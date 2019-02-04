@@ -1,4 +1,4 @@
-use super::error::CollectorError;
+use crate::error::CollectorError;
 use crossbeam_channel::Sender;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -71,8 +71,8 @@ impl<'a> Udp<'a> {
         }
     }
 
-    fn mock_start(mut self) -> Result<(), CollectorError> {
-        for i in 0..100 {
+    pub fn mock_start(mut self) -> Result<(), CollectorError> {
+        for _i in 0..100 {
             match self.fill_buffer("can_raw", "can data".to_owned()) {
                 Some(data) => self.tx.send(data).unwrap(),
                 None => {
@@ -88,8 +88,7 @@ impl<'a> Udp<'a> {
     pub fn start(mut self) -> Result<(), CollectorError> {
         let addr: SocketAddr = "127.0.0.1:0".parse()?;
         let socket = UdpSocket::bind(&addr)?;
-        let (sink, stream) = UdpFramed::new(socket, LinesCodec::new()).split();
-        let (tx, rx) = futures::sync::mpsc::channel::<i32>(10);
+        let (_sink, stream) = UdpFramed::new(socket, LinesCodec::new()).split();
         
         let udp = stream
             .map_err(|e| CollectorError::Io(e))
@@ -103,17 +102,6 @@ impl<'a> Udp<'a> {
             }
         });
 
-        let requests = rx
-        .map_err(|e| CollectorError::Channel)
-        .for_each(|v| {
-            self.event_limit.insert("can_raw", 32);
-            future::ok(())
-        });
-
-        let f = udp.select(requests)
-                .map(|(v, _select)| v)
-                .map_err(|(err, _select)| err);
-
-        tokio_current_thread::block_on_all(f)
+        tokio_current_thread::block_on_all(udp)
     }
 }
