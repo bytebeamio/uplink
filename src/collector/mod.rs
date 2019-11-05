@@ -1,3 +1,9 @@
-mod udp;
+use std::collections::HashMap;
+use derive_more::From;
 
-pub use udp::Udp;
+#[derive(Debug, From)]
+pub struct Data {
+    data: HashMap<String, String>,
+}
+
+pub mod simulator;
