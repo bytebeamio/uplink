@@ -1,17 +1,16 @@
-use crate::collector::simulator::Data;
+use crate::collector::simulator::Buffer;
 
 use crossbeam_channel::Receiver;
 use rumqtt::{MqttOptions, MqttClient, QoS, ReconnectOptions, SecurityOptions};
-use std::path::Path;
 
 pub struct Serializer {
-    collector_rx: Receiver<Vec<Data>>,
+    collector_rx: Receiver<Buffer>,
     mqtt_client: rumqtt::MqttClient
 }
 
 impl Serializer {
-    pub(crate) fn new(collector_rx: Receiver<Vec<Data>>) -> Serializer {
-        let bike_id = "bike-1";
+    pub(crate) fn new(collector_rx: Receiver<Buffer>) -> Serializer {
+        let bike_id = "bike-100";
         let reconnection_options = ReconnectOptions::AfterFirstSuccess(5);
         let (rsa_private, ca) = get_certs();
         let security_options = SecurityOptions::GcloudIot("cloudlinc".to_owned(), rsa_private.to_vec(), 60);
@@ -23,7 +22,7 @@ impl Serializer {
             .set_ca(ca)
             .set_security_opts(security_options);
 
-        let (mut mqtt_client, _notifications) = MqttClient::start(mqtt_options).unwrap();
+        let (mqtt_client, _notifications) = MqttClient::start(mqtt_options).unwrap();
 
         Serializer {
             collector_rx,
@@ -32,11 +31,12 @@ impl Serializer {
     }
 
     pub(crate) fn start(&mut self) {
-        let bike_id = "bike-1";
+        let bike_id = "bike-100";
         let sample_topic = format!("/devices/{}/events/sample", bike_id);
         let qos = QoS::AtLeastOnce;
 
         for data in self.collector_rx.iter() {
+
             let payload = serde_json::to_vec(&data).unwrap();
             self.mqtt_client.publish(&sample_topic, qos, false, payload).unwrap();
         }
@@ -44,8 +44,8 @@ impl Serializer {
 }
 
 fn get_certs() -> (Vec<u8>, Vec<u8>) {
-    let key = include_bytes!("../../certs/bike-1/rsa_private.der");
-    let ca = include_bytes!("../../certs/bike-1/roots.pem");
+    let key = include_bytes!("../../certs/bike-100/rsa_private.der");
+    let ca = include_bytes!("../../certs/bike-100/roots.pem");
 
     (key.to_vec(), ca.to_vec())
 }
