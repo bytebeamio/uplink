@@ -36,8 +36,11 @@ impl Serializer {
         let qos = QoS::AtLeastOnce;
 
         for data in self.collector_rx.iter() {
+            let buffer = &data.buffer;
+            let channel = &data.channel;
 
-            let payload = serde_json::to_vec(&data).unwrap();
+            let payload = serde_json::to_string(buffer).unwrap();
+            println!("Channel = {:?}, Payload = {:?}", channel, payload);
             self.mqtt_client.publish(&sample_topic, qos, false, payload).unwrap();
         }
     }

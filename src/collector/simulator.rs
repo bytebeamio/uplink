@@ -86,6 +86,7 @@ impl Gps {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum Data {
     Gps(Gps),
     Bms(Bms),
@@ -96,14 +97,16 @@ pub enum Data {
 // TODO: it's serializable
 // TODO: trait Data: Serialize + DeSerialize
 
-#[derive(Debug, From, Serialize)]
+#[derive(Debug)]
 pub struct Buffer {
-    buffer: Vec<Data>,
+    pub channel: String,
+    pub buffer: Vec<Data>,
 }
 
 impl Buffer {
-    pub fn new() -> Buffer {
+    pub fn new(channel: &str) -> Buffer {
         Buffer {
+            channel: channel.to_owned(),
             buffer: Vec::new()
         }
     }
@@ -113,7 +116,8 @@ impl Buffer {
 
         if self.buffer.len() > 10 {
             let buffer = mem::replace(&mut self.buffer, Vec::new());
-            let buffer = Buffer {buffer};
+            let channel = self.channel.clone();
+            let buffer = Buffer {channel, buffer};
             return Some(buffer)
         }
 
@@ -134,9 +138,9 @@ pub enum Error {
 impl Simulator {
     pub fn new(tx: Sender<Buffer>) -> Result<Simulator, Error> {
         let mut buffers = HashMap::new();
-        buffers.insert("bms".to_owned(), Buffer::new());
-        buffers.insert("motor".to_owned(), Buffer::new());
-        buffers.insert("gps".to_owned(), Buffer::new());
+        buffers.insert("bms".to_owned(), Buffer::new("bms"));
+        buffers.insert("motor".to_owned(), Buffer::new("motor"));
+        buffers.insert("gps".to_owned(), Buffer::new("gps"));
 
         let s: Simulator = Simulator {
             buffers,
