@@ -8,6 +8,9 @@ use derive_more::From;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::path::PathBuf;
+use std::io::{BufReader, BufRead, Lines};
 
 type Channel = String;
 
@@ -89,7 +92,7 @@ impl Motor {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, )]
 pub struct Gps {
     timestamp: u64,
     sequence: u32,
@@ -101,22 +104,49 @@ pub struct Gps {
 }
 
 impl Gps {
-    pub fn new(sequence: u32, timestamp: u64) -> Gps {
+    pub fn new(sequence: u32, timestamp: u64, latitude: f32, longitude: f32) -> Gps {
         let mut rng = rand::thread_rng();
+
         Gps {
             timestamp,
             sequence,
-            latitude: rng.gen_range(10.0, 30.0),
-            longitude: rng.gen_range(10.0, 30.0),
+            latitude,
+            longitude,
             speed: rng.gen_range(10.0, 30.0),
             time: rng.gen_range(10.0, 30.0),
             climb: rng.gen_range(10.0, 30.0),
         }
     }
+}
 
-    pub fn route(&mut self, latitude: f32, longitude: f32) {
-        self.latitude = latitude;
-        self.longitude = longitude;
+pub struct Route {
+    last_lat: f32,
+    last_lon: f32,
+    route: Lines<BufReader<File>>
+}
+
+impl Route {
+    pub fn new() -> Route {
+        let route = File::open("config/track_points.csv").unwrap();
+        let route = BufReader::new(route).lines();
+
+        Route {
+            last_lat:0.0,
+            last_lon: 0.0,
+            route
+        }
+    }
+
+    pub fn next(&mut self) -> (f32, f32) {
+        if let Some(line) = self.route.next() {
+            let line = line.unwrap();
+            let data: Vec<&str> = line.split(",").collect();
+
+            self.last_lon = data[0].parse().unwrap();
+            self.last_lat = data[1].parse().unwrap();
+        }
+
+        (self.last_lat, self.last_lon)
     }
 }
 
@@ -150,7 +180,7 @@ impl Buffer {
     pub fn fill(&mut self, data: Data) -> Option<Buffer> {
         self.buffer.push(data);
 
-        if self.buffer.len() > 100 {
+        if self.buffer.len() > 10 {
             let buffer = mem::replace(&mut self.buffer, Vec::new());
             let channel = self.channel.clone();
             let buffer = Buffer { channel, buffer };
@@ -195,8 +225,10 @@ impl Simulator {
 
     pub fn start(&mut self) {
         let mut count = 0;
+        let mut route = Route::new();
+
         loop {
-            thread::sleep(Duration::from_millis(10));
+            thread::sleep(Duration::from_millis(100));
             count += 1;
 
             let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
@@ -217,7 +249,8 @@ impl Simulator {
                 self.tx.send(buffer).unwrap();
             }
 
-            let data = Data::Gps(Gps::new(count, timestamp));
+            let (lat, lon) = route.next();
+            let data = Data::Gps(Gps::new(count, timestamp, lat, lon));
             if let Some(buffer) = self.fill_buffer("gps", data) {
                 self.tx.send(buffer).unwrap();
             }
