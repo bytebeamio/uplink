@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::path::PathBuf;
 use std::io::{BufReader, BufRead, Lines};
+use std::vec::IntoIter;
 
 type Channel = String;
 
@@ -120,33 +121,34 @@ impl Gps {
 }
 
 pub struct Route {
-    last_lat: f32,
-    last_lon: f32,
-    route: Lines<BufReader<File>>
+    route: Vec<String>,
+    iter: IntoIter<String>
 }
 
 impl Route {
     pub fn new() -> Route {
         let route = File::open("config/track_points.csv").unwrap();
-        let route = BufReader::new(route).lines();
+        let route: Vec<String> = BufReader::new(route).lines().map(|e| e.unwrap()).collect();
+        let iter = route.clone().into_iter();
 
         Route {
-            last_lat:0.0,
-            last_lon: 0.0,
-            route
+           route,
+            iter
         }
     }
 
     pub fn next(&mut self) -> (f32, f32) {
-        if let Some(line) = self.route.next() {
-            let line = line.unwrap();
+        if let Some(line) = self.iter.next() {
             let data: Vec<&str> = line.split(",").collect();
 
-            self.last_lon = data[0].parse().unwrap();
-            self.last_lat = data[1].parse().unwrap();
-        }
+            let lon = data[0].parse().unwrap();
+            let lat = data[1].parse().unwrap();
 
-        (self.last_lat, self.last_lon)
+            (lat, lon)
+        } else {
+            self.iter = self.route.clone().into_iter();
+            (0.0, 0.0)
+        }
     }
 }
 
