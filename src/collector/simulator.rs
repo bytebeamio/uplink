@@ -1,4 +1,5 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::thread;
 
 use derive_more::From;
 use rand::seq::SliceRandom;
@@ -9,8 +10,6 @@ use std::io::{BufReader, BufRead};
 use std::vec::IntoIter;
 
 use super::Reader;
-
-type Channel = String;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Can {
@@ -190,29 +189,35 @@ impl Simulator {
 impl Reader for Simulator {
     type Item = Data;
     type Error = Error;
-    
-    fn next(&mut self) -> Result<Option<Self::Item>, Self::Error> {         
+
+    fn next(&mut self) -> Result<Option<(String, Self::Item)>, Self::Error> {         
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
         let timestamp = timestamp.as_secs();
         let mut route = Route::new();
 
+        thread::sleep(Duration::from_millis(100));
+
         let data = match self.count % self.channel_count {
             0 => {
                 self.can_seq += 1;
-                Some(Data::Can(Can::new(self.can_seq, timestamp)))
+                let o = Data::Can(Can::new(self.can_seq, timestamp));
+                Some(("can".to_owned(), o))
             }
             1 => {
                 self.motor_seq += 1;
-                Some(Data::Motor(Motor::new(self.motor_seq, timestamp)))
+                let o = Data::Motor(Motor::new(self.motor_seq, timestamp));
+                Some(("motor".to_owned(), o))
             }
             2 => {
                 self.bms_seq += 1;
-                Some(Data::Bms(Bms::new(self.bms_seq, timestamp)))
+                let o = Data::Bms(Bms::new(self.bms_seq, timestamp));
+                Some(("bms".to_owned(), o))
             }
             3 => {
                 let (lat, lon) = route.next();
                 self.gps_seq += 1;
-                Some(Data::Gps(Gps::new(self.gps_seq, timestamp, lat, lon)))
+                let o = Data::Gps(Gps::new(self.gps_seq, timestamp, lat, lon));
+                Some(("gps".to_owned(), o))
             }
             _ => None
         };
@@ -221,4 +226,12 @@ impl Reader for Simulator {
         Ok(data)
     }
 
+    fn channels(&self) -> Vec<String> { 
+        vec![
+            "can".to_owned(),
+            "motor".to_owned(),
+            "bms".to_owned(),
+            "gps".to_owned(),
+        ]
+    }
 }

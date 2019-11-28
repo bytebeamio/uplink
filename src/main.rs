@@ -85,7 +85,7 @@ fn main() -> Result<(), InitError>{
     println!("{:?}", config);
     let (collector_tx, collector_rx) = channel::bounded(10);
     
-    let mut simulator = collector::simulator::Simulator::new().unwrap();
+    let simulator = collector::simulator::Simulator::new().unwrap();
     let mut collector = collector::Collector::new(simulator, collector_tx);
     
     //let mut collector = collector::can::Can::new("vcan0").unwrap();
