@@ -82,13 +82,13 @@ fn main() -> Result<(), InitError>{
     let commandline: CommandLine = StructOpt::from_args();
     let config = init_config(commandline)?;
 
-    println!("{:?}", config);
     let (collector_tx, collector_rx) = channel::bounded(10);
     
     let simulator = collector::simulator::Simulator::new().unwrap();
-    let mut collector = collector::Collector::new(simulator, collector_tx);
+    let mut simulator = collector::Collector::new(simulator, collector_tx);
+    let can = collector::can::Can::new("vcan0").unwrap();
+    let mut can = collector::Collector::new(can, collector_tx);
     
-    //let mut collector = collector::can::Can::new("vcan0").unwrap();
     let mut serializer = serializer::Serializer::new(config, collector_rx);
 
     thread::spawn(move || {

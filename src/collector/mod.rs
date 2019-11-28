@@ -5,7 +5,6 @@ use std::mem;
 use std::fmt::Debug;
 use std::collections::HashMap;
 
-use serde::Serialize;
 use crossbeam_channel::Sender;
 
 type Channel = String;
@@ -14,7 +13,7 @@ type Channel = String;
 /// Collector uses this trait definition to pull data from respective data sources
 /// E.g can bus, journal, grpc
 pub trait Reader {
-    type Item: Debug + Serialize;
+    type Item: Debug;
     type Error: Debug;
     
     /// List of valid channels for this reader
@@ -35,6 +34,7 @@ pub trait Batch {
 /// Buffer is an abstraction of a collection that serializer receives.
 /// It also contains meta data to understand the type of data
 /// e.g channel to mqtt topic mapping
+/// Buffer doesn't put any restriction on type of `T`
 #[derive(Debug)]
 pub struct Buffer<T> {
     pub channel: String,
@@ -42,7 +42,7 @@ pub struct Buffer<T> {
     pub max_buffer_size: usize,
 }
 
-impl<T: Serialize> Buffer<T> {
+impl<T> Buffer<T> {
     pub fn new(channel: &str, max_buffer_size: usize) -> Buffer<T> {
         Buffer {
             channel: channel.to_owned(),
@@ -75,7 +75,7 @@ pub struct Collector<T, R> {
     reader: R
 }
 
-impl<T, R> Collector<T, R> where T: Serialize + Debug, R: Reader<Item = T> {
+impl<T, R> Collector<T, R> where T: Debug, R: Reader<Item = T> {
     /// Create a new collection of buffers mapped to a (configured) channel
     pub fn new(reader: R, tx: Sender<Buffer<T>>) -> Collector<T, R> {
         let mut collector = Collector {
