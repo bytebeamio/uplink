@@ -1,31 +1,28 @@
-use std::collections::HashMap;
-use std::mem;
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use crossbeam_channel::Sender;
 use derive_more::From;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::path::PathBuf;
-use std::io::{BufReader, BufRead, Lines};
+use std::io::{BufReader, BufRead};
 use std::vec::IntoIter;
+
+use super::Reader;
 
 type Channel = String;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Can {
     timestamp: u64,
-    sequence: u32,
+    sequence: usize,
     can_id: String,
     data: String,
     dev: String,
 }
 
 impl Can {
-    pub fn new(sequence: u32, timestamp: u64) -> Can {
+    pub fn new(sequence: usize, timestamp: u64) -> Can {
         let can_ids = vec!["0x148", "0x149"];
         let mut rng = rand::thread_rng();
         let can_id = *can_ids.choose(&mut rng).unwrap();
@@ -43,7 +40,7 @@ impl Can {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Bms {
     timestamp: u64,
-    sequence: u32,
+    sequence: usize,
     cell_count: u32,
     temperature: f32,
     current: f32,
@@ -52,7 +49,7 @@ pub struct Bms {
 }
 
 impl Bms {
-    pub fn new(sequence: u32, timestamp: u64) -> Bms {
+    pub fn new(sequence: usize, timestamp: u64) -> Bms {
         let mut rng = rand::thread_rng();
 
         Bms {
@@ -70,7 +67,7 @@ impl Bms {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Motor {
     timestamp: u64,
-    sequence: u32,
+    sequence: usize,
     rpm: u32,
     current: f32,
     voltage: f32,
@@ -79,7 +76,7 @@ pub struct Motor {
 }
 
 impl Motor {
-    pub fn new(sequence: u32, timestamp: u64) -> Motor {
+    pub fn new(sequence: usize, timestamp: u64) -> Motor {
         let mut rng = rand::thread_rng();
         Motor {
             timestamp,
@@ -96,7 +93,7 @@ impl Motor {
 #[derive(Debug, Serialize, Deserialize, )]
 pub struct Gps {
     timestamp: u64,
-    sequence: u32,
+    sequence: usize,
     latitude: f32,
     longitude: f32,
     speed: f32,
@@ -105,7 +102,7 @@ pub struct Gps {
 }
 
 impl Gps {
-    pub fn new(sequence: u32, timestamp: u64, latitude: f32, longitude: f32) -> Gps {
+    pub fn new(sequence: usize, timestamp: u64, latitude: f32, longitude: f32) -> Gps {
         let mut rng = rand::thread_rng();
 
         Gps {
@@ -161,41 +158,13 @@ pub enum Data {
     Motor(Motor),
 }
 
-// TODO: Embed batching directly into Data trait make sure that
-// TODO: it's serializable
-// TODO: trait Data: Serialize + DeSerialize
-
-#[derive(Debug)]
-pub struct Buffer {
-    pub channel: String,
-    pub buffer: Vec<Data>,
-}
-
-impl Buffer {
-    pub fn new(channel: &str) -> Buffer {
-        Buffer {
-            channel: channel.to_owned(),
-            buffer: Vec::new(),
-        }
-    }
-
-    pub fn fill(&mut self, data: Data) -> Option<Buffer> {
-        self.buffer.push(data);
-
-        if self.buffer.len() > 10 {
-            let buffer = mem::replace(&mut self.buffer, Vec::new());
-            let channel = self.channel.clone();
-            let buffer = Buffer { channel, buffer };
-            return Some(buffer);
-        }
-
-        None
-    }
-}
-
 pub struct Simulator {
-    buffers: HashMap<Channel, Buffer>,
-    tx: Sender<Buffer>,
+    count: usize,
+    channel_count: usize,
+    can_seq: usize,
+    motor_seq: usize,
+    bms_seq: usize,
+    gps_seq: usize
 }
 
 #[derive(Debug, From)]
@@ -204,58 +173,52 @@ pub enum Error {
 }
 
 impl Simulator {
-    pub fn new(tx: Sender<Buffer>) -> Result<Simulator, Error> {
-        let mut buffers = HashMap::new();
-        buffers.insert("can".to_owned(), Buffer::new("can"));
-        buffers.insert("bms".to_owned(), Buffer::new("bms"));
-        buffers.insert("motor".to_owned(), Buffer::new("motor"));
-        buffers.insert("gps".to_owned(), Buffer::new("gps"));
+    pub fn new() -> Result<Simulator, Error> {
+        let simutlator = Simulator {
+            count: 0,
+            channel_count: 4,
+            can_seq: 0,
+            motor_seq: 0,
+            bms_seq: 0,
+            gps_seq: 0
+        };
 
-        let s: Simulator = Simulator { buffers, tx };
-
-        Ok(s)
+        Ok(simutlator)
     }
+}
 
-    fn fill_buffer(&mut self, channel: &str, data: Data) -> Option<Buffer> {
-        if let Some(buffer) = self.buffers.get_mut(channel) {
-            buffer.fill(data)
-        } else {
-            error!("Invalid channel = {}", channel);
-            None
-        }
-    }
-
-    pub fn start(&mut self) {
-        let mut count = 0;
+impl Reader for Simulator {
+    type Item = Data;
+    type Error = Error;
+    
+    fn next(&mut self) -> Result<Option<Self::Item>, Self::Error> {         
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let timestamp = timestamp.as_secs();
         let mut route = Route::new();
 
-        loop {
-            thread::sleep(Duration::from_millis(100));
-            count += 1;
-
-            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-            let timestamp = timestamp.as_secs();
-
-            let data = Data::Can(Can::new(count, timestamp));
-            if let Some(buffer) = self.fill_buffer("can", data) {
-                self.tx.send(buffer).unwrap();
+        let data = match self.count % self.channel_count {
+            0 => {
+                self.can_seq += 1;
+                Some(Data::Can(Can::new(self.can_seq, timestamp)))
             }
-
-            let data = Data::Motor(Motor::new(count, timestamp));
-            if let Some(buffer) = self.fill_buffer("motor", data) {
-                self.tx.send(buffer).unwrap();
+            1 => {
+                self.motor_seq += 1;
+                Some(Data::Motor(Motor::new(self.motor_seq, timestamp)))
             }
-
-            let data = Data::Bms(Bms::new(count, timestamp));
-            if let Some(buffer) = self.fill_buffer("bms", data) {
-                self.tx.send(buffer).unwrap();
+            2 => {
+                self.bms_seq += 1;
+                Some(Data::Bms(Bms::new(self.bms_seq, timestamp)))
             }
-
-            let (lat, lon) = route.next();
-            let data = Data::Gps(Gps::new(count, timestamp, lat, lon));
-            if let Some(buffer) = self.fill_buffer("gps", data) {
-                self.tx.send(buffer).unwrap();
+            3 => {
+                let (lat, lon) = route.next();
+                self.gps_seq += 1;
+                Some(Data::Gps(Gps::new(self.gps_seq, timestamp, lat, lon)))
             }
-        }
+            _ => None
+        };
+
+        self.count += 1;
+        Ok(data)
     }
+
 }

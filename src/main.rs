@@ -4,7 +4,7 @@ extern crate log;
 use std::{thread, fs, io};
 
 use crossbeam_channel as channel;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize};
 use derive_more::From;
 use std::collections::HashMap;
 use structopt::StructOpt;
@@ -84,7 +84,11 @@ fn main() -> Result<(), InitError>{
 
     println!("{:?}", config);
     let (collector_tx, collector_rx) = channel::bounded(10);
-    let mut collector = collector::simulator::Simulator::new(collector_tx).unwrap();
+    
+    let mut simulator = collector::simulator::Simulator::new().unwrap();
+    let mut collector = collector::Collector::new(simulator, collector_tx);
+    
+    //let mut collector = collector::can::Can::new("vcan0").unwrap();
     let mut serializer = serializer::Serializer::new(config, collector_rx);
 
     thread::spawn(move || {

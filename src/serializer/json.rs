@@ -1,20 +1,22 @@
-use crate::collector::simulator::Buffer;
+use crate::collector::Buffer;
 
 use crossbeam_channel::Receiver;
 use rumqtt::{MqttClient, MqttOptions, QoS, ReconnectOptions, SecurityOptions};
+use serde::Serialize;
+
 use crate::Config;
 use std::path::Path;
 use std::fs::File;
 use std::io::Read;
 
-pub struct Serializer {
+pub struct Serializer<T> {
     config: Config,
-    collector_rx: Receiver<Buffer>,
+    collector_rx: Receiver<Buffer<T>>,
     mqtt_client: rumqtt::MqttClient,
 }
 
-impl Serializer {
-    pub(crate) fn new(config: Config, collector_rx: Receiver<Buffer>) -> Serializer {
+impl<T: Serialize> Serializer<T> {
+    pub(crate) fn new(config: Config, collector_rx: Receiver<Buffer<T>>) -> Serializer<T> {
         let reconnection_options = ReconnectOptions::AfterFirstSuccess(5);
 
         let key = &config.key.clone().unwrap();
@@ -40,7 +42,6 @@ impl Serializer {
     }
 
     pub(crate) fn start(&mut self) {
-        let bike_id = "bike-100";
         let qos = QoS::AtLeastOnce;
 
         for data in self.collector_rx.iter() {
