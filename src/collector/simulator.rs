@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io::{BufReader, BufRead};
 use std::vec::IntoIter;
 
-use super::Reader;
+use super::{Reader, Buffer, Batch};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Can {
@@ -233,5 +233,15 @@ impl Reader for Simulator {
             "bms".to_owned(),
             "gps".to_owned(),
         ]
+    }
+}
+
+impl Batch for Buffer<Data> {
+    fn channel(&self) -> String {
+        return self.channel.clone()
+    }
+    
+    fn serialize(&self) -> Vec<u8> {
+        serde_json::to_vec(&self.buffer).unwrap()
     }
 }

@@ -27,6 +27,11 @@ pub trait Reader {
 }
 
 
+pub trait Batch {
+    fn channel(&self) -> String;
+    fn serialize(&self) -> Vec<u8>;
+}
+
 /// Buffer is an abstraction of a collection that serializer receives.
 /// It also contains meta data to understand the type of data
 /// e.g channel to mqtt topic mapping
@@ -54,6 +59,7 @@ impl<T: Serialize> Buffer<T> {
             let channel = self.channel.clone();
             let max_buffer_size = self.max_buffer_size;
             let buffer = Buffer { channel, buffer, max_buffer_size };
+
             return Some(buffer);
         }
 
@@ -103,7 +109,6 @@ impl<T, R> Collector<T, R> where T: Serialize + Debug, R: Reader<Item = T> {
         loop {
             if let Some((channel, data)) = self.reader.next().unwrap() {
                 self.fill(&channel, data);
-
             }
         }
     }
@@ -186,4 +191,3 @@ mod test {
         }
     }
 }
-
