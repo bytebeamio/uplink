@@ -12,7 +12,7 @@
 
  for i in $(seq 1 $count)
  do
-     RUST_LOG=rumqtt,uplink=debug cargo run -- -c ../config/uplink.toml -i device-$i -a ../certs/ &
+     RUST_LOG=rumqtt,uplink=debug cargo run -- -c config/uplink.toml -i device-$i -a certs/ &
  done
 
  sleep 1000

@@ -71,13 +71,13 @@ impl<T> Buffer<T> {
 /// is `Serialize`ble data which is collected by the serializer.
 pub struct Collector<T, R> {
     collection: HashMap<String, Buffer<T>>,
-    tx: Sender<Buffer<T>>,
+    tx: Sender<Box<dyn Batch + Send>>,
     reader: R
 }
 
-impl<T, R> Collector<T, R> where T: Debug, R: Reader<Item = T> {
+impl<T, R> Collector<T, R> where T: Debug + Send + 'static, Buffer<T>: Batch, R: Reader<Item = T> {
     /// Create a new collection of buffers mapped to a (configured) channel
-    pub fn new(reader: R, tx: Sender<Buffer<T>>) -> Collector<T, R> {
+    pub fn new(reader: R, tx: Sender<Box<dyn Batch + Send>>) -> Collector<T, R> {
         let mut collector = Collector {
             collection: HashMap::new(),
             tx,
@@ -101,6 +101,7 @@ impl<T, R> Collector<T, R> where T: Debug, R: Reader<Item = T> {
         };
 
         if let Some(buffer) = o {
+            let buffer = Box::new(buffer);
             self.tx.send(buffer).unwrap();
         }
     }
