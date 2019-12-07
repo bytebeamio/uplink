@@ -8,14 +8,14 @@ use std::path::Path;
 use std::fs::File;
 use std::io::Read;
 
-pub struct Serializer<T> {
+pub struct Serializer {
     config: Config,
-    collector_rx: Receiver<T>,
+    collector_rx: Receiver<Box<dyn Batch + Send>>,
     mqtt_client: rumqtt::MqttClient,
 }
 
-impl<T: Batch> Serializer<T> {
-    pub(crate) fn new(config: Config, collector_rx: Receiver<T>) -> Serializer<T> {
+impl Serializer {
+    pub(crate) fn new(config: Config, collector_rx: Receiver<Box<dyn Batch + Send>>) -> Serializer {
         let reconnection_options = ReconnectOptions::AfterFirstSuccess(5);
 
         let key = &config.key.clone().unwrap();

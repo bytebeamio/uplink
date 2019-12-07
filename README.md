@@ -1,4 +1,12 @@
+Setup CAN interface on ubuntu
+--------------
 
+https://stackoverflow.com/questions/33574256/socket-can-virtual-bus
+
+```
+ip link add dev vcan0 type vcan
+ip link set up vcan0
+```
 
 Build for EC25
 --------------
