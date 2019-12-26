@@ -66,7 +66,7 @@ fn init_config(commandline: CommandLine) -> Result<Config, InitError> {
         commandline
             .certs_dir
             .join(device_id)
-            .join("rsa_private.der"),
+            .join("rsa_private.pem"),
     );
 
     config.device_id = str::replace(&config.device_id, "{device_id}", device_id);

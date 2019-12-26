@@ -1,9 +1,9 @@
-pub mod simulator;
 pub mod can;
+pub mod simulator;
 
-use std::mem;
-use std::fmt::Debug;
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::mem;
 
 use crossbeam_channel::Sender;
 
@@ -15,7 +15,7 @@ type Channel = String;
 pub trait Reader {
     type Item: Debug;
     type Error: Debug;
-    
+
     /// List of valid channels for this reader
     fn channels(&self) -> Vec<String>;
 
@@ -24,7 +24,6 @@ pub trait Reader {
     // conditional rollup (see simulator) without using loops.
     fn next(&mut self) -> Result<Option<(Channel, Self::Item)>, Self::Error>;
 }
-
 
 pub trait Batch {
     fn channel(&self) -> String;
@@ -47,7 +46,7 @@ impl<T> Buffer<T> {
         Buffer {
             channel: channel.to_owned(),
             buffer: Vec::new(),
-            max_buffer_size
+            max_buffer_size,
         }
     }
 
@@ -58,7 +57,11 @@ impl<T> Buffer<T> {
             let buffer = mem::replace(&mut self.buffer, Vec::new());
             let channel = self.channel.clone();
             let max_buffer_size = self.max_buffer_size;
-            let buffer = Buffer { channel, buffer, max_buffer_size };
+            let buffer = Buffer {
+                channel,
+                buffer,
+                max_buffer_size,
+            };
 
             return Some(buffer);
         }
@@ -72,21 +75,28 @@ impl<T> Buffer<T> {
 pub struct Collector<T, R> {
     collection: HashMap<String, Buffer<T>>,
     tx: Sender<Box<dyn Batch + Send>>,
-    reader: R
+    reader: R,
 }
 
-impl<T, R> Collector<T, R> where T: Debug + Send + 'static, Buffer<T>: Batch, R: Reader<Item = T> {
+impl<T, R> Collector<T, R>
+where
+    T: Debug + Send + 'static,
+    Buffer<T>: Batch,
+    R: Reader<Item = T>,
+{
     /// Create a new collection of buffers mapped to a (configured) channel
     pub fn new(reader: R, tx: Sender<Box<dyn Batch + Send>>) -> Collector<T, R> {
         let mut collector = Collector {
             collection: HashMap::new(),
             tx,
-            reader
+            reader,
         };
 
         for channel in collector.reader.channels().iter() {
             let buffer = Buffer::new(channel, 10);
-            collector.collection.insert(buffer.channel.to_owned(), buffer);
+            collector
+                .collection
+                .insert(buffer.channel.to_owned(), buffer);
         }
 
         collector
@@ -115,18 +125,17 @@ impl<T, R> Collector<T, R> where T: Debug + Send + 'static, Buffer<T>: Batch, R:
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use super::{Buffer, Collector, Reader};
-    use serde::Serialize;
     use crossbeam_channel::bounded;
+    use serde::Serialize;
 
     #[derive(Clone, Debug, Serialize)]
     pub struct Dummy {
         a: i32,
         b: String,
-        c: Vec<u8>
+        c: Vec<u8>,
     }
 
     struct Generator;
@@ -134,12 +143,18 @@ mod test {
         type Item = Dummy;
         type Error = ();
 
-        fn channels(&self) -> Vec<String> { vec!["can".to_owned()] }
-        fn next(&mut self) -> Result<Option<(String, Self::Item)>, Self::Error> { 
+        fn channels(&self) -> Vec<String> {
+            vec!["can".to_owned()]
+        }
+        fn next(&mut self) -> Result<Option<(String, Self::Item)>, Self::Error> {
             let channel = "can".to_owned();
-            let data = Dummy {a: 10, b: "hello".to_owned(), c: vec![1, 2, 3]};
+            let data = Dummy {
+                a: 10,
+                b: "hello".to_owned(),
+                c: vec![1, 2, 3],
+            };
             let out = (channel, data);
-            
+
             Ok(Some(out))
         }
     }
@@ -147,7 +162,11 @@ mod test {
     #[test]
     fn return_filled_buffer_after_it_is_full() {
         let mut buffer = Buffer::new("dummy", 10);
-        let dummy = Dummy {a: 10, b: "hello".to_owned(), c: vec![1, 2, 3]};
+        let dummy = Dummy {
+            a: 10,
+            b: "hello".to_owned(),
+            c: vec![1, 2, 3],
+        };
 
         for i in 1..100 {
             let o = buffer.fill(dummy.clone());

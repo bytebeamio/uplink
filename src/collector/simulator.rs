@@ -1,15 +1,15 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use derive_more::From;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::{BufReader, BufRead};
+use std::io::{BufRead, BufReader};
 use std::vec::IntoIter;
 
-use super::{Reader, Buffer, Batch};
+use super::{Batch, Buffer, Reader};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Can {
@@ -89,7 +89,7 @@ impl Motor {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, )]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Gps {
     timestamp: u64,
     sequence: usize,
@@ -118,7 +118,7 @@ impl Gps {
 
 pub struct Route {
     route: Vec<String>,
-    iter: IntoIter<String>
+    iter: IntoIter<String>,
 }
 
 impl Route {
@@ -127,10 +127,7 @@ impl Route {
         let route: Vec<String> = BufReader::new(route).lines().map(|e| e.unwrap()).collect();
         let iter = route.clone().into_iter();
 
-        Route {
-           route,
-            iter
-        }
+        Route { route, iter }
     }
 
     pub fn next(&mut self) -> (f32, f32) {
@@ -163,7 +160,7 @@ pub struct Simulator {
     can_seq: usize,
     motor_seq: usize,
     bms_seq: usize,
-    gps_seq: usize
+    gps_seq: usize,
 }
 
 #[derive(Debug, From)]
@@ -179,7 +176,7 @@ impl Simulator {
             can_seq: 0,
             motor_seq: 0,
             bms_seq: 0,
-            gps_seq: 0
+            gps_seq: 0,
         };
 
         Ok(simutlator)
@@ -190,7 +187,7 @@ impl Reader for Simulator {
     type Item = Data;
     type Error = Error;
 
-    fn next(&mut self) -> Result<Option<(String, Self::Item)>, Self::Error> {         
+    fn next(&mut self) -> Result<Option<(String, Self::Item)>, Self::Error> {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
         let timestamp = timestamp.as_secs();
         let mut route = Route::new();
@@ -219,14 +216,14 @@ impl Reader for Simulator {
                 let o = Data::Gps(Gps::new(self.gps_seq, timestamp, lat, lon));
                 Some(("gps".to_owned(), o))
             }
-            _ => None
+            _ => None,
         };
 
         self.count += 1;
         Ok(data)
     }
 
-    fn channels(&self) -> Vec<String> { 
+    fn channels(&self) -> Vec<String> {
         vec![
             "can".to_owned(),
             "motor".to_owned(),
@@ -238,9 +235,9 @@ impl Reader for Simulator {
 
 impl Batch for Buffer<Data> {
     fn channel(&self) -> String {
-        return self.channel.clone()
+        return self.channel.clone();
     }
-    
+
     fn serialize(&self) -> Vec<u8> {
         serde_json::to_vec(&self.buffer).unwrap()
     }
