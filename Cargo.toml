@@ -14,12 +14,12 @@ derive_more = "0.15"
 structopt = "0.3"
 toml = "0.5"
 #rumq-client = { path = "../rumq/rumq-client" } 
-rumq-client = { version = "0.1.0-alpha.2" }
+rumq-client = { version = "0.1.0-alpha.3" }
 rand = "0.7"
 log = "0.4"
 socketcan = "1"
 hex = "0.4"
-tokio = { version = "0.2", features = ["io-util", "tcp", "dns", "sync", "stream", "time", "rt-core", "macros"] }
+tokio = { version = "0.2", features = ["full"] }
 futures-util = "0.3"
 jsonwebtoken = "7.0.0-alpha.2"
 pretty_env_logger = "0.3"

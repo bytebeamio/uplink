@@ -1,5 +1,5 @@
 [target.armv7-unknown-linux-gnueabihf]
-linker = "arm-linux-gnueabihf-ld"
+linker = "arm-linux-gnueabihf-gcc"
 
 [build]
 rustflags = ["-C", "rpath"]

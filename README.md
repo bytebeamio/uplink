@@ -16,13 +16,36 @@ Build for EC25
 * ./ec25compile.sh
 * Copy uplink binary and certs dir into ec25
 * Run the below instruction in ec25
-
 ```
 RUST_LOG=rumqtt=debug {path}/uplink --certs certs --bike bike-2 --rate 1
 ```
 
+Build for Beagle
+--------------
+Install arm compilers and linkers
+
+```
+apt install gcc-9-arm-linux-gnueabihf
+ln -s /usr/bin/arm-linux-gnueabihf-gcc-9 /usr/bin/arm-linux-gnueabihf-gcc
+```
+create `.cargo/config`
+
+```
+[target.armv7-unknown-linux-gnueabihf]
+linker = "arm-linux-gnueabihf-gcc"
+
+[build]
+rustflags = ["-C", "rpath"]
+```
+
+```
+rustup target install armv7-unknown-linux-gnueabihf
+cargo build --release --target armv7-unknown-linux-gnueabihf
+```
+
 References
 ----------
-
+* [Rust target list to arm architecture map](https://forge.rust-lang.org/release/platform-support.html)
+* [Arm architectures](https://en.wikipedia.org/wiki/List_of_ARM_microarchitectures)
 * https://users.rust-lang.org/t/how-to-pass-cargo-linker-args/3163/2 
 * https://sigmaris.info/blog/2019/02/cross-compiling-rust-on-mac-os-for-an-arm-linux-router/
