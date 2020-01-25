@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use structopt::StructOpt;
 
+mod actions;
 mod collector;
 mod serializer;
 
@@ -82,29 +83,17 @@ fn init_config(commandline: CommandLine) -> Result<Config, InitError> {
 
 fn main() -> Result<(), InitError> {
     pretty_env_logger::init();
+
     let commandline: CommandLine = StructOpt::from_args();
     let config = init_config(commandline)?;
 
     let (collector_tx, collector_rx) = channel::bounded(10);
-
-    // create collector of simulator type
-    let simulator = collector::simulator::Simulator::new().unwrap();
-    let mut simulator = collector::Collector::new(simulator, collector_tx.clone());
-
-    // create can collector
-    // let can = collector::can::Can::new("vcan0").unwrap();
-    // let mut can = collector::Collector::new(can, collector_tx);
-
-    let mut serializer = serializer::Serializer::new(config, collector_rx);
+    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx);
 
     thread::spawn(move || {
         serializer.start();
     });
 
-    // thread::spawn(move || {
-    //  can.start();
-    // });
-
-    simulator.start();
+    actions::start(config, collector_tx);
     Ok(())
 }

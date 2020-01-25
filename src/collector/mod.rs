@@ -1,4 +1,3 @@
-pub mod can;
 pub mod simulator;
 
 use std::collections::HashMap;
@@ -7,27 +6,16 @@ use std::mem;
 
 use crossbeam_channel::Sender;
 
-type Channel = String;
-
-/// Defines methods required for a type to be compatible with collector.
-/// Collector uses this trait definition to pull data from respective data sources
-/// E.g can bus, journal, grpc
-pub trait Reader {
-    type Item: Debug;
-    type Error: Debug;
-
-    /// List of valid channels for this reader
-    fn channels(&self) -> Vec<String>;
-
-    // Option relaxes the rule that next implementors should always
-    // return an item. This is very useful for filtering and
-    // conditional rollup (see simulator) without using loops.
-    fn next(&mut self) -> Result<Option<(Channel, Self::Item)>, Self::Error>;
-}
-
-pub trait Batch {
+pub trait Packable {
     fn channel(&self) -> String;
     fn serialize(&self) -> Vec<u8>;
+}
+
+/// Signal to modify the behaviour of collector
+pub enum Control {
+    Shutdown,
+    StopChannel(String),
+    StartChannel(String),
 }
 
 /// Buffer is an abstraction of a collection that serializer receives.
@@ -42,9 +30,9 @@ pub struct Buffer<T> {
 }
 
 impl<T> Buffer<T> {
-    pub fn new(channel: &str, max_buffer_size: usize) -> Buffer<T> {
+    pub fn new<S: Into<String>>(channel: S, max_buffer_size: usize) -> Buffer<T> {
         Buffer {
-            channel: channel.to_owned(),
+            channel: channel.into(),
             buffer: Vec::new(),
             max_buffer_size,
         }
@@ -70,36 +58,34 @@ impl<T> Buffer<T> {
     }
 }
 
-/// Collector uses its `Reader` to read data from source. This data
-/// is `Serialize`ble data which is collected by the serializer.
-pub struct Collector<T, R> {
+/// Partitions has handles to fill data segregated by channel, send
+/// filled data to the serializer when a channel is full and handle to
+/// receive controller notifications like shutdown, ignore a channel or
+/// throttle collection
+pub struct Partitions<T> {
     collection: HashMap<String, Buffer<T>>,
-    tx: Sender<Box<dyn Batch + Send>>,
-    reader: R,
+    tx: Sender<Box<dyn Packable + Send>>,
 }
 
-impl<T, R> Collector<T, R>
+impl<T> Partitions<T>
 where
     T: Debug + Send + 'static,
-    Buffer<T>: Batch,
-    R: Reader<Item = T>,
+    Buffer<T>: Packable,
 {
     /// Create a new collection of buffers mapped to a (configured) channel
-    pub fn new(reader: R, tx: Sender<Box<dyn Batch + Send>>) -> Collector<T, R> {
-        let mut collector = Collector {
+    pub fn new<S: Into<String>>(tx: Sender<Box<dyn Packable + Send>>, channels: Vec<S>) -> Self {
+        let mut partitions = Partitions {
             collection: HashMap::new(),
             tx,
-            reader,
         };
 
-        for channel in collector.reader.channels().iter() {
+        for channel in channels.into_iter() {
             let buffer = Buffer::new(channel, 10);
-            collector
+            partitions
                 .collection
                 .insert(buffer.channel.to_owned(), buffer);
         }
-
-        collector
+        partitions
     }
 
     pub fn fill(&mut self, channel: &str, data: T) {
@@ -115,20 +101,11 @@ where
             self.tx.send(buffer).unwrap();
         }
     }
-
-    pub fn start(&mut self) {
-        loop {
-            if let Some((channel, data)) = self.reader.next().unwrap() {
-                self.fill(&channel, data);
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod test {
-    use super::{Buffer, Collector, Reader};
-    use crossbeam_channel::bounded;
+    use super::Buffer;
     use serde::Serialize;
 
     #[derive(Clone, Debug, Serialize)]
@@ -136,27 +113,6 @@ mod test {
         a: i32,
         b: String,
         c: Vec<u8>,
-    }
-
-    struct Generator;
-    impl Reader for Generator {
-        type Item = Dummy;
-        type Error = ();
-
-        fn channels(&self) -> Vec<String> {
-            vec!["can".to_owned()]
-        }
-        fn next(&mut self) -> Result<Option<(String, Self::Item)>, Self::Error> {
-            let channel = "can".to_owned();
-            let data = Dummy {
-                a: 10,
-                b: "hello".to_owned(),
-                c: vec![1, 2, 3],
-            };
-            let out = (channel, data);
-
-            Ok(Some(out))
-        }
     }
 
     #[test]
@@ -176,37 +132,6 @@ mod test {
                 assert_eq!(o.unwrap().buffer.len(), 10);
             } else {
                 assert!(o.is_none())
-            }
-        }
-    }
-
-    #[test]
-    fn invalid_channels_are_not_filled_by_the_collector() {
-        let (tx, rx) = bounded(1);
-        let generator = Generator;
-
-        let mut collector = Collector::new(generator, tx);
-
-        for _ in 1..100 {
-            let (_channel, data) = collector.reader.next().unwrap().unwrap();
-            collector.fill("dummy", data);
-            assert!(rx.try_recv().is_err())
-        }
-    }
-
-    #[test]
-    fn collector_places_the_buffer_in_the_channel_after_the_buffer_is_full() {
-        let (tx, rx) = bounded(1);
-        let generator = Generator;
-        let mut collector = Collector::new(generator, tx);
-
-        for i in 1..=100 {
-            let (channel, data) = collector.reader.next().unwrap().unwrap();
-            collector.fill(&channel, data);
-            if i % 10 == 0 {
-                assert_eq!(rx.try_recv().unwrap().buffer.len(), 10);
-            } else {
-                assert!(rx.try_recv().is_err())
             }
         }
     }

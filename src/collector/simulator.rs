@@ -1,15 +1,19 @@
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crossbeam_channel::Receiver;
+use crossbeam_channel::Sender;
 use derive_more::From;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::vec::IntoIter;
 
-use super::{Batch, Buffer, Reader};
+use super::{Buffer, Control, Packable, Partitions};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Can {
@@ -181,19 +185,13 @@ impl Simulator {
 
         Ok(simutlator)
     }
-}
 
-impl Reader for Simulator {
-    type Item = Data;
-    type Error = Error;
-
-    fn next(&mut self) -> Result<Option<(String, Self::Item)>, Self::Error> {
+    fn next(&mut self) -> Result<Option<(String, Data)>, Error> {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
         let timestamp = timestamp.as_secs();
         let mut route = Route::new();
 
         thread::sleep(Duration::from_millis(100));
-
         let data = match self.count % self.channel_count {
             0 => {
                 self.can_seq += 1;
@@ -233,7 +231,38 @@ impl Reader for Simulator {
     }
 }
 
-impl Batch for Buffer<Data> {
+pub fn start(tx: Sender<Box<dyn Packable + Send>>, rx: Receiver<Control>) {
+    let mut simutlator = Simulator::new().unwrap();
+    let mut partitions = Partitions::new(tx, simutlator.channels());
+    let mut disabled_channels = HashSet::new();
+
+    loop {
+        if let Some((channel, data)) = simutlator.next().unwrap() {
+            // insert only if this channel is not part of disabled channels
+            if disabled_channels.get(&channel).is_none() {
+                partitions.fill(&channel, data);
+            }
+        }
+
+        let control = if let Ok(control) = rx.try_recv() {
+            control
+        } else {
+            continue;
+        };
+
+        match control {
+            Control::Shutdown => break,
+            Control::StopChannel(channel) => {
+                disabled_channels.insert(channel);
+            }
+            Control::StartChannel(channel) => {
+                disabled_channels.remove(&channel);
+            }
+        }
+    }
+}
+
+impl Packable for Buffer<Data> {
     fn channel(&self) -> String {
         return self.channel.clone();
     }
