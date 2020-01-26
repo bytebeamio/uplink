@@ -297,7 +297,7 @@ impl Process {
 
             // wait for spawned process result without blocking
             tokio::spawn(async {
-                let child = time::timeout(Duration::from_secs(10), async {
+                let child = time::timeout(Duration::from_secs(120), async {
                     child.await.expect("child process encountered an error");
                 });
 
