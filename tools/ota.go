@@ -52,7 +52,7 @@ func main() {
 
 	status := ActionStatus{
 		Id:       id,
-		State:    "Done",
+		State:    "Completed",
 		Progress: "100",
 		Errors:   []string{},
 	}
