@@ -191,7 +191,7 @@ impl Simulator {
         let timestamp = timestamp.as_secs();
         let mut route = Route::new();
 
-        thread::sleep(Duration::from_millis(10000));
+        thread::sleep(Duration::from_millis(100));
         let data = match self.count % self.channel_count {
             0 => {
                 self.can_seq += 1;
