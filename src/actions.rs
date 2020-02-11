@@ -204,10 +204,16 @@ pub async fn start(
     loop {
         let subscribe = rumq_client::subscribe(actions_subscription.clone(), QoS::AtLeastOnce);
         let subscribe = Request::Subscribe(subscribe);
-        let _ = requests_tx.send(subscribe).await;
+        // let _ = requests_tx.send(subscribe).await;
         let mut stream = eventloop.stream();
-
         while let Some(notification) = stream.next().await {
+            debug!("Notification = {:?}", notification);
+            if let Notification::StreamEnd(err) = notification {
+                error!("Actions stream closed!! Error = {:?}", err);
+                tokio::time::delay_for(Duration::from_secs(1)).await;
+                continue;
+            }
+
             let action = match action(notification) {
                 Ok(action) => action,
                 Err(e) => {
@@ -217,7 +223,6 @@ pub async fn start(
             };
 
             debug!("Action = {:?}", action);
-
             match action.kind.as_ref() {
                 "control" => {
                     // let command = action.name.clone();
@@ -239,11 +244,7 @@ pub async fn start(
 
 fn action(notification: Notification) -> Result<Action, Error> {
     let action = match notification {
-        Notification::Publish(publish) => serde_json::from_slice(publish.payload())?,
-        Notification::StreamEnd(err) => {
-            error!("Stream closed!! Error = {:?}", err);
-            return Err(Error::Stream(err));
-        }
+        Notification::Publish(publish) => serde_json::from_slice(&publish.payload)?,
         _ => {
             error!("Unsupported notification = {:?}", notification);
             unimplemented!()
