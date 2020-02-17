@@ -10,6 +10,7 @@ import (
 
 type ActionStatus struct {
 	Id       string   `json:"id"`
+	Timestamp int64   `json:"timestamp"`
 	State    string   `json:"state"`
 	Progress string   `json:"progress"`
 	Errors   []string `json:"errors"`
@@ -19,7 +20,8 @@ func main() {
 	if len(os.Args) != 3 {
 		status := ActionStatus{
 			Id:       "None",
-			State:    "Finished",
+			Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
+			State:    "Completed",
 			Progress: "0",
 			Errors:   []string{"Expected 2 arguments"},
 		}
@@ -37,6 +39,7 @@ func main() {
 	for i := 0; i < 100; i++ {
 		status := ActionStatus{
 			Id:       id,
+			Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 			State:    "In Progress",
 			Progress: strconv.Itoa(i),
 			Errors:   []string{},
@@ -52,6 +55,7 @@ func main() {
 
 	status := ActionStatus{
 		Id:       id,
+		Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 		State:    "Completed",
 		Progress: "100",
 		Errors:   []string{},

@@ -11,13 +11,6 @@ pub trait Packable {
     fn serialize(&self) -> Vec<u8>;
 }
 
-/// Signal to modify the behaviour of collector
-pub enum Control {
-    Shutdown,
-    StopChannel(String),
-    StartChannel(String),
-}
-
 /// Buffer is an abstraction of a collection that serializer receives.
 /// It also contains meta data to understand the type of data
 /// e.g channel to mqtt topic mapping
@@ -31,11 +24,7 @@ pub struct Buffer<T> {
 
 impl<T> Buffer<T> {
     pub fn new<S: Into<String>>(channel: S, max_buffer_size: usize) -> Buffer<T> {
-        Buffer {
-            channel: channel.into(),
-            buffer: Vec::new(),
-            max_buffer_size,
-        }
+        Buffer { channel: channel.into(), buffer: Vec::new(), max_buffer_size }
     }
 
     pub fn fill(&mut self, data: T) -> Option<Buffer<T>> {
@@ -45,11 +34,7 @@ impl<T> Buffer<T> {
             let buffer = mem::replace(&mut self.buffer, Vec::new());
             let channel = self.channel.clone();
             let max_buffer_size = self.max_buffer_size;
-            let buffer = Buffer {
-                channel,
-                buffer,
-                max_buffer_size,
-            };
+            let buffer = Buffer { channel, buffer, max_buffer_size };
 
             return Some(buffer);
         }
@@ -74,16 +59,11 @@ where
 {
     /// Create a new collection of buffers mapped to a (configured) channel
     pub fn new<S: Into<String>>(tx: Sender<Box<dyn Packable + Send>>, channels: Vec<S>) -> Self {
-        let mut partitions = Partitions {
-            collection: HashMap::new(),
-            tx,
-        };
+        let mut partitions = Partitions { collection: HashMap::new(), tx };
 
         for channel in channels.into_iter() {
             let buffer = Buffer::new(channel, 10);
-            partitions
-                .collection
-                .insert(buffer.channel.to_owned(), buffer);
+            partitions.collection.insert(buffer.channel.to_owned(), buffer);
         }
         partitions
     }
@@ -118,11 +98,7 @@ mod test {
     #[test]
     fn return_filled_buffer_after_it_is_full() {
         let mut buffer = Buffer::new("dummy", 10);
-        let dummy = Dummy {
-            a: 10,
-            b: "hello".to_owned(),
-            c: vec![1, 2, 3],
-        };
+        let dummy = Dummy { a: 10, b: "hello".to_owned(), c: vec![1, 2, 3] };
 
         for i in 1..100 {
             let o = buffer.fill(dummy.clone());

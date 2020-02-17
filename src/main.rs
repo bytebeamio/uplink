@@ -52,10 +52,8 @@ pub enum InitError {
 /// Reads config file to generate config struct and replaces places holders
 /// like bike id and data version
 fn init_config(commandline: CommandLine) -> Result<Config, InitError> {
-    let config = fs::read_to_string(&commandline.config_path).map_err(|err| InitError::File {
-        name: commandline.config_path.clone(),
-        err,
-    })?;
+    let config = fs::read_to_string(&commandline.config_path)
+        .map_err(|err| InitError::File { name: commandline.config_path.clone(), err })?;
 
     let device_id = commandline.device_id.trim();
     let version = commandline.version.trim();
@@ -63,12 +61,7 @@ fn init_config(commandline: CommandLine) -> Result<Config, InitError> {
     let mut config: Config = toml::from_str(&config)?;
 
     config.ca = Some(commandline.certs_dir.join(device_id).join("roots.pem"));
-    config.key = Some(
-        commandline
-            .certs_dir
-            .join(device_id)
-            .join("rsa_private.pem"),
-    );
+    config.key = Some(commandline.certs_dir.join(device_id).join("rsa_private.pem"));
 
     config.device_id = str::replace(&config.device_id, "{device_id}", device_id);
     for config in config.channels.values_mut() {
@@ -81,19 +74,31 @@ fn init_config(commandline: CommandLine) -> Result<Config, InitError> {
     Ok(config)
 }
 
-fn main() -> Result<(), InitError> {
+#[tokio::main(core_threads = 1)]
+async fn main() -> Result<(), InitError> {
     pretty_env_logger::init();
 
     let commandline: CommandLine = StructOpt::from_args();
     let config = init_config(commandline)?;
-
     let (collector_tx, collector_rx) = channel::bounded(10);
-    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx);
 
+    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx);
     thread::spawn(move || {
         serializer.start();
     });
 
-    actions::start(config, collector_tx);
+    // controllers for each collector
+    let mut controllers = HashMap::new();
+
+    // create simulator contrller and start the simulator
+    let (controller_tx, controller_rx) = crossbeam_channel::bounded(10);
+    let collector = collector_tx.clone();
+    controllers.insert("simulator".to_owned(), controller_tx);
+    thread::spawn(move || {
+        collector::simulator::start(collector, controller_rx);
+    });
+
+    let mut actions = actions::new(config, collector_tx, controllers).await;
+    actions.start().await;
     Ok(())
 }

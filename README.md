@@ -17,7 +17,7 @@ Build for EC25
 * Copy uplink binary and certs dir into ec25
 * Run the below instruction in ec25
 ```
-RUST_LOG=rumqtt=debug {path}/uplink --certs certs --bike bike-2 --rate 1
+RUST_LOG=debug cargo run -- -a certs/ -c config/uplink.toml -i bike-1
 ```
 
 Build for Beagle

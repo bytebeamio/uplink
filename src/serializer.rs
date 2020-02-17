@@ -3,7 +3,7 @@ use crate::Config;
 
 use crossbeam_channel::Receiver;
 use futures_util::stream::StreamExt;
-use rumq_client::{self, eventloop, MqttOptions, Notification, QoS, Request};
+use rumq_client::{self, eventloop, MqttOptions, QoS, Request};
 use tokio::sync::mpsc::{self, channel, Sender};
 
 use std::fs::File;
@@ -13,9 +13,9 @@ use std::thread;
 use std::time::Duration;
 
 pub struct Serializer {
-    config: Config,
+    config:       Config,
     collector_rx: Receiver<Box<dyn Packable + Send>>,
-    mqtt_tx: Sender<Request>,
+    mqtt_tx:      Sender<Request>,
 }
 
 impl Serializer {
@@ -26,21 +26,17 @@ impl Serializer {
 
         thread::spawn(move || mqtt(options, requests_rx));
 
-        Serializer {
-            config,
-            collector_rx,
-            mqtt_tx: requests_tx,
-        }
+        Serializer { config, collector_rx, mqtt_tx: requests_tx }
     }
 
-    #[tokio::main(basic_scheduler)]
+    #[tokio::main(core_threads = 1)]
     pub async fn start(&mut self) {
         for data in self.collector_rx.iter() {
             let channel = &data.channel();
 
             let topic = self.config.channels.get(channel).unwrap().topic.clone();
             let payload = data.serialize();
-            let qos = QoS::AtMostOnce;
+            let qos = QoS::AtLeastOnce;
 
             let publish = rumq_client::publish(topic, qos, payload);
             let publish = Request::Publish(publish);
@@ -57,14 +53,10 @@ async fn mqtt(options: MqttOptions, requests_rx: mpsc::Receiver<Request>) {
     loop {
         let mut stream = eventloop.stream();
         while let Some(notification) = stream.next().await {
-            if let Notification::StreamEnd(err) = &notification {
-                error!("Pipeline stream closed!! Error = {:?}", err);
-                tokio::time::delay_for(Duration::from_secs(10)).await;
-                continue;
-            }
-
             debug!("Notification = {:?}", notification);
         }
+
+        tokio::time::delay_for(Duration::from_secs(5)).await;
     }
 }
 
