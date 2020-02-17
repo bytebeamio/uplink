@@ -13,7 +13,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::vec::IntoIter;
 
-use super::{Buffer, Control, Packable, Partitions};
+use super::{Buffer, Packable, Partitions};
+use crate::actions::Control;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Can {
@@ -30,13 +31,7 @@ impl Can {
         let mut rng = rand::thread_rng();
         let can_id = *can_ids.choose(&mut rng).unwrap();
 
-        Can {
-            timestamp,
-            sequence,
-            can_id: can_id.to_owned(),
-            data: "123456789123456789".to_owned(),
-            dev: "can0".to_owned(),
-        }
+        Can { timestamp, sequence, can_id: can_id.to_owned(), data: "123456789123456789".to_owned(), dev: "can0".to_owned() }
     }
 }
 
@@ -174,14 +169,7 @@ pub enum Error {
 
 impl Simulator {
     pub fn new() -> Result<Simulator, Error> {
-        let simutlator = Simulator {
-            count: 0,
-            channel_count: 4,
-            can_seq: 0,
-            motor_seq: 0,
-            bms_seq: 0,
-            gps_seq: 0,
-        };
+        let simutlator = Simulator { count: 0, channel_count: 4, can_seq: 0, motor_seq: 0, bms_seq: 0, gps_seq: 0 };
 
         Ok(simutlator)
     }
@@ -222,12 +210,7 @@ impl Simulator {
     }
 
     fn channels(&self) -> Vec<String> {
-        vec![
-            "can".to_owned(),
-            "motor".to_owned(),
-            "bms".to_owned(),
-            "gps".to_owned(),
-        ]
+        vec!["can".to_owned(), "motor".to_owned(), "bms".to_owned(), "gps".to_owned()]
     }
 }
 
