@@ -1,10 +1,8 @@
-use crate::collector::Packable;
-use crate::Config;
+use crate::base::{Config, Package};
 
-use crossbeam_channel::Receiver;
 use futures_util::stream::StreamExt;
 use rumq_client::{self, eventloop, MqttOptions, QoS, Request};
-use tokio::sync::mpsc::{self, channel, Sender};
+use tokio::sync::mpsc::{self, channel, Sender, Receiver};
 
 use std::fs::File;
 use std::io::Read;
@@ -14,12 +12,12 @@ use std::time::Duration;
 
 pub struct Serializer {
     config:       Config,
-    collector_rx: Receiver<Box<dyn Packable + Send>>,
+    collector_rx: Receiver<Box<dyn Package>>,
     mqtt_tx:      Sender<Request>,
 }
 
 impl Serializer {
-    pub fn new(config: Config, collector_rx: Receiver<Box<dyn Packable + Send>>) -> Serializer {
+    pub fn new(config: Config, collector_rx: Receiver<Box<dyn Package>>) -> Serializer {
         let (requests_tx, requests_rx) = channel::<Request>(1);
 
         let options = mqttoptions(config.clone());
@@ -31,7 +29,14 @@ impl Serializer {
 
     #[tokio::main(core_threads = 1)]
     pub async fn start(&mut self) {
-        for data in self.collector_rx.iter() {
+        loop {
+            let data = match self.collector_rx.recv().await {
+                Some(data) => data,
+                None => {
+                    error!("Senders closed!!");
+                    return
+                }
+            };
             let channel = &data.channel();
 
             let topic = self.config.channels.get(channel).unwrap().topic.clone();
@@ -62,7 +67,7 @@ async fn mqtt(options: MqttOptions, requests_rx: mpsc::Receiver<Request>) {
 
 fn mqttoptions(config: Config) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
-    let mut mqttoptions = MqttOptions::new(config.device_id, "localhost", 1883);
+    let mut mqttoptions = MqttOptions::new(config.device_id, config.broker, config.port);
     mqttoptions.set_keep_alive(30);
     mqttoptions
 }

@@ -1,18 +1,22 @@
 #[macro_use]
 extern crate log;
 
-use std::{fs, io, thread};
-
-use crossbeam_channel as channel;
-use derive_more::From;
-use serde::Deserialize;
-use std::collections::HashMap;
+use std::{fs, io};
 use std::path::PathBuf;
-use structopt::StructOpt;
+use std::thread;
+use std::collections::HashMap;
 
-mod actions;
+use derive_more::From;
+use structopt::StructOpt;
+use tokio::sync::mpsc::{channel, Sender};
+use tokio::task;
+
+mod base;
 mod collector;
-mod serializer;
+
+use base::actions;
+use base::serializer;
+use base::Config;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
@@ -27,26 +31,11 @@ pub struct CommandLine {
     certs_dir: PathBuf,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct ChannelConfig {
-    pub topic: String,
-    pub buf_size: u16,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Config {
-    pub device_id: String,
-    pub broker: String,
-    pub port: u16,
-    pub channels: HashMap<String, ChannelConfig>,
-    pub key: Option<PathBuf>,
-    pub ca: Option<PathBuf>,
-}
-
 #[derive(Debug, From)]
 pub enum InitError {
     Toml(toml::de::Error),
     File { name: String, err: io::Error },
+    Base(base::Error)
 }
 
 /// Reads config file to generate config struct and replaces places holders
@@ -80,23 +69,33 @@ async fn main() -> Result<(), InitError> {
 
     let commandline: CommandLine = StructOpt::from_args();
     let config = init_config(commandline)?;
-    let (collector_tx, collector_rx) = channel::bounded(10);
+
+    let (collector_tx, collector_rx) = channel(10);
 
     let mut serializer = serializer::Serializer::new(config.clone(), collector_rx);
     thread::spawn(move || {
         serializer.start();
     });
 
-    // controllers for each collector
-    let mut controllers = HashMap::new();
+    let mut controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
 
-    // create simulator contrller and start the simulator
-    let (controller_tx, controller_rx) = crossbeam_channel::bounded(10);
-    let collector = collector_tx.clone();
-    controllers.insert("simulator".to_owned(), controller_tx);
-    thread::spawn(move || {
-        collector::simulator::start(collector, controller_rx);
-    });
+    #[cfg(feature = "tcpjson")] {
+        let collector = collector_tx.clone();
+        task::spawn(async move {
+            if let Err(e) = collector::tcpjson::start(collector).await {
+                error!("Failed to spawn tcpjson collector. Error = {:?}", e);
+            }
+        });
+    }
+    
+    #[cfg(feature = "simulator")] {
+        let (control_tx, control_rx) = channel(10);
+        let collector = collector_tx.clone();
+        controllers.insert("simulator".to_owned(), control_tx);
+        task::spawn(async move {
+            collector::simulator::start(collector, control_rx).await;
+        });
+    }
 
     let mut actions = actions::new(config, collector_tx, controllers).await;
     actions.start().await;
