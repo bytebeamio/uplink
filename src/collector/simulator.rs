@@ -1,20 +1,18 @@
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crossbeam_channel::Receiver;
-use crossbeam_channel::Sender;
 use derive_more::From;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::{Receiver, Sender};
 
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::vec::IntoIter;
 
-use super::{Buffer, Packable, Partitions};
-use crate::actions::Control;
+use crate::base::{Buffer, Control, Package, Partitions};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Can {
@@ -209,12 +207,17 @@ impl Simulator {
         Ok(data)
     }
 
-    fn channels(&self) -> Vec<String> {
-        vec!["can".to_owned(), "motor".to_owned(), "bms".to_owned(), "gps".to_owned()]
+    fn channels(&self) -> Vec<(String, usize)> {
+        vec![
+            ("can".to_owned(), 10), 
+            ("motor".to_owned(), 10), 
+            ("bms".to_owned(), 10), 
+            ("gps".to_owned(), 10)
+        ]
     }
 }
 
-pub fn start(tx: Sender<Box<dyn Packable + Send>>, rx: Receiver<Control>) {
+pub async fn start(tx: Sender<Box<dyn Package>>, mut rx: Receiver<Control>) {
     let mut simutlator = Simulator::new().unwrap();
     let mut partitions = Partitions::new(tx, simutlator.channels());
     let mut disabled_channels = HashSet::new();
@@ -223,7 +226,7 @@ pub fn start(tx: Sender<Box<dyn Packable + Send>>, rx: Receiver<Control>) {
         if let Some((channel, data)) = simutlator.next().unwrap() {
             // insert only if this channel is not part of disabled channels
             if disabled_channels.get(&channel).is_none() {
-                partitions.fill(&channel, data);
+                partitions.fill(&channel, data).await.unwrap();
             }
         }
 
@@ -245,7 +248,7 @@ pub fn start(tx: Sender<Box<dyn Packable + Send>>, rx: Receiver<Control>) {
     }
 }
 
-impl Packable for Buffer<Data> {
+impl Package for Buffer<Data> {
     fn channel(&self) -> String {
         return self.channel.clone();
     }

@@ -1,5 +1,4 @@
-use super::collector::Packable;
-use super::Config;
+use super::{Config, Control, Package};
 use derive_more::From;
 use rumq_client::{eventloop, MqttEventLoop, MqttOptions, Notification, QoS, Request};
 use serde::{Deserialize, Serialize};
@@ -10,9 +9,9 @@ use std::time::{UNIX_EPOCH, SystemTime, SystemTimeError, Duration};
 use std::collections::HashMap;
 
 mod process;
-mod controller;
+pub mod controller;
 
-pub use controller::{Controller, Control};
+pub use controller::Controller;
 
 #[derive(Debug, From)]
 pub enum Error {
@@ -67,19 +66,19 @@ pub struct Actions {
     process: process::Process,
     controller: controller::Controller,
     requests_tx: Sender<Request>,
-    collector_tx: crossbeam_channel::Sender<Box<dyn Packable + Send>>,
+    collector_tx: Sender<Box<dyn Package>>,
     eventloop: Option<MqttEventLoop>
 }
 
 
-pub async fn new(config: Config, collector_tx: crossbeam_channel::Sender<Box<dyn Packable + Send>>, controllers: HashMap<String, crossbeam_channel::Sender<Control>>) -> Actions {
+pub async fn new(config: Config, collector_tx: Sender<Box<dyn Package>>, controllers: HashMap<String, Sender<Control>>) -> Actions {
     let connection_id = format!("actions-{}", config.device_id);
     let mut mqttoptions = MqttOptions::new(connection_id, &config.broker, config.port);
     mqttoptions.set_keep_alive(30);
 
     let (requests_tx, requests_rx) = channel(10);
     let eventloop = eventloop(mqttoptions, requests_rx);
-    let controller = Controller::new(config.clone(), controllers, collector_tx.clone());
+    let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
 
 
@@ -172,7 +171,7 @@ impl Actions {
 
         status.add_error(format!("{:?}", error));
 
-        if let Err(e) = self.collector_tx.send(Box::new(status)) {
+        if let Err(e) = self.collector_tx.send(Box::new(status)).await {
             error!("Failed to send status. Error = {:?}", e);
         }
     }
@@ -193,7 +192,7 @@ fn create_action(notification: Notification) -> Result<Option<Action>, Error> {
 }
 
 
-impl Packable for ActionStatus {
+impl Package for ActionStatus {
     fn channel(&self) -> String {
         return "action_status".to_owned();
     }

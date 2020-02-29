@@ -8,14 +8,6 @@ ip link add dev vcan0 type vcan
 ip link set up vcan0
 ```
 
-Build for EC25
---------------
-
-* Install rust
-* Init quectel sdk to bring tools and env required for cross compilation into current shell
-* ./ec25compile.sh
-* Copy uplink binary and certs dir into ec25
-* Run the below instruction in ec25
 ```
 RUST_LOG=debug cargo run -- -a certs/ -c config/uplink.toml -i bike-1
 ```

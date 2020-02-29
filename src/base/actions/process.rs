@@ -1,11 +1,11 @@
 use tokio::io::{ AsyncBufReadExt, BufReader };
 use tokio::process::{ Command, ChildStdout};
+use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::error::SendError;
 use tokio::time;
-use crossbeam_channel::Sender;
 use derive_more::From;
 
-use crate::collector::Packable;
-use super::ActionStatus;
+use super::{ActionStatus, Package};
 
 use std::sync::{Arc, Mutex};
 use std::io;
@@ -20,19 +20,19 @@ pub struct Process {
     // we use this flag to ignore new process spawn while previous process is in progress
     last_process_done: Arc<Mutex<bool>>,
     // used to send errors and process status to cloud
-    collector_tx:      crossbeam_channel::Sender<Box<dyn Packable + Send>>,
+    collector_tx:      Sender<Box<dyn Package>>,
 }
 
 #[derive(Debug, From)]
 pub enum Error {
     Io(io::Error),
     Json(serde_json::Error),
-    Send(crossbeam_channel::SendError<Box<dyn Packable + Send>>),
+    Send(SendError<Box<dyn Package>>),
     Busy
 }
 
 impl Process {
-    pub fn new(collector_tx: crossbeam_channel::Sender<Box<dyn Packable + Send>>) -> Process {
+    pub fn new(collector_tx: Sender<Box<dyn Package>>) -> Process {
         Process { last_process_done: Arc::new(Mutex::new(true)), collector_tx }
     }
 
@@ -60,7 +60,7 @@ impl Process {
 
         // spawn a process and capture its stdout without blocking the `execute` method
         tokio::spawn(async move {
-            let stdout = child.stdout().take().expect("child did not have a handle to stdout");
+            let stdout = child.stdout.take().expect("child did not have a handle to stdout");
 
             // wait for spawned process result without blocking
             tokio::spawn(async {
@@ -84,13 +84,13 @@ impl Process {
 
 }
 
-async fn capture_stdout(stdout: ChildStdout, collector_tx: Sender<Box<dyn Packable + Send>>) -> Result<(), Error>  {
+async fn capture_stdout(stdout: ChildStdout, mut collector_tx: Sender<Box<dyn Package>>) -> Result<(), Error>  {
     // stream the stdout of spawned process to capture its progress
     let mut stdout = BufReader::new(stdout).lines();
     while let Some(line) = stdout.next_line().await.unwrap() {
         let status: ActionStatus = serde_json::from_str(&line)?;
-        debug!("Acion status: {:?}", status);
-        collector_tx.send(Box::new(status))?;
+        warn!("Acion status: {:?}", status);
+        collector_tx.send(Box::new(status)).await?;
     }
 
     Ok(())
