@@ -1,0 +1,27 @@
+[package]
+name = "uplink"
+version = "0.1.0"
+authors = ["tekjar <raviteja@bytebeam.io>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+tcpjson = []
+simulator = []
+
+default = ["tcpjson", "simulator"]
+
+[dependencies]
+persistentstream = { path = "../persistentstream", version = "0.1" }
+tokio = { version = "0.2", features = ["full"] }
+rumq-client = { version = "0.1.0-alpha.7" }
+tokio-util = { version = "0.2", features = ["codec"] }
+derive_more = { version = "0.99", features = ["from"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+futures-util = "0.3"
+structopt = "0.3"
+rand = "0.7"
+toml = "0.5"
+log = "0.4"
+pretty_env_logger = "0.4"

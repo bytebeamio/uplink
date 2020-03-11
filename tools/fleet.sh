@@ -12,7 +12,7 @@ count=$1
 
 for i in $(seq 1 $count)
 do
-    RUST_LOG=rumq_broker,uplink=debug cargo run -- -c config/uplink.toml -i $i -a certs/ &
+    RUST_LOG=rumq_client=debug,uplink=warn target/debug/uplink -c config/uplink.toml -i $i -a certs/  2>&1 | tee /tmp/uplink-$i.txt &
 done
 
 trap 'kill $(jobs -p)' EXIT

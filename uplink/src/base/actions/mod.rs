@@ -1,18 +1,17 @@
-use super::collector::Packable;
-use super::Config;
+use super::{Config, Control, Package};
 use derive_more::From;
-use rumq_client::{eventloop, MqttEventLoop, MqttOptions, Notification, QoS, Request};
+use rumq_client::Notification;
 use serde::{Deserialize, Serialize};
 use tokio::stream::StreamExt;
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::mpsc::{Sender, Receiver};
 
 use std::time::{UNIX_EPOCH, SystemTime, SystemTimeError, Duration};
 use std::collections::HashMap;
 
 mod process;
-mod controller;
+pub mod controller;
 
-pub use controller::{Controller, Control};
+pub use controller::Controller;
 
 #[derive(Debug, From)]
 pub enum Error {
@@ -66,20 +65,18 @@ pub struct Actions {
     config: Config,
     process: process::Process,
     controller: controller::Controller,
-    requests_tx: Sender<Request>,
-    collector_tx: crossbeam_channel::Sender<Box<dyn Packable + Send>>,
-    eventloop: Option<MqttEventLoop>
+    collector_tx: Sender<Box<dyn Package>>,
+    actions_rx: Option<Receiver<Notification>>
 }
 
 
-pub async fn new(config: Config, collector_tx: crossbeam_channel::Sender<Box<dyn Packable + Send>>, controllers: HashMap<String, crossbeam_channel::Sender<Control>>) -> Actions {
-    let connection_id = format!("actions-{}", config.device_id);
-    let mut mqttoptions = MqttOptions::new(connection_id, &config.broker, config.port);
-    mqttoptions.set_keep_alive(30);
+pub async fn new(
+    config: Config, 
+    collector_tx: Sender<Box<dyn Package>>, 
+    controllers: HashMap<String, Sender<Control>>,
+    actions_rx: Receiver<Notification>) -> Actions {
 
-    let (requests_tx, requests_rx) = channel(10);
-    let eventloop = eventloop(mqttoptions, requests_rx);
-    let controller = Controller::new(config.clone(), controllers, collector_tx.clone());
+    let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
 
 
@@ -87,29 +84,18 @@ pub async fn new(config: Config, collector_tx: crossbeam_channel::Sender<Box<dyn
         config,
         process,
         controller,
-        requests_tx,
         collector_tx,
-        eventloop: Some(eventloop)
+        actions_rx: Some(actions_rx)
     }
 }
 
 impl Actions {
     pub async fn start(&mut self) {
-        let actions_subscription = format!("/devices/{}/actions", self.config.device_id);
-        let subscribe = rumq_client::subscribe(actions_subscription.clone(), QoS::AtLeastOnce);
-        let mut eventloop = self.eventloop.take().unwrap();
+        let mut notification_stream = self.actions_rx.take().unwrap();
 
         // start the eventloop
         loop {
-            let mut stream = eventloop.stream();
-            while let Some(notification) = stream.next().await {
-                // resubscribe after reconnection
-                if let Notification::Connected = notification {
-                    let subscribe = Request::Subscribe(subscribe.clone());
-                    let _ = self.requests_tx.send(subscribe).await;
-                    continue
-                }
-
+            while let Some(notification) = notification_stream.next().await {
                 debug!("Notification = {:?}", notification);
                 let action = match create_action(notification) {
                     Ok(Some(action)) => action,
@@ -172,7 +158,7 @@ impl Actions {
 
         status.add_error(format!("{:?}", error));
 
-        if let Err(e) = self.collector_tx.send(Box::new(status)) {
+        if let Err(e) = self.collector_tx.send(Box::new(status)).await {
             error!("Failed to send status. Error = {:?}", e);
         }
     }
@@ -193,7 +179,7 @@ fn create_action(notification: Notification) -> Result<Option<Action>, Error> {
 }
 
 
-impl Packable for ActionStatus {
+impl Package for ActionStatus {
     fn channel(&self) -> String {
         return "action_status".to_owned();
     }

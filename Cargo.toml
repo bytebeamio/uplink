@@ -1,25 +1,6 @@
-[package]
-name = "uplink"
-version = "0.1.0"
-authors = ["tekjar <kraviteza@gmail.com>"]
-edition = "2018"
+[workspace]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-crossbeam-channel = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1.0"
-derive_more = "0.15"
-structopt = "0.3"
-toml = "0.5"
-# rumq-client = { path = "../rumq/rumq-client" } 
-rumq-client = { version = "0.1.0-alpha.5" }
-rand = "0.7"
-log = "0.4"
-socketcan = "1"
-hex = "0.4"
-tokio = { version = "0.2", features = ["full"] }
-futures-util = "0.3"
-jsonwebtoken = "7.0.0-alpha.2"
-pretty_env_logger = "0.3"
+members = [
+    "uplink",
+    "persistentstream"
+]

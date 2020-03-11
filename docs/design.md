@@ -3,11 +3,12 @@ Design keeping this in mind
 * Swappable collectors and serializers
 * Persistence with priority
 * Graceful shutdown
-* Disable and enable a channel at collector dynamically
+* Disable and enable a channel of collector dynamically
 * Disable and enable a collector dynamically
 * Sampling channel data
 * System metrics like memory, cpu, network io etc
 * Self Instrumentation..Incoming bandwidth, Outgoing bandwidth, Disk backlog etc
+* Self errors should also be reported to the cloud
 
 
 Several collector types
@@ -51,6 +52,7 @@ Collector
 Self Instrumentation
 --------
 
+* Critical errors that happened in a collector
 * Channel incoming data throughput
 * Channel outgoing data throughput
 * Total incoming and outgoing data throughput
