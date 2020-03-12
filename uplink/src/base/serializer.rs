@@ -1,12 +1,13 @@
 use crate::base::{Config, Package};
 
 use rumq_client::{self, QoS, Request};
-use tokio::sync::mpsc::{Sender, Receiver};
+use tokio::sync::mpsc::Receiver;
+use persistentstream::Sender;
 
 pub struct Serializer {
     config:       Config,
     collector_rx: Receiver<Box<dyn Package>>,
-    mqtt_tx:      Sender<Request>,
+    mqtt_tx:      persistentstream::Sender<Request>,
 }
 
 impl Serializer {

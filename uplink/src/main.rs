@@ -35,7 +35,8 @@ pub struct CommandLine {
 pub enum InitError {
     Toml(toml::de::Error),
     File { name: String, err: io::Error },
-    Base(base::Error)
+    Base(base::Error),
+    PersistentStream(persistentstream::Error<rumq_client::Request>),
 }
 
 /// Reads config file to generate config struct and replaces places holders
@@ -73,8 +74,9 @@ async fn main() -> Result<(), InitError> {
     let (collector_tx, collector_rx) = channel(10);
     let (actions_tx, actions_rx) = channel(10);
     let (mqtt_tx, mqtt_rx) = channel(10);
+    let serializer_mqtt_tx = persistentstream::upgrade("/tmp/persist", mqtt_tx.clone(), 10 * 1024, 30)?;
 
-    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx, mqtt_tx.clone());
+    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx, serializer_mqtt_tx);
     task::spawn(async move {
         serializer.start().await;
     });

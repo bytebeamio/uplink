@@ -674,8 +674,6 @@ dependencies = [
 [[package]]
 name = "rumq-client"
 version = "0.1.0-alpha.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f5ba12e599a12f6fa132ce770d33186ac0f712f618f75a72128e7cad9f154d0"
 dependencies = [
  "async-stream",
  "derive_more",
@@ -692,8 +690,6 @@ dependencies = [
 [[package]]
 name = "rumq-core"
 version = "0.1.0-alpha.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbdeca48853c9e186377c735a501c1cf9b44893de8cf8d5c521ed3878662d19a"
 dependencies = [
  "async-trait",
  "byteorder",
