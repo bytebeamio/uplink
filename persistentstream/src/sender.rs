@@ -19,7 +19,7 @@ pub struct Sender<T> {
     index_file: File,
     /// last failed send used to track orchestration between disk and channel
     last_failed: Option<T>,
-    /// list of backlog file ids
+    /// list of backlog file ids. Mutated only be the serialization part of the sender
     backlog_file_ids: Vec<u64>,
     /// handle to put data into the queue
     tx: mpsc::Sender<T>,
@@ -29,19 +29,14 @@ pub struct Sender<T> {
     max_file_size: usize,
     /// maximum number of files before deleting old file
     max_file_count: usize,
-    /// current_write_file id which is used to increment next write file name
-    /// Necessary as we can't use backlog_file_ids which get's mutated while
-    /// reading causing races. E.g assume writes at 0. reads now will pop 0 from
-    /// backlog_file_ids causing next write filename to be backup@0 again
-    current_write_file_id: Option<u64>,
-    /// current read file index. pointer into current reader id index in backlog_file_ids
-    current_read_file_index: Option<usize>,
     /// current open file
     current_write_file: Option<File>,
-    /// size of file that's being filled
-    current_write_file_size: usize,
     /// current_read_file
     current_read_file: Option<File>,
+    /// current read file index. pointer into current reader id index in backlog_file_ids
+    current_read_file_index: Option<usize>,
+    /// size of file that's being filled
+    current_write_file_size: usize,
     /// flag to detect slow receiver
     slow_receiver: bool,
 }
@@ -66,7 +61,7 @@ impl<T> Sender<T> where T: Into<Vec<u8>>, Vec<u8>: Into<T> {
         let (index_file, current_read_file_index) = parse_index_file(backup_path)?;
 
         debug!("Previous session file count = {:?}", backlog_file_ids.len());
-        let mut sender = Sender {
+        let sender = Sender {
             index_file,
             last_failed: None,
             backlog_file_ids,
@@ -74,7 +69,6 @@ impl<T> Sender<T> where T: Into<Vec<u8>>, Vec<u8>: Into<T> {
             tx,
             backup_path: PathBuf::from(backup_path),
             max_file_count,
-            current_write_file_id: None,
             current_read_file_index,
             current_write_file: None,
             current_write_file_size: 0,
@@ -82,17 +76,13 @@ impl<T> Sender<T> where T: Into<Vec<u8>>, Vec<u8>: Into<T> {
             slow_receiver: false
         };
 
-        if let Some(id) = sender.backlog_file_ids.last() {
-            sender.current_write_file_id = Some(*id);
-        } 
-
         Ok(sender)
     }
 
     /// Opens next file to write to by incrementing current_write_file_id
     /// Handles retention
     fn open_next_write_file(&mut self) -> Result<(), Error<T>> {
-        let next_file_id = match self.current_write_file_id {
+        let next_file_id = match self.backlog_file_ids.last() {
             Some(id) => id + 1,
             None => 0
         };
@@ -103,7 +93,6 @@ impl<T> Sender<T> where T: Into<Vec<u8>>, Vec<u8>: Into<T> {
         let next_file = File::new(next_file_path, next_file);
 
         self.current_write_file = Some(next_file);
-        self.current_write_file_id = Some(next_file_id);
         self.backlog_file_ids.push(next_file_id);
 
         let backlog_files_count = self.backlog_file_ids.len();
