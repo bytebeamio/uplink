@@ -13,10 +13,10 @@ use tokio::sync::mpsc;
 mod sender;
 
 #[derive(Debug, From)]
-pub enum Error {
+pub enum Error<T> {
     NonDirBackupPath,
     Io(io::Error),
-    Sender(sender::Error),
+    Sender(sender::Error<T>),
 }
 
 #[derive(Debug)]
@@ -82,14 +82,18 @@ fn parse_index_file(backup_path: &Path) -> io::Result<(File, Option<usize>)> {
     Ok((index_file, Some(id)))
 }
 
-pub fn channel<P: AsRef<Path>>(
+pub fn channel<T, P>(
     backlog_dir: P,
     channel_size: usize,
     max_file_size: usize,
     max_file_count: usize,
-) -> Result<(Sender, mpsc::Receiver<Vec<u8>>), Error> {
+) -> Result<(Sender<T>, mpsc::Receiver<T>), Error<T>>
+where
+    P: AsRef<Path>,
+    T: Into<Vec<u8>>,
+    Vec<u8>: Into<T>,
+{
     let (tx, rx) = mpsc::channel(channel_size);
-
     let tx = Sender::new(backlog_dir.as_ref(), max_file_size, max_file_count, tx)?;
     Ok((tx, rx))
 }

@@ -15,14 +15,14 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 /// The Sender half of the persistent channel API. Calls to send method will not block indefinitely.
 /// Rotates the data to disk when the channel is full.
-pub struct Sender {
+pub struct Sender<T> {
     index_file: File,
     /// last failed send used to track orchestration between disk and channel
-    last_failed: Option<Vec<u8>>,
+    last_failed: Option<T>,
     /// list of backlog file ids
     backlog_file_ids: Vec<u64>,
     /// handle to put data into the queue
-    tx: mpsc::Sender<Vec<u8>>,
+    tx: mpsc::Sender<T>,
     /// persistence path
     backup_path: PathBuf,
     /// maximum allowed file size
@@ -48,20 +48,20 @@ pub struct Sender {
 
 
 #[derive(Debug, From)]
-pub enum Error {
+pub enum Error<T> {
+    #[from]
     Io(io::Error),
-    Closed(Vec<u8>),
-    Time(std::time::SystemTimeError),
+    Closed(T),
     CrcMisMatch
 }
 
-impl Sender {
+impl<T> Sender<T> where T: Into<Vec<u8>>, Vec<u8>: Into<T> {
     pub fn new(
         backup_path: &Path,
         max_file_size: usize,
         max_file_count: usize,
-        tx: mpsc::Sender<Vec<u8>>,
-    ) -> Result<Self, Error> {
+        tx: mpsc::Sender<T>,
+    ) -> Result<Self, Error<T>> {
         let backlog_file_ids = get_file_ids(backup_path)?;
         let (index_file, current_read_file_index) = parse_index_file(backup_path)?;
 
@@ -91,7 +91,7 @@ impl Sender {
 
     /// Opens next file to write to by incrementing current_write_file_id
     /// Handles retention
-    fn open_next_write_file(&mut self) -> Result<(), Error> {
+    fn open_next_write_file(&mut self) -> Result<(), Error<T>> {
         let next_file_id = match self.current_write_file_id {
             Some(id) => id + 1,
             None => 0
@@ -128,7 +128,7 @@ impl Sender {
     /// of this method to open next file to serialize data to
     /// Also manages retention by deleting old files when file retention count is crossed
     /// Deletes the old file right after opening the next write file
-    fn serialize_data_to_disk(&mut self, data: Vec<u8>) -> Result<(), Error> {
+    fn serialize_data_to_disk(&mut self, data: Vec<u8>) -> Result<(), Error<T>> {
         if self.current_write_file.is_none() {
             self.open_next_write_file()?;
         }
@@ -158,7 +158,7 @@ impl Sender {
         Ok(())
     }
 
-    fn decrement_reader_index(&mut self) -> Result<(), Error> {
+    fn decrement_reader_index(&mut self) -> Result<(), Error<T>> {
         let index = if let Some(index) = self.current_read_file_index {
             index as isize - 1
         } else {
@@ -178,7 +178,7 @@ impl Sender {
         Ok(())
     }
 
-    fn increment_reader_index(&mut self) -> Result<(), Error> {
+    fn increment_reader_index(&mut self) -> Result<(), Error<T>> {
         let index = if let Some(index) = self.current_read_file_index {
             index + 1
         } else {
@@ -200,7 +200,7 @@ impl Sender {
     }
 
     /// Update next read file and delete the last read file 
-    fn open_next_read_file(&mut self) -> Result<bool, Error> {
+    fn open_next_read_file(&mut self) -> Result<bool, Error<T>> {
         // TODO: This condition might not hit. Reevaluate
         if self.backlog_file_ids.len() == 0 {
             return Ok(false)
@@ -235,7 +235,7 @@ impl Sender {
     /// Jumps from one file to another when the current file is at EOF
     /// Also handles reads on file which also being currently written
     /// Deletes the last read file just before moving to next read file
-    fn deserialize_data_from_disk(&mut self) -> Result<Option<Vec<u8>>, Error> {
+    fn deserialize_data_from_disk(&mut self) -> Result<Option<Vec<u8>>, Error<T>> {
         loop {
             let current_read_file = if let Some(file) = &mut self.current_read_file {
                 file
@@ -291,7 +291,7 @@ impl Sender {
     }
 
 
-    pub async fn sync(&mut self) -> Result<(), Error> {
+    pub async fn sync(&mut self) -> Result<(), Error<T>> {
         if let Some(last_failed) = self.last_failed.take() {
             let mut next_message = last_failed;
 
@@ -299,12 +299,14 @@ impl Sender {
             // picked up. Start filling the channel starting with last failed message and
             // proceed to get elements from the disk until all the slots in the channel are full.
             // This makes sure that receiver cathes up with all the backlog files when possible
-            debug!("try sending slow data to imq -> {}", next_message[0]);
             loop {
                 match self.tx.try_send(next_message) {
                     Ok(_) => {
                         match self.deserialize_data_from_disk()? {
-                            Some(data) => next_message = data,
+                            Some(data) => {
+                                debug!("sent slow data to imq -> {}", data[0]);
+                                next_message = data.into();
+                            }
                             None => {
                                 debug!("disk empty. toggling to fast data mode");
                                 self.slow_receiver = false;
@@ -313,7 +315,7 @@ impl Sender {
                         }
                     }
                     Err(TrySendError::Full(data)) => {
-                        debug!("failed to send data to imq   -> {}", data[0]);
+                        debug!("failed to send data to imq");
                         self.last_failed = Some(data);
                         break
                     } 
@@ -330,10 +332,10 @@ impl Sender {
     /// where all the next iteration writes new elements to disk and try_sends
     /// max possible old elements from file to channel. If all the backlog files
     /// are done, toggle slow_receiver mode where data is directly written to the channel
-    pub async fn send(&mut self, data: Vec<u8>) -> Result<(), Error> {
+    pub async fn send(&mut self, data: T) -> Result<(), Error<T>> {
         if self.slow_receiver {
             // write the next element to the disk. 
-            self.serialize_data_to_disk(data)?;
+            self.serialize_data_to_disk(data.into())?;
             // after writing the current element to the disk, it might be possible the receiver has
             // picked up. Start filling the channel starting with last failed message and
             // proceed to get elements from the disk until all the slots in the channel are full.
@@ -343,7 +345,7 @@ impl Sender {
             match self.tx.try_send(data) {
                 Ok(()) => return Ok(()),
                 Err(TrySendError::Full(data)) => {
-                    debug!("imq full. toggling to slow data mode -> {}", data[0]);
+                    debug!("imq full. toggling to slow data mode");
                     // keep the last failed element in memeory. This makes the channel look like it
                     // has capacity + 1 elements. This failed message in the state is used to
                     // instruct the next iteration to start writing next data to the disk.
@@ -405,7 +407,7 @@ mod test {
     #[tokio::test]
     async fn current_write_file_names_and_sizes_are_incremented_and_reset_correctly_at_edges() {
         let backup = init_backup_folders();
-        let (tx, _rx) = mpsc::channel(10);
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(10);
         // Max possible data on disk = 10 * 10K - inmemory count size
         let mut tx = Sender::new(backup.path(), 10 * 1024, 10, tx).unwrap();
 
@@ -457,7 +459,7 @@ mod test {
     #[tokio::test]
     async fn serializer_cretes_new_file_after_the_current_file_is_full() {
         let backup = init_backup_folders();
-        let (tx, _rx) = mpsc::channel(10);
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(10);
         let mut tx = Sender::new(backup.path(), 10 * 1024, 10, tx).unwrap();
 
         for _ in 0..10u32 {
@@ -480,7 +482,7 @@ mod test {
     #[tokio::test]
     async fn deletes_old_file_when_file_limit_reached() {
         let backup = init_backup_folders();
-        let (tx, _rx) = mpsc::channel(10);
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(10);
         let mut tx = Sender::new(backup.path(), 10 * 1024, 10, tx).unwrap();
 
         for _i in 0..100u32 {
@@ -504,7 +506,7 @@ mod test {
     #[tokio::test]
     async fn writer_updates_index_of_reader_correctly_when_it_deletes_a_file() {
         let backup = init_backup_folders();
-        let (tx, _rx) = mpsc::channel(10);
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(10);
         let mut tx = Sender::new(backup.path(), 10 * 1024, 10, tx).unwrap();
 
         // results in 10 files backup@0 to backup@9 with data 0..=99
@@ -545,7 +547,7 @@ mod test {
     #[tokio::test]
     async fn next_boot_should_continue_with_correct_file_name_to_write() {
         let backup = init_backup_folders();
-        let (tx, _rx) = mpsc::channel(10);
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(10);
         let mut tx = Sender::new(backup.path(), 10 * 1024, 10, tx).unwrap();
 
         for _i in 0..100u32 {
@@ -556,7 +558,7 @@ mod test {
         let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(10, files.len());
 
-        let (tx, _rx) = mpsc::channel(10);
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(10);
         let mut tx = Sender::new(backup.path(), 10 * 1024, 10, tx).unwrap();
         for _i in 0..10u32 {
             let data = generate_data(1024);
@@ -570,7 +572,7 @@ mod test {
     #[tokio::test]
     async fn next_boot_should_continue_with_correct_file_to_read() {
         let backup = init_backup_folders();
-        let (tx, _rx) = mpsc::channel(10);
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(10);
         let mut tx = Sender::new(backup.path(), 10 * 1024, 10, tx).unwrap();
 
         // write data to disk. 100K data. 10 files. backup@0..9
@@ -591,7 +593,7 @@ mod test {
         assert_eq!(data[0], 50);
 
         // next boot should read from backup@5 and data 50
-        let (tx, _rx) = mpsc::channel(10);
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(10);
         let mut tx = Sender::new(backup.path(), 10 * 1024, 10, tx).unwrap();
         for i in 50..100 {
             let data = tx.deserialize_data_from_disk().unwrap().unwrap();
@@ -602,7 +604,7 @@ mod test {
     #[tokio::test]
     async fn read_should_extract_data_from_disk_correctly() {
         let backup = init_backup_folders();
-        let (tx, _rx) = mpsc::channel(10);
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(10);
         let mut tx = Sender::new(backup.path(), 10 * 1024, 10, tx).unwrap();
 
         for i in 0..100 {
@@ -624,7 +626,7 @@ mod test {
     #[tokio::test]
     async fn serializing_and_deserializing_the_same_current_file_should_work_correctly() {
         let backup = init_backup_folders();
-        let (tx, _rx) = mpsc::channel(10);
+        let (tx, _rx) = mpsc::channel::<Vec<u8>>(10);
         let mut tx = Sender::new(backup.path(), 10 * 1024, 10, tx).unwrap();
 
         // file would be partially full at the end of this loop
