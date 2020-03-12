@@ -9,6 +9,23 @@ tokio channel receiver
 
 -------------------------------------
 
+A note on sender and blocking
+-----------------------------
+
+All the file operations are done in blocking mode. This is a conscious
+decision as this library intends to be completely a only on the receiver
+side (to be used in a network eventloop).
+
+Also synchronous disk writes are usually very fast
+
+Also it is rare to use the tx part of the channel in the select block
+for concurrent execution. Nevertheless, if you are using sender in a
+complete aync fashion (like tokio task spawns), keep this restriction in mind.
+Use spawn_blocking. Really slow disk reads and writes will screwup your
+async runtime if you don't
+
+-------------------------------------
+
 Orchestration
 -------------
 
