@@ -82,6 +82,7 @@ fn parse_index_file(backup_path: &Path) -> io::Result<(File, Option<usize>)> {
     Ok((index_file, Some(id)))
 }
 
+/// Create a disk aware channel and return tx and rx handles
 pub fn channel<T, P>(
     backlog_dir: P,
     channel_size: usize,
@@ -96,6 +97,22 @@ where
     let (tx, rx) = mpsc::channel(channel_size);
     let tx = Sender::new(backlog_dir.as_ref(), max_file_size, max_file_count, tx)?;
     Ok((tx, rx))
+}
+
+/// Upgrades an existing tokio sender with disk awareness
+pub fn upgrade<T, P>(
+    backlog_dir: P,
+    tx: mpsc::Sender<T>,
+    max_file_size: usize,
+    max_file_count: usize,
+) -> Result<Sender<T>, Error<T>>
+where
+    P: AsRef<Path>,
+    T: Into<Vec<u8>>,
+    Vec<u8>: Into<T>,
+{
+    let tx = Sender::new(backlog_dir.as_ref(), max_file_size, max_file_count, tx)?;
+    Ok(tx)
 }
 
 pub use sender::Sender;
