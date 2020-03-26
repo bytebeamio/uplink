@@ -36,17 +36,19 @@ impl Mqtt {
         loop {
             let mut stream = self.eventloop.stream();
             while let Some(notification) = stream.next().await {
+                // NOTE These should never block. Causes mqtt eventloop to halt
+                // FIXME There is a chance that subscriptions and actions are lost here
                 match notification {
                     Notification::Connected => {
                         let subscription = subscribe(actions_subscription.clone(), QoS::AtLeastOnce);
                         let subscribe = Request::Subscribe(subscription);
-                        if let Err(e) = self.mqtt_tx.send(subscribe).await {
+                        if let Err(e) = self.mqtt_tx.try_send(subscribe) {
                             error!("Failed to send subscription. Error = {:?}", e);
                         }
                     }
                     Notification::Publish(publish) if publish.topic_name == actions_subscription => {
                         let notification = Notification::Publish(publish);
-                        if let Err(e) = self.actions_tx.send(notification).await {
+                        if let Err(e) = self.actions_tx.try_send(notification) {
                             error!("Failed to forward action. Error = {:?}", e);
                         }
                     }
@@ -56,6 +58,7 @@ impl Mqtt {
                 }
             }
 
+            // try reconnecting again in 5 seconds
             tokio::time::delay_for(Duration::from_secs(5)).await;
         }
     }
@@ -64,7 +67,7 @@ impl Mqtt {
 fn mqttoptions(config: &Config) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
     let mut mqttoptions = MqttOptions::new(&config.device_id, &config.broker, config.port);
-    mqttoptions.set_keep_alive(30);
+    mqttoptions.set_keep_alive(5);
     mqttoptions
 }
 

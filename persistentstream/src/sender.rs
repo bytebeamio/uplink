@@ -401,7 +401,7 @@ mod test {
         let mut tx = Sender::new(backup.path(), 10 * 1024, 10, tx).unwrap();
 
         assert!(tx.current_write_file.is_none());
-        assert!(tx.current_write_file_id.is_none());
+        assert!(tx.backlog_file_ids.last().is_none());
         for i in 0..100 {
             let data = generate_data(1024);
             tx.serialize_data_to_disk(data).unwrap();
@@ -412,7 +412,7 @@ mod test {
                     let file = backup.path().join(name);
                     assert_eq!(tx.current_write_file.as_ref().unwrap().path, file);
                     assert_eq!(tx.current_write_file_size, (i + 1) * 1024);
-                    assert_eq!(tx.current_write_file_id.unwrap(), 0);
+                    assert_eq!(*tx.backlog_file_ids.last().unwrap(), 0);
                 }
                 9 => {
                     // 9th element causes file size to be 10K. this should reset the current write
@@ -421,14 +421,14 @@ mod test {
                     assert!(tx.current_write_file.is_none());
                     assert_eq!(tx.current_write_file_size, 0);
                     // this is incremented while opening the next file
-                    assert_eq!(tx.current_write_file_id.unwrap(), 0);
+                    assert_eq!(*tx.backlog_file_ids.last().unwrap(), 0);
                 }
                 10..=18 => {
                     let name = format!("backup@{}", 1);
                     let file = backup.path().join(name);
                     assert_eq!(tx.current_write_file.as_ref().unwrap().path, file);
                     assert_eq!(tx.current_write_file_size, (i % 10 + 1) * 1024);
-                    assert_eq!(tx.current_write_file_id.unwrap(), 1);
+                    assert_eq!(*tx.backlog_file_ids.last().unwrap(), 1);
                 }
                 19 => {
                     // 9th element causes file size to be 10K. this should reset the current write
@@ -437,7 +437,7 @@ mod test {
                     assert!(tx.current_write_file.is_none());
                     assert_eq!(tx.current_write_file_size, 0);
                     // this is incremented while opening the next file
-                    assert_eq!(tx.current_write_file_id.unwrap(), 1);
+                    assert_eq!(*tx.backlog_file_ids.last().unwrap(), 1);
                 }
                 _ => ()
             }

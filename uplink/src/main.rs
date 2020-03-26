@@ -64,7 +64,7 @@ fn init_config(commandline: CommandLine) -> Result<Config, InitError> {
     Ok(config)
 }
 
-#[tokio::main(core_threads = 1)]
+#[tokio::main(core_threads = 4)]
 async fn main() -> Result<(), InitError> {
     pretty_env_logger::init();
 
