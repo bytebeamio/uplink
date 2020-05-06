@@ -76,15 +76,25 @@ async fn main() -> Result<(), InitError> {
     let (mqtt_tx, mqtt_rx) = channel(10);
     let serializer_mqtt_tx = persistentstream::upgrade("/tmp/persist", mqtt_tx.clone(), 10 * 1024, 30)?;
 
-    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx, serializer_mqtt_tx);
-    task::spawn(async move {
-        serializer.start().await;
-    });
+    let mut controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
 
-    let mut mqtt = mqtt::Mqtt::new(config.clone(), actions_tx, mqtt_tx, mqtt_rx);
-    task::spawn(async move {
-        mqtt.start().await;
-    });
+    #[cfg(feature = "tcpjson")] {
+        let collector = collector_tx.clone();
+        task::spawn(async move {
+            if let Err(e) = collector::tcpjson::start(collector).await {
+                error!("Failed to spawn tcpjson collector. Error = {:?}", e);
+            }
+        });
+    }
+    
+    #[cfg(feature = "simulator")] {
+        let (control_tx, control_rx) = channel(10);
+        let collector = collector_tx.clone();
+        controllers.insert("simulator".to_owned(), control_tx);
+        task::spawn(async move {
+            collector::simulator::start(collector, control_rx).await;
+        });
+    }
 
     let mut controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
     #[cfg(feature = "tcpjson")] {

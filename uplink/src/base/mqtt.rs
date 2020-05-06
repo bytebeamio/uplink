@@ -1,4 +1,4 @@
-use rumq_client::{MqttEventLoop, eventloop, subscribe, QoS, MqttOptions, Request, Notification};
+use rumq_client::{MqttEventLoop, eventloop, Subscribe, QoS, MqttOptions, Request, Notification};
 use tokio::time::Duration;
 use tokio::sync::mpsc::{Sender, Receiver};
 use futures_util::stream::StreamExt;
@@ -34,18 +34,26 @@ impl Mqtt {
     pub async fn start(&mut self) {
         let actions_subscription = format!("/devices/{}/actions", self.config.device_id);
         loop {
-            let mut stream = self.eventloop.stream();
+            let mut stream = match self.eventloop.connect().await {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Connection error = {:?}", e);
+                    tokio::time::delay_for(Duration::from_secs(5)).await;
+                    continue
+                }
+            };
+
+            let subscription = Subscribe::new(actions_subscription.clone(), QoS::AtLeastOnce);
+            let subscribe = Request::Subscribe(subscription);
+            if let Err(e) = self.mqtt_tx.try_send(subscribe) {
+                error!("Failed to send subscription. Error = {:?}", e);
+            }
+
+            
             while let Some(notification) = stream.next().await {
                 // NOTE These should never block. Causes mqtt eventloop to halt
                 // FIXME There is a chance that subscriptions and actions are lost here
                 match notification {
-                    Notification::Connected => {
-                        let subscription = subscribe(actions_subscription.clone(), QoS::AtLeastOnce);
-                        let subscribe = Request::Subscribe(subscription);
-                        if let Err(e) = self.mqtt_tx.try_send(subscribe) {
-                            error!("Failed to send subscription. Error = {:?}", e);
-                        }
-                    }
                     Notification::Publish(publish) if publish.topic_name == actions_subscription => {
                         let notification = Notification::Publish(publish);
                         if let Err(e) = self.actions_tx.try_send(notification) {

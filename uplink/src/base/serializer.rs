@@ -30,7 +30,7 @@ impl Serializer {
             let payload = data.serialize();
             let qos = QoS::AtLeastOnce;
 
-            let mut publish = rumq_client::publish(topic, qos, payload);
+            let mut publish = rumq_client::Publish::new(topic, qos, payload);
             // NOTE this is required for serialization in persistentstream. Otherwise QoS 1 packets
             // with no packetid in the payload will be misinterpreted during deserialization
             // TODO See if there is a way to fix this
