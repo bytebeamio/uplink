@@ -3,7 +3,6 @@ extern crate log;
 
 use std::{fs, io};
 use std::path::PathBuf;
-use std::thread;
 use std::collections::HashMap;
 
 use derive_more::From;
@@ -16,6 +15,7 @@ mod collector;
 
 use base::actions;
 use base::serializer;
+use base::mqtt;
 use base::Config;
 
 #[derive(StructOpt, Debug)]
@@ -35,7 +35,8 @@ pub struct CommandLine {
 pub enum InitError {
     Toml(toml::de::Error),
     File { name: String, err: io::Error },
-    Base(base::Error)
+    Base(base::Error),
+    PersistentStream(persistentstream::Error<rumq_client::Request>),
 }
 
 /// Reads config file to generate config struct and replaces places holders
@@ -63,7 +64,7 @@ fn init_config(commandline: CommandLine) -> Result<Config, InitError> {
     Ok(config)
 }
 
-#[tokio::main(core_threads = 1)]
+#[tokio::main(core_threads = 4)]
 async fn main() -> Result<(), InitError> {
     pretty_env_logger::init();
 
@@ -71,11 +72,9 @@ async fn main() -> Result<(), InitError> {
     let config = init_config(commandline)?;
 
     let (collector_tx, collector_rx) = channel(10);
-
-    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx);
-    thread::spawn(move || {
-        serializer.start();
-    });
+    let (actions_tx, actions_rx) = channel(10);
+    let (mqtt_tx, mqtt_rx) = channel(10);
+    let serializer_mqtt_tx = persistentstream::upgrade("/tmp/persist", mqtt_tx.clone(), 10 * 1024, 30)?;
 
     let mut controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
 
@@ -97,7 +96,26 @@ async fn main() -> Result<(), InitError> {
         });
     }
 
-    let mut actions = actions::new(config, collector_tx, controllers).await;
+    let mut controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
+    #[cfg(feature = "tcpjson")] {
+        let collector = collector_tx.clone();
+        task::spawn(async move {
+            if let Err(e) = collector::tcpjson::start(collector).await {
+                error!("Failed to spawn tcpjson collector. Error = {:?}", e);
+            }
+        });
+    }
+    
+    #[cfg(feature = "simulator")] {
+        let (control_tx, control_rx) = channel(10);
+        let collector = collector_tx.clone();
+        controllers.insert("simulator".to_owned(), control_tx);
+        task::spawn(async move {
+            collector::simulator::start(collector, control_rx).await;
+        });
+    }
+
+    let mut actions = actions::new(config, collector_tx, controllers, actions_rx).await;
     actions.start().await;
     Ok(())
 }

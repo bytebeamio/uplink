@@ -1,9 +1,9 @@
 use super::{Config, Control, Package};
 use derive_more::From;
-use rumq_client::{eventloop, MqttEventLoop, MqttOptions, Notification, QoS, Request};
+use rumq_client::Notification;
 use serde::{Deserialize, Serialize};
 use tokio::stream::StreamExt;
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::mpsc::{Sender, Receiver};
 
 use std::time::{UNIX_EPOCH, SystemTime, SystemTimeError, Duration};
 use std::collections::HashMap;
@@ -65,6 +65,19 @@ pub struct Actions {
     config: Config,
     process: process::Process,
     controller: controller::Controller,
+<<<<<<< HEAD:uplink/src/base/actions/mod.rs
+    collector_tx: Sender<Box<dyn Package>>,
+    actions_rx: Option<Receiver<Notification>>
+}
+
+
+pub async fn new(
+    config: Config, 
+    collector_tx: Sender<Box<dyn Package>>, 
+    controllers: HashMap<String, Sender<Control>>,
+    actions_rx: Receiver<Notification>) -> Actions {
+
+=======
     requests_tx: Sender<Request>,
     collector_tx: Sender<Box<dyn Package>>,
     eventloop: Option<MqttEventLoop>
@@ -78,6 +91,7 @@ pub async fn new(config: Config, collector_tx: Sender<Box<dyn Package>>, control
 
     let (requests_tx, requests_rx) = channel(10);
     let eventloop = eventloop(mqttoptions, requests_rx);
+>>>>>>> master:uplink/src/base/base/actions/mod.rs
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
 
@@ -86,29 +100,18 @@ pub async fn new(config: Config, collector_tx: Sender<Box<dyn Package>>, control
         config,
         process,
         controller,
-        requests_tx,
         collector_tx,
-        eventloop: Some(eventloop)
+        actions_rx: Some(actions_rx)
     }
 }
 
 impl Actions {
     pub async fn start(&mut self) {
-        let actions_subscription = format!("/devices/{}/actions", self.config.device_id);
-        let subscribe = rumq_client::subscribe(actions_subscription.clone(), QoS::AtLeastOnce);
-        let mut eventloop = self.eventloop.take().unwrap();
+        let mut notification_stream = self.actions_rx.take().unwrap();
 
         // start the eventloop
         loop {
-            let mut stream = eventloop.stream();
-            while let Some(notification) = stream.next().await {
-                // resubscribe after reconnection
-                if let Notification::Connected = notification {
-                    let subscribe = Request::Subscribe(subscribe.clone());
-                    let _ = self.requests_tx.send(subscribe).await;
-                    continue
-                }
-
+            while let Some(notification) = notification_stream.next().await {
                 debug!("Notification = {:?}", notification);
                 let action = match create_action(notification) {
                     Ok(Some(action)) => action,

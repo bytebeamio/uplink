@@ -1,4 +1,3 @@
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use derive_more::From;
@@ -6,6 +5,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::time;
 
 use std::collections::HashSet;
 use std::fs::File;
@@ -172,12 +172,12 @@ impl Simulator {
         Ok(simutlator)
     }
 
-    fn next(&mut self) -> Result<Option<(String, Data)>, Error> {
+    async fn next(&mut self) -> Result<Option<(String, Data)>, Error> {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
         let timestamp = timestamp.as_secs();
         let mut route = Route::new();
 
-        thread::sleep(Duration::from_millis(100));
+        time::delay_for(Duration::from_millis(100)).await;
         let data = match self.count % self.channel_count {
             0 => {
                 self.can_seq += 1;
@@ -223,7 +223,7 @@ pub async fn start(tx: Sender<Box<dyn Package>>, mut rx: Receiver<Control>) {
     let mut disabled_channels = HashSet::new();
 
     loop {
-        if let Some((channel, data)) = simutlator.next().unwrap() {
+        if let Some((channel, data)) = simutlator.next().await.unwrap() {
             // insert only if this channel is not part of disabled channels
             if disabled_channels.get(&channel).is_none() {
                 partitions.fill(&channel, data).await.unwrap();
