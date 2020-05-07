@@ -14,8 +14,8 @@ default = ["tcpjson", "simulator"]
 [dependencies]
 persistentstream = { path = "../persistentstream", version = "0.1" }
 tokio = { version = "0.2", features = ["full"] }
-rumq-client = { path = "../../rumq/rumq-client" }
-#rumq-client = { version = "0.1.0-alpha.7" }
+#rumq-client = { path = "../../rumq/rumq-client" }
+rumq-client = { version = "0.1.0-alpha.10" }
 tokio-util = { version = "0.2", features = ["codec"] }
 derive_more = { version = "0.99", features = ["from"] }
 serde = { version = "1", features = ["derive"] }
