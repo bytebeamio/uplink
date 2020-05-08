@@ -8,6 +8,7 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::base::Config;
+use crate::base::actions::Action;
 
 pub struct Mqtt {
     config:       Config,
@@ -18,7 +19,13 @@ pub struct Mqtt {
 
 
 impl Mqtt {
-    pub fn new(config: Config, actions_tx: Sender<Notification>, mqtt_tx: Sender<Request>, mqtt_rx: Receiver<Request>) -> Mqtt {
+    pub fn new(
+        config: Config,
+        actions_tx: Sender<Notification>,
+        bridge_actions_tx: Sender<Action>,
+        mqtt_tx: Sender<Request>,
+        mqtt_rx: Receiver<Request>
+    ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let eventloop = eventloop(options, mqtt_rx);

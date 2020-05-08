@@ -22,7 +22,7 @@ pub enum Error {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Action {
+pub struct Action {
     // action id
     id:      String,
     // control or process
@@ -141,7 +141,6 @@ impl Actions {
         Ok(())
     }
 
-
     async fn forward_action_error(&mut self, id: &str, action: &str, error:Error) {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
 
@@ -173,7 +172,6 @@ fn create_action(notification: Notification) -> Result<Option<Action>, Error> {
 
     Ok(action)
 }
-
 
 impl Package for ActionResponse {
     fn channel(&self) -> String {
