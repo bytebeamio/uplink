@@ -49,7 +49,6 @@ impl Mqtt {
                 error!("Failed to send subscription. Error = {:?}", e);
             }
 
-            
             while let Some(notification) = stream.next().await {
                 // NOTE These should never block. Causes mqtt eventloop to halt
                 // FIXME There is a chance that subscriptions and actions are lost here
