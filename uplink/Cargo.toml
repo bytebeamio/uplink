@@ -6,10 +6,9 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-tcpjson = []
-simulator = []
+bridge = []
 
-default = ["tcpjson"]
+default = ["bridge"]
 
 [dependencies]
 persistentstream = { path = "../persistentstream", version = "0.1" }

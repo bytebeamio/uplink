@@ -88,10 +88,10 @@ async fn main() -> Result<(), InitError> {
     });
     
     let mut controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    #[cfg(feature = "tcpjson")] {
+    #[cfg(feature = "bridge")] {
         let collector = collector_tx.clone();
         task::spawn(async move {
-            if let Err(e) = collector::tcpjson::start(collector).await {
+            if let Err(e) = collector::bridge::start(collector).await {
                 error!("Failed to spawn tcpjson collector. Error = {:?}", e);
             }
         });
