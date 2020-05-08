@@ -9,7 +9,7 @@ edition = "2018"
 tcpjson = []
 simulator = []
 
-default = ["tcpjson", "simulator"]
+default = ["tcpjson"]
 
 [dependencies]
 persistentstream = { path = "../persistentstream", version = "0.1" }

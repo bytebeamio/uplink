@@ -34,7 +34,7 @@ struct Action {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ActionStatus {
+pub struct ActionResponse {
     id:       String,
     // timestamp
     timestamp: u128,
@@ -46,10 +46,10 @@ pub struct ActionStatus {
     errors:   Vec<String>,
 }
 
-impl ActionStatus {
+impl ActionResponse {
     pub fn new(id: &str, state: &str) -> Result<Self, SystemTimeError> {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-        let status = ActionStatus { id: id.to_owned(), timestamp, state: state.to_owned(), progress: "0".to_owned(), errors: Vec::new() };
+        let status = ActionResponse { id: id.to_owned(), timestamp, state: state.to_owned(), progress: "0".to_owned(), errors: Vec::new() };
         Ok(status)
     }
 
@@ -57,9 +57,6 @@ impl ActionStatus {
         self.errors.push(error);
     }
 }
-
-
-
 
 pub struct Actions {
     config: Config,
@@ -148,7 +145,7 @@ impl Actions {
     async fn forward_action_error(&mut self, id: &str, action: &str, error:Error) {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
 
-        let mut status = match ActionStatus::new(id, "Failed") {
+        let mut status = match ActionResponse::new(id, "Failed") {
             Ok(status) => status,
             Err(e) => {
                 error!("Failed to create status. Error = {:?}", e);
@@ -164,7 +161,6 @@ impl Actions {
     }
 }
 
-
 /// Creates action from notification
 fn create_action(notification: Notification) -> Result<Option<Action>, Error> {
     let action = match notification {
@@ -179,7 +175,7 @@ fn create_action(notification: Notification) -> Result<Option<Action>, Error> {
 }
 
 
-impl Package for ActionStatus {
+impl Package for ActionResponse {
     fn channel(&self) -> String {
         return "action_status".to_owned();
     }

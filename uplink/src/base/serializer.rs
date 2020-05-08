@@ -23,8 +23,8 @@ impl Serializer {
                     return
                 }
             };
-            let channel = &data.channel();
 
+            let channel = &data.channel();
             let topic = self.config.channels.get(channel).unwrap().topic.clone();
             let payload = data.serialize();
             let qos = QoS::AtLeastOnce;
