@@ -1,7 +1,8 @@
-use rumq_client::{MqttEventLoop, eventloop, Subscribe, QoS, MqttOptions, Request, Notification};
+use rumq_client::{MqttEventLoop, eventloop, Subscribe, QoS, MqttOptions, Request, Notification, Publish};
 use tokio::time::Duration;
 use tokio::sync::mpsc::{Sender, Receiver};
 use futures_util::stream::StreamExt;
+use derive_more::From;
 
 use std::fs::File;
 use std::io::Read;
@@ -10,38 +11,48 @@ use std::path::Path;
 use crate::base::Config;
 use crate::base::actions::Action;
 
-pub struct Mqtt {
-    config:       Config,
-    eventloop: MqttEventLoop,
-    actions_tx: Sender<Notification>,
-    mqtt_tx: Sender<Request>
+#[derive(Debug, From)]
+pub enum Error {
+    Serde(serde_json::Error),
 }
 
+pub struct Mqtt {
+    config:       Config,
+    eventloop: Option<MqttEventLoop>,
+    actions_tx: Sender<Action>,
+    bridge_actions_tx: Sender<Vec<u8>>,
+    mqtt_tx: Sender<Request>,
+    actions_subscription: String,
+}
 
 impl Mqtt {
     pub fn new(
         config: Config,
-        actions_tx: Sender<Notification>,
-        bridge_actions_tx: Sender<Action>,
+        actions_tx: Sender<Action>,
+        bridge_actions_tx: Sender<Vec<u8>>,
         mqtt_tx: Sender<Request>,
         mqtt_rx: Receiver<Request>
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let eventloop = eventloop(options, mqtt_rx);
+        let actions_subscription = format!("/devices/{}/actions", config.device_id);
 
         Mqtt {
             config,
-            eventloop,
+            eventloop: Some(eventloop),
             mqtt_tx,
-            actions_tx 
+            actions_tx,
+            bridge_actions_tx,
+            actions_subscription
         }
     }
 
     pub async fn start(&mut self) {
-        let actions_subscription = format!("/devices/{}/actions", self.config.device_id);
+        let mut eventloop = self.eventloop.take().unwrap();
+
         loop {
-            let mut stream = match self.eventloop.connect().await {
+            let mut stream = match eventloop.connect().await {
                 Ok(s) => s,
                 Err(e) => {
                     error!("Connection error = {:?}", e);
@@ -50,7 +61,7 @@ impl Mqtt {
                 }
             };
 
-            let subscription = Subscribe::new(actions_subscription.clone(), QoS::AtLeastOnce);
+            let subscription = Subscribe::new(self.actions_subscription.clone(), QoS::AtLeastOnce);
             let subscribe = Request::Subscribe(subscription);
             if let Err(e) = self.mqtt_tx.try_send(subscribe) {
                 error!("Failed to send subscription. Error = {:?}", e);
@@ -60,10 +71,9 @@ impl Mqtt {
                 // NOTE These should never block. Causes mqtt eventloop to halt
                 // FIXME There is a chance that subscriptions and actions are lost here
                 match notification {
-                    Notification::Publish(publish) if publish.topic_name == actions_subscription => {
-                        let notification = Notification::Publish(publish);
-                        if let Err(e) = self.actions_tx.try_send(notification) {
-                            error!("Failed to forward action. Error = {:?}", e);
+                    Notification::Publish(publish) => {
+                        if let Err(e) = self.handle_incoming_publish(publish) {
+                            error!("Incoming publish handle failed. Error = {:?}", e);
                         }
                     }
                     _ => {
@@ -76,7 +86,21 @@ impl Mqtt {
             tokio::time::delay_for(Duration::from_secs(5)).await;
         }
     }
+
+    fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
+        if publish.topic_name != self.actions_subscription {
+            error!("Unsolicited publish on {}", publish.topic_name);
+        }
+
+        let action = serde_json::from_slice(&publish.payload)?;
+        if let Err(e) = self.actions_tx.try_send(action) {
+            error!("Failed to forward action. Error = {:?}", e);
+        }
+
+        Ok(())
+    }
 }
+
 
 fn mqttoptions(config: &Config) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());

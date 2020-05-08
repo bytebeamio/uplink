@@ -3,13 +3,14 @@ use tokio::stream::StreamExt;
 use tokio_util::codec::{LinesCodec, LinesCodecError};
 use tokio_util::codec::Framed;
 use tokio::sync::mpsc::{Sender, Receiver};
+use tokio::select;
+use tokio::io::AsyncWriteExt;
 use derive_more::From;
 use serde::{Serialize, Deserialize};
 
 use std::io;
 
 use crate::base::{Buffer, Package, Partitions, Config};
-use crate::base::actions::Action;
 use std::sync::Arc;
 
 #[derive(Debug, From)]
@@ -31,7 +32,7 @@ pub struct Bridge<'bridge> {
     config: Arc<Config>,
     data_rx: TcpStream,
     data_tx: &'bridge mut Sender<Box<dyn Package>>,
-    actions: &'bridge mut Receiver<Action>,
+    actions: &'bridge mut Receiver<Vec<u8>>,
 }
 
 impl<'bridge> Bridge<'bridge> {
@@ -39,7 +40,7 @@ impl<'bridge> Bridge<'bridge> {
         config: Arc<Config>,
         data_tx: &'bridge mut Sender<Box<dyn Package>>,
         data_rx: TcpStream,
-        actions: &'bridge mut Receiver<Action>
+        actions: &'bridge mut Receiver<Vec<u8>>
     ) -> Bridge<'bridge> {
         Bridge {
             config,
@@ -51,17 +52,25 @@ impl<'bridge> Bridge<'bridge> {
 
     pub async fn collect(&mut self) -> Result<(), Error> {
         let channels = self.config.channels.iter().map(|(channel, config)| (channel.to_owned(), config.buf_size as usize)).collect();
-
         let mut partitions = Partitions::new(self.data_tx.clone(), channels);
         let mut framed = Framed::new(&mut self.data_rx, LinesCodec::new());
 
         loop {
-            let frame = framed.next().await.ok_or(Error::StreamDone)??;
-            info!("Received line = {}", frame);
-            let data: Payload = serde_json::from_str(&frame)?;
-            // TODO remove channel clone
-            if let Err(e) = partitions.fill(&data.channel.clone(), data).await {
-                error!("Failed to send data. Error = {:?}", e);
+            select! {
+                frame = framed.next() => {
+                    let frame = frame.ok_or(Error::StreamDone)??;
+                    info!("Received line = {}", frame);
+                    let data: Payload = serde_json::from_str(&frame)?;
+                    // TODO remove channel clone
+                    if let Err(e) = partitions.fill(&data.channel.clone(), data).await {
+                        error!("Failed to send data. Error = {:?}", e);
+                    }
+                }
+                action = self.actions.next() => {
+                    let action = action.ok_or(Error::StreamDone)?;
+                    framed.get_mut().write_all(&action).await?;
+                    framed.get_mut().write_all(b"\n").await?;
+                }
             }
         }
     }
@@ -70,7 +79,7 @@ impl<'bridge> Bridge<'bridge> {
 pub async fn start(
     config: Arc<Config>,
     mut data_tx: Sender<Box<dyn Package>>,
-    mut actions_rx: Receiver<Action>
+    mut actions_rx: Receiver<Vec<u8>>
 ) -> Result<(), Error> {
     let mut listener = TcpListener::bind("0.0.0.0:5555").await?;
     loop {

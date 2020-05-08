@@ -1,6 +1,5 @@
 use super::{Config, Control, Package};
 use derive_more::From;
-use rumq_client::Notification;
 use serde::{Deserialize, Serialize};
 use tokio::stream::StreamExt;
 use tokio::sync::mpsc::{Sender, Receiver};
@@ -63,7 +62,7 @@ pub struct Actions {
     process: process::Process,
     controller: controller::Controller,
     collector_tx: Sender<Box<dyn Package>>,
-    actions_rx: Option<Receiver<Notification>>
+    actions_rx: Option<Receiver<Action>>
 }
 
 
@@ -71,7 +70,7 @@ pub async fn new(
     config: Config, 
     collector_tx: Sender<Box<dyn Package>>, 
     controllers: HashMap<String, Sender<Control>>,
-    actions_rx: Receiver<Notification>) -> Actions {
+    actions_rx: Receiver<Action>) -> Actions {
 
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
@@ -92,17 +91,8 @@ impl Actions {
 
         // start the eventloop
         loop {
-            while let Some(notification) = notification_stream.next().await {
-                debug!("Notification = {:?}", notification);
-                let action = match create_action(notification) {
-                    Ok(Some(action)) => action,
-                    Ok(None) => continue,
-                    Err(e) => {
-                        error!("Unable to create action. Error = {:?}", e);
-                        continue;
-                    }
-                };
-
+            while let Some(action) = notification_stream.next().await {
+                debug!("Action = {:?}", action);
                 let action_id = action.id.clone();
                 let action_name = action.name.clone();
                 let error = match self.handle(action).await {
@@ -160,18 +150,6 @@ impl Actions {
     }
 }
 
-/// Creates action from notification
-fn create_action(notification: Notification) -> Result<Option<Action>, Error> {
-    let action = match notification {
-        Notification::Publish(publish) => {
-            let action = serde_json::from_slice(&publish.payload)?;
-            Some(action)
-        }
-        _ => None,
-    };
-
-    Ok(action)
-}
 
 impl Package for ActionResponse {
     fn channel(&self) -> String {
