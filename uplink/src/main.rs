@@ -70,7 +70,7 @@ async fn main() -> Result<(), InitError> {
     pretty_env_logger::init();
 
     let commandline: CommandLine = StructOpt::from_args();
-    let config = init_config(commandline)?;
+    let config = Arc::new(init_config(commandline)?);
 
     let (collector_tx, collector_rx) = channel(10);
     let (actions_tx, actions_rx) = channel(10);
@@ -91,15 +91,14 @@ async fn main() -> Result<(), InitError> {
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
     #[cfg(feature = "bridge")] {
         let collector = collector_tx.clone();
-        let c = Arc::new(config.clone());
         task::spawn(async move {
-            if let Err(e) = collector::bridge::start(c, collector, bridge_actions_rx).await {
+            if let Err(e) = collector::bridge::start(config.clone(), collector, bridge_actions_rx).await {
                 error!("Failed to spawn tcpjson collector. Error = {:?}", e);
             }
         });
     }
     
-    let mut actions = actions::new(config, collector_tx, controllers, actions_rx).await;
+    let mut actions = actions::new(collector_tx, controllers, actions_rx).await;
     actions.start().await;
     Ok(())
 }

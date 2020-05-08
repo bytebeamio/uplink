@@ -10,6 +10,7 @@ use std::path::Path;
 
 use crate::base::Config;
 use crate::base::actions::Action;
+use std::sync::Arc;
 
 #[derive(Debug, From)]
 pub enum Error {
@@ -17,7 +18,7 @@ pub enum Error {
 }
 
 pub struct Mqtt {
-    config:       Config,
+    config: Arc<Config>,
     eventloop: Option<MqttEventLoop>,
     actions_tx: Sender<Action>,
     bridge_actions_tx: Sender<Vec<u8>>,
@@ -27,7 +28,7 @@ pub struct Mqtt {
 
 impl Mqtt {
     pub fn new(
-        config: Config,
+        config: Arc<Config>,
         actions_tx: Sender<Action>,
         bridge_actions_tx: Sender<Vec<u8>>,
         mqtt_tx: Sender<Request>,
@@ -69,12 +70,9 @@ impl Mqtt {
 
             while let Some(notification) = stream.next().await {
                 // NOTE These should never block. Causes mqtt eventloop to halt
-                // FIXME There is a chance that subscriptions and actions are lost here
                 match notification {
-                    Notification::Publish(publish) => {
-                        if let Err(e) = self.handle_incoming_publish(publish) {
-                            error!("Incoming publish handle failed. Error = {:?}", e);
-                        }
+                    Notification::Publish(publish) => if let Err(e) = self.handle_incoming_publish(publish) {
+                        error!("Incoming publish handle failed. Error = {:?}", e);
                     }
                     _ => {
                         debug!("Notification = {:?}", notification);
@@ -92,7 +90,15 @@ impl Mqtt {
             error!("Unsolicited publish on {}", publish.topic_name);
         }
 
-        let action = serde_json::from_slice(&publish.payload)?;
+        let action: Action = serde_json::from_slice(&publish.payload)?;
+        if self.config.actions.contains(&action.id) {
+            if let Err(e) = self.bridge_actions_tx.try_send(publish.payload) {
+                error!("Failed to forward bridge action. Error = {:?}", e);
+            }
+
+            return Ok(())
+        }
+
         if let Err(e) = self.actions_tx.try_send(action) {
             error!("Failed to forward action. Error = {:?}", e);
         }
@@ -100,7 +106,6 @@ impl Mqtt {
         Ok(())
     }
 }
-
 
 fn mqttoptions(config: &Config) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());

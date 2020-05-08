@@ -1,4 +1,4 @@
-use super::{Config, Control, Package};
+use super::{Control, Package};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use tokio::stream::StreamExt;
@@ -23,7 +23,7 @@ pub enum Error {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Action {
     // action id
-    id:      String,
+    pub id:      String,
     // control or process
     kind:    String,
     // action name
@@ -58,7 +58,6 @@ impl ActionResponse {
 }
 
 pub struct Actions {
-    config: Config,
     process: process::Process,
     controller: controller::Controller,
     collector_tx: Sender<Box<dyn Package>>,
@@ -67,8 +66,7 @@ pub struct Actions {
 
 
 pub async fn new(
-    config: Config, 
-    collector_tx: Sender<Box<dyn Package>>, 
+    collector_tx: Sender<Box<dyn Package>>,
     controllers: HashMap<String, Sender<Control>>,
     actions_rx: Receiver<Action>) -> Actions {
 
@@ -77,7 +75,6 @@ pub async fn new(
 
 
     Actions {
-        config,
         process,
         controller,
         collector_tx,

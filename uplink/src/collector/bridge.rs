@@ -81,7 +81,8 @@ pub async fn start(
     mut data_tx: Sender<Box<dyn Package>>,
     mut actions_rx: Receiver<Vec<u8>>
 ) -> Result<(), Error> {
-    let mut listener = TcpListener::bind("0.0.0.0:5555").await?;
+    let addr = format!("0.0.0.0:{}", config.bridge_port);
+    let mut listener = TcpListener::bind(addr).await?;
     loop {
         let (stream, addr) = match listener.accept().await {
             Ok(s) => s,

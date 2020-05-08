@@ -28,6 +28,8 @@ pub struct Config {
     pub device_id: String,
     pub broker: String,
     pub port: u16,
+    pub bridge_port: u16,
+    pub actions: Vec<String>,
     pub channels: HashMap<String, ChannelConfig>,
     pub key: Option<PathBuf>,
     pub ca: Option<PathBuf>,
