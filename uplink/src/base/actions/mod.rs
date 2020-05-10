@@ -40,7 +40,7 @@ pub struct ActionResponse {
     // running, failed
     state:    String,
     // progress percentage for processes
-    progress: String,
+    progress: u8,
     // list of error
     errors:   Vec<String>,
 }
@@ -48,7 +48,7 @@ pub struct ActionResponse {
 impl ActionResponse {
     pub fn new(id: &str, state: &str) -> Result<Self, SystemTimeError> {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-        let status = ActionResponse { id: id.to_owned(), timestamp, state: state.to_owned(), progress: "0".to_owned(), errors: Vec::new() };
+        let status = ActionResponse { id: id.to_owned(), timestamp, state: state.to_owned(), progress: 0, errors: Vec::new() };
         Ok(status)
     }
 
@@ -130,7 +130,6 @@ impl Actions {
 
     async fn forward_action_error(&mut self, id: &str, action: &str, error:Error) {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
-
         let mut status = match ActionResponse::new(id, "Failed") {
             Ok(status) => status,
             Err(e) => {
@@ -140,7 +139,6 @@ impl Actions {
         };
 
         status.add_error(format!("{:?}", error));
-
         if let Err(e) = self.collector_tx.send(Box::new(status)).await {
             error!("Failed to send status. Error = {:?}", e);
         }

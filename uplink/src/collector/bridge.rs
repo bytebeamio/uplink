@@ -12,6 +12,7 @@ use std::io;
 
 use crate::base::{Buffer, Package, Partitions, Config};
 use std::sync::Arc;
+use toml::Value;
 
 #[derive(Debug, From)]
 pub enum Error {
@@ -21,11 +22,13 @@ pub enum Error {
     Json(serde_json::error::Error)
 }
 
+// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is inturn a json
+// TODO which cloud will doubel deserialize (Batch 1st and messages next)
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
     channel: String,
     #[serde(flatten)]
-    payload: Vec<u8>
+    payload: Value
 }
 
 pub struct Bridge<'bridge> {
@@ -60,7 +63,14 @@ impl<'bridge> Bridge<'bridge> {
                 frame = framed.next() => {
                     let frame = frame.ok_or(Error::StreamDone)??;
                     info!("Received line = {}", frame);
-                    let data: Payload = serde_json::from_str(&frame)?;
+                    let data: Payload = match serde_json::from_str(&frame) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            error!("Deserialization error = {:?}", e);
+                            continue
+                        }
+                    };
+
                     // TODO remove channel clone
                     if let Err(e) = partitions.fill(&data.channel.clone(), data).await {
                         error!("Failed to send data. Error = {:?}", e);

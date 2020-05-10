@@ -91,7 +91,8 @@ impl Mqtt {
         }
 
         let action: Action = serde_json::from_slice(&publish.payload)?;
-        if self.config.actions.contains(&action.id) {
+        debug!("Action = {:?}", action);
+        if !self.config.actions.contains(&action.id) {
             if let Err(e) = self.bridge_actions_tx.try_send(publish.payload) {
                 error!("Failed to forward bridge action. Error = {:?}", e);
             }
