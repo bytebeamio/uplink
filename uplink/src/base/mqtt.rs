@@ -21,7 +21,7 @@ pub struct Mqtt {
     config: Arc<Config>,
     eventloop: Option<MqttEventLoop>,
     actions_tx: Sender<Action>,
-    bridge_actions_tx: Sender<Vec<u8>>,
+    bridge_actions_tx: Sender<Action>,
     mqtt_tx: Sender<Request>,
     actions_subscription: String,
 }
@@ -30,7 +30,7 @@ impl Mqtt {
     pub fn new(
         config: Arc<Config>,
         actions_tx: Sender<Action>,
-        bridge_actions_tx: Sender<Vec<u8>>,
+        bridge_actions_tx: Sender<Action>,
         mqtt_tx: Sender<Request>,
         mqtt_rx: Receiver<Request>
     ) -> Mqtt {
@@ -93,7 +93,7 @@ impl Mqtt {
         let action: Action = serde_json::from_slice(&publish.payload)?;
         debug!("Action = {:?}", action);
         if !self.config.actions.contains(&action.id) {
-            if let Err(e) = self.bridge_actions_tx.try_send(publish.payload) {
+            if let Err(e) = self.bridge_actions_tx.try_send(action) {
                 error!("Failed to forward bridge action. Error = {:?}", e);
             }
 

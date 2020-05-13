@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tokio::stream::StreamExt;
 use tokio::sync::mpsc::{Sender, Receiver};
 
-use std::time::{UNIX_EPOCH, SystemTime, SystemTimeError, Duration};
+use std::time::{UNIX_EPOCH, SystemTime, Duration};
 use std::collections::HashMap;
 
 mod process;
@@ -46,10 +46,17 @@ pub struct ActionResponse {
 }
 
 impl ActionResponse {
-    pub fn new(id: &str, state: &str) -> Result<Self, SystemTimeError> {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+    pub fn new(id: &str, state: &str) -> Self {
+        let timestamp = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(t) => t.as_millis(),
+            Err(e) => {
+                error!("Time error = {:?}", e);
+                0
+            }
+        };
+
         let status = ActionResponse { id: id.to_owned(), timestamp, state: state.to_owned(), progress: 0, errors: Vec::new() };
-        Ok(status)
+        status
     }
 
     pub fn add_error(&mut self, error: String) {
@@ -130,14 +137,7 @@ impl Actions {
 
     async fn forward_action_error(&mut self, id: &str, action: &str, error:Error) {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
-        let mut status = match ActionResponse::new(id, "Failed") {
-            Ok(status) => status,
-            Err(e) => {
-                error!("Failed to create status. Error = {:?}", e);
-                return
-            }
-        };
-
+        let mut status = ActionResponse::new(id, "Failed");
         status.add_error(format!("{:?}", error));
         if let Err(e) = self.collector_tx.send(Box::new(status)).await {
             error!("Failed to send status. Error = {:?}", e);
