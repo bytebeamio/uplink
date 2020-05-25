@@ -67,7 +67,7 @@ impl<'bridge> Bridge<'bridge> {
             select! {
                 frame = framed.next() => {
                     let frame = frame.ok_or(Error::StreamDone)??;
-                    info!("Received line = {}", frame);
+                    info!("Received line = {:?}", frame);
 
                     match self.current_action.take() {
                         Some(id) => debug!("Response for action = {:?}", id),
