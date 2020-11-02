@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io;
 use std::time::SystemTimeError;
 
-use super::{ActionStatus, Control, Package};
+use super::{ActionResponse, Control, Package};
 use derive_more::From;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::error::TrySendError;
@@ -70,7 +70,7 @@ impl Controller {
                 for channel in args.into_iter() {
                     controller_tx.try_send(Control::StopChannel(channel)).unwrap();
                 }
-                let action_status = ActionStatus::new(id, "running")?;
+                let action_status = ActionResponse::new(id, "running");
                 self.collector_tx.try_send(Box::new(action_status)).unwrap();
             }
             "start_collector_channel" => {
@@ -79,7 +79,7 @@ impl Controller {
                 for channel in args.into_iter() {
                     controller_tx.try_send(Control::StartChannel(channel)).unwrap();
                 }
-                let action_status = ActionStatus::new(id, "running")?;
+                let action_status = ActionResponse::new(id, "running");
                 self.collector_tx.try_send(Box::new(action_status)).unwrap();
             }
             "stop_collector" => {
@@ -93,7 +93,7 @@ impl Controller {
                         // tihs flag is an optimistic assignment. But UI should only enable next
                         // control action based on action status from the controller
                         *running = false;
-                        let action_status = ActionStatus::new(id, "running")?;
+                        let action_status = ActionResponse::new(id, "running");
                         self.collector_tx.try_send(Box::new(action_status)).unwrap();
                     }
                 }
@@ -102,7 +102,7 @@ impl Controller {
                 let collector_name = args.remove(0);
                 if let Some(running) = self.collector_run_status.get_mut(&collector_name) {
                     if !*running {
-                        let action_status = ActionStatus::new(id, "done")?;
+                        let action_status = ActionResponse::new(id, "done");
                         self.collector_tx.try_send(Box::new(action_status)).unwrap();
                     }
                 }

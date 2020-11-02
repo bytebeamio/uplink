@@ -2,15 +2,16 @@ use crate::base::{Config, Package};
 
 use rumq_client::{self, QoS, Request};
 use tokio::sync::mpsc::{Sender, Receiver};
+use std::sync::Arc;
 
 pub struct Serializer {
-    config:       Config,
+    config:       Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
     mqtt_tx:      Sender<Request>,
 }
 
 impl Serializer {
-    pub fn new(config: Config, collector_rx: Receiver<Box<dyn Package>>, mqtt_tx: Sender<Request>) -> Serializer {
+    pub fn new(config: Arc<Config>, collector_rx: Receiver<Box<dyn Package>>, mqtt_tx: Sender<Request>) -> Serializer {
         Serializer { config, collector_rx, mqtt_tx }
     }
 
@@ -23,8 +24,8 @@ impl Serializer {
                     return
                 }
             };
-            let channel = &data.channel();
 
+            let channel = &data.channel();
             let topic = self.config.channels.get(channel).unwrap().topic.clone();
             let payload = data.serialize();
             let qos = QoS::AtLeastOnce;

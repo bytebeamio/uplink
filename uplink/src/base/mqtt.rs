@@ -1,40 +1,59 @@
-use rumq_client::{MqttEventLoop, eventloop, Subscribe, QoS, MqttOptions, Request, Notification};
+use rumq_client::{MqttEventLoop, eventloop, Subscribe, QoS, MqttOptions, Request, Notification, Publish};
 use tokio::time::Duration;
 use tokio::sync::mpsc::{Sender, Receiver};
 use futures_util::stream::StreamExt;
+use derive_more::From;
 
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
 use crate::base::Config;
+use crate::base::actions::Action;
+use std::sync::Arc;
 
-pub struct Mqtt {
-    config:       Config,
-    eventloop: MqttEventLoop,
-    actions_tx: Sender<Notification>,
-    mqtt_tx: Sender<Request>
+#[derive(Debug, From)]
+pub enum Error {
+    Serde(serde_json::Error),
 }
 
+pub struct Mqtt {
+    config: Arc<Config>,
+    eventloop: Option<MqttEventLoop>,
+    actions_tx: Sender<Action>,
+    bridge_actions_tx: Sender<Action>,
+    mqtt_tx: Sender<Request>,
+    actions_subscription: String,
+}
 
 impl Mqtt {
-    pub fn new(config: Config, actions_tx: Sender<Notification>, mqtt_tx: Sender<Request>, mqtt_rx: Receiver<Request>) -> Mqtt {
+    pub fn new(
+        config: Arc<Config>,
+        actions_tx: Sender<Action>,
+        bridge_actions_tx: Sender<Action>,
+        mqtt_tx: Sender<Request>,
+        mqtt_rx: Receiver<Request>
+    ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let eventloop = eventloop(options, mqtt_rx);
+        let actions_subscription = format!("/devices/{}/actions", config.device_id);
 
         Mqtt {
             config,
-            eventloop,
+            eventloop: Some(eventloop),
             mqtt_tx,
-            actions_tx 
+            actions_tx,
+            bridge_actions_tx,
+            actions_subscription
         }
     }
 
     pub async fn start(&mut self) {
-        let actions_subscription = format!("/devices/{}/actions", self.config.device_id);
+        let mut eventloop = self.eventloop.take().unwrap();
+
         loop {
-            let mut stream = match self.eventloop.connect().await {
+            let mut stream = match eventloop.connect().await {
                 Ok(s) => s,
                 Err(e) => {
                     error!("Connection error = {:?}", e);
@@ -43,7 +62,7 @@ impl Mqtt {
                 }
             };
 
-            let subscription = Subscribe::new(actions_subscription.clone(), QoS::AtLeastOnce);
+            let subscription = Subscribe::new(self.actions_subscription.clone(), QoS::AtLeastOnce);
             let subscribe = Request::Subscribe(subscription);
             if let Err(e) = self.mqtt_tx.try_send(subscribe) {
                 error!("Failed to send subscription. Error = {:?}", e);
@@ -51,13 +70,9 @@ impl Mqtt {
 
             while let Some(notification) = stream.next().await {
                 // NOTE These should never block. Causes mqtt eventloop to halt
-                // FIXME There is a chance that subscriptions and actions are lost here
                 match notification {
-                    Notification::Publish(publish) if publish.topic_name == actions_subscription => {
-                        let notification = Notification::Publish(publish);
-                        if let Err(e) = self.actions_tx.try_send(notification) {
-                            error!("Failed to forward action. Error = {:?}", e);
-                        }
+                    Notification::Publish(publish) => if let Err(e) = self.handle_incoming_publish(publish) {
+                        error!("Incoming publish handle failed. Error = {:?}", e);
                     }
                     _ => {
                         debug!("Notification = {:?}", notification);
@@ -68,6 +83,28 @@ impl Mqtt {
             // try reconnecting again in 5 seconds
             tokio::time::delay_for(Duration::from_secs(5)).await;
         }
+    }
+
+    fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
+        if publish.topic_name != self.actions_subscription {
+            error!("Unsolicited publish on {}", publish.topic_name);
+        }
+
+        let action: Action = serde_json::from_slice(&publish.payload)?;
+        debug!("Action = {:?}", action);
+        if !self.config.actions.contains(&action.id) {
+            if let Err(e) = self.bridge_actions_tx.try_send(action) {
+                error!("Failed to forward bridge action. Error = {:?}", e);
+            }
+
+            return Ok(())
+        }
+
+        if let Err(e) = self.actions_tx.try_send(action) {
+            error!("Failed to forward action. Error = {:?}", e);
+        }
+
+        Ok(())
     }
 }
 

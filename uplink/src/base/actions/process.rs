@@ -5,7 +5,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::time;
 use derive_more::From;
 
-use super::{ActionStatus, Package};
+use super::{ActionResponse, Package};
 
 use std::sync::{Arc, Mutex};
 use std::io;
@@ -88,7 +88,7 @@ async fn capture_stdout(stdout: ChildStdout, mut collector_tx: Sender<Box<dyn Pa
     // stream the stdout of spawned process to capture its progress
     let mut stdout = BufReader::new(stdout).lines();
     while let Some(line) = stdout.next_line().await.unwrap() {
-        let status: ActionStatus = serde_json::from_str(&line)?;
+        let status: ActionResponse = serde_json::from_str(&line)?;
         warn!("Acion status: {:?}", status);
         collector_tx.send(Box::new(status)).await?;
     }

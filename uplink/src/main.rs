@@ -17,6 +17,7 @@ use base::actions;
 use base::serializer;
 use base::mqtt;
 use base::Config;
+use std::sync::Arc;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
@@ -69,10 +70,11 @@ async fn main() -> Result<(), InitError> {
     pretty_env_logger::init();
 
     let commandline: CommandLine = StructOpt::from_args();
-    let config = init_config(commandline)?;
+    let config = Arc::new(init_config(commandline)?);
 
     let (collector_tx, collector_rx) = channel(10);
     let (actions_tx, actions_rx) = channel(10);
+    let (bridge_actions_tx, bridge_actions_rx) = channel(10);
     let (mqtt_tx, mqtt_rx) = channel(10);
     // let serializer_mqtt_tx = persistentstream::upgrade("/tmp/persist", mqtt_tx.clone(), 10 * 1024, 30)?;
     
@@ -81,32 +83,22 @@ async fn main() -> Result<(), InitError> {
         serializer.start().await;
     });
 
-    
-    let mut mqtt = mqtt::Mqtt::new(config.clone(), actions_tx, mqtt_tx, mqtt_rx);
+    let mut mqtt = mqtt::Mqtt::new(config.clone(), actions_tx, bridge_actions_tx, mqtt_tx, mqtt_rx);
     task::spawn(async move {
         mqtt.start().await;
     });
     
-    let mut controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    #[cfg(feature = "tcpjson")] {
+    let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
+    #[cfg(feature = "bridge")] {
         let collector = collector_tx.clone();
         task::spawn(async move {
-            if let Err(e) = collector::tcpjson::start(collector).await {
+            if let Err(e) = collector::bridge::start(config.clone(), collector, bridge_actions_rx).await {
                 error!("Failed to spawn tcpjson collector. Error = {:?}", e);
             }
         });
     }
     
-    #[cfg(feature = "simulator")] {
-        let (control_tx, control_rx) = channel(10);
-        let collector = collector_tx.clone();
-        controllers.insert("simulator".to_owned(), control_tx);
-        task::spawn(async move {
-            collector::simulator::start(collector, control_rx).await;
-        });
-    }
-
-    let mut actions = actions::new(config, collector_tx, controllers, actions_rx).await;
+    let mut actions = actions::new(collector_tx, controllers, actions_rx).await;
     actions.start().await;
     Ok(())
 }

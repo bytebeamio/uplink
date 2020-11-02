@@ -1,11 +1,10 @@
-use super::{Config, Control, Package};
+use super::{Control, Package};
 use derive_more::From;
-use rumq_client::Notification;
 use serde::{Deserialize, Serialize};
 use tokio::stream::StreamExt;
 use tokio::sync::mpsc::{Sender, Receiver};
 
-use std::time::{UNIX_EPOCH, SystemTime, SystemTimeError, Duration};
+use std::time::{UNIX_EPOCH, SystemTime, Duration};
 use std::collections::HashMap;
 
 mod process;
@@ -22,9 +21,9 @@ pub enum Error {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Action {
+pub struct Action {
     // action id
-    id:      String,
+    pub id:      String,
     // control or process
     kind:    String,
     // action name
@@ -34,23 +33,30 @@ struct Action {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ActionStatus {
+pub struct ActionResponse {
     id:       String,
     // timestamp
     timestamp: u128,
     // running, failed
     state:    String,
     // progress percentage for processes
-    progress: String,
+    progress: u8,
     // list of error
     errors:   Vec<String>,
 }
 
-impl ActionStatus {
-    pub fn new(id: &str, state: &str) -> Result<Self, SystemTimeError> {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-        let status = ActionStatus { id: id.to_owned(), timestamp, state: state.to_owned(), progress: "0".to_owned(), errors: Vec::new() };
-        Ok(status)
+impl ActionResponse {
+    pub fn new(id: &str, state: &str) -> Self {
+        let timestamp = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(t) => t.as_millis(),
+            Err(e) => {
+                error!("Time error = {:?}", e);
+                0
+            }
+        };
+
+        let status = ActionResponse { id: id.to_owned(), timestamp, state: state.to_owned(), progress: 0, errors: Vec::new() };
+        status
     }
 
     pub fn add_error(&mut self, error: String) {
@@ -58,30 +64,24 @@ impl ActionStatus {
     }
 }
 
-
-
-
 pub struct Actions {
-    config: Config,
     process: process::Process,
     controller: controller::Controller,
     collector_tx: Sender<Box<dyn Package>>,
-    actions_rx: Option<Receiver<Notification>>
+    actions_rx: Option<Receiver<Action>>
 }
 
 
 pub async fn new(
-    config: Config, 
-    collector_tx: Sender<Box<dyn Package>>, 
+    collector_tx: Sender<Box<dyn Package>>,
     controllers: HashMap<String, Sender<Control>>,
-    actions_rx: Receiver<Notification>) -> Actions {
+    actions_rx: Receiver<Action>) -> Actions {
 
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
 
 
     Actions {
-        config,
         process,
         controller,
         collector_tx,
@@ -95,17 +95,8 @@ impl Actions {
 
         // start the eventloop
         loop {
-            while let Some(notification) = notification_stream.next().await {
-                debug!("Notification = {:?}", notification);
-                let action = match create_action(notification) {
-                    Ok(Some(action)) => action,
-                    Ok(None) => continue,
-                    Err(e) => {
-                        error!("Unable to create action. Error = {:?}", e);
-                        continue;
-                    }
-                };
-
+            while let Some(action) = notification_stream.next().await {
+                debug!("Action = {:?}", action);
                 let action_id = action.id.clone();
                 let action_name = action.name.clone();
                 let error = match self.handle(action).await {
@@ -144,20 +135,10 @@ impl Actions {
         Ok(())
     }
 
-
     async fn forward_action_error(&mut self, id: &str, action: &str, error:Error) {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
-
-        let mut status = match ActionStatus::new(id, "Failed") {
-            Ok(status) => status,
-            Err(e) => {
-                error!("Failed to create status. Error = {:?}", e);
-                return
-            }
-        };
-
+        let mut status = ActionResponse::new(id, "Failed");
         status.add_error(format!("{:?}", error));
-
         if let Err(e) = self.collector_tx.send(Box::new(status)).await {
             error!("Failed to send status. Error = {:?}", e);
         }
@@ -165,21 +146,7 @@ impl Actions {
 }
 
 
-/// Creates action from notification
-fn create_action(notification: Notification) -> Result<Option<Action>, Error> {
-    let action = match notification {
-        Notification::Publish(publish) => {
-            let action = serde_json::from_slice(&publish.payload)?;
-            Some(action)
-        }
-        _ => None,
-    };
-
-    Ok(action)
-}
-
-
-impl Package for ActionStatus {
+impl Package for ActionResponse {
     fn channel(&self) -> String {
         return "action_status".to_owned();
     }
