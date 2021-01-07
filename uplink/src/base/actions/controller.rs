@@ -3,23 +3,26 @@ use std::io;
 use std::time::SystemTimeError;
 
 use super::{ActionResponse, Control, Package};
-use derive_more::From;
+use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::Sender;
 
-#[derive(Debug, From)]
+#[derive(Error, Debug)]
 pub enum Error {
-    Io(io::Error),
-    Json(serde_json::Error),
-    Send(SendError<Box<dyn Package>>),
-    TrySend(TrySendError<Control>),
-    Time(SystemTimeError),
-    InvalidChannel(String),
-    Busy,
+    #[error("Io error {0}")]
+    Io(#[from] io::Error),
+    #[error("Json error {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("Send error {0}")]
+    Send(#[from] SendError<Box<dyn Package>>),
+    #[error("Try send error {0}")]
+    TrySend(#[from] TrySendError<Control>),
+    #[error("Time error {0}")]
+    Time(#[from] SystemTimeError),
 }
 
-/// Actions should be able to following struff
+/// Actions should be able to do the following
 /// 1. Send device state to cloud. This can be part of device state. Device state informs state of
 ///    actions
 ///
@@ -55,13 +58,12 @@ pub struct Controller {
 
 impl Controller {
     pub fn new(controllers: HashMap<String, Sender<Control>>, collector_tx: Sender<Box<dyn Package>>) -> Self {
-        let controller =
-            Controller { collector_tx, collector_controllers: controllers, collector_run_status: HashMap::new() };
-
+        let controller = Controller { collector_tx, collector_controllers: controllers, collector_run_status: HashMap::new() };
         controller
     }
 
     pub fn execute(&mut self, id: &str, command: String, _payload: String) -> Result<(), Error> {
+        // TODO remove all try sends
         let mut args = vec!["simulator".to_owned(), "can".to_owned()];
         match command.as_ref() {
             "stop_collector_channel" => {
@@ -87,7 +89,6 @@ impl Controller {
                 if let Some(running) = self.collector_run_status.get_mut(&collector_name) {
                     if *running {
                         let controller_tx = self.collector_controllers.get_mut(&collector_name).unwrap();
-                        // TODO remove all try sends
                         controller_tx.try_send(Control::Shutdown).unwrap();
                         // there is no way of knowing if collector thread is actually shutdown. so
                         // tihs flag is an optimistic assignment. But UI should only enable next

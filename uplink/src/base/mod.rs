@@ -4,17 +4,17 @@ use std::mem;
 use std::path::PathBuf;
 
 use serde::Deserialize;
-use derive_more::From;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::Sender;
 
 pub mod actions;
-pub mod serializer;
 pub mod mqtt;
+pub mod serializer;
 
-#[derive(Debug, From)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    Send(SendError<Box<dyn Package>>)
+    #[error("Send error {0}")]
+    Send(#[from] SendError<Box<dyn Package>>),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -125,8 +125,8 @@ where
 #[cfg(test)]
 mod test {
 
-use serde::Serialize;
-use super::Buffer;
+    use super::Buffer;
+    use serde::Serialize;
 
     #[derive(Clone, Debug, Serialize)]
     pub struct Dummy {
@@ -152,4 +152,3 @@ use super::Buffer;
         }
     }
 }
-

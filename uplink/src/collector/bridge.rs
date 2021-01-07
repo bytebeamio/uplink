@@ -1,27 +1,31 @@
-use tokio::net::{TcpStream, TcpListener};
-use tokio::stream::StreamExt;
-use tokio_util::codec::{LinesCodec, LinesCodecError};
-use tokio_util::codec::Framed;
-use tokio::sync::mpsc::{Sender, Receiver};
-use tokio::{select, time};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tokio::io::AsyncWriteExt;
-use derive_more::From;
-use serde::{Serialize, Deserialize};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::stream::StreamExt;
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::{select, time};
+use tokio_util::codec::Framed;
+use tokio_util::codec::{LinesCodec, LinesCodecError};
 
 use std::io;
 
-use crate::base::{Buffer, Package, Partitions, Config};
-use std::sync::Arc;
-use toml::Value;
 use crate::base::actions::{Action, ActionResponse};
+use crate::base::{Buffer, Config, Package, Partitions};
+use std::sync::Arc;
 use tokio::time::{Duration, Instant};
+use toml::Value;
 
-#[derive(Debug, From)]
+#[derive(Error, Debug)]
 pub enum Error {
-    Io(io::Error),
+    #[error("Io error {0}")]
+    Io(#[from] io::Error),
+    #[error("Stream done")]
     StreamDone,
-    Codec(LinesCodecError),
-    Json(serde_json::error::Error)
+    #[error("Lines codec error {0}")]
+    Codec(#[from] LinesCodecError),
+    #[error("Serde error {0}")]
+    Json(#[from] serde_json::error::Error),
 }
 
 // TODO Don't do any deserialization on payload. Read it a Vec<u8> which is inturn a json
@@ -30,7 +34,7 @@ pub enum Error {
 pub struct Payload {
     channel: String,
     #[serde(flatten)]
-    payload: Value
+    payload: Value,
 }
 
 pub struct Bridge<'bridge> {
@@ -46,19 +50,14 @@ impl<'bridge> Bridge<'bridge> {
         config: Arc<Config>,
         data_tx: &'bridge mut Sender<Box<dyn Package>>,
         data_rx: TcpStream,
-        actions: &'bridge mut Receiver<Action>
+        actions: &'bridge mut Receiver<Action>,
     ) -> Bridge<'bridge> {
-        Bridge {
-            config,
-            data_tx,
-            data_rx,
-            actions,
-            current_action: None
-        }
+        Bridge { config, data_tx, data_rx, actions, current_action: None }
     }
 
     pub async fn collect(&mut self) -> Result<(), Error> {
-        let channels = self.config.channels.iter().map(|(channel, config)| (channel.to_owned(), config.buf_size as usize)).collect();
+        let channels =
+            self.config.channels.iter().map(|(channel, config)| (channel.to_owned(), config.buf_size as usize)).collect();
         let mut partitions = Partitions::new(self.data_tx.clone(), channels);
         let mut framed = Framed::new(&mut self.data_rx, LinesCodec::new());
         let mut action_timeout = time::delay_for(Duration::from_secs(10));
@@ -121,7 +120,7 @@ impl<'bridge> Bridge<'bridge> {
 pub async fn start(
     config: Arc<Config>,
     mut data_tx: Sender<Box<dyn Package>>,
-    mut actions_rx: Receiver<Action>
+    mut actions_rx: Receiver<Action>,
 ) -> Result<(), Error> {
     let addr = format!("0.0.0.0:{}", config.bridge_port);
     let mut listener = TcpListener::bind(addr).await?;

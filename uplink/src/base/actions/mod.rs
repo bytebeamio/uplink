@@ -1,48 +1,52 @@
 use super::{Control, Package};
-use derive_more::From;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tokio::stream::StreamExt;
-use tokio::sync::mpsc::{Sender, Receiver};
+use tokio::sync::mpsc::{Receiver, Sender};
 
-use std::time::{UNIX_EPOCH, SystemTime, Duration};
 use std::collections::HashMap;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-mod process;
 pub mod controller;
+mod process;
 
 pub use controller::Controller;
 
-#[derive(Debug, From)]
+#[derive(Error, Debug)]
 pub enum Error {
-    Serde(serde_json::Error),
-    Stream(rumq_client::EventLoopError),
-    Process(process::Error),
-    Controller(controller::Error)
+    #[error("Serde error {0}")]
+    Serde(#[from] serde_json::Error),
+    #[error("Eventloop error {0}")]
+    Stream(#[from] rumq_client::EventLoopError),
+    #[error("Process error {0}")]
+    Process(#[from] process::Error),
+    #[error("Controller error {0}")]
+    Controller(#[from] controller::Error),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Action {
     // action id
-    pub id:      String,
+    pub id: String,
     // control or process
-    kind:    String,
+    kind: String,
     // action name
-    name:    String,
+    name: String,
     // action payload. json. can be args/payload. depends on the invoked command
     payload: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
-    id:       String,
+    id: String,
     // timestamp
     timestamp: u128,
     // running, failed
-    state:    String,
+    state: String,
     // progress percentage for processes
     progress: u8,
     // list of error
-    errors:   Vec<String>,
+    errors: Vec<String>,
 }
 
 impl ActionResponse {
@@ -68,25 +72,18 @@ pub struct Actions {
     process: process::Process,
     controller: controller::Controller,
     collector_tx: Sender<Box<dyn Package>>,
-    actions_rx: Option<Receiver<Action>>
+    actions_rx: Option<Receiver<Action>>,
 }
-
 
 pub async fn new(
     collector_tx: Sender<Box<dyn Package>>,
     controllers: HashMap<String, Sender<Control>>,
-    actions_rx: Receiver<Action>) -> Actions {
-
+    actions_rx: Receiver<Action>,
+) -> Actions {
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
 
-
-    Actions {
-        process,
-        controller,
-        collector_tx,
-        actions_rx: Some(actions_rx)
-    }
+    Actions { process, controller, collector_tx, actions_rx: Some(actions_rx) }
 }
 
 impl Actions {
@@ -101,7 +98,7 @@ impl Actions {
                 let action_name = action.name.clone();
                 let error = match self.handle(action).await {
                     Ok(_) => continue,
-                    Err(e) => e
+                    Err(e) => e,
                 };
 
                 self.forward_action_error(&action_id, &action_name, error).await;
@@ -110,7 +107,6 @@ impl Actions {
             tokio::time::delay_for(Duration::from_secs(1)).await;
         }
     }
-
 
     async fn handle(&mut self, action: Action) -> Result<(), Error> {
         debug!("Action = {:?}", action);
@@ -135,7 +131,7 @@ impl Actions {
         Ok(())
     }
 
-    async fn forward_action_error(&mut self, id: &str, action: &str, error:Error) {
+    async fn forward_action_error(&mut self, id: &str, action: &str, error: Error) {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
         let mut status = ActionResponse::new(id, "Failed");
         status.add_error(format!("{:?}", error));
@@ -144,7 +140,6 @@ impl Actions {
         }
     }
 }
-
 
 impl Package for ActionResponse {
     fn channel(&self) -> String {

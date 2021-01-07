@@ -1,11 +1,11 @@
 #[macro_use]
 extern crate log;
 
-use std::{fs, io};
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 
-use derive_more::From;
+use anyhow::{Context, Error};
 use structopt::StructOpt;
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
@@ -14,8 +14,8 @@ mod base;
 mod collector;
 
 use base::actions;
-use base::serializer;
 use base::mqtt;
+use base::serializer;
 use base::Config;
 use std::sync::Arc;
 
@@ -32,19 +32,11 @@ pub struct CommandLine {
     certs_dir: PathBuf,
 }
 
-#[derive(Debug, From)]
-pub enum InitError {
-    Toml(toml::de::Error),
-    File { name: String, err: io::Error },
-    Base(base::Error),
-    PersistentStream(persistentstream::Error<rumq_client::Request>),
-}
-
 /// Reads config file to generate config struct and replaces places holders
 /// like bike id and data version
-fn init_config(commandline: CommandLine) -> Result<Config, InitError> {
-    let config = fs::read_to_string(&commandline.config_path)
-        .map_err(|err| InitError::File { name: commandline.config_path.clone(), err })?;
+fn init_config(commandline: CommandLine) -> Result<Config, Error> {
+    let config = fs::read_to_string(&commandline.config_path);
+    let config = config.with_context(|| format!("Config error = {}", commandline.config_path))?;
 
     let device_id = commandline.device_id.trim();
     let version = commandline.version.trim();
@@ -66,7 +58,7 @@ fn init_config(commandline: CommandLine) -> Result<Config, InitError> {
 }
 
 #[tokio::main(core_threads = 4)]
-async fn main() -> Result<(), InitError> {
+async fn main() -> Result<(), Error> {
     pretty_env_logger::init();
 
     let commandline: CommandLine = StructOpt::from_args();
@@ -77,7 +69,7 @@ async fn main() -> Result<(), InitError> {
     let (bridge_actions_tx, bridge_actions_rx) = channel(10);
     let (mqtt_tx, mqtt_rx) = channel(10);
     // let serializer_mqtt_tx = persistentstream::upgrade("/tmp/persist", mqtt_tx.clone(), 10 * 1024, 30)?;
-    
+
     let mut serializer = serializer::Serializer::new(config.clone(), collector_rx, mqtt_tx.clone());
     task::spawn(async move {
         serializer.start().await;
@@ -87,9 +79,10 @@ async fn main() -> Result<(), InitError> {
     task::spawn(async move {
         mqtt.start().await;
     });
-    
+
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    #[cfg(feature = "bridge")] {
+    #[cfg(feature = "bridge")]
+    {
         let collector = collector_tx.clone();
         task::spawn(async move {
             if let Err(e) = collector::bridge::start(config.clone(), collector, bridge_actions_rx).await {
@@ -97,7 +90,7 @@ async fn main() -> Result<(), InitError> {
             }
         });
     }
-    
+
     let mut actions = actions::new(collector_tx, controllers, actions_rx).await;
     actions.start().await;
     Ok(())

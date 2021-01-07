@@ -1,20 +1,21 @@
-use rumq_client::{MqttEventLoop, eventloop, Subscribe, QoS, MqttOptions, Request, Notification, Publish};
-use tokio::time::Duration;
-use tokio::sync::mpsc::{Sender, Receiver};
 use futures_util::stream::StreamExt;
-use derive_more::From;
+use rumq_client::{eventloop, MqttEventLoop, MqttOptions, Notification, Publish, QoS, Request, Subscribe};
+use thiserror::Error;
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::time::Duration;
 
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use crate::base::Config;
 use crate::base::actions::Action;
+use crate::base::Config;
 use std::sync::Arc;
 
-#[derive(Debug, From)]
+#[derive(Error, Debug)]
 pub enum Error {
-    Serde(serde_json::Error),
+    #[error("Serde error {0}")]
+    Serde(#[from] serde_json::Error),
 }
 
 pub struct Mqtt {
@@ -32,21 +33,14 @@ impl Mqtt {
         actions_tx: Sender<Action>,
         bridge_actions_tx: Sender<Action>,
         mqtt_tx: Sender<Request>,
-        mqtt_rx: Receiver<Request>
+        mqtt_rx: Receiver<Request>,
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let eventloop = eventloop(options, mqtt_rx);
         let actions_subscription = format!("/devices/{}/actions", config.device_id);
 
-        Mqtt {
-            config,
-            eventloop: Some(eventloop),
-            mqtt_tx,
-            actions_tx,
-            bridge_actions_tx,
-            actions_subscription
-        }
+        Mqtt { config, eventloop: Some(eventloop), mqtt_tx, actions_tx, bridge_actions_tx, actions_subscription }
     }
 
     pub async fn start(&mut self) {
@@ -58,7 +52,7 @@ impl Mqtt {
                 Err(e) => {
                     error!("Connection error = {:?}", e);
                     tokio::time::delay_for(Duration::from_secs(5)).await;
-                    continue
+                    continue;
                 }
             };
 
@@ -71,8 +65,10 @@ impl Mqtt {
             while let Some(notification) = stream.next().await {
                 // NOTE These should never block. Causes mqtt eventloop to halt
                 match notification {
-                    Notification::Publish(publish) => if let Err(e) = self.handle_incoming_publish(publish) {
-                        error!("Incoming publish handle failed. Error = {:?}", e);
+                    Notification::Publish(publish) => {
+                        if let Err(e) = self.handle_incoming_publish(publish) {
+                            error!("Incoming publish handle failed. Error = {:?}", e);
+                        }
                     }
                     _ => {
                         debug!("Notification = {:?}", notification);
@@ -97,7 +93,7 @@ impl Mqtt {
                 error!("Failed to forward bridge action. Error = {:?}", e);
             }
 
-            return Ok(())
+            return Ok(());
         }
 
         if let Err(e) = self.actions_tx.try_send(action) {

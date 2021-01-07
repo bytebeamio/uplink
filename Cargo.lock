@@ -19,6 +19,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee67c11feeac938fae061b232e38e0b6d94f97a9df10e6271319325ac4c56a86"
+
+[[package]]
 name = "arc-swap"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1001,7 +1007,7 @@ checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 name = "uplink"
 version = "0.1.0"
 dependencies = [
- "derive_more",
+ "anyhow",
  "futures-util",
  "log",
  "persistentstream",
@@ -1011,6 +1017,7 @@ dependencies = [
  "serde",
  "serde_json",
  "structopt",
+ "thiserror",
  "tokio",
  "tokio-util 0.2.0",
  "toml",

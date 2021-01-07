@@ -1,15 +1,15 @@
-use tokio::io::{ AsyncBufReadExt, BufReader };
-use tokio::process::{ Command, ChildStdout};
-use tokio::sync::mpsc::Sender;
+use thiserror::Error;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{ChildStdout, Command};
 use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::Sender;
 use tokio::time;
-use derive_more::From;
 
 use super::{ActionResponse, Package};
 
-use std::sync::{Arc, Mutex};
 use std::io;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Process abstracts functions to spawn process and handle their output
@@ -20,15 +20,19 @@ pub struct Process {
     // we use this flag to ignore new process spawn while previous process is in progress
     last_process_done: Arc<Mutex<bool>>,
     // used to send errors and process status to cloud
-    collector_tx:      Sender<Box<dyn Package>>,
+    collector_tx: Sender<Box<dyn Package>>,
 }
 
-#[derive(Debug, From)]
+#[derive(Error, Debug)]
 pub enum Error {
-    Io(io::Error),
-    Json(serde_json::Error),
-    Send(SendError<Box<dyn Package>>),
-    Busy
+    #[error("IO Error {0}")]
+    Io(#[from] io::Error),
+    #[error("Json error {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("Send error {0}")]
+    Send(#[from] SendError<Box<dyn Package>>),
+    #[error("Busy error")]
+    Busy,
 }
 
 impl Process {
@@ -43,7 +47,7 @@ impl Process {
         if *self.last_process_done.lock().unwrap() == false {
             return Err(Error::Busy);
         }
-            
+
         *self.last_process_done.lock().unwrap() = false;
         let mut cmd = Command::new(command);
         cmd.arg(id.into()).arg(payload.into()).kill_on_drop(true).stdout(Stdio::piped());
@@ -54,7 +58,7 @@ impl Process {
             Ok(child) => child,
             Err(e) => {
                 *self.last_process_done.lock().unwrap() = true;
-                return Err(e.into())
+                return Err(e.into());
             }
         };
 
@@ -67,7 +71,8 @@ impl Process {
                 let status = time::timeout(Duration::from_secs(120), async {
                     let status = child.await?;
                     Ok::<_, io::Error>(status)
-                }).await;
+                })
+                .await;
 
                 debug!("child status was: {:?}", status);
             });
@@ -81,10 +86,9 @@ impl Process {
 
         Ok(())
     }
-
 }
 
-async fn capture_stdout(stdout: ChildStdout, mut collector_tx: Sender<Box<dyn Package>>) -> Result<(), Error>  {
+async fn capture_stdout(stdout: ChildStdout, mut collector_tx: Sender<Box<dyn Package>>) -> Result<(), Error> {
     // stream the stdout of spawned process to capture its progress
     let mut stdout = BufReader::new(stdout).lines();
     while let Some(line) = stdout.next_line().await.unwrap() {
