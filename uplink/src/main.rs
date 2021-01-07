@@ -57,7 +57,7 @@ fn init_config(commandline: CommandLine) -> Result<Config, Error> {
     Ok(config)
 }
 
-#[tokio::main(core_threads = 4)]
+#[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
     pretty_env_logger::init();
 
@@ -65,17 +65,15 @@ async fn main() -> Result<(), Error> {
     let config = Arc::new(init_config(commandline)?);
 
     let (collector_tx, collector_rx) = channel(10);
-    let (actions_tx, actions_rx) = channel(10);
+    let (native_actions_tx, native_actions_rx) = channel(10);
     let (bridge_actions_tx, bridge_actions_rx) = channel(10);
-    let (mqtt_tx, mqtt_rx) = channel(10);
-    // let serializer_mqtt_tx = persistentstream::upgrade("/tmp/persist", mqtt_tx.clone(), 10 * 1024, 30)?;
+    let mut mqtt = mqtt::Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
 
-    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx, mqtt_tx.clone());
+    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx, mqtt.client());
     task::spawn(async move {
         serializer.start().await;
     });
 
-    let mut mqtt = mqtt::Mqtt::new(config.clone(), actions_tx, bridge_actions_tx, mqtt_tx, mqtt_rx);
     task::spawn(async move {
         mqtt.start().await;
     });
@@ -91,7 +89,7 @@ async fn main() -> Result<(), Error> {
         });
     }
 
-    let mut actions = actions::new(collector_tx, controllers, actions_rx).await;
+    let mut actions = actions::new(collector_tx, controllers, native_actions_rx).await;
     actions.start().await;
     Ok(())
 }

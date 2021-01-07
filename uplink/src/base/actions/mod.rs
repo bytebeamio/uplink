@@ -1,7 +1,6 @@
 use super::{Control, Package};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::stream::StreamExt;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use std::collections::HashMap;
@@ -16,8 +15,6 @@ pub use controller::Controller;
 pub enum Error {
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
-    #[error("Eventloop error {0}")]
-    Stream(#[from] rumq_client::EventLoopError),
     #[error("Process error {0}")]
     Process(#[from] process::Error),
     #[error("Controller error {0}")]
@@ -92,7 +89,7 @@ impl Actions {
 
         // start the eventloop
         loop {
-            while let Some(action) = notification_stream.next().await {
+            while let Some(action) = notification_stream.recv().await {
                 debug!("Action = {:?}", action);
                 let action_id = action.id.clone();
                 let action_name = action.name.clone();
@@ -104,7 +101,7 @@ impl Actions {
                 self.forward_action_error(&action_id, &action_name, error).await;
             }
 
-            tokio::time::delay_for(Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
 

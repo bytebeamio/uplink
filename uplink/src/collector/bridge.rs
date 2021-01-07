@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::stream::StreamExt;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::{select, time};
+use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 use tokio_util::codec::{LinesCodec, LinesCodecError};
 
@@ -28,8 +28,8 @@ pub enum Error {
     Json(#[from] serde_json::error::Error),
 }
 
-// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is inturn a json
-// TODO which cloud will doubel deserialize (Batch 1st and messages next)
+// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
+// TODO which cloud will double deserialize (Batch 1st and messages next)
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
     channel: String,
@@ -60,8 +60,9 @@ impl<'bridge> Bridge<'bridge> {
             self.config.channels.iter().map(|(channel, config)| (channel.to_owned(), config.buf_size as usize)).collect();
         let mut partitions = Partitions::new(self.data_tx.clone(), channels);
         let mut framed = Framed::new(&mut self.data_rx, LinesCodec::new());
-        let mut action_timeout = time::delay_for(Duration::from_secs(10));
+        let action_timeout = time::sleep(Duration::from_secs(10));
 
+        tokio::pin!(action_timeout);
         loop {
             select! {
                 frame = framed.next() => {
@@ -89,10 +90,11 @@ impl<'bridge> Bridge<'bridge> {
                         error!("Failed to send data. Error = {:?}", e);
                     }
                 }
-                action = self.actions.next() => {
+                action = self.actions.recv() => {
                     let action = action.ok_or(Error::StreamDone)?;
                     self.current_action = Some(action.id.to_owned());
-                    action_timeout.reset(Instant::now() + Duration::from_secs(10));
+
+                    action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
                     let data = match serde_json::to_vec(&action) {
                         Ok(d) => d,
                         Err(e) => {
@@ -123,7 +125,7 @@ pub async fn start(
     mut actions_rx: Receiver<Action>,
 ) -> Result<(), Error> {
     let addr = format!("0.0.0.0:{}", config.bridge_port);
-    let mut listener = TcpListener::bind(addr).await?;
+    let listener = TcpListener::bind(addr).await?;
     loop {
         let (stream, addr) = match listener.accept().await {
             Ok(s) => s,

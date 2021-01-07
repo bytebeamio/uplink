@@ -1,7 +1,5 @@
-use futures_util::stream::StreamExt;
-use rumq_client::{eventloop, MqttEventLoop, MqttOptions, Notification, Publish, QoS, Request, Subscribe};
 use thiserror::Error;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 use tokio::time::Duration;
 
 use std::fs::File;
@@ -10,6 +8,7 @@ use std::path::Path;
 
 use crate::base::actions::Action;
 use crate::base::Config;
+use rumqttc::{AsyncClient, Event, EventLoop, Incoming, MqttOptions, Publish, QoS};
 use std::sync::Arc;
 
 #[derive(Error, Debug)]
@@ -20,70 +19,55 @@ pub enum Error {
 
 pub struct Mqtt {
     config: Arc<Config>,
-    eventloop: Option<MqttEventLoop>,
+    client: AsyncClient,
+    eventloop: EventLoop,
     actions_tx: Sender<Action>,
     bridge_actions_tx: Sender<Action>,
-    mqtt_tx: Sender<Request>,
     actions_subscription: String,
 }
 
 impl Mqtt {
-    pub fn new(
-        config: Arc<Config>,
-        actions_tx: Sender<Action>,
-        bridge_actions_tx: Sender<Action>,
-        mqtt_tx: Sender<Request>,
-        mqtt_rx: Receiver<Request>,
-    ) -> Mqtt {
+    pub fn new(config: Arc<Config>, actions_tx: Sender<Action>, bridge_actions_tx: Sender<Action>) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
-        let eventloop = eventloop(options, mqtt_rx);
+        let (client, eventloop) = AsyncClient::new(options, 10);
         let actions_subscription = format!("/devices/{}/actions", config.device_id);
+        Mqtt { config, client, eventloop, actions_tx, bridge_actions_tx, actions_subscription }
+    }
 
-        Mqtt { config, eventloop: Some(eventloop), mqtt_tx, actions_tx, bridge_actions_tx, actions_subscription }
+    pub fn client(&mut self) -> AsyncClient {
+        self.client.clone()
     }
 
     pub async fn start(&mut self) {
-        let mut eventloop = self.eventloop.take().unwrap();
-
         loop {
-            let mut stream = match eventloop.connect().await {
-                Ok(s) => s,
+            match self.eventloop.poll().await {
+                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                    if let Err(e) = self.client.subscribe(self.actions_subscription.clone(), QoS::AtLeastOnce).await {
+                        error!("Failed to send subscription. Error = {:?}", e);
+                    }
+                }
+                Ok(Event::Incoming(Incoming::Publish(publish))) => {
+                    if let Err(e) = self.handle_incoming_publish(publish) {
+                        error!("Incoming publish handle failed. Error = {:?}", e);
+                    }
+                }
+                Ok(Event::Incoming(i)) => {
+                    println!("Incoming = {:?}", i);
+                }
+                Ok(Event::Outgoing(o)) => println!("Outgoing = {:?}", o),
                 Err(e) => {
-                    error!("Connection error = {:?}", e);
-                    tokio::time::delay_for(Duration::from_secs(5)).await;
+                    println!("Connection error = {:?}", e);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
-            };
-
-            let subscription = Subscribe::new(self.actions_subscription.clone(), QoS::AtLeastOnce);
-            let subscribe = Request::Subscribe(subscription);
-            if let Err(e) = self.mqtt_tx.try_send(subscribe) {
-                error!("Failed to send subscription. Error = {:?}", e);
             }
-
-            while let Some(notification) = stream.next().await {
-                // NOTE These should never block. Causes mqtt eventloop to halt
-                match notification {
-                    Notification::Publish(publish) => {
-                        if let Err(e) = self.handle_incoming_publish(publish) {
-                            error!("Incoming publish handle failed. Error = {:?}", e);
-                        }
-                    }
-                    _ => {
-                        debug!("Notification = {:?}", notification);
-                    }
-                }
-            }
-
-            // try reconnecting again in 5 seconds
-            tokio::time::delay_for(Duration::from_secs(5)).await;
         }
     }
 
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
-        if publish.topic_name != self.actions_subscription {
-            error!("Unsolicited publish on {}", publish.topic_name);
+        if publish.topic != self.actions_subscription {
+            error!("Unsolicited publish on {}", publish.topic);
         }
 
         let action: Action = serde_json::from_slice(&publish.payload)?;
@@ -107,7 +91,7 @@ impl Mqtt {
 fn mqttoptions(config: &Config) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
     let mut mqttoptions = MqttOptions::new(&config.device_id, &config.broker, config.port);
-    mqttoptions.set_keep_alive(5);
+    mqttoptions.set_keep_alive(10);
     mqttoptions
 }
 

@@ -67,13 +67,8 @@ impl Process {
             let stdout = child.stdout.take().expect("child did not have a handle to stdout");
 
             // wait for spawned process result without blocking
-            tokio::spawn(async {
-                let status = time::timeout(Duration::from_secs(120), async {
-                    let status = child.await?;
-                    Ok::<_, io::Error>(status)
-                })
-                .await;
-
+            tokio::spawn(async move {
+                let status = time::timeout(Duration::from_secs(120), child.wait()).await;
                 debug!("child status was: {:?}", status);
             });
 
@@ -88,12 +83,12 @@ impl Process {
     }
 }
 
-async fn capture_stdout(stdout: ChildStdout, mut collector_tx: Sender<Box<dyn Package>>) -> Result<(), Error> {
+async fn capture_stdout(stdout: ChildStdout, collector_tx: Sender<Box<dyn Package>>) -> Result<(), Error> {
     // stream the stdout of spawned process to capture its progress
     let mut stdout = BufReader::new(stdout).lines();
     while let Some(line) = stdout.next_line().await.unwrap() {
         let status: ActionResponse = serde_json::from_str(&line)?;
-        warn!("Acion status: {:?}", status);
+        warn!("Action status: {:?}", status);
         collector_tx.send(Box::new(status)).await?;
     }
 

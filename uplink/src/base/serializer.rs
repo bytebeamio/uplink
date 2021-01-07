@@ -1,18 +1,18 @@
 use crate::base::{Config, Package};
 
-use rumq_client::{self, QoS, Request};
-use tokio::sync::mpsc::{Sender, Receiver};
+use rumqttc::*;
 use std::sync::Arc;
+use tokio::sync::mpsc::Receiver;
 
 pub struct Serializer {
-    config:       Arc<Config>,
+    config: Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
-    mqtt_tx:      Sender<Request>,
+    client: AsyncClient,
 }
 
 impl Serializer {
-    pub fn new(config: Arc<Config>, collector_rx: Receiver<Box<dyn Package>>, mqtt_tx: Sender<Request>) -> Serializer {
-        Serializer { config, collector_rx, mqtt_tx }
+    pub fn new(config: Arc<Config>, collector_rx: Receiver<Box<dyn Package>>, client: AsyncClient) -> Serializer {
+        Serializer { config, collector_rx, client }
     }
 
     pub async fn start(&mut self) {
@@ -21,7 +21,7 @@ impl Serializer {
                 Some(data) => data,
                 None => {
                     error!("Senders closed!!");
-                    return
+                    return;
                 }
             };
 
@@ -30,14 +30,7 @@ impl Serializer {
             let payload = data.serialize();
             let qos = QoS::AtLeastOnce;
 
-            let mut publish = rumq_client::Publish::new(topic, qos, payload);
-            // NOTE this is required for serialization in persistentstream. Otherwise QoS 1 packets
-            // with no packetid in the payload will be misinterpreted during deserialization
-            // TODO See if there is a way to fix this
-            publish.set_pkid(0);
-            let publish = Request::Publish(publish);
-            self.mqtt_tx.send(publish).await.unwrap();
+            self.client.publish(topic, qos, false, payload).await.unwrap();
         }
     }
 }
-
