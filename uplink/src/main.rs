@@ -60,7 +60,6 @@ fn init_config(commandline: CommandLine) -> Result<Config, Error> {
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
     pretty_env_logger::init();
-
     let commandline: CommandLine = StructOpt::from_args();
     let config = Arc::new(init_config(commandline)?);
 
@@ -79,15 +78,12 @@ async fn main() -> Result<(), Error> {
     });
 
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    #[cfg(feature = "bridge")]
-    {
-        let collector = collector_tx.clone();
-        task::spawn(async move {
-            if let Err(e) = collector::bridge::start(config.clone(), collector, bridge_actions_rx).await {
-                error!("Failed to spawn tcpjson collector. Error = {:?}", e);
-            }
-        });
-    }
+    let collector = collector_tx.clone();
+    task::spawn(async move {
+        if let Err(e) = collector::bridge::start(config.clone(), collector, bridge_actions_rx).await {
+            error!("Failed to spawn tcpjson collector. Error = {:?}", e);
+        }
+    });
 
     let mut actions = actions::new(collector_tx, controllers, native_actions_rx).await;
     actions.start().await;
