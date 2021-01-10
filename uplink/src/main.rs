@@ -47,7 +47,7 @@ fn init_config(commandline: CommandLine) -> Result<Config, Error> {
     config.key = Some(commandline.certs_dir.join(device_id).join("rsa_private.pem"));
 
     config.device_id = str::replace(&config.device_id, "{device_id}", device_id);
-    for config in config.channels.values_mut() {
+    for config in config.streams.values_mut() {
         let topic = str::replace(&config.topic, "{device_id}", device_id);
         let topic = str::replace(&topic, "{version}", version);
 

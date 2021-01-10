@@ -18,7 +18,7 @@ pub enum Error {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ChannelConfig {
+pub struct StreamConfig {
     pub topic: String,
     pub buf_size: u16,
 }
@@ -30,13 +30,13 @@ pub struct Config {
     pub port: u16,
     pub bridge_port: u16,
     pub actions: Vec<String>,
-    pub channels: HashMap<String, ChannelConfig>,
+    pub streams: HashMap<String, StreamConfig>,
     pub key: Option<PathBuf>,
     pub ca: Option<PathBuf>,
 }
 
 pub trait Package: Send + Debug {
-    fn channel(&self) -> String;
+    fn stream(&self) -> String;
     fn serialize(&self) -> Vec<u8>;
 }
 
@@ -44,24 +44,24 @@ pub trait Package: Send + Debug {
 #[derive(Debug)]
 pub enum Control {
     Shutdown,
-    StopChannel(String),
-    StartChannel(String),
+    StopStream(String),
+    StartStream(String),
 }
 
 /// Buffer is an abstraction of a collection that serializer receives.
 /// It also contains meta data to understand the type of data
-/// e.g channel to mqtt topic mapping
+/// e.g stream to mqtt topic mapping
 /// Buffer doesn't put any restriction on type of `T`
 #[derive(Debug)]
 pub struct Buffer<T> {
-    pub channel: String,
+    pub stream: String,
     pub buffer: Vec<T>,
     max_buffer_size: usize,
 }
 
 impl<T> Buffer<T> {
-    pub fn new<S: Into<String>>(channel: S, max_buffer_size: usize) -> Buffer<T> {
-        Buffer { channel: channel.into(), buffer: Vec::new(), max_buffer_size }
+    pub fn new<S: Into<String>>(stream: S, max_buffer_size: usize) -> Buffer<T> {
+        Buffer { stream: stream.into(), buffer: Vec::new(), max_buffer_size }
     }
 
     pub fn fill(&mut self, data: T) -> Option<Buffer<T>> {
@@ -69,9 +69,9 @@ impl<T> Buffer<T> {
 
         if self.buffer.len() >= self.max_buffer_size {
             let buffer = mem::replace(&mut self.buffer, Vec::new());
-            let channel = self.channel.clone();
+            let stream = self.stream.clone();
             let max_buffer_size = self.max_buffer_size;
-            let buffer = Buffer { channel, buffer, max_buffer_size };
+            let buffer = Buffer { stream, buffer, max_buffer_size };
 
             return Some(buffer);
         }
@@ -80,9 +80,9 @@ impl<T> Buffer<T> {
     }
 }
 
-/// Partitions has handles to fill data segregated by channel, send
-/// filled data to the serializer when a channel is full and handle to
-/// receive controller notifications like shutdown, ignore a channel or
+/// Partitions has handles to fill data segregated by stream, send
+/// filled data to the serializer when a stream is full and handle to
+/// receive controller notifications like shutdown, ignore a stream or
 /// throttle collection
 pub struct Partitions<T> {
     collection: HashMap<String, Buffer<T>>,
@@ -94,22 +94,23 @@ where
     T: Debug + Send + 'static,
     Buffer<T>: Package,
 {
-    /// Create a new collection of buffers mapped to a (configured) channel
-    pub fn new<S: Into<String>>(tx: Sender<Box<dyn Package>>, channels: Vec<(S, usize)>) -> Self {
+    /// Create a new collection of buffers mapped to a (configured) stream
+    pub fn new<S: Into<String>>(tx: Sender<Box<dyn Package>>, streams: Vec<(S, usize)>) -> Self {
         let mut partitions = Partitions { collection: HashMap::new(), tx };
 
-        for channel in channels.into_iter() {
-            let buffer = Buffer::new(channel.0, channel.1);
-            partitions.collection.insert(buffer.channel.to_owned(), buffer);
+        for stream in streams.into_iter() {
+            let buffer = Buffer::new(stream.0, stream.1);
+            partitions.collection.insert(buffer.stream.to_owned(), buffer);
         }
+
         partitions
     }
 
-    pub async fn fill(&mut self, channel: &str, data: T) -> Result<(), Error> {
-        let o = if let Some(buffer) = self.collection.get_mut(channel) {
+    pub async fn fill(&mut self, stream: &str, data: T) -> Result<(), Error> {
+        let o = if let Some(buffer) = self.collection.get_mut(stream) {
             buffer.fill(data)
         } else {
-            error!("Invalid channel = {:?}", channel);
+            error!("Invalid stream = {:?}", stream);
             None
         };
 

@@ -32,7 +32,7 @@ pub enum Error {
 // TODO which cloud will double deserialize (Batch 1st and messages next)
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
-    channel: String,
+    stream: String,
     #[serde(flatten)]
     payload: Value,
 }
@@ -56,9 +56,9 @@ impl<'bridge> Bridge<'bridge> {
     }
 
     pub async fn collect(&mut self) -> Result<(), Error> {
-        let channels =
-            self.config.channels.iter().map(|(channel, config)| (channel.to_owned(), config.buf_size as usize)).collect();
-        let mut partitions = Partitions::new(self.data_tx.clone(), channels);
+        let streams = self.config.streams.iter();
+        let streams = streams.map(|(stream, config)| (stream.to_owned(), config.buf_size as usize)).collect();
+        let mut partitions = Partitions::new(self.data_tx.clone(), streams);
         let mut framed = Framed::new(&mut self.data_rx, LinesCodec::new());
         let action_timeout = time::sleep(Duration::from_secs(10));
 
@@ -85,8 +85,8 @@ impl<'bridge> Bridge<'bridge> {
                         }
                     };
 
-                    // TODO remove channel clone
-                    if let Err(e) = partitions.fill(&data.channel.clone(), data).await {
+                    // TODO remove stream clone
+                    if let Err(e) = partitions.fill(&data.stream.clone(), data).await {
                         error!("Failed to send data. Error = {:?}", e);
                     }
                 }
@@ -144,8 +144,8 @@ pub async fn start(
 }
 
 impl Package for Buffer<Payload> {
-    fn channel(&self) -> String {
-        return self.channel.clone();
+    fn stream(&self) -> String {
+        return self.stream.clone();
     }
 
     fn serialize(&self) -> Vec<u8> {

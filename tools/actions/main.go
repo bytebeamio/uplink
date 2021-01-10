@@ -85,13 +85,13 @@ func createAction(name string) *Action {
 		payload := `{"args": ["simulator"]}`
 		action := NewAction(id, kind, command, payload)
 		return action
-	case "stop_collector_channel":
+	case "stop_collector_stream":
 		kind := "control"
 		command := name
 		payload := `{"args": ["simulator", "gps"]}`
 		action := NewAction(id, kind, command, payload)
 		return action
-	case "start_collector_channel":
+	case "start_collector_strea":
 		kind := "control"
 		command := name
 		payload := `{"args": ["simulator", "gps"]}`

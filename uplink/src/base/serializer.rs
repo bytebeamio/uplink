@@ -25,8 +25,8 @@ impl Serializer {
                 }
             };
 
-            let channel = &data.channel();
-            let topic = self.config.channels.get(channel).unwrap().topic.clone();
+            let stream = &data.stream();
+            let topic = self.config.streams.get(stream).unwrap().topic.clone();
             let payload = data.serialize();
             let qos = QoS::AtLeastOnce;
 

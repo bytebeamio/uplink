@@ -70,7 +70,7 @@ impl Controller {
                 let collector_name = args.remove(0);
                 let controller_tx = self.collector_controllers.get_mut(&collector_name).unwrap();
                 for channel in args.into_iter() {
-                    controller_tx.try_send(Control::StopChannel(channel)).unwrap();
+                    controller_tx.try_send(Control::StopStream(channel)).unwrap();
                 }
                 let action_status = ActionResponse::new(id, "running");
                 self.collector_tx.try_send(Box::new(action_status)).unwrap();
@@ -79,7 +79,7 @@ impl Controller {
                 let collector_name = args.remove(0);
                 let controller_tx = self.collector_controllers.get_mut(&collector_name).unwrap();
                 for channel in args.into_iter() {
-                    controller_tx.try_send(Control::StartChannel(channel)).unwrap();
+                    controller_tx.try_send(Control::StartStream(channel)).unwrap();
                 }
                 let action_status = ActionResponse::new(id, "running");
                 self.collector_tx.try_send(Box::new(action_status)).unwrap();

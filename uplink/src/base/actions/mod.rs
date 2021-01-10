@@ -139,7 +139,7 @@ impl Actions {
 }
 
 impl Package for ActionResponse {
-    fn channel(&self) -> String {
+    fn stream(&self) -> String {
         return "action_status".to_owned();
     }
 
