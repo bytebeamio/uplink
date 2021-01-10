@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"strings"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
@@ -57,9 +58,11 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
-			token := client.Publish("/topics/devices/1/actions", 1, false, string(actionMsg))
+			token := client.Publish("/devices/test/actions", 1, false, string(actionMsg))
 			token.Wait()
 		}
+
+		time.Sleep(1 * time.Second)
 	}
 }
 

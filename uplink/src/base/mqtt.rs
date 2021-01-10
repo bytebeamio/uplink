@@ -43,8 +43,13 @@ impl Mqtt {
         loop {
             match self.eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                    if let Err(e) = self.client.subscribe(self.actions_subscription.clone(), QoS::AtLeastOnce).await {
-                        error!("Failed to send subscription. Error = {:?}", e);
+                    match self.client.subscribe(self.actions_subscription.clone(), QoS::AtLeastOnce).await {
+                        Ok(..) => {
+                            info!("Subscribe -> {:?}", self.actions_subscription);
+                        }
+                        Err(e) => {
+                            error!("Failed to send subscription. Error = {:?}", e);
+                        }
                     }
                 }
                 Ok(Event::Incoming(Incoming::Publish(publish))) => {
@@ -53,9 +58,9 @@ impl Mqtt {
                     }
                 }
                 Ok(Event::Incoming(i)) => {
-                    println!("Incoming = {:?}", i);
+                    debug!("Incoming = {:?}", i);
                 }
-                Ok(Event::Outgoing(o)) => println!("Outgoing = {:?}", o),
+                Ok(Event::Outgoing(o)) => debug!("Outgoing = {:?}", o),
                 Err(e) => {
                     println!("Connection error = {:?}", e);
                     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -91,7 +96,7 @@ impl Mqtt {
 fn mqttoptions(config: &Config) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
     let mut mqttoptions = MqttOptions::new(&config.device_id, &config.broker, config.port);
-    mqttoptions.set_keep_alive(10);
+    mqttoptions.set_keep_alive(120);
     mqttoptions
 }
 

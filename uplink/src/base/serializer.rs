@@ -28,9 +28,10 @@ impl Serializer {
             let stream = &data.stream();
             let topic = self.config.streams.get(stream).unwrap().topic.clone();
             let payload = data.serialize();
-            let qos = QoS::AtLeastOnce;
 
-            self.client.publish(topic, qos, false, payload).await.unwrap();
+            if let Err(e) = self.client.publish(topic, QoS::AtLeastOnce, false, payload).await {
+                error!("Publish error = {:?}", e);
+            }
         }
     }
 }
