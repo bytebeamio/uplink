@@ -66,9 +66,10 @@ async fn main() -> Result<(), Error> {
     let (collector_tx, collector_rx) = channel(10);
     let (native_actions_tx, native_actions_rx) = channel(10);
     let (bridge_actions_tx, bridge_actions_rx) = channel(10);
-    let mut mqtt = mqtt::Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
 
+    let mut mqtt = mqtt::Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
     let mut serializer = serializer::Serializer::new(config.clone(), collector_rx, mqtt.client());
+
     task::spawn(async move {
         serializer.start().await;
     });
@@ -80,9 +81,7 @@ async fn main() -> Result<(), Error> {
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
     let collector = collector_tx.clone();
     task::spawn(async move {
-        if let Err(e) = collector::bridge::start(config.clone(), collector, bridge_actions_rx).await {
-            error!("Failed to spawn tcpjson collector. Error = {:?}", e);
-        }
+        collector::bridge::start(config.clone(), collector, bridge_actions_rx).await;
     });
 
     let mut actions = actions::new(collector_tx, controllers, native_actions_rx).await;

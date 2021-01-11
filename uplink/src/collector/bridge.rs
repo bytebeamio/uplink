@@ -110,6 +110,7 @@ impl<'bridge> Bridge<'bridge> {
                     let action = self.current_action.take().unwrap();
                     let mut status = ActionResponse::new(&action, "Failed");
                     status.add_error(format!("Action timed out"));
+
                     if let Err(e) = self.data_tx.send(Box::new(status)).await {
                         error!("Failed to send status. Error = {:?}", e);
                     }
@@ -119,13 +120,16 @@ impl<'bridge> Bridge<'bridge> {
     }
 }
 
-pub async fn start(
-    config: Arc<Config>,
-    mut data_tx: Sender<Box<dyn Package>>,
-    mut actions_rx: Receiver<Action>,
-) -> Result<(), Error> {
+pub async fn start(config: Arc<Config>, mut data_tx: Sender<Box<dyn Package>>, mut actions_rx: Receiver<Action>) {
     let addr = format!("0.0.0.0:{}", config.bridge_port);
-    let listener = TcpListener::bind(addr).await?;
+    let listener = match TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            error!("Failed to bind to {}. Error = {:?}. Stopping collector", addr, e);
+            return;
+        }
+    };
+
     loop {
         let (stream, addr) = match listener.accept().await {
             Ok(s) => s,
@@ -147,7 +151,6 @@ impl Package for Buffer<Payload> {
     fn stream(&self) -> String {
         return self.stream.clone();
     }
-
     fn serialize(&self) -> Vec<u8> {
         serde_json::to_vec(&self.buffer).unwrap()
     }

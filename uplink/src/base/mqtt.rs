@@ -10,18 +10,21 @@ use crate::base::actions::Action;
 use crate::base::Config;
 use rumqttc::{AsyncClient, Event, EventLoop, Incoming, MqttOptions, Publish, QoS};
 use std::sync::Arc;
+use tokio::sync::mpsc::error::TrySendError;
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("Serde error {0}")]
+    ActionForward(#[from] TrySendError<Action>),
 }
 
 pub struct Mqtt {
     config: Arc<Config>,
     client: AsyncClient,
     eventloop: EventLoop,
-    actions_tx: Sender<Action>,
+    native_actions_tx: Sender<Action>,
     bridge_actions_tx: Sender<Action>,
     actions_subscription: String,
 }
@@ -32,7 +35,7 @@ impl Mqtt {
         let options = mqttoptions(&config);
         let (client, eventloop) = AsyncClient::new(options, 10);
         let actions_subscription = format!("/devices/{}/actions", config.device_id);
-        Mqtt { config, client, eventloop, actions_tx, bridge_actions_tx, actions_subscription }
+        Mqtt { config, client, eventloop, native_actions_tx: actions_tx, bridge_actions_tx, actions_subscription }
     }
 
     pub fn client(&mut self) -> AsyncClient {
@@ -43,13 +46,12 @@ impl Mqtt {
         loop {
             match self.eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                    match self.client.subscribe(self.actions_subscription.clone(), QoS::AtLeastOnce).await {
-                        Ok(..) => {
-                            info!("Subscribe -> {:?}", self.actions_subscription);
-                        }
-                        Err(e) => {
-                            error!("Failed to send subscription. Error = {:?}", e);
-                        }
+                    let subscription = self.actions_subscription.clone();
+                    let qos = QoS::AtLeastOnce;
+
+                    match self.client.subscribe(subscription, qos).await {
+                        Ok(..) => info!("Subscribe -> {:?}", self.actions_subscription),
+                        Err(e) => error!("Failed to send subscription. Error = {:?}", e),
                     }
                 }
                 Ok(Event::Incoming(Incoming::Publish(publish))) => {
@@ -62,7 +64,7 @@ impl Mqtt {
                 }
                 Ok(Event::Outgoing(o)) => debug!("Outgoing = {:?}", o),
                 Err(e) => {
-                    println!("Connection error = {:?}", e);
+                    error!("Connection error = {:?}", e);
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
@@ -73,20 +75,16 @@ impl Mqtt {
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
         if publish.topic != self.actions_subscription {
             error!("Unsolicited publish on {}", publish.topic);
+            return Ok(());
         }
 
         let action: Action = serde_json::from_slice(&publish.payload)?;
         debug!("Action = {:?}", action);
+
         if !self.config.actions.contains(&action.id) {
-            if let Err(e) = self.bridge_actions_tx.try_send(action) {
-                error!("Failed to forward bridge action. Error = {:?}", e);
-            }
-
-            return Ok(());
-        }
-
-        if let Err(e) = self.actions_tx.try_send(action) {
-            error!("Failed to forward action. Error = {:?}", e);
+            self.bridge_actions_tx.try_send(action)?;
+        } else {
+            self.native_actions_tx.try_send(action)?;
         }
 
         Ok(())
