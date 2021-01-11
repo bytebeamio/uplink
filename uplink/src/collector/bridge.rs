@@ -71,6 +71,16 @@ impl Bridge {
                             }
                         }
                     }
+                    Some(action) = self.actions_rx.recv() => {
+                        error!("Bridge down!! Action ID = {}", action.id);
+                        let mut status = ActionResponse::new(&action.id, "Failed");
+                        status.add_error(format!("Bridge down"));
+
+                        // Send failure notification to cloud
+                        if let Err(e) = self.data_tx.send(Box::new(status)).await {
+                            error!("Failed to send status. Error = {:?}", e);
+                        }
+                    }
                 }
             };
 
@@ -134,7 +144,7 @@ impl Bridge {
                 }
                 _ = &mut action_timeout, if self.current_action.is_some() => {
                     let action = self.current_action.take().unwrap();
-                    error!("Timeout waiting for action response. Action =  {}", action);
+                    error!("Timeout waiting for action response. Action ID = {}", action);
 
                     // Send failure response to cloud
                     let mut status = ActionResponse::new(&action, "Failed");

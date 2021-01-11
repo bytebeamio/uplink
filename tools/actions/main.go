@@ -21,6 +21,7 @@ type Action struct {
 
 func NewAction(id, kind, command, payload string) *Action {
 	action := Action{
+		ID:      id,
 		Kind:    kind,
 		Command: command,
 		Payload: payload,
