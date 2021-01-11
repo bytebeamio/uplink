@@ -13,6 +13,7 @@ use tokio::task;
 mod base;
 mod collector;
 
+use crate::collector::bridge::Bridge;
 use base::actions;
 use base::mqtt;
 use base::serializer;
@@ -78,12 +79,12 @@ async fn main() -> Result<(), Error> {
         mqtt.start().await;
     });
 
-    let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    let collector = collector_tx.clone();
+    let mut bridge = Bridge::new(config.clone(), collector_tx.clone(), bridge_actions_rx);
     task::spawn(async move {
-        collector::bridge::start(config.clone(), collector, bridge_actions_rx).await;
+        bridge.start().await;
     });
 
+    let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
     let mut actions = actions::new(collector_tx, controllers, native_actions_rx).await;
     actions.start().await;
     Ok(())

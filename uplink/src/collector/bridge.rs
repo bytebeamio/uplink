@@ -37,29 +37,55 @@ pub struct Payload {
     payload: Value,
 }
 
-pub struct Bridge<'bridge> {
+pub struct Bridge {
     config: Arc<Config>,
-    data_rx: TcpStream,
-    data_tx: &'bridge mut Sender<Box<dyn Package>>,
-    actions: &'bridge mut Receiver<Action>,
+    data_tx: Sender<Box<dyn Package>>,
+    actions_rx: Receiver<Action>,
     current_action: Option<String>,
 }
 
-impl<'bridge> Bridge<'bridge> {
-    pub fn new(
-        config: Arc<Config>,
-        data_tx: &'bridge mut Sender<Box<dyn Package>>,
-        data_rx: TcpStream,
-        actions: &'bridge mut Receiver<Action>,
-    ) -> Bridge<'bridge> {
-        Bridge { config, data_tx, data_rx, actions, current_action: None }
+impl Bridge {
+    pub fn new(config: Arc<Config>, data_tx: Sender<Box<dyn Package>>, actions_rx: Receiver<Action>) -> Bridge {
+        Bridge { config, data_tx, actions_rx, current_action: None }
     }
 
-    pub async fn collect(&mut self) -> Result<(), Error> {
+    pub async fn start(&mut self) {
+        loop {
+            let addr = format!("0.0.0.0:{}", self.config.bridge_port);
+            let listener = match TcpListener::bind(&addr).await {
+                Ok(l) => l,
+                Err(e) => {
+                    error!("Failed to bind to {}. Error = {:?}. Stopping collector", addr, e);
+                    return;
+                }
+            };
+
+            let (stream, addr) = loop {
+                select! {
+                    v = listener.accept() =>  {
+                        match v {
+                            Ok(s) => break s,
+                            Err(e) => {
+                                error!("Tcp connection error = {:?}", e);
+                                continue;
+                            }
+                        }
+                    }
+                }
+            };
+
+            info!("Accepted new connection from {:?}", addr);
+            let framed = Framed::new(stream, LinesCodec::new());
+            if let Err(e) = self.collect(framed).await {
+                error!("Bridge failed. Error = {:?}", e);
+            }
+        }
+    }
+
+    pub async fn collect(&mut self, mut framed: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
         let streams = self.config.streams.iter();
         let streams = streams.map(|(stream, config)| (stream.to_owned(), config.buf_size as usize)).collect();
         let mut partitions = Partitions::new(self.data_tx.clone(), streams);
-        let mut framed = Framed::new(&mut self.data_rx, LinesCodec::new());
         let action_timeout = time::sleep(Duration::from_secs(10));
 
         tokio::pin!(action_timeout);
@@ -90,7 +116,7 @@ impl<'bridge> Bridge<'bridge> {
                         error!("Failed to send data. Error = {:?}", e);
                     }
                 }
-                action = self.actions.recv() => {
+                action = self.actions_rx.recv() => {
                     let action = action.ok_or(Error::StreamDone)?;
                     self.current_action = Some(action.id.to_owned());
 
@@ -108,41 +134,16 @@ impl<'bridge> Bridge<'bridge> {
                 }
                 _ = &mut action_timeout, if self.current_action.is_some() => {
                     let action = self.current_action.take().unwrap();
+                    error!("Timeout waiting for action response. Action =  {}", action);
+
+                    // Send failure response to cloud
                     let mut status = ActionResponse::new(&action, "Failed");
                     status.add_error(format!("Action timed out"));
-
                     if let Err(e) = self.data_tx.send(Box::new(status)).await {
                         error!("Failed to send status. Error = {:?}", e);
                     }
                 }
             }
-        }
-    }
-}
-
-pub async fn start(config: Arc<Config>, mut data_tx: Sender<Box<dyn Package>>, mut actions_rx: Receiver<Action>) {
-    let addr = format!("0.0.0.0:{}", config.bridge_port);
-    let listener = match TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            error!("Failed to bind to {}. Error = {:?}. Stopping collector", addr, e);
-            return;
-        }
-    };
-
-    loop {
-        let (stream, addr) = match listener.accept().await {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Tcp connection error = {:?}", e);
-                continue;
-            }
-        };
-
-        info!("Accepted new connection from {:?}", addr);
-        let mut bridge = Bridge::new(config.clone(), &mut data_tx, stream, &mut actions_rx);
-        if let Err(e) = bridge.collect().await {
-            error!("Bridge failed. Error = {:?}", e);
         }
     }
 }
