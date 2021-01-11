@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub mod controller;
 mod process;
 
+use crate::base::Buffer;
 pub use controller::Controller;
 
 #[derive(Error, Debug)]
@@ -116,11 +117,11 @@ impl Actions {
                 self.controller.execute(&id, command, payload)?;
             }
             "process" => {
-                let command = action.name.clone();
-                let payload = action.payload.clone();
-                let id = action.id;
-
-                self.process.execute(id.clone(), command.clone(), payload).await?;
+                // let command = action.name.clone();
+                // let payload = action.payload.clone();
+                // let id = action.id;
+                //
+                // self.process.execute(id.clone(), command.clone(), payload).await?;
             }
             _ => unimplemented!(),
         }
@@ -132,18 +133,19 @@ impl Actions {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
         let mut status = ActionResponse::new(id, "Failed");
         status.add_error(format!("{:?}", error));
-        if let Err(e) = self.collector_tx.send(Box::new(status)).await {
-            error!("Failed to send status. Error = {:?}", e);
-        }
+
+        // if let Err(e) = self.collector_tx.send(Box::new(status)).await {
+        //     error!("Failed to send status. Error = {:?}", e);
+        // }
     }
 }
 
-impl Package for ActionResponse {
+impl Package for Buffer<ActionResponse> {
     fn stream(&self) -> String {
         return "action_status".to_owned();
     }
 
     fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self).unwrap()
+        serde_json::to_vec(&self.buffer).unwrap()
     }
 }

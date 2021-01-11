@@ -43,9 +43,9 @@ pub trait Package: Send + Debug {
 /// Signal to modify the behaviour of collector
 #[derive(Debug)]
 pub enum Control {
-    Shutdown,
-    StopStream(String),
-    StartStream(String),
+    // Shutdown,
+// StopStream(String),
+// StartStream(String),
 }
 
 /// Buffer is an abstraction of a collection that serializer receives.
@@ -107,14 +107,19 @@ where
     }
 
     pub async fn fill(&mut self, stream: &str, data: T) -> Result<(), Error> {
-        let o = if let Some(buffer) = self.collection.get_mut(stream) {
-            buffer.fill(data)
-        } else {
-            error!("Invalid stream = {:?}", stream);
-            None
+        let o = match self.collection.get_mut(stream) {
+            Some(buffer) => {
+                debug!("Filling {} buffer. Count = {}", stream, buffer.buffer.len());
+                buffer.fill(data)
+            }
+            None => {
+                error!("Invalid stream = {:?}", stream);
+                None
+            }
         };
 
         if let Some(buffer) = o {
+            info!("Flushing {} buffer", stream);
             let buffer = Box::new(buffer);
             self.tx.send(buffer).await?;
         }

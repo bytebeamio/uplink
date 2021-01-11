@@ -28,15 +28,6 @@ pub enum Error {
     Json(#[from] serde_json::error::Error),
 }
 
-// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
-// TODO which cloud will double deserialize (Batch 1st and messages next)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Payload {
-    stream: String,
-    #[serde(flatten)]
-    payload: Value,
-}
-
 pub struct Bridge {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
@@ -77,9 +68,9 @@ impl Bridge {
                         status.add_error(format!("Bridge down"));
 
                         // Send failure notification to cloud
-                        if let Err(e) = self.data_tx.send(Box::new(status)).await {
-                            error!("Failed to send status. Error = {:?}", e);
-                        }
+                        // if let Err(e) = self.data_tx.send(Box::new(status)).await {
+                        //     error!("Failed to send status. Error = {:?}", e);
+                        // }
                     }
                 }
             };
@@ -94,8 +85,11 @@ impl Bridge {
 
     pub async fn collect(&mut self, mut framed: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
         let streams = self.config.streams.iter();
-        let streams = streams.map(|(stream, config)| (stream.to_owned(), config.buf_size as usize)).collect();
-        let mut partitions = Partitions::new(self.data_tx.clone(), streams);
+        let streams: Vec<(String, usize)> =
+            streams.map(|(stream, config)| (stream.to_owned(), config.buf_size as usize)).collect();
+        let mut bridge_partitions = Partitions::new(self.data_tx.clone(), streams.clone());
+        let mut native_partitions: Partitions<ActionResponse> = Partitions::new(self.data_tx.clone(), streams);
+
         let action_timeout = time::sleep(Duration::from_secs(10));
 
         tokio::pin!(action_timeout);
@@ -122,7 +116,7 @@ impl Bridge {
                     };
 
                     // TODO remove stream clone
-                    if let Err(e) = partitions.fill(&data.stream.clone(), data).await {
+                    if let Err(e) = bridge_partitions.fill(&data.stream.clone(), data).await {
                         error!("Failed to send data. Error = {:?}", e);
                     }
                 }
@@ -149,13 +143,23 @@ impl Bridge {
                     // Send failure response to cloud
                     let mut status = ActionResponse::new(&action, "Failed");
                     status.add_error(format!("Action timed out"));
-                    if let Err(e) = self.data_tx.send(Box::new(status)).await {
-                        error!("Failed to send status. Error = {:?}", e);
+
+                    if let Err(e) = native_partitions.fill("action_status", status).await {
+                        error!("Failed to fill. Error = {:?}", e);
                     }
                 }
             }
         }
     }
+}
+
+// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
+// TODO which cloud will double deserialize (Batch 1st and messages next)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Payload {
+    stream: String,
+    #[serde(flatten)]
+    payload: Value,
 }
 
 impl Package for Buffer<Payload> {
