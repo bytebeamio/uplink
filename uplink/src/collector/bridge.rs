@@ -11,7 +11,7 @@ use tokio_util::codec::{LinesCodec, LinesCodecError};
 use std::io;
 
 use crate::base::actions::{Action, ActionResponse};
-use crate::base::{Buffer, Config, Package, Partitions};
+use crate::base::{Bucket, Buffer, Config, Package, Partitions};
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 use toml::Value;
@@ -88,7 +88,7 @@ impl Bridge {
         let streams: Vec<(String, usize)> =
             streams.map(|(stream, config)| (stream.to_owned(), config.buf_size as usize)).collect();
         let mut bridge_partitions = Partitions::new(self.data_tx.clone(), streams.clone());
-        let mut native_partitions: Partitions<ActionResponse> = Partitions::new(self.data_tx.clone(), streams);
+        let mut status_buffer = Bucket::new(self.data_tx.clone(), "action_status", 1);
 
         let action_timeout = time::sleep(Duration::from_secs(10));
 
@@ -144,7 +144,7 @@ impl Bridge {
                     let mut status = ActionResponse::new(&action, "Failed");
                     status.add_error(format!("Action timed out"));
 
-                    if let Err(e) = native_partitions.fill("action_status", status).await {
+                    if let Err(e) = status_buffer.fill(status).await {
                         error!("Failed to fill. Error = {:?}", e);
                     }
                 }

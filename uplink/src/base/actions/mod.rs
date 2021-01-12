@@ -69,7 +69,6 @@ impl ActionResponse {
 pub struct Actions {
     process: process::Process,
     controller: controller::Controller,
-    collector_tx: Sender<Box<dyn Package>>,
     actions_rx: Option<Receiver<Action>>,
 }
 
@@ -80,8 +79,7 @@ pub async fn new(
 ) -> Actions {
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
-
-    Actions { process, controller, collector_tx, actions_rx: Some(actions_rx) }
+    Actions { process, controller, actions_rx: Some(actions_rx) }
 }
 
 impl Actions {
@@ -112,16 +110,15 @@ impl Actions {
         match action.kind.as_ref() {
             "control" => {
                 let command = action.name.clone();
-                let payload = action.payload.clone();
                 let id = action.id;
-                self.controller.execute(&id, command, payload)?;
+                self.controller.execute(&id, command).await?;
             }
             "process" => {
-                // let command = action.name.clone();
-                // let payload = action.payload.clone();
-                // let id = action.id;
-                //
-                // self.process.execute(id.clone(), command.clone(), payload).await?;
+                let command = action.name.clone();
+                let payload = action.payload.clone();
+                let id = action.id;
+
+                self.process.execute(id.clone(), command.clone(), payload).await?;
             }
             _ => unimplemented!(),
         }

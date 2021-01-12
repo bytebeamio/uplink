@@ -43,9 +43,9 @@ pub trait Package: Send + Debug {
 /// Signal to modify the behaviour of collector
 #[derive(Debug)]
 pub enum Control {
-    // Shutdown,
-// StopStream(String),
-// StartStream(String),
+    Shutdown,
+    StopStream(String),
+    StartStream(String),
 }
 
 /// Buffer is an abstraction of a collection that serializer receives.
@@ -80,10 +80,40 @@ impl<T> Buffer<T> {
     }
 }
 
+pub struct Bucket<T> {
+    buffer: Buffer<T>,
+    tx: Sender<Box<dyn Package>>,
+}
+
+impl<T> Bucket<T>
+where
+    T: Debug + Send + 'static,
+    Buffer<T>: Package,
+{
+    pub fn new(tx: Sender<Box<dyn Package>>, stream: &str, max: usize) -> Self {
+        let buffer = Buffer::new(stream.to_owned(), max);
+        Bucket { buffer, tx }
+    }
+
+    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
+        if let Some(buffer) = self.buffer.fill(data) {
+            info!("Flushing {} buffer", buffer.stream);
+            let buffer = Box::new(buffer);
+            self.tx.send(buffer).await?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<T> Clone for Bucket<T> {
+    fn clone(&self) -> Self {
+        Bucket { buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.max_buffer_size), tx: self.tx.clone() }
+    }
+}
+
 /// Partitions has handles to fill data segregated by stream, send
-/// filled data to the serializer when a stream is full and handle to
-/// receive controller notifications like shutdown, ignore a stream or
-/// throttle collection
+/// filled data to the serializer when a stream is full
 pub struct Partitions<T> {
     collection: HashMap<String, Buffer<T>>,
     tx: Sender<Box<dyn Package>>,

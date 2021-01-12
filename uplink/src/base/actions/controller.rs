@@ -3,7 +3,7 @@ use std::io;
 use std::time::SystemTimeError;
 
 use super::{ActionResponse, Control, Package};
-use crate::base::Partitions;
+use crate::base::{self, Bucket};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::error::TrySendError;
@@ -11,6 +11,8 @@ use tokio::sync::mpsc::Sender;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Base error {0}")]
+    Base(#[from] base::Error),
     #[error("Io error {0}")]
     Io(#[from] io::Error),
     #[error("Json error {0}")]
@@ -47,9 +49,9 @@ pub enum Error {
 ///     action_state: "in_progress"
 /// }
 pub struct Controller {
-    // Partition to send action status to serializer. This is also cloned to spawn
+    // Storage to send action status to serializer. This is also cloned to spawn
     // a new collector
-    partitions: Partitions<ActionResponse>,
+    status_bucket: Bucket<ActionResponse>,
     // controller_tx per collector
     collector_controllers: HashMap<String, Sender<Control>>,
     // collector running status. Used to spawn a new collector thread based on current
@@ -59,64 +61,65 @@ pub struct Controller {
 
 impl Controller {
     pub fn new(controllers: HashMap<String, Sender<Control>>, collector_tx: Sender<Box<dyn Package>>) -> Self {
-        let partitions = Partitions::new(collector_tx, vec![("action_status".to_owned(), 1)]);
-        let controller = Controller { partitions, collector_controllers: controllers, collector_run_status: HashMap::new() };
+        let status_bucket = Bucket::new(collector_tx, "action_status", 1);
+        let controller = Controller { status_bucket, collector_controllers: controllers, collector_run_status: HashMap::new() };
         controller
     }
 
-    pub fn execute(&mut self, _id: &str, _command: String, _payload: String) -> Result<(), Error> {
+    pub async fn execute(&mut self, id: &str, command: String) -> Result<(), Error> {
         // TODO remove all try sends
-        // let mut args = vec!["simulator".to_owned(), "can".to_owned()];
-        // match command.as_ref() {
-        // "stop_collector_channel" => {
-        //     let collector_name = args.remove(0);
-        //     let controller_tx = self.collector_controllers.get_mut(&collector_name).unwrap();
-        //     for channel in args.into_iter() {
-        //         controller_tx.try_send(Control::StopStream(channel)).unwrap();
-        //     }
+        let mut args = vec!["simulator".to_owned(), "can".to_owned()];
+        match command.as_ref() {
+            "stop_collector_channel" => {
+                let collector_name = args.remove(0);
+                let controller_tx = self.collector_controllers.get_mut(&collector_name).unwrap();
+                for channel in args.into_iter() {
+                    controller_tx.try_send(Control::StopStream(channel)).unwrap();
+                }
 
-        //     let status = ActionResponse::new(id, "running");
-        // }
-        // "start_collector_channel" => {
-        //     let collector_name = args.remove(0);
-        //     let controller_tx = self.collector_controllers.get_mut(&collector_name).unwrap();
-        //     for channel in args.into_iter() {
-        //         controller_tx.try_send(Control::StartStream(channel)).unwrap();
-        //     }
+                let status = ActionResponse::new(id, "running");
+                self.status_bucket.fill(status).await?;
+            }
+            "start_collector_channel" => {
+                let collector_name = args.remove(0);
+                let controller_tx = self.collector_controllers.get_mut(&collector_name).unwrap();
+                for channel in args.into_iter() {
+                    controller_tx.try_send(Control::StartStream(channel)).unwrap();
+                }
 
-        //     let action_status = ActionResponse::new(id, "running");
-        //     // self.collector_tx.try_send(Box::new(action_status)).unwrap();
-        // }
-        // "stop_collector" => {
-        //     let collector_name = args.remove(0);
-        //     if let Some(running) = self.collector_run_status.get_mut(&collector_name) {
-        //         if *running {
-        //             let controller_tx = self.collector_controllers.get_mut(&collector_name).unwrap();
-        //             controller_tx.try_send(Control::Shutdown).unwrap();
-        //             // there is no way of knowing if collector thread is actually shutdown. so
-        //             // tihs flag is an optimistic assignment. But UI should only enable next
-        //             // control action based on action status from the controller
-        //             *running = false;
-        //             let action_status = ActionResponse::new(id, "running");
-        //             // self.collector_tx.try_send(Box::new(action_status)).unwrap();
-        //         }
-        //     }
-        // }
-        // "start_collector" => {
-        //     let collector_name = args.remove(0);
-        //     if let Some(running) = self.collector_run_status.get_mut(&collector_name) {
-        //         if !*running {
-        //             let action_status = ActionResponse::new(id, "done");
-        //             // self.collector_tx.try_send(Box::new(action_status)).unwrap();
-        //         }
-        //     }
+                let status = ActionResponse::new(id, "running");
+                self.status_bucket.fill(status).await?;
+            }
+            "stop_collector" => {
+                let collector_name = args.remove(0);
+                if let Some(running) = self.collector_run_status.get_mut(&collector_name) {
+                    if *running {
+                        let controller_tx = self.collector_controllers.get_mut(&collector_name).unwrap();
+                        controller_tx.try_send(Control::Shutdown).unwrap();
+                        // there is no way of knowing if collector thread is actually shutdown. so
+                        // tihs flag is an optimistic assignment. But UI should only enable next
+                        // control action based on action status from the controller
+                        *running = false;
+                        let status = ActionResponse::new(id, "running");
+                        self.status_bucket.fill(status).await?;
+                    }
+                }
+            }
+            "start_collector" => {
+                let collector_name = args.remove(0);
+                if let Some(running) = self.collector_run_status.get_mut(&collector_name) {
+                    if !*running {
+                        let status = ActionResponse::new(id, "done");
+                        self.status_bucket.fill(status).await?;
+                    }
+                }
 
-        //     if let Some(status) = self.collector_run_status.get_mut(&collector_name) {
-        //         *status = true;
-        //     }
-        // }
-        // _ => unimplemented!(),
-        // }
+                if let Some(status) = self.collector_run_status.get_mut(&collector_name) {
+                    *status = true;
+                }
+            }
+            _ => unimplemented!(),
+        }
 
         Ok(())
     }
