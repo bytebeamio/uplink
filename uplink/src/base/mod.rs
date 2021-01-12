@@ -98,6 +98,7 @@ where
     pub async fn fill(&mut self, data: T) -> Result<(), Error> {
         if let Some(buffer) = self.buffer.fill(data) {
             info!("Flushing {} buffer", buffer.stream);
+
             let buffer = Box::new(buffer);
             self.tx.send(buffer).await?;
         }

@@ -4,12 +4,12 @@ use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod controller;
 mod process;
 
-use crate::base::Buffer;
+use crate::base::{Bucket, Buffer};
 pub use controller::Controller;
 
 #[derive(Error, Debug)]
@@ -20,6 +20,8 @@ pub enum Error {
     Process(#[from] process::Error),
     #[error("Controller error {0}")]
     Controller(#[from] controller::Error),
+    #[error("Invalid action")]
+    InvalidActionKind(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -61,12 +63,19 @@ impl ActionResponse {
         status
     }
 
+    pub fn new_with_error(id: &str, state: &str, error: String) -> Self {
+        let mut response = ActionResponse::new(id, state);
+        response.add_error(error);
+        response
+    }
+
     pub fn add_error(&mut self, error: String) {
         self.errors.push(error);
     }
 }
 
 pub struct Actions {
+    status_bucket: Bucket<ActionResponse>,
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
@@ -79,17 +88,19 @@ pub async fn new(
 ) -> Actions {
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
-    Actions { process, controller, actions_rx: Some(actions_rx) }
+    let status_bucket = Bucket::new(collector_tx, "action_status", 1);
+    Actions { status_bucket, process, controller, actions_rx: Some(actions_rx) }
 }
 
 impl Actions {
     pub async fn start(&mut self) {
-        let mut notification_stream = self.actions_rx.take().unwrap();
+        let mut action_stream = self.actions_rx.take().unwrap();
 
-        // start the eventloop
+        // start receiving and processing actions
         loop {
-            while let Some(action) = notification_stream.recv().await {
+            while let Some(action) = action_stream.recv().await {
                 debug!("Action = {:?}", action);
+
                 let action_id = action.id.clone();
                 let action_name = action.name.clone();
                 let error = match self.handle(action).await {
@@ -99,14 +110,10 @@ impl Actions {
 
                 self.forward_action_error(&action_id, &action_name, error).await;
             }
-
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
 
     async fn handle(&mut self, action: Action) -> Result<(), Error> {
-        debug!("Action = {:?}", action);
-
         match action.kind.as_ref() {
             "control" => {
                 let command = action.name.clone();
@@ -120,7 +127,7 @@ impl Actions {
 
                 self.process.execute(id.clone(), command.clone(), payload).await?;
             }
-            _ => unimplemented!(),
+            v => return Err(Error::InvalidActionKind(v.to_owned())),
         }
 
         Ok(())
@@ -128,12 +135,11 @@ impl Actions {
 
     async fn forward_action_error(&mut self, id: &str, action: &str, error: Error) {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
-        let mut status = ActionResponse::new(id, "Failed");
-        status.add_error(format!("{:?}", error));
+        let status = ActionResponse::new_with_error(id, "Failed", error.to_string());
 
-        // if let Err(e) = self.collector_tx.send(Box::new(status)).await {
-        //     error!("Failed to send status. Error = {:?}", e);
-        // }
+        if let Err(e) = self.status_bucket.fill(status).await {
+            error!("Failed to send status. Error = {:?}", e);
+        }
     }
 }
 
