@@ -51,6 +51,7 @@ impl Bridge {
                 }
             };
 
+            let mut status_bucket = Bucket::new(self.data_tx.clone(), "action_status", 1);
             let (stream, addr) = loop {
                 select! {
                     v = listener.accept() =>  {
@@ -64,13 +65,10 @@ impl Bridge {
                     }
                     Some(action) = self.actions_rx.recv() => {
                         error!("Bridge down!! Action ID = {}", action.id);
-                        let mut status = ActionResponse::new(&action.id, "Failed");
-                        status.add_error(format!("Bridge down"));
-
-                        // Send failure notification to cloud
-                        // if let Err(e) = self.data_tx.send(Box::new(status)).await {
-                        //     error!("Failed to send status. Error = {:?}", e);
-                        // }
+                        let status = ActionResponse::failure(&action.id, "Bridge down");
+                        if let Err(e) = status_bucket.fill(status).await {
+                            error!("Failed to send busy status. Error = {:?}", e);
+                        }
                     }
                 }
             };
@@ -141,9 +139,7 @@ impl Bridge {
                     error!("Timeout waiting for action response. Action ID = {}", action);
 
                     // Send failure response to cloud
-                    let mut status = ActionResponse::new(&action, "Failed");
-                    status.add_error(format!("Action timed out"));
-
+                    let status = ActionResponse::failure(&action, "Action timed out");
                     if let Err(e) = status_buffer.fill(status).await {
                         error!("Failed to fill. Error = {:?}", e);
                     }

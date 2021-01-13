@@ -77,7 +77,7 @@ impl Process {
                      Ok(Some(line)) = stdout.next_line() => {
                         let status: ActionResponse = match serde_json::from_str(&line) {
                             Ok(status) => status,
-                            Err(e) => ActionResponse::new_with_error("dummy", "Failed", e.to_string()),
+                            Err(e) => ActionResponse::failure("dummy", e.to_string()),
                         };
 
                         debug!("Action status: {:?}", status);

@@ -11,6 +11,7 @@ mod process;
 
 use crate::base::{Bucket, Buffer};
 pub use controller::Controller;
+use tokio::time::Duration;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -50,27 +51,38 @@ pub struct ActionResponse {
 }
 
 impl ActionResponse {
-    pub fn new(id: &str, state: &str) -> Self {
-        let timestamp = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(t) => t.as_millis(),
-            Err(e) => {
-                error!("Time error = {:?}", e);
-                0
-            }
-        };
+    pub fn new(id: &str) -> Self {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
 
-        let status = ActionResponse { id: id.to_owned(), timestamp, state: state.to_owned(), progress: 0, errors: Vec::new() };
-        status
+        ActionResponse {
+            id: id.to_owned(),
+            timestamp: timestamp.as_millis(),
+            state: "Running".to_owned(),
+            progress: 0,
+            errors: vec![],
+        }
     }
 
-    pub fn new_with_error(id: &str, state: &str, error: String) -> Self {
-        let mut response = ActionResponse::new(id, state);
-        response.add_error(error);
-        response
+    pub fn success(id: &str) -> ActionResponse {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        ActionResponse {
+            id: id.to_owned(),
+            timestamp: timestamp.as_millis(),
+            state: "Completed".to_owned(),
+            progress: 100,
+            errors: vec![],
+        }
     }
 
-    pub fn add_error(&mut self, error: String) {
-        self.errors.push(error);
+    pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        ActionResponse {
+            id: id.to_owned(),
+            timestamp: timestamp.as_millis(),
+            state: "Failed".to_owned(),
+            progress: 100,
+            errors: vec![error.into()],
+        }
     }
 }
 
@@ -135,7 +147,7 @@ impl Actions {
 
     async fn forward_action_error(&mut self, id: &str, action: &str, error: Error) {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
-        let status = ActionResponse::new_with_error(id, "Failed", error.to_string());
+        let status = ActionResponse::failure(id, error.to_string());
 
         if let Err(e) = self.status_bucket.fill(status).await {
             error!("Failed to send status. Error = {:?}", e);

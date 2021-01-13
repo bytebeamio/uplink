@@ -37,7 +37,10 @@ var f mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 func main() {
 	reader := bufio.NewReader(os.Stdin)
 
-	opts := mqtt.NewClientOptions().AddBroker("tcp://localhost:1883")
+	// broker := "tcp://139.180.134.6:1883"
+	broker := "tcp://localhost:1883"
+
+	opts := mqtt.NewClientOptions().AddBroker(broker)
 	opts.SetClientID("actions")
 	opts.SetDefaultPublishHandler(f)
 
@@ -59,7 +62,7 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
-			token := client.Publish("/devices/test/actions", 1, false, string(actionMsg))
+			token := client.Publish("/devices/1/actions", 1, false, string(actionMsg))
 			token.Wait()
 		}
 

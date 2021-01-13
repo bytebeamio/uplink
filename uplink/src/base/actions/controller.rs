@@ -77,7 +77,7 @@ impl Controller {
                     controller_tx.try_send(Control::StopStream(channel)).unwrap();
                 }
 
-                let status = ActionResponse::new(id, "running");
+                let status = ActionResponse::new(id);
                 self.status_bucket.fill(status).await?;
             }
             "start_collector_channel" => {
@@ -87,7 +87,7 @@ impl Controller {
                     controller_tx.try_send(Control::StartStream(channel)).unwrap();
                 }
 
-                let status = ActionResponse::new(id, "running");
+                let status = ActionResponse::new(id);
                 self.status_bucket.fill(status).await?;
             }
             "stop_collector" => {
@@ -100,7 +100,7 @@ impl Controller {
                         // tihs flag is an optimistic assignment. But UI should only enable next
                         // control action based on action status from the controller
                         *running = false;
-                        let status = ActionResponse::new(id, "running");
+                        let status = ActionResponse::new(id);
                         self.status_bucket.fill(status).await?;
                     }
                 }
@@ -109,7 +109,7 @@ impl Controller {
                 let collector_name = args.remove(0);
                 if let Some(running) = self.collector_run_status.get_mut(&collector_name) {
                     if !*running {
-                        let status = ActionResponse::new(id, "done");
+                        let status = ActionResponse::success(id);
                         self.status_bucket.fill(status).await?;
                     }
                 }
