@@ -222,7 +222,6 @@ dependencies = [
  "log",
  "pretty_env_logger",
  "rand 0.7.3",
- "rumqttc",
  "seahash",
  "tempdir",
 ]

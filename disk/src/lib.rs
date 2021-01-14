@@ -7,9 +7,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
-pub struct AsyncClient {
-    /// client for mqtt operations
-    client: rumqttc::AsyncClient,
+pub struct Storage {
     /// index
     index_file: File,
     /// list of backlog file ids. Mutated only be the serialization part of the sender
@@ -30,18 +28,12 @@ pub struct AsyncClient {
     slow_receiver: bool,
 }
 
-impl AsyncClient {
-    pub fn new(
-        client: rumqttc::AsyncClient,
-        backlog_dir: &Path,
-        max_file_size: usize,
-        max_file_count: usize,
-    ) -> io::Result<AsyncClient> {
+impl Storage {
+    pub fn new(backlog_dir: &Path, max_file_size: usize, max_file_count: usize) -> io::Result<Storage> {
         let backlog_file_ids = get_file_ids(backlog_dir)?;
         let (index_file, current_read_file_index) = parse_index_file(backlog_dir)?;
 
-        Ok(AsyncClient {
-            client,
+        Ok(Storage {
             index_file,
             backlog_file_ids,
             backup_path: PathBuf::from(backlog_dir),

@@ -10,7 +10,6 @@ edition = "2018"
 bytes = "1"
 seahash = "4"
 log = "0.4"
-rumqttc = "0.4"
 
 [dev-dependencies]
 tempdir = "0.3"

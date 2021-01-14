@@ -37,8 +37,8 @@ var f mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 func main() {
 	reader := bufio.NewReader(os.Stdin)
 
-	// broker := "tcp://139.180.134.6:1883"
-	broker := "tcp://localhost:1883"
+	broker := "tcp://139.180.134.6:1883"
+	// broker := "tcp://localhost:1883"
 
 	opts := mqtt.NewClientOptions().AddBroker(broker)
 	opts.SetClientID("actions")
