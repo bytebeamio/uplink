@@ -2,7 +2,7 @@
 extern crate log;
 
 use bytes::BytesMut;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::{fs, io};
@@ -51,12 +51,12 @@ impl Storage {
 
         if index < 0 {
             self.current_read_file_index = None;
-            self.index_file.fd.seek(SeekFrom::Start(0))?;
-            self.index_file.fd.write_all(format!("").as_bytes())?;
+            self.index_file.seek(SeekFrom::Start(0))?;
+            self.index_file.write_all(format!("").as_bytes())?;
         } else {
             self.current_read_file_index = Some(index as usize);
-            self.index_file.fd.seek(SeekFrom::Start(0))?;
-            self.index_file.fd.write_all(format!("{}", index).as_bytes())?;
+            self.index_file.seek(SeekFrom::Start(0))?;
+            self.index_file.write_all(format!("{}", index).as_bytes())?;
         }
 
         Ok(())
@@ -69,36 +69,59 @@ impl Storage {
         // update the index of file which we are done reading
         // (so that the increment of happens correctly during first read after boot)
         if index > 0 {
-            self.index_file.fd.seek(SeekFrom::Start(0))?;
-            self.index_file.fd.write_all(format!("{}", index - 1).as_bytes())?;
+            self.index_file.seek(SeekFrom::Start(0))?;
+            self.index_file.write_all(format!("{}", index - 1).as_bytes())?;
         } else {
-            self.index_file.fd.seek(SeekFrom::Start(0))?;
-            self.index_file.fd.write_all(format!("").as_bytes())?;
+            self.index_file.seek(SeekFrom::Start(0))?;
+            self.index_file.write_all(format!("").as_bytes())?;
         }
 
         Ok(())
     }
 
-    /// Serializes data to the disk.
-    /// Manages segmentation cooperatively. When the current write file size is full, resets
-    /// `current_write_file` and `current_write_file_size` to indicate the next iteration of
-    /// of this method to open next file to serialize data to
-    /// Also manages retention by deleting old files when file retention count is crossed
-    /// Deletes the old file right after opening the next write file
-    fn serialize_data_to_disk(&mut self, data: &[u8]) -> io::Result<()> {
+    /// Opens next file to write to by incrementing current_write_file_id
+    /// Handles retention
+    fn open_next_write_file(&mut self) -> io::Result<File> {
+        let next_file_id = match self.backlog_file_ids.last() {
+            Some(id) => id + 1,
+            None => 0,
+        };
+
+        let next_file_path = self.backup_path.join(&format!("backup@{}", next_file_id));
+        let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
+        self.backlog_file_ids.push(next_file_id);
+
+        let backlog_files_count = self.backlog_file_ids.len();
+        // TODO testcases for max no. of files = 0 and 1
+        if backlog_files_count > self.max_file_count {
+            // count here will always be > 0 due to above if statement. safe. doesn't panic
+            let id = self.backlog_file_ids.remove(0);
+            let file = self.backup_path.join(&format!("backup@{}", id));
+
+            warn!("file limit reached. deleting {:?}", file);
+            fs::remove_file(file)?;
+            self.decrement_reader_index()?;
+        }
+
+        Ok(next_file)
+    }
+
+    /// Checks current write buffer size and flushes it to disk when the size
+    /// exceeds configured size
+    pub fn flush_on_overflow(&mut self) -> io::Result<()> {
+        if self.current_write_file.len() >= self.max_file_size {
+            self.flush()?;
+        }
+
         Ok(())
     }
-}
 
-#[derive(Debug)]
-struct File {
-    path: PathBuf,
-    fd: fs::File,
-}
-
-impl File {
-    pub fn new(path: PathBuf, fd: fs::File) -> File {
-        File { path, fd }
+    /// Flushes what ever is in current write buffer into a new file on the disk
+    #[inline]
+    pub fn flush(&mut self) -> io::Result<()> {
+        let mut next_file = self.open_next_write_file()?;
+        next_file.write_all(&self.current_write_file[..])?;
+        Ok(())
     }
 }
 
@@ -138,8 +161,6 @@ fn parse_index_file(backup_path: &Path) -> io::Result<(File, Option<usize>)> {
     let index_file = OpenOptions::new().write(true).create(true).open(&index_file_path)?;
 
     let index = fs::read_to_string(&index_file_path)?;
-    let index_file = File::new(index_file_path, index_file);
-
     let reader_id = match index.as_str() {
         "" => return Ok((index_file, None)),
         number => number,
