@@ -1,9 +1,9 @@
 #[macro_use]
 extern crate log;
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use std::fs::{File, OpenOptions};
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::{fs, io, mem};
 
@@ -20,8 +20,6 @@ pub struct Storage {
     current_write_file: BytesMut,
     /// current_read_file
     current_read_file: BytesMut,
-    /// flag to detect slow receiver
-    slow_receiver: bool,
 }
 
 impl Storage {
@@ -35,7 +33,6 @@ impl Storage {
             max_file_count,
             current_write_file: BytesMut::with_capacity(max_file_size),
             current_read_file: BytesMut::with_capacity(max_file_size),
-            slow_receiver: false,
         })
     }
 
@@ -54,35 +51,10 @@ impl Storage {
         Ok(())
     }
 
-    /// Loads head file to current inmemory read buffer. Deletes
-    /// the file after loading. If all the disk data is caught up,
-    /// swaps current write buffer to current read buffer if there
-    /// is pending data in memory write buffer. Resets `slowreceiver`
-    /// flag if there is no pending data in write buffer
-    pub fn reload(&mut self) -> io::Result<()> {
-        // Swap read buffer with write buffer to read data in inmemory
-        // write buffer
-        if self.backlog_file_ids.len() == 0 {
-            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
-
-            // If read buffer is 0 after swapping, all the data is caught up
-            // Reset 'slow receiver' flag
-            if self.current_read_file.is_empty() {
-                self.slow_receiver = false;
-            }
-        }
-
-        Ok(())
-    }
-
     /// Opens file to flush current inmemory write buffer to disk.
     /// Also handles retention of previous files on disk
     fn open_next_write_file(&mut self) -> io::Result<File> {
-        let next_file_id = match self.backlog_file_ids.last() {
-            Some(id) => id + 1,
-            None => 0,
-        };
-
+        let next_file_id = self.backlog_file_ids.last().map_or(0, |id| id + 1);
         let next_file_path = self.backup_path.join(&format!("backup@{}", next_file_id));
         let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
         self.backlog_file_ids.push(next_file_id);
@@ -98,6 +70,15 @@ impl Storage {
         Ok(next_file)
     }
 
+    /// Flushes what ever is in current write buffer into a new file on the disk
+    #[inline]
+    pub fn flush(&mut self) -> io::Result<()> {
+        let mut next_file = self.open_next_write_file()?;
+        next_file.write_all(&self.current_write_file[..])?;
+        self.current_write_file.clear();
+        Ok(())
+    }
+
     /// Checks current write buffer size and flushes it to disk when the size
     /// exceeds configured size
     pub fn flush_on_overflow(&mut self) -> io::Result<()> {
@@ -108,13 +89,35 @@ impl Storage {
         Ok(())
     }
 
-    /// Flushes what ever is in current write buffer into a new file on the disk
-    #[inline]
-    pub fn flush(&mut self) -> io::Result<()> {
-        let mut next_file = self.open_next_write_file()?;
-        next_file.write_all(&self.current_write_file[..])?;
-        self.current_write_file.clear();
-        Ok(())
+    /// Loads head file to current inmemory read buffer. Deletes
+    /// the file after loading. If all the disk data is caught up,
+    /// swaps current write buffer to current read buffer if there
+    /// is pending data in memory write buffer.
+    /// Returns true if all the messages are caught up
+    pub fn reload_on_eof(&mut self) -> io::Result<bool> {
+        // Don't reload if there is data in current read file
+        if self.current_read_file.has_remaining() {
+            return Ok(false);
+        }
+
+        // Swap read buffer with write buffer to read data in inmemory write buffer
+        if self.backlog_file_ids.len() == 0 {
+            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
+            // If read buffer is 0 after swapping, all the data is caught up
+            if self.current_read_file.is_empty() {
+                return Ok(true);
+            }
+        }
+
+        // Len always > 0 because of above if. Doesn't panic
+        let id = self.backlog_file_ids.remove(0);
+        let next_file_path = self.backup_path.join(&format!("backup@{}", id));
+        let mut file = OpenOptions::new().open(&next_file_path)?;
+
+        // Load file into memory and delete it
+        file.read(&mut self.current_read_file)?;
+        self.remove(id)?;
+        Ok(false)
     }
 }
 
