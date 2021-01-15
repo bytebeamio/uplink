@@ -3,9 +3,9 @@ extern crate log;
 
 use bytes::BytesMut;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::{fs, io};
+use std::{fs, io, mem};
 
 pub struct Storage {
     /// list of backlog file ids. Mutated only be the serialization part of the sender
@@ -47,8 +47,36 @@ impl Storage {
         &mut self.current_read_file
     }
 
-    /// Opens next file to write to by incrementing current_write_file_id
-    /// Handles retention
+    /// Removes a file with provided id
+    fn remove(&self, id: u64) -> io::Result<()> {
+        let path = self.backup_path.join(&format!("backup@{}", id));
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    /// Loads head file to current inmemory read buffer. Deletes
+    /// the file after loading. If all the disk data is caught up,
+    /// swaps current write buffer to current read buffer if there
+    /// is pending data in memory write buffer. Resets `slowreceiver`
+    /// flag if there is no pending data in write buffer
+    pub fn reload(&mut self) -> io::Result<()> {
+        // Swap read buffer with write buffer to read data in inmemory
+        // write buffer
+        if self.backlog_file_ids.len() == 0 {
+            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
+
+            // If read buffer is 0 after swapping, all the data is caught up
+            // Reset 'slow receiver' flag
+            if self.current_read_file.is_empty() {
+                self.slow_receiver = false;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Opens file to flush current inmemory write buffer to disk.
+    /// Also handles retention of previous files on disk
     fn open_next_write_file(&mut self) -> io::Result<File> {
         let next_file_id = match self.backlog_file_ids.last() {
             Some(id) => id + 1,
@@ -61,12 +89,10 @@ impl Storage {
 
         let backlog_files_count = self.backlog_file_ids.len();
         if backlog_files_count > self.max_file_count {
-            // count here will always be > 0 due to above if statement. safe. doesn't panic
+            // Len always be > 0 due to the above push. doesn't panic
             let id = self.backlog_file_ids.remove(0);
-            let file = self.backup_path.join(&format!("backup@{}", id));
-
-            warn!("file limit reached. deleting {:?}", file);
-            fs::remove_file(file)?;
+            warn!("file limit reached. deleting backup@{}", id);
+            self.remove(id)?;
         }
 
         Ok(next_file)
@@ -92,9 +118,23 @@ impl Storage {
     }
 }
 
+/// Converts file path to file id
+fn id(path: &Path) -> io::Result<u64> {
+    if let Some(file_name) = path.file_name() {
+        let file_name = format!("{:?}", file_name);
+        if !file_name.contains("backup@") {
+            return Err(io::Error::new(ErrorKind::InvalidInput, "Not a backup file"));
+        }
+    }
+
+    let id: Vec<&str> = path.file_name().unwrap().to_str().unwrap().split("@").collect();
+    let id: u64 = id[1].parse().unwrap();
+    Ok(id)
+}
+
 /// Gets list of file ids in the disk. Id of file backup@10 is 10.
 /// Storing ids instead of full paths enables efficient indexing
-pub fn get_file_ids(path: &Path) -> io::Result<Vec<u64>> {
+fn get_file_ids(path: &Path) -> io::Result<Vec<u64>> {
     let mut file_ids = Vec::new();
     let files = fs::read_dir(path)?;
     for file in files.into_iter() {
@@ -105,17 +145,10 @@ pub fn get_file_ids(path: &Path) -> io::Result<Vec<u64>> {
             continue;
         }
 
-        if let Some(file_name) = path.file_name() {
-            let file_name = format!("{:?}", file_name);
-            if !file_name.contains("backup@") {
-                continue;
-            }
+        match id(&path) {
+            Ok(id) => file_ids.push(id),
+            Err(_) => continue,
         }
-
-        let id: Vec<&str> = path.file_name().unwrap().to_str().unwrap().split("@").collect();
-        let id: u64 = id[1].parse().unwrap();
-
-        file_ids.push(id);
     }
 
     file_ids.sort();
