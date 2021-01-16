@@ -97,17 +97,8 @@ impl Storage {
         Ok(())
     }
 
-    /// Loads head file to current inmemory read buffer. Deletes
-    /// the file after loading. If all the disk data is caught up,
-    /// swaps current write buffer to current read buffer if there
-    /// is pending data in memory write buffer.
-    /// Returns true if all the messages are caught up
-    pub fn reload_on_eof(&mut self) -> io::Result<bool> {
-        // Don't reload if there is data in current read file
-        if self.current_read_file.has_remaining() {
-            return Ok(false);
-        }
-
+    /// Reloads next buffer even if there is pending data in current buffer
+    pub fn reload(&mut self) -> io::Result<bool> {
         // Swap read buffer with write buffer to read data in inmemory write buffer
         if self.backlog_file_ids.len() == 0 {
             mem::swap(&mut self.current_read_file, &mut self.current_write_file);
@@ -122,14 +113,28 @@ impl Storage {
         let id = self.backlog_file_ids.remove(0);
         let next_file_path = self.backup_path.join("backup@".to_owned() + &id.to_string());
         let mut file = OpenOptions::new().read(true).open(&next_file_path)?;
-        let metadata = fs::metadata(&next_file_path).expect("unable to read metadata");
-
-        self.prepare_current_read_buffer(metadata.len() as usize);
 
         // Load file into memory and delete it
+        let metadata = fs::metadata(&next_file_path).expect("unable to read metadata");
+        self.prepare_current_read_buffer(metadata.len() as usize);
         file.read_exact(&mut self.current_read_file[..])?;
         self.remove(id)?;
+
         Ok(false)
+    }
+
+    /// Loads head file to current inmemory read buffer. Deletes
+    /// the file after loading. If all the disk data is caught up,
+    /// swaps current write buffer to current read buffer if there
+    /// is pending data in memory write buffer.
+    /// Returns true if all the messages are caught up
+    pub fn reload_on_eof(&mut self) -> io::Result<bool> {
+        // Don't reload if there is data in current read file
+        if self.current_read_file.has_remaining() {
+            return Ok(false);
+        }
+
+        self.reload()
     }
 }
 
