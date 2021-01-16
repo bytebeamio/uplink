@@ -4,10 +4,8 @@ use std::time::SystemTimeError;
 
 use super::{ActionResponse, Control, Package};
 use crate::base::{self, Bucket};
+use async_channel::{SendError, Sender, TrySendError};
 use thiserror::Error;
-use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::error::TrySendError;
-use tokio::sync::mpsc::Sender;
 
 #[derive(Error, Debug)]
 pub enum Error {

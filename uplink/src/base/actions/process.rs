@@ -1,8 +1,7 @@
+use async_channel::{SendError, Sender};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::Sender;
 use tokio::{pin, select, task, time};
 
 use super::{ActionResponse, Package};

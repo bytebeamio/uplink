@@ -1,5 +1,5 @@
+use async_channel::{Sender, TrySendError};
 use thiserror::Error;
-use tokio::sync::mpsc::Sender;
 use tokio::time::Duration;
 
 use std::fs::File;
@@ -10,7 +10,6 @@ use crate::base::actions::Action;
 use crate::base::Config;
 use rumqttc::{AsyncClient, Event, EventLoop, Incoming, MqttOptions, Publish, QoS};
 use std::sync::Arc;
-use tokio::sync::mpsc::error::TrySendError;
 
 #[derive(Error, Debug)]
 pub enum Error {

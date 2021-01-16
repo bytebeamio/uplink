@@ -6,8 +6,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Error};
+use async_channel::{bounded, Sender};
 use structopt::StructOpt;
-use tokio::sync::mpsc::{channel, Sender};
 use tokio::task;
 
 mod base;
@@ -64,12 +64,12 @@ async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
     let config = Arc::new(init_config(commandline)?);
 
-    let (collector_tx, collector_rx) = channel(10);
-    let (native_actions_tx, native_actions_rx) = channel(10);
-    let (bridge_actions_tx, bridge_actions_rx) = channel(10);
+    let (collector_tx, collector_rx) = bounded(10);
+    let (native_actions_tx, native_actions_rx) = bounded(10);
+    let (bridge_actions_tx, bridge_actions_rx) = bounded(10);
 
     let mut mqtt = mqtt::Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
-    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx, mqtt.client());
+    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx, mqtt.client())?;
 
     task::spawn(async move {
         serializer.start().await;

@@ -1,7 +1,7 @@
 use super::{Control, Package};
+use async_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::mpsc::{Receiver, Sender};
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -106,22 +106,28 @@ pub async fn new(
 
 impl Actions {
     pub async fn start(&mut self) {
-        let mut action_stream = self.actions_rx.take().unwrap();
+        let action_stream = self.actions_rx.take().unwrap();
 
         // start receiving and processing actions
         loop {
-            while let Some(action) = action_stream.recv().await {
-                debug!("Action = {:?}", action);
+            let action = match action_stream.recv().await {
+                Ok(v) => v,
+                Err(e) => {
+                    error!("Action stream receiver error = {:?}", e);
+                    break;
+                }
+            };
 
-                let action_id = action.id.clone();
-                let action_name = action.name.clone();
-                let error = match self.handle(action).await {
-                    Ok(_) => continue,
-                    Err(e) => e,
-                };
+            debug!("Action = {:?}", action);
 
-                self.forward_action_error(&action_id, &action_name, error).await;
-            }
+            let action_id = action.id.clone();
+            let action_name = action.name.clone();
+            let error = match self.handle(action).await {
+                Ok(_) => continue,
+                Err(e) => e,
+            };
+
+            self.forward_action_error(&action_id, &action_name, error).await;
         }
     }
 

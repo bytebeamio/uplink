@@ -3,9 +3,8 @@ use std::fmt::Debug;
 use std::mem;
 use std::path::PathBuf;
 
+use async_channel::{SendError, Sender};
 use serde::Deserialize;
-use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::Sender;
 
 pub mod actions;
 pub mod mqtt;

@@ -5,10 +5,13 @@ authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
 
 [dependencies]
+disk = { path = "../disk" }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.6", features = ["codec"] }
 tokio-stream = "0.1"
-rumqttc = "0.4"
+rumqttc = { path = "../../rumqtt/rumqttc" }
+async-channel = "1.5"
+# rumqttc = "0.4"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 anyhow = "1"

@@ -1,8 +1,8 @@
+use async_channel::{Receiver, RecvError, Sender};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::{select, time};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
@@ -20,6 +20,8 @@ use toml::Value;
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] io::Error),
+    #[error("Receiver error {0}")]
+    Recv(#[from] RecvError),
     #[error("Stream done")]
     StreamDone,
     #[error("Lines codec error {0}")]
@@ -63,7 +65,8 @@ impl Bridge {
                             }
                         }
                     }
-                    Some(action) = self.actions_rx.recv() => {
+                    action = self.actions_rx.recv() => {
+                        let action = action.unwrap();
                         error!("Bridge down!! Action ID = {}", action.id);
                         let status = ActionResponse::failure(&action.id, "Bridge down");
                         if let Err(e) = status_bucket.fill(status).await {
@@ -119,7 +122,7 @@ impl Bridge {
                     }
                 }
                 action = self.actions_rx.recv() => {
-                    let action = action.ok_or(Error::StreamDone)?;
+                    let action = action?;
                     self.current_action = Some(action.id.to_owned());
 
                     action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
