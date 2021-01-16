@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate log;
 
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
@@ -31,8 +31,8 @@ impl Storage {
             backup_path: PathBuf::from(backlog_dir),
             max_file_size,
             max_file_count,
-            current_write_file: BytesMut::with_capacity(max_file_size),
-            current_read_file: BytesMut::with_capacity(max_file_size),
+            current_write_file: BytesMut::with_capacity(max_file_size * 2),
+            current_read_file: BytesMut::with_capacity(max_file_size * 2),
         })
     }
 
@@ -49,6 +49,13 @@ impl Storage {
         let path = self.backup_path.join(&format!("backup@{}", id));
         fs::remove_file(path)?;
         Ok(())
+    }
+
+    /// Initializes read buffer before reading data from the file
+    fn prepare_current_read_buffer(&mut self, file_len: usize) {
+        self.current_read_file.clear();
+        let mut init = vec![0u8; file_len];
+        self.current_read_file.put_slice(&mut init[..]);
     }
 
     /// Opens file to flush current inmemory write buffer to disk.
@@ -75,6 +82,7 @@ impl Storage {
     pub fn flush(&mut self) -> io::Result<()> {
         let mut next_file = self.open_next_write_file()?;
         next_file.write_all(&self.current_write_file[..])?;
+        next_file.flush()?;
         self.current_write_file.clear();
         Ok(())
     }
@@ -103,6 +111,7 @@ impl Storage {
         // Swap read buffer with write buffer to read data in inmemory write buffer
         if self.backlog_file_ids.len() == 0 {
             mem::swap(&mut self.current_read_file, &mut self.current_write_file);
+
             // If read buffer is 0 after swapping, all the data is caught up
             if self.current_read_file.is_empty() {
                 return Ok(true);
@@ -111,11 +120,14 @@ impl Storage {
 
         // Len always > 0 because of above if. Doesn't panic
         let id = self.backlog_file_ids.remove(0);
-        let next_file_path = self.backup_path.join(&format!("backup@{}", id));
-        let mut file = OpenOptions::new().open(&next_file_path)?;
+        let next_file_path = self.backup_path.join("backup@".to_owned() + &id.to_string());
+        let mut file = OpenOptions::new().read(true).open(&next_file_path)?;
+        let metadata = fs::metadata(&next_file_path).expect("unable to read metadata");
+
+        self.prepare_current_read_buffer(metadata.len() as usize);
 
         // Load file into memory and delete it
-        file.read(&mut self.current_read_file)?;
+        file.read_exact(&mut self.current_read_file[..])?;
         self.remove(id)?;
         Ok(false)
     }
@@ -225,5 +237,36 @@ mod test {
         assert_eq!(storage.writer().len(), 0);
         let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    }
+
+    #[test]
+    fn reload_loads_correct_file_into_memory() {
+        let backup = init_backup_folders();
+        let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
+
+        // 10 files on disk
+        for i in 0..100 {
+            let mut publish = Publish::new("hello", QoS::AtLeastOnce, vec![i; 1024]);
+            publish.pkid = 1;
+            publish.write(storage.writer()).unwrap();
+            storage.flush_on_overflow().unwrap();
+        }
+
+        let mut publishes = Vec::new();
+
+        // breaks after 100th iteration due to `reload_on_eof` break
+        for _ in 0..1234 {
+            // Done reading all the pending files
+            if storage.reload_on_eof().unwrap() {
+                break;
+            }
+
+            match read(storage.reader(), 1048).unwrap() {
+                Packet::Publish(publish) => publishes.push(publish),
+                packet => unreachable!("{:?}", packet),
+            }
+        }
+
+        assert_eq!(publishes.len(), 100);
     }
 }
