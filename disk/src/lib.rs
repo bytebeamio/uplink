@@ -104,9 +104,7 @@ impl Storage {
             mem::swap(&mut self.current_read_file, &mut self.current_write_file);
 
             // If read buffer is 0 after swapping, all the data is caught up
-            if self.current_read_file.is_empty() {
-                return Ok(true);
-            }
+            return if self.current_read_file.is_empty() { Ok(true) } else { Ok(false) };
         }
 
         // Len always > 0 because of above if. Doesn't panic
@@ -179,8 +177,6 @@ fn get_file_ids(path: &Path) -> io::Result<Vec<u64>> {
 mod test {
     use super::*;
     use mqttbytes::*;
-    use std::thread;
-    use std::time::Duration;
     use tempdir::TempDir;
 
     fn init_backup_folders() -> TempDir {
@@ -273,5 +269,43 @@ mod test {
         }
 
         assert_eq!(publishes.len(), 100);
+        for (i, publish) in publishes.iter().enumerate() {
+            assert_eq!(&publish.payload[..], vec![i as u8; 1024].as_slice());
+        }
+    }
+
+    #[test]
+    fn reload_loads_partially_written_write_buffer_correctly() {
+        let backup = init_backup_folders();
+        let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
+
+        // 10 files on disk and partially filled current write buffer
+        for i in 0..105 {
+            let mut publish = Publish::new("hello", QoS::AtLeastOnce, vec![i; 1024]);
+            publish.pkid = 1;
+            publish.write(storage.writer()).unwrap();
+            storage.flush_on_overflow().unwrap();
+        }
+
+        let mut publishes = Vec::new();
+
+        // breaks after 100th iteration due to `reload_on_eof` break
+        for _i in 0..12345 {
+            // Done reading all the pending files
+            if storage.reload_on_eof().unwrap() {
+                break;
+            }
+
+            match read(storage.reader(), 1048).unwrap() {
+                Packet::Publish(publish) => publishes.push(publish),
+                packet => unreachable!("{:?}", packet),
+            }
+        }
+
+        assert_eq!(storage.current_write_file.len(), 0);
+        assert_eq!(publishes.len(), 105);
+        for (i, publish) in publishes.iter().enumerate() {
+            assert_eq!(&publish.payload[..], vec![i as u8; 1024].as_slice());
+        }
     }
 }
