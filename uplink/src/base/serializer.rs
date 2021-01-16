@@ -42,8 +42,7 @@ impl Serializer {
         Ok(Serializer { config, collector_rx, client, storage })
     }
 
-    /// Write new data to disk until the back pressure due to slow n/w
-    /// until slow n/w io is resolved
+    /// Write new data to disk until back pressure due to slow n/w is resolved
     async fn disk(&mut self, publish: Publish) -> Result<Status, Error> {
         loop {
             select! {
@@ -67,7 +66,7 @@ impl Serializer {
     }
 
     /// Write new collector data to disk while sending existing data on
-    /// dis to mqtt eventloop
+    /// disk to mqtt eventloop
     async fn catchup(&mut self) -> Result<Status, Error> {
         loop {
             if let Ok(data) = self.collector_rx.try_recv() {
@@ -120,32 +119,14 @@ impl Serializer {
         }
     }
 
-    pub async fn start(&mut self) {
+    pub async fn start(&mut self) -> Result<(), Error> {
         let mut status = Status::Normal;
 
         loop {
             let next_status = match status {
-                Status::Normal => match self.normal().await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        error!("Error = {:?}", e);
-                        return;
-                    }
-                },
-                Status::SlowEventloop(publish) => match self.disk(publish).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        error!("Error = {:?}", e);
-                        return;
-                    }
-                },
-                Status::EventLoopReady => match self.catchup().await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        error!("Error = {:?}", e);
-                        return;
-                    }
-                },
+                Status::Normal => self.normal().await?,
+                Status::SlowEventloop(publish) => self.disk(publish).await?,
+                Status::EventLoopReady => self.catchup().await?,
             };
 
             status = next_status;

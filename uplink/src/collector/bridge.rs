@@ -42,25 +42,19 @@ impl Bridge {
         Bridge { config, data_tx, actions_rx, current_action: None }
     }
 
-    pub async fn start(&mut self) {
+    pub async fn start(&mut self) -> Result<(), Error> {
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
-            let listener = match TcpListener::bind(&addr).await {
-                Ok(l) => l,
-                Err(e) => {
-                    error!("Failed to bind to {}. Error = {:?}. Stopping collector", addr, e);
-                    return;
-                }
-            };
-
+            let listener = TcpListener::bind(&addr).await?;
             let mut status_bucket = Bucket::new(self.data_tx.clone(), "action_status", 1);
+
             let (stream, addr) = loop {
                 select! {
                     v = listener.accept() =>  {
                         match v {
                             Ok(s) => break s,
                             Err(e) => {
-                                error!("Tcp connection error = {:?}", e);
+                                error!("Tcp connection accept error = {:?}", e);
                                 continue;
                             }
                         }

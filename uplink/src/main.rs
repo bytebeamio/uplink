@@ -72,7 +72,9 @@ async fn main() -> Result<(), Error> {
     let mut serializer = serializer::Serializer::new(config.clone(), collector_rx, mqtt.client())?;
 
     task::spawn(async move {
-        serializer.start().await;
+        if let Err(e) = serializer.start().await {
+            error!("Serializer stopped!! Error = {:?}", e);
+        }
     });
 
     task::spawn(async move {
@@ -81,7 +83,9 @@ async fn main() -> Result<(), Error> {
 
     let mut bridge = Bridge::new(config.clone(), collector_tx.clone(), bridge_actions_rx);
     task::spawn(async move {
-        bridge.start().await;
+        if let Err(e) = bridge.start().await {
+            error!("Bridge stopped!! Error = {:?}", e);
+        }
     });
 
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
