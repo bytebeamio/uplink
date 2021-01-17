@@ -92,6 +92,14 @@ impl Serializer {
             return Ok(Status::Normal);
         }
 
+        let publish = match read(storage.reader(), max_packet_size).map_err(|e| Error::Mqtt(e))? {
+            Packet::Publish(publish) => publish,
+            packet => unreachable!("{:?}", packet),
+        };
+
+        let send = send_publish(client, publish.topic, &publish.payload[..]);
+        tokio::pin!(send);
+
         loop {
             select! {
                 data = self.collector_rx.recv() => {
@@ -105,24 +113,19 @@ impl Serializer {
                       publish.write(&mut storage.writer()).map_err(|e| Error::Mqtt(e))?;
                       storage.flush_on_overflow()?;
                 }
-                o = async {
-                    match read(storage.reader(), max_packet_size).map_err(|e| Error::Mqtt(e))? {
-                        Packet::Publish(publish) => {
-                            let topic = publish.topic;
-                            let payload = publish.payload;
-                            client.publish(topic, QoS::AtLeastOnce, false, &payload[..]).await?;
-                        }
-                        packet => unreachable!("{:?}", packet),
-                    }
+                o = &mut send => {
+                    o?;
 
-                    Ok::<(), Error>(())
-                } => {
                     // Done reading all the pending files
-                    if storage.reload_on_eof().unwrap() {
+                    if storage.reload_on_eof()? {
                         return Ok(Status::Normal);
                     }
 
-                    o?;
+                    let publish = match read(storage.reader(), max_packet_size).map_err(|e| Error::Mqtt(e))? {
+                        Packet::Publish(publish) => publish,
+                        packet => unreachable!("{:?}", packet),
+                    };
+
                 }
             }
         }
@@ -161,4 +164,9 @@ impl Serializer {
             status = next_status;
         }
     }
+}
+
+async fn send_publish<V: Into<Vec<u8>>>(client: &mut AsyncClient, topic: String, payload: V) -> Result<(), ClientError> {
+    client.publish(topic, QoS::AtLeastOnce, false, payload).await?;
+    Ok(())
 }
