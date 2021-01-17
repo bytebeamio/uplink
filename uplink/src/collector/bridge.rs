@@ -92,15 +92,7 @@ impl Bridge {
             select! {
                 frame = framed.next() => {
                     let frame = frame.ok_or(Error::StreamDone)??;
-                    info!("Received line = {:?}", frame);
-
-                    match self.current_action.take() {
-                        Some(id) => debug!("Response for action = {:?}", id),
-                        None => {
-                            error!("Action timed out already");
-                            continue
-                        }
-                    }
+                    debug!("Received line = {:?}", frame);
 
                     let data: Payload = match serde_json::from_str(&frame) {
                         Ok(d) => d,
@@ -109,6 +101,18 @@ impl Bridge {
                             continue
                         }
                     };
+
+                    // If incoming data is a response for an action, drop it
+                    // if timeout is already sent to cloud
+                    if data.stream == "action_status" {
+                        match self.current_action.take() {
+                            Some(id) => debug!("Response for action = {:?}", id),
+                            None => {
+                                error!("Action timed out already");
+                                continue
+                            }
+                        }
+                    }
 
                     // TODO remove stream clone
                     if let Err(e) = bridge_partitions.fill(&data.stream.clone(), data).await {

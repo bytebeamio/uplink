@@ -61,7 +61,7 @@ impl Storage {
 
     /// Opens file to flush current inmemory write buffer to disk.
     /// Also handles retention of previous files on disk
-    fn open_next_write_file(&mut self) -> io::Result<File> {
+    fn open_next_write_file(&mut self) -> io::Result<(PathBuf, File)> {
         let next_file_id = self.backlog_file_ids.last().map_or(0, |id| id + 1);
         let next_file_path = self.backup_path.join(&format!("backup@{}", next_file_id));
         let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
@@ -75,13 +75,14 @@ impl Storage {
             self.remove(id)?;
         }
 
-        Ok(next_file)
+        Ok((next_file_path, next_file))
     }
 
     /// Flushes what ever is in current write buffer into a new file on the disk
     #[inline]
     pub fn flush(&mut self) -> io::Result<()> {
-        let mut next_file = self.open_next_write_file()?;
+        let (path, mut next_file) = self.open_next_write_file()?;
+        info!("Flushing data to disk!! {:?}", path);
         next_file.write_all(&self.current_write_file[..])?;
         next_file.flush()?;
         self.current_write_file.clear();
