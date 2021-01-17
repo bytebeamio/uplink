@@ -47,6 +47,11 @@ impl Serializer {
 
     /// Write new data to disk until back pressure due to slow n/w is resolved
     async fn disk(&mut self, publish: Publish) -> Result<Status, Error> {
+        // Note: self.client.publish() is executing code before await point
+        // in publish method every time. Verify this behaviour later
+        let publish = self.client.publish(&publish.topic, QoS::AtLeastOnce, false, &publish.payload[..]);
+        tokio::pin!(publish);
+
         loop {
             select! {
                 data = self.collector_rx.recv() => {
@@ -60,7 +65,7 @@ impl Serializer {
                       publish.write(&mut self.storage.writer()).map_err(|e| Error::Mqtt(e))?;
                       self.storage.flush_on_overflow()?;
                 }
-                o = self.client.publish(&publish.topic, QoS::AtLeastOnce, false, &publish.payload[..]) => {
+                o = &mut publish => {
                     o?;
                     return Ok(Status::EventLoopReady)
                 }
@@ -96,7 +101,7 @@ impl Serializer {
                       storage.flush_on_overflow()?;
                 }
                 o = async {
-                    match read(storage.reader(), 1048).map_err(|e| Error::Mqtt(e))? {
+                    match read(storage.reader(), 5012).map_err(|e| Error::Mqtt(e))? {
                         Packet::Publish(publish) => {
                             let topic = publish.topic;
                             let payload = publish.payload;
@@ -141,9 +146,18 @@ impl Serializer {
 
         loop {
             let next_status = match status {
-                Status::Normal => self.normal().await?,
-                Status::SlowEventloop(publish) => self.disk(publish).await?,
-                Status::EventLoopReady => self.catchup().await?,
+                Status::Normal => {
+                    info!("Switching to normal mode!!");
+                    self.normal().await?
+                }
+                Status::SlowEventloop(publish) => {
+                    info!("Switching to slow eventloop mode!!");
+                    self.disk(publish).await?
+                }
+                Status::EventLoopReady => {
+                    info!("Switching to catchup mode!!");
+                    self.catchup().await?
+                }
             };
 
             status = next_status;

@@ -1,5 +1,6 @@
 use async_channel::{Sender, TrySendError};
 use thiserror::Error;
+use tokio::task;
 use tokio::time::Duration;
 
 use std::fs::File;
@@ -47,11 +48,16 @@ impl Mqtt {
                 Ok(Event::Incoming(Incoming::ConnAck(_))) => {
                     let subscription = self.actions_subscription.clone();
                     let qos = QoS::AtLeastOnce;
+                    let client = self.client();
 
-                    match self.client.subscribe(subscription, qos).await {
-                        Ok(..) => info!("Subscribe -> {:?}", self.actions_subscription),
-                        Err(e) => error!("Failed to send subscription. Error = {:?}", e),
-                    }
+                    // This can potentially block when client from other threads
+                    // have already filled the channel due to bad network. So we spawn
+                    task::spawn(async move {
+                        match client.subscribe(subscription.clone(), qos).await {
+                            Ok(..) => info!("Subscribe -> {:?}", subscription),
+                            Err(e) => error!("Failed to send subscription. Error = {:?}", e),
+                        }
+                    });
                 }
                 Ok(Event::Incoming(Incoming::Publish(publish))) => {
                     if let Err(e) = self.handle_incoming_publish(publish) {
@@ -59,11 +65,11 @@ impl Mqtt {
                     }
                 }
                 Ok(Event::Incoming(i)) => {
-                    debug!("Incoming = {:?}", i);
+                    info!("Incoming = {:?}", i);
                 }
                 Ok(Event::Outgoing(o)) => debug!("Outgoing = {:?}", o),
                 Err(e) => {
-                    error!("Connection error = {:?}", e);
+                    error!("Connection error = {:?}", e.to_string());
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }

@@ -116,7 +116,7 @@ impl Bridge {
 
                     // TODO remove stream clone
                     if let Err(e) = bridge_partitions.fill(&data.stream.clone(), data).await {
-                        error!("Failed to send data. Error = {:?}", e);
+                        error!("Failed to send data. Error = {:?}", e.to_string());
                     }
                 }
                 action = self.actions_rx.recv() => {
