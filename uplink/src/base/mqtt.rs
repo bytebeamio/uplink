@@ -47,26 +47,23 @@ impl Mqtt {
             match self.eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::ConnAck(_))) => {
                     let subscription = self.actions_subscription.clone();
-                    let qos = QoS::AtLeastOnce;
                     let client = self.client();
 
                     // This can potentially block when client from other threads
                     // have already filled the channel due to bad network. So we spawn
                     task::spawn(async move {
-                        match client.subscribe(subscription.clone(), qos).await {
+                        match client.subscribe(subscription.clone(), QoS::AtLeastOnce).await {
                             Ok(..) => info!("Subscribe -> {:?}", subscription),
                             Err(e) => error!("Failed to send subscription. Error = {:?}", e),
                         }
                     });
                 }
-                Ok(Event::Incoming(Incoming::Publish(publish))) => {
-                    if let Err(e) = self.handle_incoming_publish(publish) {
+                Ok(Event::Incoming(Incoming::Publish(p))) => {
+                    if let Err(e) = self.handle_incoming_publish(p) {
                         error!("Incoming publish handle failed. Error = {:?}", e);
                     }
                 }
-                Ok(Event::Incoming(i)) => {
-                    info!("Incoming = {:?}", i);
-                }
+                Ok(Event::Incoming(i)) => info!("Incoming = {:?}", i),
                 Ok(Event::Outgoing(o)) => debug!("Outgoing = {:?}", o),
                 Err(e) => {
                     error!("Connection error = {:?}", e.to_string());
@@ -99,6 +96,7 @@ impl Mqtt {
 fn mqttoptions(config: &Config) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
     let mut mqttoptions = MqttOptions::new(&config.device_id, &config.broker, config.port);
+    mqttoptions.set_max_packet_size(config.max_packet_size, config.max_packet_size);
     mqttoptions.set_keep_alive(120);
     mqttoptions
 }
