@@ -23,12 +23,20 @@ pub struct StreamConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct Persistence {
+    pub path: String,
+    pub max_file_size: usize,
+    pub max_file_count: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub device_id: String,
     pub broker: String,
     pub port: u16,
     pub bridge_port: u16,
     pub actions: Vec<String>,
+    pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
     pub key: Option<PathBuf>,
     pub ca: Option<PathBuf>,

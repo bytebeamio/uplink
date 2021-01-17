@@ -4,7 +4,6 @@ use async_channel::{Receiver, RecvError};
 use disk::Storage;
 use rumqttc::*;
 use std::io;
-use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::select;
@@ -37,8 +36,12 @@ pub struct Serializer {
 }
 
 impl Serializer {
-    pub fn new(config: Arc<Config>, collector_rx: Receiver<Box<dyn Package>>, client: AsyncClient) -> Result<Serializer, Error> {
-        let storage = Storage::new(&Path::new("/tmp/persist"), 10240, 10)?;
+    pub fn new(
+        config: Arc<Config>,
+        collector_rx: Receiver<Box<dyn Package>>,
+        client: AsyncClient,
+        storage: Storage,
+    ) -> Result<Serializer, Error> {
         Ok(Serializer { config, collector_rx, client, storage })
     }
 

@@ -13,11 +13,12 @@ use tokio::task;
 mod base;
 mod collector;
 
+use crate::base::mqtt::Mqtt;
+use crate::base::serializer::Serializer;
 use crate::collector::bridge::Bridge;
 use base::actions;
-use base::mqtt;
-use base::serializer;
 use base::Config;
+use disk::Storage;
 use std::sync::Arc;
 
 #[derive(StructOpt, Debug)]
@@ -37,7 +38,7 @@ pub struct CommandLine {
 /// like bike id and data version
 fn init_config(commandline: CommandLine) -> Result<Config, Error> {
     let config = fs::read_to_string(&commandline.config_path);
-    let config = config.with_context(|| format!("Config error = {}", commandline.config_path))?;
+    let config = config.with_context(|| format!("Config = {}", commandline.config_path))?;
 
     let device_id = commandline.device_id.trim();
     let version = commandline.version.trim();
@@ -68,8 +69,11 @@ async fn main() -> Result<(), Error> {
     let (native_actions_tx, native_actions_rx) = bounded(10);
     let (bridge_actions_tx, bridge_actions_rx) = bounded(10);
 
-    let mut mqtt = mqtt::Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
-    let mut serializer = serializer::Serializer::new(config.clone(), collector_rx, mqtt.client())?;
+    let storage = Storage::new(&config.persistence.path, config.persistence.max_file_size, config.persistence.max_file_count);
+    let storage = storage.with_context(|| format!("Storage = {:?}", config.persistence))?;
+
+    let mut mqtt = Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
+    let mut serializer = Serializer::new(config.clone(), collector_rx, mqtt.client(), storage)?;
 
     task::spawn(async move {
         if let Err(e) = serializer.start().await {
