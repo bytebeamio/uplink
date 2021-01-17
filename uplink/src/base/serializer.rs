@@ -87,16 +87,7 @@ impl Serializer {
 
             match read(self.storage.reader(), 1048).map_err(|e| Error::Mqtt(e))? {
                 Packet::Publish(publish) => {
-                    // Try sending data on disk to eventloop
-                    match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, &publish.payload[..]) {
-                        Ok(_) => continue,
-                        // If eventloop is slow again, return current publish with slow disk status
-                        Err(ClientError::TryRequest(request)) => match request.into_inner() {
-                            Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
-                            v => unreachable!("{:?}", v),
-                        },
-                        Err(e) => return Err(e.into()),
-                    }
+                    self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, &publish.payload[..])?;
                 }
                 packet => unreachable!("{:?}", packet),
             }
@@ -109,13 +100,7 @@ impl Serializer {
             let stream = &data.stream();
             let topic = self.config.streams.get(stream).unwrap().topic.clone();
             let payload = data.serialize();
-
-            if let Err(ClientError::TryRequest(request)) = self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
-                match request.into_inner() {
-                    Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
-                    v => unreachable!("{:?}", v),
-                };
-            }
+            self.client.try_publish(topic, QoS::AtLeastOnce, false, payload)?;
         }
     }
 
@@ -124,9 +109,18 @@ impl Serializer {
 
         loop {
             let next_status = match status {
-                Status::Normal => self.normal().await?,
-                Status::SlowEventloop(publish) => self.disk(publish).await?,
-                Status::EventLoopReady => self.catchup().await?,
+                Status::Normal => self.normal().await,
+                Status::SlowEventloop(publish) => self.disk(publish).await,
+                Status::EventLoopReady => self.catchup().await,
+            };
+
+            let next_status = match next_status {
+                Ok(s) => s,
+                Err(Error::Client(ClientError::TryRequest(request))) => match request.into_inner() {
+                    Request::Publish(publish) => Status::SlowEventloop(publish),
+                    v => unreachable!("{:?}", v),
+                },
+                Err(e) => return Err(e),
             };
 
             status = next_status;
