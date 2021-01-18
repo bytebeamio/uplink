@@ -1,6 +1,7 @@
 use crate::base::{Config, Package};
 
 use async_channel::{Receiver, RecvError};
+use bytes::Bytes;
 use disk::Storage;
 use rumqttc::*;
 use std::io;
@@ -85,7 +86,7 @@ impl Serializer {
 
         let max_packet_size = self.config.max_packet_size;
         let storage = &mut self.storage;
-        let client = &mut self.client;
+        let client = self.client.clone();
 
         // Done reading all the pending files
         if storage.reload_on_eof().unwrap() {
@@ -97,7 +98,7 @@ impl Serializer {
             packet => unreachable!("{:?}", packet),
         };
 
-        let send = send_publish(client, publish.topic, &publish.payload[..]);
+        let send = send_publish(client, publish.topic, publish.payload);
         tokio::pin!(send);
 
         loop {
@@ -114,7 +115,7 @@ impl Serializer {
                       storage.flush_on_overflow()?;
                 }
                 o = &mut send => {
-                    o?;
+                    let client = o?;
 
                     // Done reading all the pending files
                     if storage.reload_on_eof()? {
@@ -126,6 +127,7 @@ impl Serializer {
                         packet => unreachable!("{:?}", packet),
                     };
 
+                    send.set(send_publish(client, publish.topic, publish.payload));
                 }
             }
         }
@@ -166,7 +168,7 @@ impl Serializer {
     }
 }
 
-async fn send_publish<V: Into<Vec<u8>>>(client: &mut AsyncClient, topic: String, payload: V) -> Result<(), ClientError> {
-    client.publish(topic, QoS::AtLeastOnce, false, payload).await?;
-    Ok(())
+async fn send_publish(client: AsyncClient, topic: String, payload: Bytes) -> Result<AsyncClient, ClientError> {
+    client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
+    Ok(client)
 }

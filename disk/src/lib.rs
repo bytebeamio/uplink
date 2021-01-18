@@ -129,7 +129,6 @@ impl Storage {
     /// is pending data in memory write buffer.
     /// Returns true if all the messages are caught up
     pub fn reload_on_eof(&mut self) -> io::Result<bool> {
-        println!("{:?}", self.current_read_file.has_remaining());
         // Don't reload if there is data in current read file
         if self.current_read_file.has_remaining() {
             return Ok(false);

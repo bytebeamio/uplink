@@ -911,6 +911,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-channel",
+ "bytes 1.0.0",
  "disk",
  "log",
  "pretty_env_logger",
