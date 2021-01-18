@@ -1,6 +1,7 @@
 use crate::base::{Config, Package};
 
 use async_channel::{Receiver, RecvError};
+use bytes::Bytes;
 use disk::Storage;
 use rumqttc::*;
 use std::io;
@@ -85,12 +86,20 @@ impl Serializer {
 
         let max_packet_size = self.config.max_packet_size;
         let storage = &mut self.storage;
-        let client = &mut self.client;
+        let client = self.client.clone();
 
         // Done reading all the pending files
         if storage.reload_on_eof().unwrap() {
             return Ok(Status::Normal);
         }
+
+        let publish = match read(storage.reader(), max_packet_size).map_err(|e| Error::Mqtt(e))? {
+            Packet::Publish(publish) => publish,
+            packet => unreachable!("{:?}", packet),
+        };
+
+        let send = send_publish(client, publish.topic, publish.payload);
+        tokio::pin!(send);
 
         loop {
             select! {
@@ -105,24 +114,20 @@ impl Serializer {
                       publish.write(&mut storage.writer()).map_err(|e| Error::Mqtt(e))?;
                       storage.flush_on_overflow()?;
                 }
-                o = async {
-                    match read(storage.reader(), max_packet_size).map_err(|e| Error::Mqtt(e))? {
-                        Packet::Publish(publish) => {
-                            let topic = publish.topic;
-                            let payload = publish.payload;
-                            client.publish(topic, QoS::AtLeastOnce, false, &payload[..]).await?;
-                        }
-                        packet => unreachable!("{:?}", packet),
-                    }
+                o = &mut send => {
+                    let client = o?;
 
-                    Ok::<(), Error>(())
-                } => {
                     // Done reading all the pending files
-                    if storage.reload_on_eof().unwrap() {
+                    if storage.reload_on_eof()? {
                         return Ok(Status::Normal);
                     }
 
-                    o?;
+                    let publish = match read(storage.reader(), max_packet_size).map_err(|e| Error::Mqtt(e))? {
+                        Packet::Publish(publish) => publish,
+                        packet => unreachable!("{:?}", packet),
+                    };
+
+                    send.set(send_publish(client, publish.topic, publish.payload));
                 }
             }
         }
@@ -161,4 +166,9 @@ impl Serializer {
             status = next_status;
         }
     }
+}
+
+async fn send_publish(client: AsyncClient, topic: String, payload: Bytes) -> Result<AsyncClient, ClientError> {
+    client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
+    Ok(client)
 }

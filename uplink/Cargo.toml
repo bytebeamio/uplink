@@ -12,6 +12,7 @@ tokio-stream = "0.1"
 rumqttc = { path = "../../rumqtt/rumqttc" }
 async-channel = "1.5"
 # rumqttc = "0.4"
+bytes = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 anyhow = "1"
