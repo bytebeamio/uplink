@@ -136,7 +136,7 @@ version = "0.1.0"
 dependencies = [
  "bytes 1.0.0",
  "log",
- "mqttbytes 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mqttbytes 0.1.0",
  "pretty_env_logger",
  "rand 0.7.3",
  "seahash",
@@ -321,15 +321,17 @@ dependencies = [
 [[package]]
 name = "mqttbytes"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9b7801639a5398353b9acf0764907d6571ca92e6b7a3662013b03861789449c"
 dependencies = [
  "bytes 1.0.0",
 ]
 
 [[package]]
 name = "mqttbytes"
-version = "0.1.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9b7801639a5398353b9acf0764907d6571ca92e6b7a3662013b03861789449c"
+checksum = "80d411eb33f1496153262103cd18ec3ea6c33bc0d2156a7dcc8d6db0b58181da"
 dependencies = [
  "bytes 1.0.0",
 ]
@@ -588,13 +590,15 @@ dependencies = [
 
 [[package]]
 name = "rumqttc"
-version = "0.4.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de758d1b983dc386aa083ab91e8c774415364fe236a2808fdf95d5d54c7e5e93"
 dependencies = [
  "async-channel",
  "bytes 1.0.0",
  "http",
  "log",
- "mqttbytes 0.1.0",
+ "mqttbytes 0.2.1",
  "pollster",
  "thiserror",
  "tokio",
