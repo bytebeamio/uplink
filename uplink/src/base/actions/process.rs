@@ -1,15 +1,15 @@
-use tokio::io::{ AsyncBufReadExt, BufReader };
-use tokio::process::{ Command, ChildStdout};
-use tokio::sync::mpsc::Sender;
-use tokio::sync::mpsc::error::SendError;
-use tokio::time;
-use derive_more::From;
+use async_channel::{SendError, Sender};
+use thiserror::Error;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{Child, Command};
+use tokio::{pin, select, task, time};
 
 use super::{ActionResponse, Package};
 
-use std::sync::{Arc, Mutex};
+use crate::base::Bucket;
 use std::io;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Process abstracts functions to spawn process and handle their output
@@ -17,63 +17,76 @@ use std::time::Duration;
 /// is in progress.
 /// It sends result and errors to the broker over collector_tx
 pub struct Process {
+    // buffer to send status messages to cloud
+    status_bucket: Bucket<ActionResponse>,
     // we use this flag to ignore new process spawn while previous process is in progress
     last_process_done: Arc<Mutex<bool>>,
-    // used to send errors and process status to cloud
-    collector_tx:      Sender<Box<dyn Package>>,
 }
 
-#[derive(Debug, From)]
+#[derive(Error, Debug)]
 pub enum Error {
-    Io(io::Error),
-    Json(serde_json::Error),
-    Send(SendError<Box<dyn Package>>),
-    Busy
+    #[error("IO Error {0}")]
+    Io(#[from] io::Error),
+    #[error("Json error {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("Send error {0}")]
+    Send(#[from] SendError<Box<dyn Package>>),
+    #[error("Busy with previous action")]
+    Busy,
+    #[error("No stdout in spawned action")]
+    NoStdout,
 }
 
 impl Process {
     pub fn new(collector_tx: Sender<Box<dyn Package>>) -> Process {
-        Process { last_process_done: Arc::new(Mutex::new(true)), collector_tx }
+        let status_bucket = Bucket::new(collector_tx, "action_status", 1);
+        Process { status_bucket, last_process_done: Arc::new(Mutex::new(true)) }
     }
 
-    pub async fn execute<S: Into<String>>(&mut self, id: S, command: S, payload: S) -> Result<(), Error> {
-        let command = String::from("tools/") + &command.into();
-
-        // check if last process is in progress
-        if *self.last_process_done.lock().unwrap() == false {
-            return Err(Error::Busy);
-        }
-            
+    /// Run a process of specified command
+    pub async fn run(&mut self, id: String, command: String, payload: String) -> Result<Child, Error> {
         *self.last_process_done.lock().unwrap() = false;
-        let mut cmd = Command::new(command);
-        cmd.arg(id.into()).arg(payload.into()).kill_on_drop(true).stdout(Stdio::piped());
 
-        let collector_tx = self.collector_tx.clone();
-        let last_process_done = self.last_process_done.clone();
-        let mut child = match cmd.spawn() {
-            Ok(child) => child,
+        let mut cmd = Command::new(command);
+        cmd.arg(id).arg(payload).kill_on_drop(true).stdout(Stdio::piped());
+
+        match cmd.spawn() {
+            Ok(child) => Ok(child),
             Err(e) => {
                 *self.last_process_done.lock().unwrap() = true;
-                return Err(e.into())
+                return Err(e.into());
             }
-        };
+        }
+    }
 
-        // spawn a process and capture its stdout without blocking the `execute` method
-        tokio::spawn(async move {
-            let stdout = child.stdout.take().expect("child did not have a handle to stdout");
+    /// Capture stdout of the running process in a spawned task
+    pub async fn spawn_and_capture_stdout(&mut self, mut child: Child) -> Result<(), Error> {
+        let stdout = child.stdout.take().ok_or(Error::NoStdout)?;
+        let mut stdout = BufReader::new(stdout).lines();
 
-            // wait for spawned process result without blocking
-            tokio::spawn(async {
-                let status = time::timeout(Duration::from_secs(120), async {
-                    let status = child.await?;
-                    Ok::<_, io::Error>(status)
-                }).await;
+        let mut status_bucket = self.status_bucket.clone();
+        let last_process_done = self.last_process_done.clone();
 
-                debug!("child status was: {:?}", status);
-            });
+        task::spawn(async move {
+            let timeout = time::sleep(Duration::from_secs(10));
+            pin!(timeout);
 
-            if let Err(e) = capture_stdout(stdout, collector_tx).await {
-                error!("Failed to capture stdout. Error = {:?}", e);
+            loop {
+                select! {
+                     Ok(Some(line)) = stdout.next_line() => {
+                        let status: ActionResponse = match serde_json::from_str(&line) {
+                            Ok(status) => status,
+                            Err(e) => ActionResponse::failure("dummy", e.to_string()),
+                        };
+
+                        debug!("Action status: {:?}", status);
+                        if let Err(e) = status_bucket.fill(status).await {
+                            error!("Failed to send child process status. Error = {:?}", e);
+                        }
+                     }
+                     status = child.wait() => info!("Action done!! Status = {:?}", status),
+                     _ = &mut timeout => break
+                }
             }
 
             *last_process_done.lock().unwrap() = true;
@@ -82,16 +95,18 @@ impl Process {
         Ok(())
     }
 
-}
+    pub async fn execute<S: Into<String>>(&mut self, id: S, command: S, payload: S) -> Result<(), Error> {
+        let command = String::from("tools/") + &command.into();
 
-async fn capture_stdout(stdout: ChildStdout, mut collector_tx: Sender<Box<dyn Package>>) -> Result<(), Error>  {
-    // stream the stdout of spawned process to capture its progress
-    let mut stdout = BufReader::new(stdout).lines();
-    while let Some(line) = stdout.next_line().await.unwrap() {
-        let status: ActionResponse = serde_json::from_str(&line)?;
-        warn!("Acion status: {:?}", status);
-        collector_tx.send(Box::new(status)).await?;
+        // Check if last process is in progress
+        if *self.last_process_done.lock().unwrap() == false {
+            return Err(Error::Busy);
+        }
+
+        // Spawn the action and capture its stdout
+        let child = self.run(id.into(), command, payload.into()).await?;
+        self.spawn_and_capture_stdout(child).await?;
+
+        Ok(())
     }
-
-    Ok(())
 }

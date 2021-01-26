@@ -1,15 +1,8 @@
-Setup CAN interface on ubuntu
+Setup and run
 --------------
 
-https://stackoverflow.com/questions/33574256/socket-can-virtual-bus
-
 ```
-ip link add dev vcan0 type vcan
-ip link set up vcan0
-```
-
-```
-RUST_LOG=debug cargo run -- -a certs/ -c config/uplink.toml -i bike-1
+RUST_LOG=uplink=debug cargo run -- -a certs/ -c config/uplink.toml -i 1
 ```
 
 Build for Beagle

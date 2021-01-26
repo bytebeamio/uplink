@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"strings"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
@@ -20,6 +21,7 @@ type Action struct {
 
 func NewAction(id, kind, command, payload string) *Action {
 	action := Action{
+		ID:      id,
 		Kind:    kind,
 		Command: command,
 		Payload: payload,
@@ -35,7 +37,10 @@ var f mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 func main() {
 	reader := bufio.NewReader(os.Stdin)
 
-	opts := mqtt.NewClientOptions().AddBroker("tcp://localhost:1883")
+	broker := "tcp://139.180.134.6:1883"
+	// broker := "tcp://localhost:1883"
+
+	opts := mqtt.NewClientOptions().AddBroker(broker)
 	opts.SetClientID("actions")
 	opts.SetDefaultPublishHandler(f)
 
@@ -57,9 +62,11 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
-			token := client.Publish("/topics/devices/1/actions", 1, false, string(actionMsg))
+			token := client.Publish("/devices/1/actions", 1, false, string(actionMsg))
 			token.Wait()
 		}
+
+		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -85,13 +92,13 @@ func createAction(name string) *Action {
 		payload := `{"args": ["simulator"]}`
 		action := NewAction(id, kind, command, payload)
 		return action
-	case "stop_collector_channel":
+	case "stop_collector_stream":
 		kind := "control"
 		command := name
 		payload := `{"args": ["simulator", "gps"]}`
 		action := NewAction(id, kind, command, payload)
 		return action
-	case "start_collector_channel":
+	case "start_collector_strea":
 		kind := "control"
 		command := name
 		payload := `{"args": ["simulator", "gps"]}`

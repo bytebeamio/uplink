@@ -1,126 +1,142 @@
 use super::{Control, Package};
-use derive_more::From;
+use async_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
-use tokio::stream::StreamExt;
-use tokio::sync::mpsc::{Sender, Receiver};
+use thiserror::Error;
 
-use std::time::{UNIX_EPOCH, SystemTime, Duration};
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-mod process;
 pub mod controller;
+mod process;
 
+use crate::base::{Bucket, Buffer};
 pub use controller::Controller;
+use tokio::time::Duration;
 
-#[derive(Debug, From)]
+#[derive(Error, Debug)]
 pub enum Error {
-    Serde(serde_json::Error),
-    Stream(rumq_client::EventLoopError),
-    Process(process::Error),
-    Controller(controller::Error)
+    #[error("Serde error {0}")]
+    Serde(#[from] serde_json::Error),
+    #[error("Process error {0}")]
+    Process(#[from] process::Error),
+    #[error("Controller error {0}")]
+    Controller(#[from] controller::Error),
+    #[error("Invalid action")]
+    InvalidActionKind(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Action {
     // action id
-    pub id:      String,
+    pub id: String,
     // control or process
-    kind:    String,
+    kind: String,
     // action name
-    name:    String,
+    name: String,
     // action payload. json. can be args/payload. depends on the invoked command
     payload: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
-    id:       String,
+    id: String,
     // timestamp
     timestamp: u128,
     // running, failed
-    state:    String,
+    state: String,
     // progress percentage for processes
     progress: u8,
     // list of error
-    errors:   Vec<String>,
+    errors: Vec<String>,
 }
 
 impl ActionResponse {
-    pub fn new(id: &str, state: &str) -> Self {
-        let timestamp = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(t) => t.as_millis(),
-            Err(e) => {
-                error!("Time error = {:?}", e);
-                0
-            }
-        };
+    pub fn new(id: &str) -> Self {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
 
-        let status = ActionResponse { id: id.to_owned(), timestamp, state: state.to_owned(), progress: 0, errors: Vec::new() };
-        status
+        ActionResponse {
+            id: id.to_owned(),
+            timestamp: timestamp.as_millis(),
+            state: "Running".to_owned(),
+            progress: 0,
+            errors: vec![],
+        }
     }
 
-    pub fn add_error(&mut self, error: String) {
-        self.errors.push(error);
+    pub fn success(id: &str) -> ActionResponse {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        ActionResponse {
+            id: id.to_owned(),
+            timestamp: timestamp.as_millis(),
+            state: "Completed".to_owned(),
+            progress: 100,
+            errors: vec![],
+        }
+    }
+
+    pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        ActionResponse {
+            id: id.to_owned(),
+            timestamp: timestamp.as_millis(),
+            state: "Failed".to_owned(),
+            progress: 100,
+            errors: vec![error.into()],
+        }
     }
 }
 
 pub struct Actions {
+    status_bucket: Bucket<ActionResponse>,
     process: process::Process,
     controller: controller::Controller,
-    collector_tx: Sender<Box<dyn Package>>,
-    actions_rx: Option<Receiver<Action>>
+    actions_rx: Option<Receiver<Action>>,
 }
-
 
 pub async fn new(
     collector_tx: Sender<Box<dyn Package>>,
     controllers: HashMap<String, Sender<Control>>,
-    actions_rx: Receiver<Action>) -> Actions {
-
+    actions_rx: Receiver<Action>,
+) -> Actions {
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
-
-
-    Actions {
-        process,
-        controller,
-        collector_tx,
-        actions_rx: Some(actions_rx)
-    }
+    let status_bucket = Bucket::new(collector_tx, "action_status", 1);
+    Actions { status_bucket, process, controller, actions_rx: Some(actions_rx) }
 }
 
 impl Actions {
     pub async fn start(&mut self) {
-        let mut notification_stream = self.actions_rx.take().unwrap();
+        let action_stream = self.actions_rx.take().unwrap();
 
-        // start the eventloop
+        // start receiving and processing actions
         loop {
-            while let Some(action) = notification_stream.next().await {
-                debug!("Action = {:?}", action);
-                let action_id = action.id.clone();
-                let action_name = action.name.clone();
-                let error = match self.handle(action).await {
-                    Ok(_) => continue,
-                    Err(e) => e
-                };
+            let action = match action_stream.recv().await {
+                Ok(v) => v,
+                Err(e) => {
+                    error!("Action stream receiver error = {:?}", e);
+                    break;
+                }
+            };
 
-                self.forward_action_error(&action_id, &action_name, error).await;
-            }
+            debug!("Action = {:?}", action);
 
-            tokio::time::delay_for(Duration::from_secs(1)).await;
+            let action_id = action.id.clone();
+            let action_name = action.name.clone();
+            let error = match self.handle(action).await {
+                Ok(_) => continue,
+                Err(e) => e,
+            };
+
+            self.forward_action_error(&action_id, &action_name, error).await;
         }
     }
 
-
     async fn handle(&mut self, action: Action) -> Result<(), Error> {
-        debug!("Action = {:?}", action);
-
         match action.kind.as_ref() {
             "control" => {
                 let command = action.name.clone();
-                let payload = action.payload.clone();
                 let id = action.id;
-                self.controller.execute(&id, command, payload)?;
+                self.controller.execute(&id, command).await?;
             }
             "process" => {
                 let command = action.name.clone();
@@ -129,29 +145,28 @@ impl Actions {
 
                 self.process.execute(id.clone(), command.clone(), payload).await?;
             }
-            _ => unimplemented!(),
+            v => return Err(Error::InvalidActionKind(v.to_owned())),
         }
 
         Ok(())
     }
 
-    async fn forward_action_error(&mut self, id: &str, action: &str, error:Error) {
+    async fn forward_action_error(&mut self, id: &str, action: &str, error: Error) {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
-        let mut status = ActionResponse::new(id, "Failed");
-        status.add_error(format!("{:?}", error));
-        if let Err(e) = self.collector_tx.send(Box::new(status)).await {
+        let status = ActionResponse::failure(id, error.to_string());
+
+        if let Err(e) = self.status_bucket.fill(status).await {
             error!("Failed to send status. Error = {:?}", e);
         }
     }
 }
 
-
-impl Package for ActionResponse {
-    fn channel(&self) -> String {
+impl Package for Buffer<ActionResponse> {
+    fn stream(&self) -> String {
         return "action_status".to_owned();
     }
 
     fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self).unwrap()
+        serde_json::to_vec(&self.buffer).unwrap()
     }
 }

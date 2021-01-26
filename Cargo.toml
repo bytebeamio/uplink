@@ -2,5 +2,5 @@
 
 members = [
     "uplink",
-    "persistentstream"
+    "disk"
 ]
