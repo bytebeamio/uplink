@@ -154,6 +154,7 @@ impl Bridge {
 // TODO which cloud will double deserialize (Batch 1st and messages next)
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
+    #[serde(skip_serializing)]
     stream: String,
     #[serde(flatten)]
     payload: Value,
@@ -163,6 +164,7 @@ impl Package for Buffer<Payload> {
     fn stream(&self) -> String {
         return self.stream.clone();
     }
+
     fn serialize(&self) -> Vec<u8> {
         serde_json::to_vec(&self.buffer).unwrap()
     }
