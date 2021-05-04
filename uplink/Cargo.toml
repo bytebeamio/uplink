@@ -1,6 +1,6 @@
 [package]
 name = "uplink"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
 
