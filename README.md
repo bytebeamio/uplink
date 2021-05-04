@@ -2,7 +2,7 @@ Setup and run
 --------------
 
 ```
-RUST_LOG=uplink=debug cargo run -- -a certs/ -c config/uplink.toml -i 1
+cargo run -- -a certs/ -c config/uplink.toml -i 1 -vv
 ```
 
 Build for Beagle

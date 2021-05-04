@@ -97,7 +97,7 @@ fn mqttoptions(config: &Config) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
     let mut mqttoptions = MqttOptions::new(&config.device_id, &config.broker, config.port);
     mqttoptions.set_max_packet_size(config.max_packet_size, config.max_packet_size);
-    mqttoptions.set_keep_alive(120);
+    mqttoptions.set_keep_alive(60);
     mqttoptions
 }
 

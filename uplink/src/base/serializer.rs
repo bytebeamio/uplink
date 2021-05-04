@@ -19,14 +19,13 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
     Client(#[from] ClientError),
-    #[error("Mqtt serialization error")]
-    Mqtt(rumqttc::Error),
 }
 
 enum Status {
     Normal,
     SlowEventloop(Publish),
     EventLoopReady,
+    EventLoopCrash(Publish),
 }
 
 pub struct Serializer {
@@ -46,6 +45,36 @@ impl Serializer {
         Ok(Serializer { config, collector_rx, client, storage })
     }
 
+    async fn crash(&mut self, mut publish: Publish) -> Result<Status, Error> {
+        // Write failed publish to disk first
+        publish.pkid = 1;
+
+        loop {
+            let data = self.collector_rx.recv().await?;
+
+            let stream = &data.stream();
+            let topic = self.config.streams.get(stream).unwrap().topic.clone();
+            let payload = data.serialize();
+            if payload.is_empty() {
+                warn!("Empty payload. Stream = {}", stream);
+                continue
+            }
+
+            let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
+            publish.pkid = 1;
+
+            if let Err(e) = publish.write(&mut self.storage.writer()) {
+                error!("Failed to fill write buffer during bad network. Error = {:?}", e);
+                continue
+            }
+
+            if let Err(e) = self.storage.flush_on_overflow() {
+                error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
+                continue
+            }
+        }
+    }
+
     /// Write new data to disk until back pressure due to slow n/w is resolved
     async fn disk(&mut self, publish: Publish) -> Result<Status, Error> {
         info!("Switching to slow eventloop mode!!");
@@ -62,11 +91,23 @@ impl Serializer {
                       let stream = &data.stream();
                       let topic = self.config.streams.get(stream).unwrap().topic.clone();
                       let payload = data.serialize();
+                      if payload.is_empty() {
+                          warn!("Empty payload. Stream = {}", stream);
+                          continue
+                      }
 
                       let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
-                      publish.write(&mut self.storage.writer()).map_err(|e| Error::Mqtt(e))?;
-                      self.storage.flush_on_overflow()?;
+
+                      if let Err(e) = publish.write(&mut self.storage.writer()) {
+                          error!("Failed to fill write buffer during bad network. Error = {:?}", e);
+                          continue
+                      }
+
+                      if let Err(e) = self.storage.flush_on_overflow() {
+                          error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
+                          continue
+                      }
                 }
                 o = &mut publish => {
                     o?;
@@ -93,9 +134,13 @@ impl Serializer {
             return Ok(Status::Normal);
         }
 
-        let publish = match read(storage.reader(), max_packet_size).map_err(|e| Error::Mqtt(e))? {
-            Packet::Publish(publish) => publish,
-            packet => unreachable!("{:?}", packet),
+        let publish = match read(storage.reader(), max_packet_size) {
+            Ok(Packet::Publish(publish)) => publish,
+            Ok(packet) => unreachable!("{:?}", packet),
+            Err(e) => {
+                error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+                return Ok(Status::Normal)
+            }
         };
 
         let send = send_publish(client, publish.topic, publish.payload);
@@ -111,21 +156,48 @@ impl Serializer {
 
                       let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
-                      publish.write(&mut storage.writer()).map_err(|e| Error::Mqtt(e))?;
-                      storage.flush_on_overflow()?;
+
+                      if let Err(e) = publish.write(&mut storage.writer()) {
+                          error!("Failed to fill write buffer during catchup. Error = {:?}", e);
+                          continue
+                      }
+                      
+                      if let Err(e) = storage.flush_on_overflow() {
+                          error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
+                          continue
+                      }
                 }
                 o = &mut send => {
-                    let client = o?;
+                    // Send failure implies eventloop crash. Switch state to 
+                    // indefinitely write to disk to not loose data
+                    let client = match o {
+                        Ok(c) => c,
+                        Err(ClientError::Request(request)) => match request.into_inner() {
+                            Request::Publish(publish) => return Ok(Status::EventLoopCrash(publish)),
+                            request => unreachable!("{:?}", request),
+                        },
+                        Err(e) => return Err(e.into()),
+                    };
 
-                    // Done reading all the pending files
-                    if storage.reload_on_eof()? {
-                        return Ok(Status::Normal);
+                    match storage.reload_on_eof() {
+                        // Done reading all pending files
+                        Ok(true) => return Ok(Status::Normal),
+                        Ok(false) => {},
+                        Err(e) => {
+                            error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
+                            return Ok(Status::Normal)
+                        }
                     }
 
-                    let publish = match read(storage.reader(), max_packet_size).map_err(|e| Error::Mqtt(e))? {
-                        Packet::Publish(publish) => publish,
-                        packet => unreachable!("{:?}", packet),
+                    let publish = match read(storage.reader(), max_packet_size) {
+                        Ok(Packet::Publish(publish)) => publish,
+                        Ok(packet) => unreachable!("{:?}", packet),
+                        Err(e) => {
+                            error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+                            return Ok(Status::Normal)
+                        }
                     };
+
 
                     send.set(send_publish(client, publish.topic, publish.payload));
                 }
@@ -161,6 +233,7 @@ impl Serializer {
                 Status::Normal => self.normal().await?,
                 Status::SlowEventloop(publish) => self.disk(publish).await?,
                 Status::EventLoopReady => self.catchup().await?,
+                Status::EventLoopCrash(publish) => self.crash(publish).await?,
             };
 
             status = next_status;

@@ -80,7 +80,7 @@ impl Storage {
 
     /// Flushes what ever is in current write buffer into a new file on the disk
     #[inline]
-    pub fn flush(&mut self) -> io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
         let (path, mut next_file) = self.open_next_write_file()?;
         info!("Flushing data to disk!! {:?}", path);
         next_file.write_all(&self.current_write_file[..])?;
@@ -101,7 +101,8 @@ impl Storage {
 
     /// Reloads next buffer even if there is pending data in current buffer
     pub fn reload(&mut self) -> io::Result<bool> {
-        // Swap read buffer with write buffer to read data in inmemory write buffer
+        // Swap read buffer with write buffer to read data in inmemory write
+        // buffer when all the backlog disk files are done
         if self.backlog_file_ids.len() == 0 {
             mem::swap(&mut self.current_read_file, &mut self.current_write_file);
 
