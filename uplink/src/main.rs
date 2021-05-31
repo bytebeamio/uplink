@@ -52,7 +52,6 @@ fn initalize_config(commandline: CommandLine) -> Result<Config, Error> {
     let device_id = commandline.device_id.trim();
 
     let mut config: Config = toml::from_str(&config)?;
-    dbg!(&config);
     config.ca = Some(commandline.certs_dir.join(device_id).join("roots.pem"));
     config.key = Some(commandline.certs_dir.join(device_id).join("rsa_private.pem"));
     config.device_id = str::replace(&config.device_id, "{device_id}", device_id);
@@ -76,8 +75,10 @@ fn initialize_logging(commandline: &CommandLine) {
     let mut config = simplelog::ConfigBuilder::new();
     config
         .set_location_level(LevelFilter::Off)
-        .set_target_level(LevelFilter::Debug)
+        .set_target_level(LevelFilter::Error)
+        .set_thread_level(LevelFilter::Error)
         .set_level_padding(LevelPadding::Right);
+
 
     if commandline.modules.is_empty() {
         config

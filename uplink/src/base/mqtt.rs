@@ -98,7 +98,6 @@ fn mqttoptions(config: &Config) -> MqttOptions {
     let mut mqttoptions = MqttOptions::new(&config.device_id, &config.broker, config.port);
     mqttoptions.set_max_packet_size(config.max_packet_size, config.max_packet_size);
     mqttoptions.set_keep_alive(60);
-    mqttoptions.set_collision_safety(true);
     mqttoptions.set_inflight(config.max_inflight);
     mqttoptions
 }

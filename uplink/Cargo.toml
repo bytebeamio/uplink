@@ -1,6 +1,6 @@
 [package]
 name = "uplink"
-version = "1.0.1"
+version = "1.0.2"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
 
@@ -10,7 +10,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.6", features = ["codec"] }
 tokio-stream = "0.1"
 async-channel = "1.5"
-rumqttc = "0.5"
+rumqttc = "0.7"
 # rumqttc = { path = "../../rumqtt/rumqttc" }
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
