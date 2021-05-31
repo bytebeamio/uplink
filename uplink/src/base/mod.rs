@@ -36,6 +36,7 @@ pub struct Config {
     pub port: u16,
     pub bridge_port: u16,
     pub max_packet_size: usize,
+    pub max_inflight: u16,
     pub actions: Vec<String>,
     pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
