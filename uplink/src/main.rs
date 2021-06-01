@@ -4,21 +4,21 @@ extern crate log;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::thread;
 
 use anyhow::{Context, Error};
 use async_channel::{bounded, Sender};
+use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
-use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
-
 
 mod base;
 mod collector;
 
+use crate::base::actions::{self, tunshell::{TunshellSession, Relay}};
 use crate::base::mqtt::Mqtt;
 use crate::base::serializer::Serializer;
 use crate::collector::bridge::Bridge;
-use base::actions;
 use base::Config;
 use disk::Storage;
 use std::sync::Arc;
@@ -31,16 +31,16 @@ pub struct CommandLine {
     device_id: String,
     /// config file
     #[structopt(short = "c", help = "Config file")]
-    config: String,
+    config:    String,
     /// directory with certificates
     #[structopt(short = "a", help = "certs")]
     certs_dir: PathBuf,
     /// log level (v: info, vv: debug, vvv: trace)
     #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
-    verbose: u8,
+    verbose:   u8,
     /// list of modules to log
     #[structopt(short = "m", long = "modules")]
-    modules: Vec<String>,
+    modules:   Vec<String>,
 }
 
 /// Reads config file to generate config struct and replaces places holders
@@ -79,11 +79,8 @@ fn initialize_logging(commandline: &CommandLine) {
         .set_thread_level(LevelFilter::Error)
         .set_level_padding(LevelPadding::Right);
 
-
     if commandline.modules.is_empty() {
-        config
-            .add_filter_allow_str("uplink")
-            .add_filter_allow_str("disk");
+        config.add_filter_allow_str("uplink").add_filter_allow_str("disk");
     } else {
         for module in commandline.modules.iter() {
             config.add_filter_allow(format!("{}", module));
@@ -94,7 +91,6 @@ fn initialize_logging(commandline: &CommandLine) {
     CombinedLogger::init(vec![loggers]).unwrap();
 }
 
-
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
@@ -104,6 +100,7 @@ async fn main() -> Result<(), Error> {
     let (collector_tx, collector_rx) = bounded(10);
     let (native_actions_tx, native_actions_rx) = bounded(10);
     let (bridge_actions_tx, bridge_actions_rx) = bounded(10);
+    let (tunshell_keys_tx, tunshell_keys_rx) = bounded(10);
 
     let storage = Storage::new(&config.persistence.path, config.persistence.max_file_size, config.persistence.max_file_count);
     let storage = storage.with_context(|| format!("Storage = {:?}", config.persistence))?;
@@ -128,8 +125,18 @@ async fn main() -> Result<(), Error> {
         }
     });
 
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let tunshell_session = TunshellSession::new(
+            Relay::default(),
+            true,
+            tunshell_keys_rx,
+        );
+        rt.spawn(tunshell_session.start());
+    });
+
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    let mut actions = actions::new(collector_tx, controllers, native_actions_rx).await;
+    let mut actions = actions::new(collector_tx, controllers, native_actions_rx, tunshell_keys_tx).await;
     actions.start().await;
     Ok(())
 }
