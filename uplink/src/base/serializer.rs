@@ -57,7 +57,7 @@ impl Serializer {
             let payload = data.serialize();
             if payload.is_empty() {
                 warn!("Empty payload. Stream = {}", stream);
-                continue
+                continue;
             }
 
             let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
@@ -65,12 +65,12 @@ impl Serializer {
 
             if let Err(e) = publish.write(&mut self.storage.writer()) {
                 error!("Failed to fill write buffer during bad network. Error = {:?}", e);
-                continue
+                continue;
             }
 
             if let Err(e) = self.storage.flush_on_overflow() {
                 error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
-                continue
+                continue;
             }
         }
     }
@@ -89,7 +89,14 @@ impl Serializer {
                 data = self.collector_rx.recv() => {
                       let data = data?;
                       let stream = &data.stream();
-                      let topic = self.config.streams.get(stream).unwrap().topic.clone();
+                      let topic = match self.config.streams.get(stream) {
+                          Some(s) => s.topic.clone(),
+                          None => {
+                              error!("Unconfigured stream while writing to disk = {}", stream);
+                              continue
+                          }
+                      };
+
                       let payload = data.serialize();
                       if payload.is_empty() {
                           warn!("Empty payload. Stream = {}", stream);
@@ -139,7 +146,7 @@ impl Serializer {
             Ok(packet) => unreachable!("{:?}", packet),
             Err(e) => {
                 error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
-                return Ok(Status::Normal)
+                return Ok(Status::Normal);
             }
         };
 
@@ -151,7 +158,13 @@ impl Serializer {
                 data = self.collector_rx.recv() => {
                       let data = data?;
                       let stream = &data.stream();
-                      let topic = self.config.streams.get(stream).unwrap().topic.clone();
+                      let topic = match self.config.streams.get(stream) {
+                          Some(s) => s.topic.clone(),
+                          None => {
+                              error!("Unconfigured stream while catching up = {}", stream);
+                              continue
+                          }
+                      };
                       let payload = data.serialize();
 
                       let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
@@ -161,14 +174,14 @@ impl Serializer {
                           error!("Failed to fill write buffer during catchup. Error = {:?}", e);
                           continue
                       }
-                      
+
                       if let Err(e) = storage.flush_on_overflow() {
                           error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
                           continue
                       }
                 }
                 o = &mut send => {
-                    // Send failure implies eventloop crash. Switch state to 
+                    // Send failure implies eventloop crash. Switch state to
                     // indefinitely write to disk to not loose data
                     let client = match o {
                         Ok(c) => c,
@@ -211,9 +224,15 @@ impl Serializer {
         loop {
             let data = self.collector_rx.recv().await?;
             let stream = &data.stream();
-            let topic = self.config.streams.get(stream).unwrap().topic.clone();
-            let payload = data.serialize();
+            let topic = match self.config.streams.get(stream) {
+                Some(s) => s.topic.clone(),
+                None => {
+                    error!("Unconfigured stream = {}", stream);
+                    continue;
+                }
+            };
 
+            let payload = data.serialize();
             match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
                 Ok(_) => continue,
                 Err(ClientError::TryRequest(request)) => match request.into_inner() {

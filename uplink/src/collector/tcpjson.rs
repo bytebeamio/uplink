@@ -12,9 +12,9 @@ use std::io;
 
 use crate::base::actions::{Action, ActionResponse};
 use crate::base::{Bucket, Buffer, Config, Package, Partitions};
+use serde_json::Value;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
-use toml::Value;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -155,9 +155,9 @@ impl Bridge {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
     #[serde(skip_serializing)]
-    stream: String,
+    pub(crate) stream: String,
     #[serde(flatten)]
-    payload: Value,
+    pub(crate) payload: Value,
 }
 
 impl Package for Buffer<Payload> {
