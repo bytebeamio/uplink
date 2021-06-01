@@ -7,17 +7,16 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Error};
 use async_channel::{bounded, Sender};
+use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
-use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
-
 
 mod base;
 mod collector;
 
 use crate::base::mqtt::Mqtt;
 use crate::base::serializer::Serializer;
-use crate::collector::bridge::Bridge;
+use crate::collector::tcpjson::Bridge;
 use base::actions;
 use base::Config;
 use disk::Storage;
@@ -79,11 +78,8 @@ fn initialize_logging(commandline: &CommandLine) {
         .set_thread_level(LevelFilter::Error)
         .set_level_padding(LevelPadding::Right);
 
-
     if commandline.modules.is_empty() {
-        config
-            .add_filter_allow_str("uplink")
-            .add_filter_allow_str("disk");
+        config.add_filter_allow_str("uplink").add_filter_allow_str("disk");
     } else {
         for module in commandline.modules.iter() {
             config.add_filter_allow(format!("{}", module));
@@ -93,7 +89,6 @@ fn initialize_logging(commandline: &CommandLine) {
     let loggers = TermLogger::new(level, config.build(), TerminalMode::Mixed);
     CombinedLogger::init(vec![loggers]).unwrap();
 }
-
 
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
