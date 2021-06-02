@@ -125,12 +125,14 @@ async fn main() -> Result<(), Error> {
         }
     });
 
+    let tunshell_collector_tx = collector_tx.clone();
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let tunshell_session = TunshellSession::new(
             Relay::default(),
             true,
             tunshell_keys_rx,
+            tunshell_collector_tx,
         );
         rt.spawn(tunshell_session.start());
     });
