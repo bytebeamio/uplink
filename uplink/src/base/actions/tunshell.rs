@@ -47,13 +47,13 @@ impl TunshellSession {
     pub fn new(
         relay: Relay,
         echo_stdout: bool,
-        tunshell_keys_rx: Receiver<String>,
+        tunshell_rx: Receiver<String>,
         collector_tx: Sender<Box<dyn Package>>,
     ) -> Self {
         Self {
             relay,
             echo_stdout,
-            keys_rx: tunshell_keys_rx,
+            keys_rx: tunshell_rx,
             status_bucket: Bucket::new(collector_tx, "tunshell_status", 1),
             last_process_done: Arc::new(Mutex::new(true)),
         }
@@ -72,6 +72,7 @@ impl TunshellSession {
         )
     }
 
+    #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) -> Result<(), Error> {
         while let Ok(keys) = self.keys_rx.recv().await {
             if *self.last_process_done.lock().unwrap() == false {
