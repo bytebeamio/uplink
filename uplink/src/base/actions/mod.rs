@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod controller;
+pub mod tunshell;
 mod process;
 
 use crate::base::{Bucket, Buffer};
@@ -21,6 +22,8 @@ pub enum Error {
     Process(#[from] process::Error),
     #[error("Controller error {0}")]
     Controller(#[from] controller::Error),
+    #[error("Error sending keys to tunshell thread {0}")]
+    TunshellSendError(#[from] async_channel::SendError<String>),
     #[error("Invalid action")]
     InvalidActionKind(String),
 }
@@ -91,17 +94,19 @@ pub struct Actions {
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
+    tunshell_tx: Sender<String>
 }
 
 pub async fn new(
     collector_tx: Sender<Box<dyn Package>>,
     controllers: HashMap<String, Sender<Control>>,
     actions_rx: Receiver<Action>,
+    tunshell_tx: Sender<String>
 ) -> Actions {
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
     let status_bucket = Bucket::new(collector_tx, "action_status", 1);
-    Actions { status_bucket, process, controller, actions_rx: Some(actions_rx) }
+    Actions { status_bucket, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
 }
 
 impl Actions {
@@ -144,6 +149,9 @@ impl Actions {
                 let id = action.id;
 
                 self.process.execute(id.clone(), command.clone(), payload).await?;
+            }
+            "tunshell" => {
+                self.tunshell_tx.send(action.payload).await?;
             }
             v => return Err(Error::InvalidActionKind(v.to_owned())),
         }
