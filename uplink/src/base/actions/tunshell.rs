@@ -95,9 +95,9 @@ impl TunshellSession {
                 let send_status = match res {
                     Ok(status) => {
                         if status != 0 {
-                            status_tx.fill(ActionResponse::success("tunshell")).await
-                        } else {
                             status_tx.fill(ActionResponse::failure("tunshell", Error::NonZeroExit(status).to_string())).await
+                        } else {
+                            status_tx.fill(ActionResponse::success("tunshell")).await
                         }
                     }
                     Err(e) => status_tx.fill(ActionResponse::failure("tunshell", e.to_string())).await,
