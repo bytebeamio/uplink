@@ -15,7 +15,10 @@ use tokio::task;
 mod base;
 mod collector;
 
-use crate::base::actions::{self, tunshell::{TunshellSession, Relay}};
+use crate::base::actions::{
+    self,
+    tunshell::{Relay, TunshellSession},
+};
 use crate::base::mqtt::Mqtt;
 use crate::base::serializer::Serializer;
 use crate::collector::bridge::Bridge;
@@ -31,16 +34,16 @@ pub struct CommandLine {
     device_id: String,
     /// config file
     #[structopt(short = "c", help = "Config file")]
-    config:    String,
+    config: String,
     /// directory with certificates
     #[structopt(short = "a", help = "certs")]
     certs_dir: PathBuf,
     /// log level (v: info, vv: debug, vvv: trace)
     #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
-    verbose:   u8,
+    verbose: u8,
     /// list of modules to log
     #[structopt(short = "m", long = "modules")]
-    modules:   Vec<String>,
+    modules: Vec<String>,
 }
 
 /// Reads config file to generate config struct and replaces places holders
@@ -127,15 +130,8 @@ async fn main() -> Result<(), Error> {
 
     let tunshell_collector_tx = collector_tx.clone();
     thread::spawn(move || {
-        let tunshell_session = TunshellSession::new(
-            Relay::default(),
-            true,
-            tunshell_keys_rx,
-            tunshell_collector_tx,
-        );
-        if let Err(e) = tunshell_session.start() {
-            error!("Tunshell Error : {:?}", e);
-        }
+        let tunshell_session = TunshellSession::new(Relay::default(), true, tunshell_keys_rx, tunshell_collector_tx);
+        tunshell_session.start()
     });
 
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();

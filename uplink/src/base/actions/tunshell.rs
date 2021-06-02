@@ -12,44 +12,27 @@ use crate::base::{
 };
 
 pub struct Relay {
-    host:     String,
+    host: String,
     tls_port: u16,
-    ws_port:  u16,
+    ws_port: u16,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Keys {
-    session:    String,
+    session: String,
     encryption: String,
 }
 
 pub struct TunshellSession {
-    relay:             Relay,
-    echo_stdout:       bool,
-    keys_rx:           Receiver<String>,
-    status_bucket:     Bucket<ActionResponse>,
+    relay: Relay,
+    echo_stdout: bool,
+    keys_rx: Receiver<String>,
+    status_bucket: Bucket<ActionResponse>,
     last_process_done: Arc<Mutex<bool>>,
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("Serde error {0}")]
-    Serde(#[from] serde_json::Error),
-    #[error("Tunshell error {0}")]
-    Tunshell(#[from] anyhow::Error),
-    #[error("Already another tunshell session running")]
-    Busy,
-    #[error("Non-zero exit error {0}")]
-    NonZeroExit(u8),
-}
-
 impl TunshellSession {
-    pub fn new(
-        relay: Relay,
-        echo_stdout: bool,
-        tunshell_rx: Receiver<String>,
-        collector_tx: Sender<Box<dyn Package>>,
-    ) -> Self {
+    pub fn new(relay: Relay, echo_stdout: bool, tunshell_rx: Receiver<String>, collector_tx: Sender<Box<dyn Package>>) -> Self {
         Self {
             relay,
             echo_stdout,
@@ -73,30 +56,42 @@ impl TunshellSession {
     }
 
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(mut self) -> Result<(), Error> {
+    pub async fn start(mut self) {
         while let Ok(keys) = self.keys_rx.recv().await {
             if *self.last_process_done.lock().unwrap() == false {
-                if let Err(e) = self.status_bucket.fill(ActionResponse::failure("tunshell", Error::Busy.to_string())).await {
+                let status = ActionResponse::failure("tunshell", "busy".to_owned());
+                if let Err(e) = self.status_bucket.fill(status).await {
                     error!("Failed to send status, Error = {:?}", e);
                 };
+
                 continue;
             }
 
-            let keys = serde_json::from_str(&keys)?;
-            let mut client = Client::new(self.config(keys), HostShell::new().unwrap());
+            println!("{:?}", keys);
+            let keys = match serde_json::from_str(&keys) {
+                Ok(k) => k,
+                Err(e) => {
+                    error!("Failed to deserialize keys. Error = {:?}", e);
+                    let status = ActionResponse::failure("tunshell", "corruptkeys".to_owned());
+                    if let Err(e) = self.status_bucket.fill(status).await {
+                        error!("Failed to send status, Error = {:?}", e);
+                    };
 
+                    continue;
+                }
+            };
+
+            let mut client = Client::new(self.config(keys), HostShell::new().unwrap());
             let last_process_done = self.last_process_done.clone();
             let mut status_tx = self.status_bucket.clone();
 
             tokio::spawn(async move {
                 *last_process_done.lock().unwrap() = false;
-                let res = client.start_session().compat().await;
-                *last_process_done.lock().unwrap() = true;
 
-                let send_status = match res {
+                let send_status = match client.start_session().compat().await {
                     Ok(status) => {
                         if status != 0 {
-                            status_tx.fill(ActionResponse::failure("tunshell", Error::NonZeroExit(status).to_string())).await
+                            status_tx.fill(ActionResponse::failure("tunshell", status.to_string())).await
                         } else {
                             status_tx.fill(ActionResponse::success("tunshell")).await
                         }
@@ -107,9 +102,10 @@ impl TunshellSession {
                 if let Err(e) = send_status {
                     error!("Failed to send status. Error {:?}", e);
                 }
+
+                *last_process_done.lock().unwrap() = true;
             });
         }
-        Ok(())
     }
 }
 
