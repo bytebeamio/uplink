@@ -94,19 +94,19 @@ pub struct Actions {
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
-    tunshell_keys_tx: Sender<String>
+    tunshell_tx: Sender<String>
 }
 
 pub async fn new(
     collector_tx: Sender<Box<dyn Package>>,
     controllers: HashMap<String, Sender<Control>>,
     actions_rx: Receiver<Action>,
-    tunshell_keys_tx: Sender<String>
+    tunshell_tx: Sender<String>
 ) -> Actions {
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
     let status_bucket = Bucket::new(collector_tx, "action_status", 1);
-    Actions { status_bucket, process, controller, actions_rx: Some(actions_rx), tunshell_keys_tx }
+    Actions { status_bucket, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
 }
 
 impl Actions {
@@ -151,7 +151,7 @@ impl Actions {
                 self.process.execute(id.clone(), command.clone(), payload).await?;
             }
             "tunshell" => {
-                self.tunshell_keys_tx.send(action.payload).await?;
+                self.tunshell_tx.send(action.payload).await?;
             }
             v => return Err(Error::InvalidActionKind(v.to_owned())),
         }
