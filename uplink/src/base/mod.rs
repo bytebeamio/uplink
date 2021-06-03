@@ -57,6 +57,39 @@ pub enum Control {
     StartStream(String),
 }
 
+pub struct Stream<T> {
+    name: String,
+    last_sequence: u64,
+    last_timestamp: u64,
+    max_buffer_size: usize,
+    buffer: Buffer<T>,
+    tx: Sender<Box<dyn Package>>,
+}
+
+impl<T> Stream<T>
+where
+    T: Debug + Send + 'static,
+    Buffer<T>: Package,
+{
+    pub fn new(stream: String, max_buffer_size: usize, tx: Sender<Box<dyn Package>>) -> Stream<T> {
+        let buffer = Buffer { stream, buffer: vec![], anomalies: vec![], max_buffer_size };
+        Stream { name: "".to_string(), last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
+    }
+
+    pub async fn fill(&mut self, sequence: u64, timestamp: u64, data: T) -> Result<(), Error> {
+        self.buffer.buffer.push(data);
+
+        if self.buffer.buffer.len() >= self.max_buffer_size {
+            let buffer =
+                Buffer { stream: self.name.clone(), buffer: vec![], anomalies: vec![], max_buffer_size: self.max_buffer_size };
+            let buffer = mem::replace(&mut self.buffer, buffer);
+            self.tx.send(Box::new(buffer)).await?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Buffer is an abstraction of a collection that serializer receives.
 /// It also contains meta data to understand the type of data
 /// e.g stream to mqtt topic mapping
@@ -65,23 +98,21 @@ pub enum Control {
 pub struct Buffer<T> {
     pub stream: String,
     pub buffer: Vec<T>,
+    pub anomalies: Vec<String>,
     max_buffer_size: usize,
 }
 
 impl<T> Buffer<T> {
     pub fn new<S: Into<String>>(stream: S, max_buffer_size: usize) -> Buffer<T> {
-        Buffer { stream: stream.into(), buffer: Vec::new(), max_buffer_size }
+        Buffer { stream: stream.into(), buffer: vec![], anomalies: vec![], max_buffer_size }
     }
 
     pub fn fill(&mut self, data: T) -> Option<Buffer<T>> {
         self.buffer.push(data);
 
         if self.buffer.len() >= self.max_buffer_size {
-            let buffer = mem::replace(&mut self.buffer, Vec::new());
-            let stream = self.stream.clone();
-            let max_buffer_size = self.max_buffer_size;
-            let buffer = Buffer { stream, buffer, max_buffer_size };
-
+            let buffer = Buffer::new(self.stream.clone(), self.max_buffer_size);
+            let buffer = mem::replace(self, buffer);
             return Some(buffer);
         }
 
@@ -147,22 +178,15 @@ where
     }
 
     pub async fn fill(&mut self, stream: &str, data: T) -> Result<(), Error> {
-        let o = match self.collection.get_mut(stream) {
-            Some(buffer) => {
-                let v = buffer.fill(data);
-                debug!("Filling {} buffer. Count = {}", stream, buffer.buffer.len());
-                v
-            }
-            None => {
-                error!("Invalid stream = {:?}", stream);
-                None
-            }
-        };
-
-        if let Some(buffer) = o {
-            info!("Flushing {} buffer!! Count = {}", stream, buffer.max_buffer_size);
-            let buffer = Box::new(buffer);
-            self.tx.send(buffer).await?;
+        match self.collection.get_mut(stream) {
+            Some(buffer) => match buffer.fill(data) {
+                None => debug!("Filling {} buffer. Count = {}", stream, buffer.buffer.len()),
+                Some(v) => {
+                    info!("Flushing {} buffer. Count = {}", stream, buffer.max_buffer_size);
+                    self.tx.send(Box::new(v)).await?;
+                }
+            },
+            None => error!("Invalid stream = {:?}", stream),
         }
 
         Ok(())
