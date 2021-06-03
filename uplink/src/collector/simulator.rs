@@ -36,10 +36,11 @@ impl Simulator {
             gps_timestamp += 100;
             can_timestamp += 100;
 
-            let can = Payload { stream: "can".to_string(), payload: json!(Can::new(i, can_timestamp)) };
+            let can = Payload { stream: "can".to_string(), sequence: i, timestamp: can_timestamp, payload: json!(Can::new()) };
             self.partitions.fill("can", can).await.unwrap();
 
-            let payload = Payload { stream: "gps".to_string(), payload: json!(Gps::new(i, gps_timestamp)) };
+            let payload =
+                Payload { stream: "gps".to_string(), sequence: i, timestamp: gps_timestamp, payload: json!(Gps::new()) };
             self.partitions.fill("gps", payload).await.unwrap();
         }
     }
@@ -52,28 +53,24 @@ use tokio::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Gps {
-    timestamp: u64,
-    sequence: u32,
     lat: f64,
     lon: f64,
 }
 
 impl Gps {
-    pub fn new(sequence: u32, timestamp: u64) -> Gps {
+    pub fn new() -> Gps {
         let mut rng = rand::thread_rng();
-        Gps { timestamp, sequence, lat: rng.gen_range(40f64, 45f64), lon: rng.gen_range(95f64, 96f64) }
+        Gps { lat: rng.gen_range(40f64, 45f64), lon: rng.gen_range(95f64, 96f64) }
     }
 }
 
 #[derive(Debug, Serialize)]
 pub struct Can {
-    timestamp: u64,
-    sequence: u32,
     data: u64,
 }
 
 impl Can {
-    pub fn new(sequence: u32, timestamp: u64) -> Can {
-        Can { timestamp, sequence, data: 10 }
+    pub fn new() -> Can {
+        Can { data: 10 }
     }
 }

@@ -149,8 +149,9 @@ where
     pub async fn fill(&mut self, stream: &str, data: T) -> Result<(), Error> {
         let o = match self.collection.get_mut(stream) {
             Some(buffer) => {
+                let v = buffer.fill(data);
                 debug!("Filling {} buffer. Count = {}", stream, buffer.buffer.len());
-                buffer.fill(data)
+                v
             }
             None => {
                 error!("Invalid stream = {:?}", stream);

@@ -1,0 +1,4 @@
+{ "stream": "can", "sequence": 1, "timestamp": 12345, "data": 100 }
+{ "stream": "can", "sequence": 2, "timestamp": 12345, "data": 101 }
+{ "stream": "can", "sequence": 3, "timestamp": 12345, "data": 102 }
+{ "sequence": 4, "timestamp": 12345, "data": 103 }

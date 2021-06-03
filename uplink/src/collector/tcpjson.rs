@@ -156,6 +156,8 @@ impl Bridge {
 pub struct Payload {
     #[serde(skip_serializing)]
     pub(crate) stream: String,
+    pub(crate) sequence: u32,
+    pub(crate) timestamp: u64,
     #[serde(flatten)]
     pub(crate) payload: Value,
 }
