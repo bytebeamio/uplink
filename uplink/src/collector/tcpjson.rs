@@ -11,7 +11,7 @@ use tokio_util::codec::{LinesCodec, LinesCodecError};
 use std::io;
 
 use crate::base::actions::{Action, ActionResponse};
-use crate::base::{Bucket, Buffer, Config, Package, Partitions};
+use crate::base::{Buffer, Config, Package, Partitions, Stream};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
@@ -46,7 +46,7 @@ impl Bridge {
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
             let listener = TcpListener::bind(&addr).await?;
-            let mut status_bucket = Bucket::new(self.data_tx.clone(), "action_status", 1);
+            let mut status_stream = Stream::new("action_status", 1, self.data_tx.clone());
 
             let (stream, addr) = loop {
                 select! {
@@ -63,7 +63,7 @@ impl Bridge {
                         let action = action.unwrap();
                         error!("Bridge down!! Action ID = {}", action.id);
                         let status = ActionResponse::failure(&action.id, "Bridge down");
-                        if let Err(e) = status_bucket.fill(status).await {
+                        if let Err(e) = status_stream.fill(status).await {
                             error!("Failed to send busy status. Error = {:?}", e);
                         }
                     }
@@ -83,7 +83,7 @@ impl Bridge {
         let streams: Vec<(String, usize)> =
             streams.map(|(stream, config)| (stream.to_owned(), config.buf_size as usize)).collect();
         let mut bridge_partitions = Partitions::new(self.data_tx.clone(), streams.clone());
-        let mut status_buffer = Bucket::new(self.data_tx.clone(), "action_status", 1);
+        let mut status_stream = Stream::new("action_status", 1, self.data_tx.clone());
 
         let action_timeout = time::sleep(Duration::from_secs(10));
 
@@ -141,7 +141,7 @@ impl Bridge {
 
                     // Send failure response to cloud
                     let status = ActionResponse::failure(&action, "Action timed out");
-                    if let Err(e) = status_buffer.fill(status).await {
+                    if let Err(e) = status_stream.fill(status).await {
                         error!("Failed to fill. Error = {:?}", e);
                     }
                 }

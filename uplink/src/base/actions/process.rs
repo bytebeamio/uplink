@@ -6,7 +6,7 @@ use tokio::{pin, select, task, time};
 
 use super::{ActionResponse, Package};
 
-use crate::base::Bucket;
+use crate::base::Stream;
 use std::io;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -18,7 +18,7 @@ use std::time::Duration;
 /// It sends result and errors to the broker over collector_tx
 pub struct Process {
     // buffer to send status messages to cloud
-    status_bucket: Bucket<ActionResponse>,
+    status_bucket: Stream<ActionResponse>,
     // we use this flag to ignore new process spawn while previous process is in progress
     last_process_done: Arc<Mutex<bool>>,
 }
@@ -39,7 +39,7 @@ pub enum Error {
 
 impl Process {
     pub fn new(collector_tx: Sender<Box<dyn Package>>) -> Process {
-        let status_bucket = Bucket::new(collector_tx, "action_status", 1);
+        let status_bucket = Stream::new("action_status", 1, collector_tx);
         Process { status_bucket, last_process_done: Arc::new(Mutex::new(true)) }
     }
 

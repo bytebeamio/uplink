@@ -4,7 +4,7 @@ use std::mem;
 use std::path::PathBuf;
 
 use async_channel::{SendError, Sender};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub mod actions;
 pub mod mqtt;
@@ -57,6 +57,14 @@ pub enum Control {
     StartStream(String),
 }
 
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct Metrics {
+    sequence: u64,
+    timestamp: u64,
+    total_sent_size: usize,
+    total_disk_size: usize,
+}
+
 pub struct Stream<T> {
     name: String,
     last_sequence: u64,
@@ -71,12 +79,12 @@ where
     T: Debug + Send + 'static,
     Buffer<T>: Package,
 {
-    pub fn new(stream: String, max_buffer_size: usize, tx: Sender<Box<dyn Package>>) -> Stream<T> {
-        let buffer = Buffer { stream, buffer: vec![], anomalies: vec![], max_buffer_size };
+    pub fn new(stream: &str, max_buffer_size: usize, tx: Sender<Box<dyn Package>>) -> Stream<T> {
+        let buffer = Buffer { stream: stream.to_owned(), buffer: vec![], anomalies: vec![], max_buffer_size };
         Stream { name: "".to_string(), last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
     }
 
-    pub async fn fill(&mut self, sequence: u64, timestamp: u64, data: T) -> Result<(), Error> {
+    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
         self.buffer.buffer.push(data);
 
         if self.buffer.buffer.len() >= self.max_buffer_size {
@@ -120,36 +128,16 @@ impl<T> Buffer<T> {
     }
 }
 
-pub struct Bucket<T> {
-    buffer: Buffer<T>,
-    tx: Sender<Box<dyn Package>>,
-}
-
-impl<T> Bucket<T>
-where
-    T: Debug + Send + 'static,
-    Buffer<T>: Package,
-{
-    pub fn new(tx: Sender<Box<dyn Package>>, stream: &str, max: usize) -> Self {
-        let buffer = Buffer::new(stream.to_owned(), max);
-        Bucket { buffer, tx }
-    }
-
-    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
-        if let Some(buffer) = self.buffer.fill(data) {
-            info!("Flushing {} buffer!!", buffer.stream);
-
-            let buffer = Box::new(buffer);
-            self.tx.send(buffer).await?;
-        }
-
-        Ok(())
-    }
-}
-
-impl<T> Clone for Bucket<T> {
+impl<T> Clone for Stream<T> {
     fn clone(&self) -> Self {
-        Bucket { buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.max_buffer_size), tx: self.tx.clone() }
+        Stream {
+            name: self.name.clone(),
+            last_sequence: 0,
+            last_timestamp: 0,
+            max_buffer_size: self.max_buffer_size,
+            buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.max_buffer_size),
+            tx: self.tx.clone(),
+        }
     }
 }
 

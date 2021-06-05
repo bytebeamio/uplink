@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub mod controller;
 mod process;
 
-use crate::base::{Bucket, Buffer};
+use crate::base::{Buffer, Stream};
 pub use controller::Controller;
 use tokio::time::Duration;
 
@@ -40,6 +40,8 @@ pub struct Action {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
     id: String,
+    // sequence number
+    sequence: u64,
     // timestamp
     timestamp: u128,
     // running, failed
@@ -56,6 +58,7 @@ impl ActionResponse {
 
         ActionResponse {
             id: id.to_owned(),
+            sequence: 0,
             timestamp: timestamp.as_millis(),
             state: "Running".to_owned(),
             progress: 0,
@@ -67,6 +70,7 @@ impl ActionResponse {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         ActionResponse {
             id: id.to_owned(),
+            sequence: 0,
             timestamp: timestamp.as_millis(),
             state: "Completed".to_owned(),
             progress: 100,
@@ -78,6 +82,7 @@ impl ActionResponse {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         ActionResponse {
             id: id.to_owned(),
+            sequence: 0,
             timestamp: timestamp.as_millis(),
             state: "Failed".to_owned(),
             progress: 100,
@@ -87,7 +92,7 @@ impl ActionResponse {
 }
 
 pub struct Actions {
-    status_bucket: Bucket<ActionResponse>,
+    status_bucket: Stream<ActionResponse>,
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
@@ -100,7 +105,7 @@ pub async fn new(
 ) -> Actions {
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
-    let status_bucket = Bucket::new(collector_tx, "action_status", 1);
+    let status_bucket = Stream::new("action_status", 1, collector_tx);
     Actions { status_bucket, process, controller, actions_rx: Some(actions_rx) }
 }
 

@@ -3,7 +3,7 @@ use std::io;
 use std::time::SystemTimeError;
 
 use super::{ActionResponse, Control, Package};
-use crate::base::{self, Bucket};
+use crate::base::{self, Stream};
 use async_channel::{SendError, Sender, TrySendError};
 use thiserror::Error;
 
@@ -49,7 +49,7 @@ pub enum Error {
 pub struct Controller {
     // Storage to send action status to serializer. This is also cloned to spawn
     // a new collector
-    status_bucket: Bucket<ActionResponse>,
+    status_stream: Stream<ActionResponse>,
     // controller_tx per collector
     collector_controllers: HashMap<String, Sender<Control>>,
     // collector running status. Used to spawn a new collector thread based on current
@@ -59,8 +59,8 @@ pub struct Controller {
 
 impl Controller {
     pub fn new(controllers: HashMap<String, Sender<Control>>, collector_tx: Sender<Box<dyn Package>>) -> Self {
-        let status_bucket = Bucket::new(collector_tx, "action_status", 1);
-        let controller = Controller { status_bucket, collector_controllers: controllers, collector_run_status: HashMap::new() };
+        let status_stream = Stream::new("action_status", 1, collector_tx);
+        let controller = Controller { status_stream, collector_controllers: controllers, collector_run_status: HashMap::new() };
         controller
     }
 
@@ -76,7 +76,7 @@ impl Controller {
                 }
 
                 let status = ActionResponse::new(id);
-                self.status_bucket.fill(status).await?;
+                self.status_stream.fill(status).await?;
             }
             "start_collector_channel" => {
                 let collector_name = args.remove(0);
@@ -86,7 +86,7 @@ impl Controller {
                 }
 
                 let status = ActionResponse::new(id);
-                self.status_bucket.fill(status).await?;
+                self.status_stream.fill(status).await?;
             }
             "stop_collector" => {
                 let collector_name = args.remove(0);
@@ -99,7 +99,7 @@ impl Controller {
                         // control action based on action status from the controller
                         *running = false;
                         let status = ActionResponse::new(id);
-                        self.status_bucket.fill(status).await?;
+                        self.status_stream.fill(status).await?;
                     }
                 }
             }
@@ -108,7 +108,7 @@ impl Controller {
                 if let Some(running) = self.collector_run_status.get_mut(&collector_name) {
                     if !*running {
                         let status = ActionResponse::success(id);
-                        self.status_bucket.fill(status).await?;
+                        self.status_stream.fill(status).await?;
                     }
                 }
 
