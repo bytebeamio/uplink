@@ -4,8 +4,10 @@ use async_channel::{Receiver, RecvError};
 use bytes::Bytes;
 use disk::Storage;
 use rumqttc::*;
+use serde::Serialize;
 use std::io;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::select;
 
@@ -33,6 +35,7 @@ pub struct Serializer {
     collector_rx: Receiver<Box<dyn Package>>,
     client: AsyncClient,
     storage: Storage,
+    metrics: Metrics,
 }
 
 impl Serializer {
@@ -42,7 +45,7 @@ impl Serializer {
         client: AsyncClient,
         storage: Storage,
     ) -> Result<Serializer, Error> {
-        Ok(Serializer { config, collector_rx, client, storage })
+        Ok(Serializer { config, collector_rx, client, storage, metrics: Default::default() })
     }
 
     async fn crash(&mut self, mut publish: Publish) -> Result<Status, Error> {
@@ -51,14 +54,10 @@ impl Serializer {
 
         loop {
             let data = self.collector_rx.recv().await?;
-
-            let stream = &data.stream();
-            let topic = self.config.streams.get(stream).unwrap().topic.clone();
-            let payload = data.serialize();
-            if payload.is_empty() {
-                warn!("Empty payload. Stream = {}", stream);
-                continue;
-            }
+            let (topic, payload) = match topic_and_payload(&self.config, data) {
+                Some(v) => v,
+                None => continue,
+            };
 
             let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
             publish.pkid = 1;
@@ -88,20 +87,10 @@ impl Serializer {
             select! {
                 data = self.collector_rx.recv() => {
                       let data = data?;
-                      let stream = &data.stream();
-                      let topic = match self.config.streams.get(stream) {
-                          Some(s) => s.topic.clone(),
-                          None => {
-                              error!("Unconfigured stream while writing to disk = {}", stream);
-                              continue
-                          }
+                      let (topic, payload) = match topic_and_payload(&self.config, data) {
+                            Some(v) => v,
+                            None => continue
                       };
-
-                      let payload = data.serialize();
-                      if payload.is_empty() {
-                          warn!("Empty payload. Stream = {}", stream);
-                          continue
-                      }
 
                       let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
@@ -157,15 +146,10 @@ impl Serializer {
             select! {
                 data = self.collector_rx.recv() => {
                       let data = data?;
-                      let stream = &data.stream();
-                      let topic = match self.config.streams.get(stream) {
-                          Some(s) => s.topic.clone(),
-                          None => {
-                              error!("Unconfigured stream while catching up = {}", stream);
-                              continue
-                          }
+                      let (topic, payload) = match topic_and_payload(&self.config, data) {
+                            Some(v) => v,
+                            None => continue
                       };
-                      let payload = data.serialize();
 
                       let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
@@ -223,16 +207,11 @@ impl Serializer {
 
         loop {
             let data = self.collector_rx.recv().await?;
-            let stream = &data.stream();
-            let topic = match self.config.streams.get(stream) {
-                Some(s) => s.topic.clone(),
-                None => {
-                    error!("Unconfigured stream = {}", stream);
-                    continue;
-                }
+            let (topic, payload) = match topic_and_payload(&self.config, data) {
+                Some(v) => v,
+                None => continue,
             };
 
-            let payload = data.serialize();
             match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
                 Ok(_) => continue,
                 Err(ClientError::TryRequest(request)) => match request.into_inner() {
@@ -263,4 +242,60 @@ impl Serializer {
 async fn send_publish(client: AsyncClient, topic: String, payload: Bytes) -> Result<AsyncClient, ClientError> {
     client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
+}
+
+fn topic_and_payload(config: &Arc<Config>, data: Box<dyn Package>) -> Option<(String, Vec<u8>)> {
+    let stream = &data.stream();
+    let topic = match config.streams.get(stream) {
+        Some(s) => s.topic.clone(),
+        None => {
+            error!("Unconfigured stream = {}", stream);
+            return None;
+        }
+    };
+
+    let payload = data.serialize();
+    if payload.is_empty() {
+        warn!("Empty payload. Stream = {}", stream);
+        return None;
+    }
+
+    Some((topic, payload))
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+struct Metrics {
+    sequence: u64,
+    timestamp: u128,
+    total_sent_size: usize,
+    total_disk_size: usize,
+    error: Vec<String>,
+}
+
+impl Metrics {
+    pub fn add_total_sent_size(&mut self, size: usize) {
+        self.total_sent_size += size;
+    }
+
+    pub fn add_total_disk_size(&mut self, size: usize) {
+        self.total_disk_size += size;
+    }
+
+    pub fn sub_total_disk_size(&mut self, size: usize) {
+        self.total_disk_size -= size;
+    }
+
+    pub fn add_error<S: Into<String>>(&mut self, error: S) {
+        self.error.push(error.into())
+    }
+
+    pub fn next(&mut self) -> Vec<u8> {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        self.timestamp = timestamp.as_millis();
+        self.sequence += 1;
+
+        let payload = serde_json::to_vec(self).unwrap();
+        self.error.clear();
+        payload
+    }
 }

@@ -4,7 +4,7 @@ use std::mem;
 use std::path::PathBuf;
 
 use async_channel::{SendError, Sender};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 pub mod actions;
 pub mod mqtt;
@@ -55,14 +55,6 @@ pub enum Control {
     Shutdown,
     StopStream(String),
     StartStream(String),
-}
-
-#[derive(Debug, Default, Clone, Serialize)]
-pub struct Metrics {
-    sequence: u64,
-    timestamp: u64,
-    total_sent_size: usize,
-    total_disk_size: usize,
 }
 
 pub struct Stream<T> {
