@@ -11,8 +11,9 @@ use tokio_util::codec::{LinesCodec, LinesCodecError};
 use std::io;
 
 use crate::base::actions::{Action, ActionResponse};
-use crate::base::{Buffer, Config, Package, Partitions, Stream};
+use crate::base::{Buffer, Config, Package, Stream};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 
@@ -79,12 +80,12 @@ impl Bridge {
     }
 
     pub async fn collect(&mut self, mut framed: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
-        let streams = self.config.streams.iter();
-        let streams: Vec<(String, usize)> =
-            streams.map(|(stream, config)| (stream.to_owned(), config.buf_size as usize)).collect();
-        let mut bridge_partitions = Partitions::new(self.data_tx.clone(), streams.clone());
-        let mut status_stream = Stream::new("action_status", 1, self.data_tx.clone());
+        let mut bridge_partitions = HashMap::new();
+        for (stream, config) in self.config.streams.clone() {
+            bridge_partitions.insert(stream.clone(), Stream::new(stream, config.buf_size, self.data_tx.clone()));
+        }
 
+        let mut status_stream = Stream::new("action_status", 1, self.data_tx.clone());
         let action_timeout = time::sleep(Duration::from_secs(10));
 
         tokio::pin!(action_timeout);
@@ -114,9 +115,13 @@ impl Bridge {
                         }
                     }
 
-                    // TODO remove stream clone
-                    if let Err(e) = bridge_partitions.fill(&data.stream.clone(), data).await {
-                        error!("Failed to send data. Error = {:?}", e.to_string());
+                    match bridge_partitions.get_mut(&data.stream) {
+                        Some(partition) => if let Err(e) = partition.fill(data).await {
+                            error!("Failed to send data. Error = {:?}", e.to_string());
+                        }
+                        None => {
+                            error!("Data on invalid stream = {:?}", data.stream);
+                        }
                     }
                 }
                 action = self.actions_rx.recv() => {

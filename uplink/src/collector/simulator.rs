@@ -1,4 +1,4 @@
-use crate::base::{Config, Package, Partitions};
+use crate::base::{Config, Package, Stream};
 use async_channel::Sender;
 use serde::Serialize;
 use serde_json::json;
@@ -16,14 +16,16 @@ pub enum Error {
 
 pub struct Simulator {
     _config: Arc<Config>,
-    partitions: Partitions<Payload>,
+    partitions: HashMap<String, Stream<Payload>>,
 }
 
 impl Simulator {
     pub fn new(config: Arc<Config>, data_tx: Sender<Box<dyn Package>>) -> Self {
-        let streams = config.streams.iter();
-        let streams: Vec<(String, usize)> = streams.map(|(s, c)| (s.to_owned(), c.buf_size as usize)).collect();
-        let partitions = Partitions::new(data_tx, streams.clone());
+        let mut partitions = HashMap::new();
+        for (stream, config) in config.streams.clone() {
+            partitions.insert(stream.clone(), Stream::new(stream, config.buf_size, data_tx.clone()));
+        }
+
         Simulator { _config: config, partitions }
     }
 
@@ -37,17 +39,17 @@ impl Simulator {
             can_timestamp += 100;
 
             let can = Payload { stream: "can".to_string(), sequence: i, timestamp: can_timestamp, payload: json!(Can::new()) };
-            self.partitions.fill("can", can).await.unwrap();
+            self.partitions.get_mut("can").unwrap().fill(can).await.unwrap();
 
-            let payload =
-                Payload { stream: "gps".to_string(), sequence: i, timestamp: gps_timestamp, payload: json!(Gps::new()) };
-            self.partitions.fill("gps", payload).await.unwrap();
+            let gps = Payload { stream: "gps".to_string(), sequence: i, timestamp: gps_timestamp, payload: json!(Gps::new()) };
+            self.partitions.get_mut("gps").unwrap().fill(gps).await.unwrap();
         }
     }
 }
 
 use crate::collector::tcpjson::Payload;
 use rand::Rng;
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::Duration;
 

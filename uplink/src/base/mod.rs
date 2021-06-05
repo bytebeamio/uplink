@@ -19,7 +19,7 @@ pub enum Error {
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamConfig {
     pub topic: String,
-    pub buf_size: u16,
+    pub buf_size: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -79,8 +79,8 @@ where
     T: Debug + Send + 'static,
     Buffer<T>: Package,
 {
-    pub fn new(stream: &str, max_buffer_size: usize, tx: Sender<Box<dyn Package>>) -> Stream<T> {
-        let buffer = Buffer { stream: stream.to_owned(), buffer: vec![], anomalies: vec![], max_buffer_size };
+    pub fn new<S: Into<String>>(stream: S, max_buffer_size: usize, tx: Sender<Box<dyn Package>>) -> Stream<T> {
+        let buffer = Buffer::new(stream.into());
         Stream { name: "".to_string(), last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
     }
 
@@ -88,9 +88,7 @@ where
         self.buffer.buffer.push(data);
 
         if self.buffer.buffer.len() >= self.max_buffer_size {
-            let buffer =
-                Buffer { stream: self.name.clone(), buffer: vec![], anomalies: vec![], max_buffer_size: self.max_buffer_size };
-            let buffer = mem::replace(&mut self.buffer, buffer);
+            let buffer = mem::replace(&mut self.buffer, Buffer::new(self.name.clone()));
             self.tx.send(Box::new(buffer)).await?;
         }
 
@@ -107,24 +105,11 @@ pub struct Buffer<T> {
     pub stream: String,
     pub buffer: Vec<T>,
     pub anomalies: Vec<String>,
-    max_buffer_size: usize,
 }
 
 impl<T> Buffer<T> {
-    pub fn new<S: Into<String>>(stream: S, max_buffer_size: usize) -> Buffer<T> {
-        Buffer { stream: stream.into(), buffer: vec![], anomalies: vec![], max_buffer_size }
-    }
-
-    pub fn fill(&mut self, data: T) -> Option<Buffer<T>> {
-        self.buffer.push(data);
-
-        if self.buffer.len() >= self.max_buffer_size {
-            let buffer = Buffer::new(self.stream.clone(), self.max_buffer_size);
-            let buffer = mem::replace(self, buffer);
-            return Some(buffer);
-        }
-
-        None
+    pub fn new<S: Into<String>>(stream: S) -> Buffer<T> {
+        Buffer { stream: stream.into(), buffer: vec![], anomalies: vec![] }
     }
 }
 
@@ -135,79 +120,8 @@ impl<T> Clone for Stream<T> {
             last_sequence: 0,
             last_timestamp: 0,
             max_buffer_size: self.max_buffer_size,
-            buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.max_buffer_size),
+            buffer: Buffer::new(self.buffer.stream.clone()),
             tx: self.tx.clone(),
-        }
-    }
-}
-
-/// Partitions has handles to fill data segregated by stream, send
-/// filled data to the serializer when a stream is full
-pub struct Partitions<T> {
-    collection: HashMap<String, Buffer<T>>,
-    tx: Sender<Box<dyn Package>>,
-}
-
-impl<T> Partitions<T>
-where
-    T: Debug + Send + 'static,
-    Buffer<T>: Package,
-{
-    /// Create a new collection of buffers mapped to a (configured) stream
-    pub fn new<S: Into<String>>(tx: Sender<Box<dyn Package>>, streams: Vec<(S, usize)>) -> Self {
-        let mut partitions = Partitions { collection: HashMap::new(), tx };
-
-        for stream in streams.into_iter() {
-            let buffer = Buffer::new(stream.0, stream.1);
-            partitions.collection.insert(buffer.stream.to_owned(), buffer);
-        }
-
-        partitions
-    }
-
-    pub async fn fill(&mut self, stream: &str, data: T) -> Result<(), Error> {
-        match self.collection.get_mut(stream) {
-            Some(buffer) => match buffer.fill(data) {
-                None => debug!("Filling {} buffer. Count = {}", stream, buffer.buffer.len()),
-                Some(v) => {
-                    info!("Flushing {} buffer. Count = {}", stream, buffer.max_buffer_size);
-                    self.tx.send(Box::new(v)).await?;
-                }
-            },
-            None => error!("Invalid stream = {:?}", stream),
-        }
-
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod test {
-
-    use super::Buffer;
-    use serde::Serialize;
-
-    #[derive(Clone, Debug, Serialize)]
-    pub struct Dummy {
-        a: i32,
-        b: String,
-        c: Vec<u8>,
-    }
-
-    #[test]
-    fn return_filled_buffer_after_it_is_full() {
-        let mut buffer = Buffer::new("dummy", 10);
-        let dummy = Dummy { a: 10, b: "hello".to_owned(), c: vec![1, 2, 3] };
-
-        for i in 1..100 {
-            let o = buffer.fill(dummy.clone());
-
-            if i % 10 == 0 {
-                assert!(o.is_some());
-                assert_eq!(o.unwrap().buffer.len(), 10);
-            } else {
-                assert!(o.is_none())
-            }
         }
     }
 }
