@@ -9,7 +9,7 @@ use std::io;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
-use tokio::select;
+use tokio::{select, time};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -45,7 +45,10 @@ impl Serializer {
         client: AsyncClient,
         storage: Storage,
     ) -> Result<Serializer, Error> {
-        Ok(Serializer { config, collector_rx, client, storage, metrics: Default::default() })
+        let metrics_config = config.streams.get("metrics").unwrap();
+        let metrics = Metrics::new(&metrics_config.topic);
+
+        Ok(Serializer { config, collector_rx, client, storage, metrics })
     }
 
     async fn crash(&mut self, mut publish: Publish) -> Result<Status, Error> {
@@ -92,16 +95,20 @@ impl Serializer {
                             None => continue
                       };
 
+                      let payload_size = payload.len();
                       let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
-                      if let Err(e) = publish.write(&mut self.storage.writer()) {
-                          error!("Failed to fill write buffer during bad network. Error = {:?}", e);
-                          continue
+                      match publish.write(&mut self.storage.writer()) {
+                           Ok(_) => self.metrics.add_total_disk_size(payload_size),
+                           Err(e) => {
+                               error!("Failed to fill disk buffer. Error = {:?}", e);
+                               continue
+                           }
                       }
 
                       if let Err(e) = self.storage.flush_on_overflow() {
-                          error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
+                          error!("Failed to flush disk buffer. Error = {:?}", e);
                           continue
                       }
                 }
@@ -151,12 +158,16 @@ impl Serializer {
                             None => continue
                       };
 
+                      let payload_size = payload.len();
                       let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
-                      if let Err(e) = publish.write(&mut storage.writer()) {
-                          error!("Failed to fill write buffer during catchup. Error = {:?}", e);
-                          continue
+                      match publish.write(&mut storage.writer()) {
+                           Ok(_) => self.metrics.add_total_disk_size(payload_size),
+                           Err(e) => {
+                               error!("Failed to fill disk buffer. Error = {:?}", e);
+                               continue
+                           }
                       }
 
                       if let Err(e) = storage.flush_on_overflow() {
@@ -204,22 +215,37 @@ impl Serializer {
 
     async fn normal(&mut self) -> Result<Status, Error> {
         info!("Switching to normal mode!!");
+        let mut interval = time::interval(time::Duration::from_secs(2));
 
         loop {
-            let data = self.collector_rx.recv().await?;
-            let (topic, payload) = match topic_and_payload(&self.config, data) {
-                Some(v) => v,
-                None => continue,
+            let (topic, payload) = select! {
+                data = self.collector_rx.recv() => {
+                    let data = data?;
+                    match topic_and_payload(&self.config, data) {
+                        Some(v) => v,
+                        None => continue,
+                    }
+                }
+                _ = interval.tick() => {
+                    let (topic, payload) = self.metrics.next();
+                    (topic, payload)
+                }
             };
 
-            match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
-                Ok(_) => continue,
-                Err(ClientError::TryRequest(request)) => match request.into_inner() {
-                    Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
-                    request => unreachable!("{:?}", request),
-                },
+            let payload_size = payload.len();
+            let failed = match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
+                Ok(_) => {
+                    self.metrics.add_total_sent_size(payload_size);
+                    continue;
+                }
+                Err(ClientError::TryRequest(request)) => request,
                 Err(e) => return Err(e.into()),
-            }
+            };
+
+            match failed.into_inner() {
+                Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
+                request => unreachable!("{:?}", request),
+            };
         }
     }
 
@@ -265,14 +291,20 @@ fn topic_and_payload(config: &Arc<Config>, data: Box<dyn Package>) -> Option<(St
 
 #[derive(Debug, Default, Clone, Serialize)]
 struct Metrics {
+    topic: String,
     sequence: u64,
     timestamp: u128,
     total_sent_size: usize,
     total_disk_size: usize,
     error: Vec<String>,
+    error_overflow: bool,
 }
 
 impl Metrics {
+    pub fn new<T: Into<String>>(topic: T) -> Metrics {
+        Metrics { topic: topic.into(), ..Default::default() }
+    }
+
     pub fn add_total_sent_size(&mut self, size: usize) {
         self.total_sent_size += size;
     }
@@ -286,16 +318,22 @@ impl Metrics {
     }
 
     pub fn add_error<S: Into<String>>(&mut self, error: S) {
+        if self.error.len() > 25 {
+            self.error_overflow = true;
+            return;
+        }
+
         self.error.push(error.into())
     }
 
-    pub fn next(&mut self) -> Vec<u8> {
+    pub fn next(&mut self) -> (String, Vec<u8>) {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis();
         self.sequence += 1;
 
         let payload = serde_json::to_vec(self).unwrap();
         self.error.clear();
-        payload
+        self.error_overflow = false;
+        (self.topic.clone(), payload)
     }
 }
