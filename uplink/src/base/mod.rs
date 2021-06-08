@@ -57,6 +57,7 @@ pub enum Control {
     StartStream(String),
 }
 
+#[derive(Debug)]
 pub struct Stream<T> {
     name: String,
     last_sequence: u64,
@@ -72,8 +73,9 @@ where
     Buffer<T>: Package,
 {
     pub fn new<S: Into<String>>(stream: S, max_buffer_size: usize, tx: Sender<Box<dyn Package>>) -> Stream<T> {
-        let buffer = Buffer::new(stream.into());
-        Stream { name: "".to_string(), last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
+        let stream = stream.into();
+        let buffer = Buffer::new(&stream);
+        Stream { name: stream, last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
     }
 
     pub async fn fill(&mut self, data: T) -> Result<(), Error> {

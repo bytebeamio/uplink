@@ -224,15 +224,15 @@ impl Serializer {
         loop {
             let (topic, payload) = select! {
                 data = self.collector_rx.recv() => {
-                    let data = data?;
-                    match topic_and_payload(&self.config, data) {
+                    match topic_and_payload(&self.config, data?) {
                         Some(v) => v,
                         None => continue,
                     }
                 }
                 _ = interval.tick() => {
-                    let (topic, payload) = self.metrics.next();
-                    (topic, payload)
+                    // let (topic, payload) = self.metrics.next();
+                    // (topic, payload)
+                    continue
                 }
             };
 
@@ -295,9 +295,10 @@ fn topic_and_payload(config: &Arc<Config>, data: Box<dyn Package>) -> Option<(St
 
 #[derive(Debug, Default, Clone, Serialize)]
 struct Metrics {
+    #[serde(skip_serializing)]
     topic: String,
-    sequence: u64,
-    timestamp: u128,
+    sequence: u32,
+    timestamp: u64,
     total_sent_size: usize,
     total_disk_size: usize,
     error: Vec<String>,
@@ -310,15 +311,15 @@ impl Metrics {
     }
 
     pub fn add_total_sent_size(&mut self, size: usize) {
-        self.total_sent_size += size;
+        self.total_sent_size = self.total_sent_size.saturating_add(size);
     }
 
     pub fn add_total_disk_size(&mut self, size: usize) {
-        self.total_disk_size += size;
+        self.total_disk_size = self.total_disk_size.saturating_add(size);
     }
 
     pub fn sub_total_disk_size(&mut self, size: usize) {
-        self.total_disk_size -= size;
+        self.total_disk_size = self.total_disk_size.saturating_sub(size);
     }
 
     pub fn add_error<S: Into<String>>(&mut self, error: S) {
@@ -332,7 +333,7 @@ impl Metrics {
 
     pub fn next(&mut self) -> (String, Vec<u8>) {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
-        self.timestamp = timestamp.as_millis();
+        self.timestamp = timestamp.as_millis() as u64;
         self.sequence += 1;
 
         let payload = serde_json::to_vec(self).unwrap();
