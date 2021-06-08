@@ -207,7 +207,11 @@ impl Serializer {
                     };
 
 
-                    send.set(send_publish(client, publish.topic, publish.payload));
+                    let payload = publish.payload;
+                    let payload_size = payload.len();
+                    self.metrics.sub_total_disk_size(payload_size);
+                    self.metrics.add_total_sent_size(payload_size);
+                    send.set(send_publish(client, publish.topic, payload));
                 }
             }
         }
