@@ -230,9 +230,8 @@ impl Serializer {
                     }
                 }
                 _ = interval.tick() => {
-                    // let (topic, payload) = self.metrics.next();
-                    // (topic, payload)
-                    continue
+                    let (topic, payload) = self.metrics.next();
+                    (topic, payload)
                 }
             };
 
