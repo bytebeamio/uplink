@@ -300,7 +300,7 @@ struct Metrics {
     timestamp: u64,
     total_sent_size: usize,
     total_disk_size: usize,
-    error: Vec<String>,
+    errors: String,
     error_overflow: bool,
 }
 
@@ -322,12 +322,13 @@ impl Metrics {
     }
 
     pub fn add_error<S: Into<String>>(&mut self, error: S) {
-        if self.error.len() > 25 {
+        if self.errors.len() > 1024 {
             self.error_overflow = true;
             return;
         }
 
-        self.error.push(error.into())
+        self.errors.push_str(", ");
+        self.errors.push_str(&error.into());
     }
 
     pub fn next(&mut self) -> (String, Vec<u8>) {
@@ -335,8 +336,8 @@ impl Metrics {
         self.timestamp = timestamp.as_millis() as u64;
         self.sequence += 1;
 
-        let payload = serde_json::to_vec(self).unwrap();
-        self.error.clear();
+        let payload = serde_json::to_vec(&vec![&self]).unwrap();
+        self.errors.clear();
         self.error_overflow = false;
         (self.topic.clone(), payload)
     }

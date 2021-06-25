@@ -33,10 +33,10 @@ impl Simulator {
         let mut gps_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
         let mut can_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
-        for i in 0..10000 {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            gps_timestamp += 100;
-            can_timestamp += 100;
+        for i in 0..1_000_0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            gps_timestamp += 10;
+            can_timestamp += 10;
 
             let can = Payload { stream: "can".to_string(), sequence: i, timestamp: can_timestamp, payload: json!(Can::new()) };
             self.partitions.get_mut("can").unwrap().fill(can).await.unwrap();
