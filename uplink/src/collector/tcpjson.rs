@@ -11,7 +11,7 @@ use tokio_util::codec::{LinesCodec, LinesCodecError};
 use std::io;
 
 use crate::base::actions::{Action, ActionResponse};
-use crate::base::{Buffer, Config, Package, Stream};
+use crate::base::{Buffer, Config, Package, Point, Stream};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -167,6 +167,16 @@ pub struct Payload {
     pub(crate) payload: Value,
 }
 
+impl Point for Payload {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+}
+
 impl Package for Buffer<Payload> {
     fn stream(&self) -> String {
         return self.stream.clone();
@@ -174,5 +184,9 @@ impl Package for Buffer<Payload> {
 
     fn serialize(&self) -> Vec<u8> {
         serde_json::to_vec(&self.buffer).unwrap()
+    }
+
+    fn anomalies(&self) -> (String, usize) {
+        self.anomalies()
     }
 }

@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub mod controller;
 mod process;
 
-use crate::base::{Buffer, Stream};
+use crate::base::{Buffer, Point, Stream};
 pub use controller::Controller;
 use tokio::time::Duration;
 
@@ -41,9 +41,9 @@ pub struct Action {
 pub struct ActionResponse {
     id: String,
     // sequence number
-    sequence: u64,
+    sequence: u32,
     // timestamp
-    timestamp: u128,
+    timestamp: u64,
     // running, failed
     state: String,
     // progress percentage for processes
@@ -59,7 +59,7 @@ impl ActionResponse {
         ActionResponse {
             id: id.to_owned(),
             sequence: 0,
-            timestamp: timestamp.as_millis(),
+            timestamp: timestamp.as_millis() as u64,
             state: "Running".to_owned(),
             progress: 0,
             errors: vec![],
@@ -71,7 +71,7 @@ impl ActionResponse {
         ActionResponse {
             id: id.to_owned(),
             sequence: 0,
-            timestamp: timestamp.as_millis(),
+            timestamp: timestamp.as_millis() as u64,
             state: "Completed".to_owned(),
             progress: 100,
             errors: vec![],
@@ -83,11 +83,21 @@ impl ActionResponse {
         ActionResponse {
             id: id.to_owned(),
             sequence: 0,
-            timestamp: timestamp.as_millis(),
+            timestamp: timestamp.as_millis() as u64,
             state: "Failed".to_owned(),
             progress: 100,
             errors: vec![error.into()],
         }
+    }
+}
+
+impl Point for ActionResponse {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
     }
 }
 
@@ -173,5 +183,9 @@ impl Package for Buffer<ActionResponse> {
 
     fn serialize(&self) -> Vec<u8> {
         serde_json::to_vec(&self.buffer).unwrap()
+    }
+
+    fn anomalies(&self) -> (String, usize) {
+        self.anomalies()
     }
 }

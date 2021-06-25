@@ -44,9 +44,15 @@ pub struct Config {
     pub ca: Option<PathBuf>,
 }
 
+pub trait Point: Send + Debug {
+    fn sequence(&self) -> u32;
+    fn timestamp(&self) -> u64;
+}
+
 pub trait Package: Send + Debug {
     fn stream(&self) -> String;
     fn serialize(&self) -> Vec<u8>;
+    fn anomalies(&self) -> (String, usize);
 }
 
 /// Signal to modify the behaviour of collector
@@ -60,7 +66,7 @@ pub enum Control {
 #[derive(Debug)]
 pub struct Stream<T> {
     name: String,
-    last_sequence: u64,
+    last_sequence: u32,
     last_timestamp: u64,
     max_buffer_size: usize,
     buffer: Buffer<T>,
@@ -69,7 +75,7 @@ pub struct Stream<T> {
 
 impl<T> Stream<T>
 where
-    T: Debug + Send + 'static,
+    T: Point + Debug + Send + 'static,
     Buffer<T>: Package,
 {
     pub fn new<S: Into<String>>(stream: S, max_buffer_size: usize, tx: Sender<Box<dyn Package>>) -> Stream<T> {
@@ -79,8 +85,27 @@ where
     }
 
     pub async fn fill(&mut self, data: T) -> Result<(), Error> {
+        let current_sequence = data.sequence();
+        let current_timestamp = data.timestamp();
+
+        // Fill buffer with data
         self.buffer.buffer.push(data);
 
+        // Anomaly detection
+        if current_sequence <= self.last_sequence {
+            warn!("Sequence number anomaly detected!! Current = {}, last = {}", current_sequence, self.last_sequence);
+            self.buffer.add_sequence_anomaly(self.last_sequence, current_sequence);
+        }
+
+        if current_timestamp < self.last_timestamp {
+            warn!("Timestamp anomaly detected!! Current = {}, last = {}", current_timestamp, self.last_timestamp);
+            self.buffer.add_timestamp_anomaly(self.last_timestamp, current_timestamp);
+        }
+
+        self.last_sequence = current_sequence;
+        self.last_timestamp = current_timestamp;
+
+        // Send buffer to serializer
         if self.buffer.buffer.len() >= self.max_buffer_size {
             let buffer = mem::replace(&mut self.buffer, Buffer::new(self.name.clone()));
             self.tx.send(Box::new(buffer)).await?;
@@ -98,12 +123,37 @@ where
 pub struct Buffer<T> {
     pub stream: String,
     pub buffer: Vec<T>,
-    pub anomalies: Vec<String>,
+    pub anomalies: String,
+    pub anomaly_count: usize,
 }
 
 impl<T> Buffer<T> {
     pub fn new<S: Into<String>>(stream: S) -> Buffer<T> {
-        Buffer { stream: stream.into(), buffer: vec![], anomalies: vec![] }
+        Buffer { stream: stream.into(), buffer: vec![], anomalies: String::with_capacity(100), anomaly_count: 0 }
+    }
+
+    pub fn add_sequence_anomaly(&mut self, last: u32, current: u32) {
+        self.anomaly_count += 1;
+        if self.anomalies.len() >= 100 {
+            return;
+        }
+
+        let error = "sequence: ".to_owned() + &last.to_string() + ", " + &current.to_string();
+        self.anomalies.push_str(&error)
+    }
+
+    pub fn add_timestamp_anomaly(&mut self, last: u64, current: u64) {
+        self.anomaly_count += 1;
+        if self.anomalies.len() >= 100 {
+            return;
+        }
+
+        let error = "timestamp: ".to_owned() + &last.to_string() + ", " + &current.to_string();
+        self.anomalies.push_str(&error)
+    }
+
+    pub fn anomalies(&self) -> (String, usize) {
+        (self.anomalies.clone(), self.anomaly_count)
     }
 }
 

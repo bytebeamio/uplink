@@ -90,6 +90,9 @@ impl Serializer {
             select! {
                 data = self.collector_rx.recv() => {
                       let data = data?;
+                      let (errors, count) = data.anomalies();
+                      self.metrics.add_errors(errors, count);
+
                       let (topic, payload) = match topic_and_payload(&self.config, data) {
                             Some(v) => v,
                             None => continue
@@ -153,6 +156,9 @@ impl Serializer {
             select! {
                 data = self.collector_rx.recv() => {
                       let data = data?;
+                      let (errors, count) = data.anomalies();
+                      self.metrics.add_errors(errors, count);
+
                       let (topic, payload) = match topic_and_payload(&self.config, data) {
                             Some(v) => v,
                             None => continue
@@ -224,10 +230,18 @@ impl Serializer {
         loop {
             let (topic, payload) = select! {
                 data = self.collector_rx.recv() => {
-                    match topic_and_payload(&self.config, data?) {
+                    let data = data?;
+
+                    // Extract anomalies detected by package during collection
+                    let (errors, count) = data.anomalies();
+                    self.metrics.add_errors(errors, count);
+
+                    let (topic, payload) = match topic_and_payload(&self.config, data) {
                         Some(v) => v,
                         None => continue,
-                    }
+                    };
+
+                    (topic, payload)
                 }
                 _ = interval.tick() => {
                     let (topic, payload) = self.metrics.next();
@@ -301,12 +315,12 @@ struct Metrics {
     total_sent_size: usize,
     total_disk_size: usize,
     errors: String,
-    error_overflow: bool,
+    error_count: usize,
 }
 
 impl Metrics {
     pub fn new<T: Into<String>>(topic: T) -> Metrics {
-        Metrics { topic: topic.into(), ..Default::default() }
+        Metrics { topic: topic.into(), errors: String::with_capacity(1024), ..Default::default() }
     }
 
     pub fn add_total_sent_size(&mut self, size: usize) {
@@ -321,9 +335,19 @@ impl Metrics {
         self.total_disk_size = self.total_disk_size.saturating_sub(size);
     }
 
-    pub fn add_error<S: Into<String>>(&mut self, error: S) {
+    // pub fn add_error<S: Into<String>>(&mut self, error: S) {
+    //     self.error_count += 1;
+    //     if self.errors.len() > 1024 {
+    //         return;
+    //     }
+    //
+    //     self.errors.push_str(", ");
+    //     self.errors.push_str(&error.into());
+    // }
+
+    pub fn add_errors<S: Into<String>>(&mut self, error: S, count: usize) {
+        self.error_count += count;
         if self.errors.len() > 1024 {
-            self.error_overflow = true;
             return;
         }
 
@@ -338,7 +362,7 @@ impl Metrics {
 
         let payload = serde_json::to_vec(&vec![&self]).unwrap();
         self.errors.clear();
-        self.error_overflow = false;
+        self.error_count = 0;
         (self.topic.clone(), payload)
     }
 }
