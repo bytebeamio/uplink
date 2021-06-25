@@ -185,7 +185,7 @@ impl Package for Buffer<ActionResponse> {
         serde_json::to_vec(&self.buffer).unwrap()
     }
 
-    fn anomalies(&self) -> (String, usize) {
+    fn anomalies(&self) -> Option<(String, usize)> {
         self.anomalies()
     }
 }

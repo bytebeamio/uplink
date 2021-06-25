@@ -52,7 +52,7 @@ pub trait Point: Send + Debug {
 pub trait Package: Send + Debug {
     fn stream(&self) -> String;
     fn serialize(&self) -> Vec<u8>;
-    fn anomalies(&self) -> (String, usize);
+    fn anomalies(&self) -> Option<(String, usize)>;
 }
 
 /// Signal to modify the behaviour of collector
@@ -138,7 +138,7 @@ impl<T> Buffer<T> {
             return;
         }
 
-        let error = "sequence: ".to_owned() + &last.to_string() + ", " + &current.to_string();
+        let error = self.stream.clone() + ".sequence: " + &last.to_string() + ", " + &current.to_string();
         self.anomalies.push_str(&error)
     }
 
@@ -152,8 +152,12 @@ impl<T> Buffer<T> {
         self.anomalies.push_str(&error)
     }
 
-    pub fn anomalies(&self) -> (String, usize) {
-        (self.anomalies.clone(), self.anomaly_count)
+    pub fn anomalies(&self) -> Option<(String, usize)> {
+        if self.anomalies.len() == 0 {
+            return None;
+        }
+
+        Some((self.anomalies.clone(), self.anomaly_count))
     }
 }
 

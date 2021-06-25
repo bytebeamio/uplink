@@ -70,9 +70,12 @@ impl Serializer {
                 continue;
             }
 
-            if let Err(e) = self.storage.flush_on_overflow() {
-                error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
-                continue;
+            match self.storage.flush_on_overflow() {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
+                    continue;
+                }
             }
         }
     }
@@ -90,8 +93,9 @@ impl Serializer {
             select! {
                 data = self.collector_rx.recv() => {
                       let data = data?;
-                      let (errors, count) = data.anomalies();
-                      self.metrics.add_errors(errors, count);
+                      if let Some((errors, count)) = data.anomalies() {
+                        self.metrics.add_errors(errors, count);
+                      }
 
                       let (topic, payload) = match topic_and_payload(&self.config, data) {
                             Some(v) => v,
@@ -110,9 +114,14 @@ impl Serializer {
                            }
                       }
 
-                      if let Err(e) = self.storage.flush_on_overflow() {
-                          error!("Failed to flush disk buffer. Error = {:?}", e);
-                          continue
+                      match self.storage.flush_on_overflow() {
+                            Ok(deleted) => if deleted.is_some() {
+                                self.metrics.increment_lost_segments();
+                            },
+                            Err(e) => {
+                                error!("Failed to flush disk buffer. Error = {:?}", e);
+                                continue
+                            }
                       }
                 }
                 o = &mut publish => {
@@ -156,8 +165,9 @@ impl Serializer {
             select! {
                 data = self.collector_rx.recv() => {
                       let data = data?;
-                      let (errors, count) = data.anomalies();
-                      self.metrics.add_errors(errors, count);
+                      if let Some((errors, count)) = data.anomalies() {
+                        self.metrics.add_errors(errors, count);
+                      }
 
                       let (topic, payload) = match topic_and_payload(&self.config, data) {
                             Some(v) => v,
@@ -176,9 +186,14 @@ impl Serializer {
                            }
                       }
 
-                      if let Err(e) = storage.flush_on_overflow() {
-                          error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
-                          continue
+                      match storage.flush_on_overflow() {
+                            Ok(deleted) => if deleted.is_some() {
+                                self.metrics.increment_lost_segments();
+                            },
+                            Err(e) => {
+                                error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
+                                continue
+                            }
                       }
                 }
                 o = &mut send => {
@@ -233,8 +248,9 @@ impl Serializer {
                     let data = data?;
 
                     // Extract anomalies detected by package during collection
-                    let (errors, count) = data.anomalies();
-                    self.metrics.add_errors(errors, count);
+                    if let Some((errors, count)) = data.anomalies() {
+                        self.metrics.add_errors(errors, count);
+                    }
 
                     let (topic, payload) = match topic_and_payload(&self.config, data) {
                         Some(v) => v,
@@ -314,6 +330,7 @@ struct Metrics {
     timestamp: u64,
     total_sent_size: usize,
     total_disk_size: usize,
+    lost_segments: usize,
     errors: String,
     error_count: usize,
 }
@@ -335,6 +352,10 @@ impl Metrics {
         self.total_disk_size = self.total_disk_size.saturating_sub(size);
     }
 
+    pub fn increment_lost_segments(&mut self) {
+        self.lost_segments += 1;
+    }
+
     // pub fn add_error<S: Into<String>>(&mut self, error: S) {
     //     self.error_count += 1;
     //     if self.errors.len() > 1024 {
@@ -351,8 +372,8 @@ impl Metrics {
             return;
         }
 
-        self.errors.push_str(", ");
         self.errors.push_str(&error.into());
+        self.errors.push_str(" | ");
     }
 
     pub fn next(&mut self) -> (String, Vec<u8>) {
@@ -362,7 +383,6 @@ impl Metrics {
 
         let payload = serde_json::to_vec(&vec![&self]).unwrap();
         self.errors.clear();
-        self.error_count = 0;
         (self.topic.clone(), payload)
     }
 }

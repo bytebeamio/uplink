@@ -186,7 +186,7 @@ impl Package for Buffer<Payload> {
         serde_json::to_vec(&self.buffer).unwrap()
     }
 
-    fn anomalies(&self) -> (String, usize) {
+    fn anomalies(&self) -> Option<(String, usize)> {
         self.anomalies()
     }
 }
