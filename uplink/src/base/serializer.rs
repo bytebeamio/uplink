@@ -383,6 +383,7 @@ impl Metrics {
 
         let payload = serde_json::to_vec(&vec![&self]).unwrap();
         self.errors.clear();
+        self.lost_segments = 0;
         (self.topic.clone(), payload)
     }
 }
