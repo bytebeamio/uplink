@@ -1,6 +1,7 @@
-/target
+target
 **/*.rs.bk
 .idea
+.vim
 
 
 #Added by cargo

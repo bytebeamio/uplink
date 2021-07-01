@@ -60,7 +60,7 @@ fn main() {
     let encrytion_key = generate_encryption_key();
 
     // open mqtt client
-    let mut mqttoptions = MqttOptions::new("rumqtt-sync", &config.host, config.port);
+    let mut mqttoptions = MqttOptions::new("tunshell-client", &config.host, config.port);
     mqttoptions.set_keep_alive(60);
     let (mut client, mut eventloop) = Client::new(mqttoptions, 3);
     let action = Action {
@@ -76,7 +76,7 @@ fn main() {
 
     std::thread::spawn(move || {
         for (_, notification) in eventloop.iter().enumerate() {
-            println!("Notification = {:?}", notification);
+            // println!("Notification = {:?}", notification);
         }
     });
 

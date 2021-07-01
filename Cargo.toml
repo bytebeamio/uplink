@@ -3,5 +3,6 @@
 members = [
     "uplink",
     "disk",
-	"tools/tunshell"
 ]
+
+exclude = ["tools/tunshell"]
