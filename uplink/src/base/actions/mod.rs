@@ -121,7 +121,7 @@ pub async fn new(
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
     let status_bucket = Stream::new("action_status", 1, collector_tx);
-    Actions { status_bucket, process, controller, actions_rx: Some(actions_rx) }
+    Actions { status_bucket, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
 }
 
 impl Actions {

@@ -24,7 +24,6 @@ use crate::base::serializer::Serializer;
 
 use crate::collector::simulator::Simulator;
 use crate::collector::tcpjson::Bridge;
-use base::actions;
 
 use base::Config;
 use disk::Storage;

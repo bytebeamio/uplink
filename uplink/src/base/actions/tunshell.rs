@@ -8,7 +8,7 @@ use tunshell_client::{Client, ClientMode, Config, HostShell};
 
 use crate::base::{
     actions::{ActionResponse, Package},
-    Bucket,
+    Stream,
 };
 
 pub struct Relay {
@@ -27,7 +27,7 @@ pub struct TunshellSession {
     relay: Relay,
     echo_stdout: bool,
     keys_rx: Receiver<String>,
-    status_bucket: Bucket<ActionResponse>,
+    status_bucket: Stream<ActionResponse>,
     last_process_done: Arc<Mutex<bool>>,
 }
 
@@ -37,7 +37,7 @@ impl TunshellSession {
             relay,
             echo_stdout,
             keys_rx: tunshell_rx,
-            status_bucket: Bucket::new(collector_tx, "tunshell_status", 1),
+            status_bucket: Stream::new("tunshell_status", 1, collector_tx),
             last_process_done: Arc::new(Mutex::new(true)),
         }
     }
