@@ -4,10 +4,12 @@ use async_channel::{Receiver, RecvError};
 use bytes::Bytes;
 use disk::Storage;
 use rumqttc::*;
+use serde::Serialize;
 use std::io;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
-use tokio::select;
+use tokio::{select, time};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -33,6 +35,7 @@ pub struct Serializer {
     collector_rx: Receiver<Box<dyn Package>>,
     client: AsyncClient,
     storage: Storage,
+    metrics: Metrics,
 }
 
 impl Serializer {
@@ -42,7 +45,10 @@ impl Serializer {
         client: AsyncClient,
         storage: Storage,
     ) -> Result<Serializer, Error> {
-        Ok(Serializer { config, collector_rx, client, storage })
+        let metrics_config = config.streams.get("metrics").unwrap();
+        let metrics = Metrics::new(&metrics_config.topic);
+
+        Ok(Serializer { config, collector_rx, client, storage, metrics })
     }
 
     async fn crash(&mut self, mut publish: Publish) -> Result<Status, Error> {
@@ -51,26 +57,25 @@ impl Serializer {
 
         loop {
             let data = self.collector_rx.recv().await?;
-
-            let stream = &data.stream();
-            let topic = self.config.streams.get(stream).unwrap().topic.clone();
-            let payload = data.serialize();
-            if payload.is_empty() {
-                warn!("Empty payload. Stream = {}", stream);
-                continue
-            }
+            let (topic, payload) = match topic_and_payload(&self.config, data) {
+                Some(v) => v,
+                None => continue,
+            };
 
             let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
             publish.pkid = 1;
 
             if let Err(e) = publish.write(&mut self.storage.writer()) {
                 error!("Failed to fill write buffer during bad network. Error = {:?}", e);
-                continue
+                continue;
             }
 
-            if let Err(e) = self.storage.flush_on_overflow() {
-                error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
-                continue
+            match self.storage.flush_on_overflow() {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
+                    continue;
+                }
             }
         }
     }
@@ -88,25 +93,35 @@ impl Serializer {
             select! {
                 data = self.collector_rx.recv() => {
                       let data = data?;
-                      let stream = &data.stream();
-                      let topic = self.config.streams.get(stream).unwrap().topic.clone();
-                      let payload = data.serialize();
-                      if payload.is_empty() {
-                          warn!("Empty payload. Stream = {}", stream);
-                          continue
+                      if let Some((errors, count)) = data.anomalies() {
+                        self.metrics.add_errors(errors, count);
                       }
 
+                      let (topic, payload) = match topic_and_payload(&self.config, data) {
+                            Some(v) => v,
+                            None => continue
+                      };
+
+                      let payload_size = payload.len();
                       let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
-                      if let Err(e) = publish.write(&mut self.storage.writer()) {
-                          error!("Failed to fill write buffer during bad network. Error = {:?}", e);
-                          continue
+                      match publish.write(&mut self.storage.writer()) {
+                           Ok(_) => self.metrics.add_total_disk_size(payload_size),
+                           Err(e) => {
+                               error!("Failed to fill disk buffer. Error = {:?}", e);
+                               continue
+                           }
                       }
 
-                      if let Err(e) = self.storage.flush_on_overflow() {
-                          error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
-                          continue
+                      match self.storage.flush_on_overflow() {
+                            Ok(deleted) => if deleted.is_some() {
+                                self.metrics.increment_lost_segments();
+                            },
+                            Err(e) => {
+                                error!("Failed to flush disk buffer. Error = {:?}", e);
+                                continue
+                            }
                       }
                 }
                 o = &mut publish => {
@@ -139,7 +154,7 @@ impl Serializer {
             Ok(packet) => unreachable!("{:?}", packet),
             Err(e) => {
                 error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
-                return Ok(Status::Normal)
+                return Ok(Status::Normal);
             }
         };
 
@@ -150,25 +165,39 @@ impl Serializer {
             select! {
                 data = self.collector_rx.recv() => {
                       let data = data?;
-                      let stream = &data.stream();
-                      let topic = self.config.streams.get(stream).unwrap().topic.clone();
-                      let payload = data.serialize();
+                      if let Some((errors, count)) = data.anomalies() {
+                        self.metrics.add_errors(errors, count);
+                      }
 
+                      let (topic, payload) = match topic_and_payload(&self.config, data) {
+                            Some(v) => v,
+                            None => continue
+                      };
+
+                      let payload_size = payload.len();
                       let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
-                      if let Err(e) = publish.write(&mut storage.writer()) {
-                          error!("Failed to fill write buffer during catchup. Error = {:?}", e);
-                          continue
+                      match publish.write(&mut storage.writer()) {
+                           Ok(_) => self.metrics.add_total_disk_size(payload_size),
+                           Err(e) => {
+                               error!("Failed to fill disk buffer. Error = {:?}", e);
+                               continue
+                           }
                       }
-                      
-                      if let Err(e) = storage.flush_on_overflow() {
-                          error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
-                          continue
+
+                      match storage.flush_on_overflow() {
+                            Ok(deleted) => if deleted.is_some() {
+                                self.metrics.increment_lost_segments();
+                            },
+                            Err(e) => {
+                                error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
+                                continue
+                            }
                       }
                 }
                 o = &mut send => {
-                    // Send failure implies eventloop crash. Switch state to 
+                    // Send failure implies eventloop crash. Switch state to
                     // indefinitely write to disk to not loose data
                     let client = match o {
                         Ok(c) => c,
@@ -199,7 +228,11 @@ impl Serializer {
                     };
 
 
-                    send.set(send_publish(client, publish.topic, publish.payload));
+                    let payload = publish.payload;
+                    let payload_size = payload.len();
+                    self.metrics.sub_total_disk_size(payload_size);
+                    self.metrics.add_total_sent_size(payload_size);
+                    send.set(send_publish(client, publish.topic, payload));
                 }
             }
         }
@@ -207,21 +240,45 @@ impl Serializer {
 
     async fn normal(&mut self) -> Result<Status, Error> {
         info!("Switching to normal mode!!");
+        let mut interval = time::interval(time::Duration::from_secs(10));
 
         loop {
-            let data = self.collector_rx.recv().await?;
-            let stream = &data.stream();
-            let topic = self.config.streams.get(stream).unwrap().topic.clone();
-            let payload = data.serialize();
+            let (topic, payload) = select! {
+                data = self.collector_rx.recv() => {
+                    let data = data?;
 
-            match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
-                Ok(_) => continue,
-                Err(ClientError::TryRequest(request)) => match request.into_inner() {
-                    Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
-                    request => unreachable!("{:?}", request),
-                },
+                    // Extract anomalies detected by package during collection
+                    if let Some((errors, count)) = data.anomalies() {
+                        self.metrics.add_errors(errors, count);
+                    }
+
+                    let (topic, payload) = match topic_and_payload(&self.config, data) {
+                        Some(v) => v,
+                        None => continue,
+                    };
+
+                    (topic, payload)
+                }
+                _ = interval.tick() => {
+                    let (topic, payload) = self.metrics.next();
+                    (topic, payload)
+                }
+            };
+
+            let payload_size = payload.len();
+            let failed = match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
+                Ok(_) => {
+                    self.metrics.add_total_sent_size(payload_size);
+                    continue;
+                }
+                Err(ClientError::TryRequest(request)) => request,
                 Err(e) => return Err(e.into()),
-            }
+            };
+
+            match failed.into_inner() {
+                Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
+                request => unreachable!("{:?}", request),
+            };
         }
     }
 
@@ -244,4 +301,89 @@ impl Serializer {
 async fn send_publish(client: AsyncClient, topic: String, payload: Bytes) -> Result<AsyncClient, ClientError> {
     client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
+}
+
+fn topic_and_payload(config: &Arc<Config>, data: Box<dyn Package>) -> Option<(String, Vec<u8>)> {
+    let stream = &data.stream();
+    let topic = match config.streams.get(stream) {
+        Some(s) => s.topic.clone(),
+        None => {
+            error!("Unconfigured stream = {}", stream);
+            return None;
+        }
+    };
+
+    let payload = data.serialize();
+    if payload.is_empty() {
+        warn!("Empty payload. Stream = {}", stream);
+        return None;
+    }
+
+    Some((topic, payload))
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+struct Metrics {
+    #[serde(skip_serializing)]
+    topic: String,
+    sequence: u32,
+    timestamp: u64,
+    total_sent_size: usize,
+    total_disk_size: usize,
+    lost_segments: usize,
+    errors: String,
+    error_count: usize,
+}
+
+impl Metrics {
+    pub fn new<T: Into<String>>(topic: T) -> Metrics {
+        Metrics { topic: topic.into(), errors: String::with_capacity(1024), ..Default::default() }
+    }
+
+    pub fn add_total_sent_size(&mut self, size: usize) {
+        self.total_sent_size = self.total_sent_size.saturating_add(size);
+    }
+
+    pub fn add_total_disk_size(&mut self, size: usize) {
+        self.total_disk_size = self.total_disk_size.saturating_add(size);
+    }
+
+    pub fn sub_total_disk_size(&mut self, size: usize) {
+        self.total_disk_size = self.total_disk_size.saturating_sub(size);
+    }
+
+    pub fn increment_lost_segments(&mut self) {
+        self.lost_segments += 1;
+    }
+
+    // pub fn add_error<S: Into<String>>(&mut self, error: S) {
+    //     self.error_count += 1;
+    //     if self.errors.len() > 1024 {
+    //         return;
+    //     }
+    //
+    //     self.errors.push_str(", ");
+    //     self.errors.push_str(&error.into());
+    // }
+
+    pub fn add_errors<S: Into<String>>(&mut self, error: S, count: usize) {
+        self.error_count += count;
+        if self.errors.len() > 1024 {
+            return;
+        }
+
+        self.errors.push_str(&error.into());
+        self.errors.push_str(" | ");
+    }
+
+    pub fn next(&mut self) -> (String, Vec<u8>) {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        self.timestamp = timestamp.as_millis() as u64;
+        self.sequence += 1;
+
+        let payload = serde_json::to_vec(&vec![&self]).unwrap();
+        self.errors.clear();
+        self.lost_segments = 0;
+        (self.topic.clone(), payload)
+    }
 }

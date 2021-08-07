@@ -61,42 +61,45 @@ impl Storage {
 
     /// Opens file to flush current inmemory write buffer to disk.
     /// Also handles retention of previous files on disk
-    fn open_next_write_file(&mut self) -> io::Result<(PathBuf, File)> {
+    fn open_next_write_file(&mut self) -> io::Result<NextFile> {
         let next_file_id = self.backlog_file_ids.last().map_or(0, |id| id + 1);
         let next_file_path = self.backup_path.join(&format!("backup@{}", next_file_id));
         let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
         self.backlog_file_ids.push(next_file_id);
+
+        let mut next = NextFile { path: next_file_path, file: next_file, deleted: None };
 
         let backlog_files_count = self.backlog_file_ids.len();
         if backlog_files_count > self.max_file_count {
             // Len always be > 0 due to the above push. doesn't panic
             let id = self.backlog_file_ids.remove(0);
             warn!("file limit reached. deleting backup@{}", id);
+            next.deleted = Some(id);
             self.remove(id)?;
         }
 
-        Ok((next_file_path, next_file))
+        Ok(next)
     }
 
     /// Flushes what ever is in current write buffer into a new file on the disk
     #[inline]
-    fn flush(&mut self) -> io::Result<()> {
-        let (path, mut next_file) = self.open_next_write_file()?;
-        info!("Flushing data to disk!! {:?}", path);
-        next_file.write_all(&self.current_write_file[..])?;
-        next_file.flush()?;
+    fn flush(&mut self) -> io::Result<Option<u64>> {
+        let mut next_file = self.open_next_write_file()?;
+        info!("Flushing data to disk!! {:?}", next_file.path);
+        next_file.file.write_all(&self.current_write_file[..])?;
+        next_file.file.flush()?;
         self.current_write_file.clear();
-        Ok(())
+        Ok(next_file.deleted)
     }
 
     /// Checks current write buffer size and flushes it to disk when the size
     /// exceeds configured size
-    pub fn flush_on_overflow(&mut self) -> io::Result<()> {
+    pub fn flush_on_overflow(&mut self) -> io::Result<Option<u64>> {
         if self.current_write_file.len() >= self.max_file_size {
-            self.flush()?;
+            return self.flush();
         }
 
-        Ok(())
+        Ok(None)
     }
 
     /// Reloads next buffer even if there is pending data in current buffer
@@ -174,6 +177,12 @@ fn get_file_ids(path: &Path) -> io::Result<Vec<u64>> {
 
     file_ids.sort();
     Ok(file_ids)
+}
+
+struct NextFile {
+    path: PathBuf,
+    file: File,
+    deleted: Option<u64>,
 }
 
 #[cfg(test)]

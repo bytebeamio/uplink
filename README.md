@@ -5,6 +5,24 @@ Setup and run
 cargo run -- -a certs/ -c config/uplink.toml -i 1 -vv
 ```
 
+Testing with netcat
+--------------
+
+* Send content of a text file
+
+```
+nc localhost 5555 < tools/netcat.txt
+```
+
+* Send json one by one
+
+```
+nc localhost 5555
+{ "stream": "can", "sequence": 1, "timestamp": 12345, "data": 100 }
+{ "stream": "can", "sequence": 1, "timestamp": 12345, "data": 100 }
+{ "stream": "can", "sequence": 1, "timestamp": 12345, "data": 100 }
+```
+
 Build for Beagle
 --------------
 Install arm compilers and linkers

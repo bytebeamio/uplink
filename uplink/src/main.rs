@@ -21,7 +21,10 @@ use crate::base::actions::{
 };
 use crate::base::mqtt::Mqtt;
 use crate::base::serializer::Serializer;
-use crate::collector::bridge::Bridge;
+
+use crate::collector::simulator::Simulator;
+use crate::collector::tcpjson::Bridge;
+
 use base::Config;
 use disk::Storage;
 use std::sync::Arc;
@@ -38,6 +41,9 @@ pub struct CommandLine {
     /// directory with certificates
     #[structopt(short = "a", help = "certs")]
     certs_dir: PathBuf,
+    /// list of modules to log
+    #[structopt(short = "s", long = "simulator")]
+    simulator: bool,
     /// log level (v: info, vv: debug, vvv: trace)
     #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
     verbose: u8,
@@ -97,6 +103,8 @@ fn initialize_logging(commandline: &CommandLine) {
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
+    let enable_simulator = commandline.simulator;
+
     initialize_logging(&commandline);
     let config = Arc::new(initalize_config(commandline)?);
 
@@ -128,6 +136,14 @@ async fn main() -> Result<(), Error> {
         }
     });
 
+    if enable_simulator {
+        let data_tx = collector_tx.clone();
+        task::spawn(async {
+            let mut simulator = Simulator::new(config, data_tx);
+            simulator.start().await;
+        });
+    }
+    
     let tunshell_collector_tx = collector_tx.clone();
     thread::spawn(move || {
         let tunshell_session = TunshellSession::new(Relay::default(), false, tunshell_keys_rx, tunshell_collector_tx);

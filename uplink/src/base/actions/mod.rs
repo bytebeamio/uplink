@@ -10,7 +10,7 @@ pub mod controller;
 pub mod tunshell;
 mod process;
 
-use crate::base::{Bucket, Buffer};
+use crate::base::{Buffer, Point, Stream};
 pub use controller::Controller;
 use tokio::time::Duration;
 
@@ -43,8 +43,10 @@ pub struct Action {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
     id: String,
+    // sequence number
+    sequence: u32,
     // timestamp
-    timestamp: u128,
+    timestamp: u64,
     // running, failed
     state: String,
     // progress percentage for processes
@@ -59,7 +61,8 @@ impl ActionResponse {
 
         ActionResponse {
             id: id.to_owned(),
-            timestamp: timestamp.as_millis(),
+            sequence: 0,
+            timestamp: timestamp.as_millis() as u64,
             state: "Running".to_owned(),
             progress: 0,
             errors: vec![],
@@ -70,7 +73,8 @@ impl ActionResponse {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         ActionResponse {
             id: id.to_owned(),
-            timestamp: timestamp.as_millis(),
+            sequence: 0,
+            timestamp: timestamp.as_millis() as u64,
             state: "Completed".to_owned(),
             progress: 100,
             errors: vec![],
@@ -81,7 +85,8 @@ impl ActionResponse {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         ActionResponse {
             id: id.to_owned(),
-            timestamp: timestamp.as_millis(),
+            sequence: 0,
+            timestamp: timestamp.as_millis() as u64,
             state: "Failed".to_owned(),
             progress: 100,
             errors: vec![error.into()],
@@ -89,8 +94,18 @@ impl ActionResponse {
     }
 }
 
+impl Point for ActionResponse {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+}
+
 pub struct Actions {
-    status_bucket: Bucket<ActionResponse>,
+    status_bucket: Stream<ActionResponse>,
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
@@ -105,7 +120,7 @@ pub async fn new(
 ) -> Actions {
     let controller = Controller::new(controllers, collector_tx.clone());
     let process = process::Process::new(collector_tx.clone());
-    let status_bucket = Bucket::new(collector_tx, "action_status", 1);
+    let status_bucket = Stream::new("action_status", 1, collector_tx);
     Actions { status_bucket, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
 }
 
@@ -176,5 +191,9 @@ impl Package for Buffer<ActionResponse> {
 
     fn serialize(&self) -> Vec<u8> {
         serde_json::to_vec(&self.buffer).unwrap()
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        self.anomalies()
     }
 }

@@ -11,10 +11,11 @@ use tokio_util::codec::{LinesCodec, LinesCodecError};
 use std::io;
 
 use crate::base::actions::{Action, ActionResponse};
-use crate::base::{Bucket, Buffer, Config, Package, Partitions};
+use crate::base::{Buffer, Config, Package, Point, Stream};
+use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
-use toml::Value;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -46,7 +47,7 @@ impl Bridge {
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
             let listener = TcpListener::bind(&addr).await?;
-            let mut status_bucket = Bucket::new(self.data_tx.clone(), "action_status", 1);
+            let mut status_stream = Stream::new("action_status", 1, self.data_tx.clone());
 
             let (stream, addr) = loop {
                 select! {
@@ -63,7 +64,7 @@ impl Bridge {
                         let action = action.unwrap();
                         error!("Bridge down!! Action ID = {}", action.id);
                         let status = ActionResponse::failure(&action.id, "Bridge down");
-                        if let Err(e) = status_bucket.fill(status).await {
+                        if let Err(e) = status_stream.fill(status).await {
                             error!("Failed to send busy status. Error = {:?}", e);
                         }
                     }
@@ -79,12 +80,12 @@ impl Bridge {
     }
 
     pub async fn collect(&mut self, mut framed: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
-        let streams = self.config.streams.iter();
-        let streams: Vec<(String, usize)> =
-            streams.map(|(stream, config)| (stream.to_owned(), config.buf_size as usize)).collect();
-        let mut bridge_partitions = Partitions::new(self.data_tx.clone(), streams.clone());
-        let mut status_buffer = Bucket::new(self.data_tx.clone(), "action_status", 1);
+        let mut bridge_partitions = HashMap::new();
+        for (stream, config) in self.config.streams.clone() {
+            bridge_partitions.insert(stream.clone(), Stream::new(stream, config.buf_size, self.data_tx.clone()));
+        }
 
+        let mut status_stream = Stream::new("action_status", 1, self.data_tx.clone());
         let action_timeout = time::sleep(Duration::from_secs(10));
 
         tokio::pin!(action_timeout);
@@ -114,9 +115,13 @@ impl Bridge {
                         }
                     }
 
-                    // TODO remove stream clone
-                    if let Err(e) = bridge_partitions.fill(&data.stream.clone(), data).await {
-                        error!("Failed to send data. Error = {:?}", e.to_string());
+                    match bridge_partitions.get_mut(&data.stream) {
+                        Some(partition) => if let Err(e) = partition.fill(data).await {
+                            error!("Failed to send data. Error = {:?}", e.to_string());
+                        }
+                        None => {
+                            error!("Data on invalid stream = {:?}", data.stream);
+                        }
                     }
                 }
                 action = self.actions_rx.recv() => {
@@ -141,7 +146,7 @@ impl Bridge {
 
                     // Send failure response to cloud
                     let status = ActionResponse::failure(&action, "Action timed out");
-                    if let Err(e) = status_buffer.fill(status).await {
+                    if let Err(e) = status_stream.fill(status).await {
                         error!("Failed to fill. Error = {:?}", e);
                     }
                 }
@@ -155,9 +160,21 @@ impl Bridge {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
     #[serde(skip_serializing)]
-    stream: String,
+    pub(crate) stream: String,
+    pub(crate) sequence: u32,
+    pub(crate) timestamp: u64,
     #[serde(flatten)]
-    payload: Value,
+    pub(crate) payload: Value,
+}
+
+impl Point for Payload {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
 }
 
 impl Package for Buffer<Payload> {
@@ -167,5 +184,9 @@ impl Package for Buffer<Payload> {
 
     fn serialize(&self) -> Vec<u8> {
         serde_json::to_vec(&self.buffer).unwrap()
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        self.anomalies()
     }
 }

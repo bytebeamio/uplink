@@ -19,7 +19,7 @@ pub enum Error {
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamConfig {
     pub topic: String,
-    pub buf_size: u16,
+    pub buf_size: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -44,9 +44,15 @@ pub struct Config {
     pub ca: Option<PathBuf>,
 }
 
+pub trait Point: Send + Debug {
+    fn sequence(&self) -> u32;
+    fn timestamp(&self) -> u64;
+}
+
 pub trait Package: Send + Debug {
     fn stream(&self) -> String;
     fn serialize(&self) -> Vec<u8>;
+    fn anomalies(&self) -> Option<(String, usize)>;
 }
 
 /// Signal to modify the behaviour of collector
@@ -57,6 +63,58 @@ pub enum Control {
     StartStream(String),
 }
 
+#[derive(Debug)]
+pub struct Stream<T> {
+    name: String,
+    last_sequence: u32,
+    last_timestamp: u64,
+    max_buffer_size: usize,
+    buffer: Buffer<T>,
+    tx: Sender<Box<dyn Package>>,
+}
+
+impl<T> Stream<T>
+where
+    T: Point + Debug + Send + 'static,
+    Buffer<T>: Package,
+{
+    pub fn new<S: Into<String>>(stream: S, max_buffer_size: usize, tx: Sender<Box<dyn Package>>) -> Stream<T> {
+        let stream = stream.into();
+        let buffer = Buffer::new(&stream);
+        Stream { name: stream, last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
+    }
+
+    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
+        let current_sequence = data.sequence();
+        let current_timestamp = data.timestamp();
+
+        // Fill buffer with data
+        self.buffer.buffer.push(data);
+
+        // Anomaly detection
+        if current_sequence <= self.last_sequence {
+            warn!("Sequence number anomaly detected!! Current = {}, last = {}", current_sequence, self.last_sequence);
+            self.buffer.add_sequence_anomaly(self.last_sequence, current_sequence);
+        }
+
+        if current_timestamp < self.last_timestamp {
+            warn!("Timestamp anomaly detected!! Current = {}, last = {}", current_timestamp, self.last_timestamp);
+            self.buffer.add_timestamp_anomaly(self.last_timestamp, current_timestamp);
+        }
+
+        self.last_sequence = current_sequence;
+        self.last_timestamp = current_timestamp;
+
+        // Send buffer to serializer
+        if self.buffer.buffer.len() >= self.max_buffer_size {
+            let buffer = mem::replace(&mut self.buffer, Buffer::new(self.name.clone()));
+            self.tx.send(Box::new(buffer)).await?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Buffer is an abstraction of a collection that serializer receives.
 /// It also contains meta data to understand the type of data
 /// e.g stream to mqtt topic mapping
@@ -65,136 +123,53 @@ pub enum Control {
 pub struct Buffer<T> {
     pub stream: String,
     pub buffer: Vec<T>,
-    max_buffer_size: usize,
+    pub anomalies: String,
+    pub anomaly_count: usize,
 }
 
 impl<T> Buffer<T> {
-    pub fn new<S: Into<String>>(stream: S, max_buffer_size: usize) -> Buffer<T> {
-        Buffer { stream: stream.into(), buffer: Vec::new(), max_buffer_size }
+    pub fn new<S: Into<String>>(stream: S) -> Buffer<T> {
+        Buffer { stream: stream.into(), buffer: vec![], anomalies: String::with_capacity(100), anomaly_count: 0 }
     }
 
-    pub fn fill(&mut self, data: T) -> Option<Buffer<T>> {
-        self.buffer.push(data);
-
-        if self.buffer.len() >= self.max_buffer_size {
-            let buffer = mem::replace(&mut self.buffer, Vec::new());
-            let stream = self.stream.clone();
-            let max_buffer_size = self.max_buffer_size;
-            let buffer = Buffer { stream, buffer, max_buffer_size };
-
-            return Some(buffer);
+    pub fn add_sequence_anomaly(&mut self, last: u32, current: u32) {
+        self.anomaly_count += 1;
+        if self.anomalies.len() >= 100 {
+            return;
         }
 
-        None
-    }
-}
-
-pub struct Bucket<T> {
-    buffer: Buffer<T>,
-    tx: Sender<Box<dyn Package>>,
-}
-
-impl<T> Bucket<T>
-where
-    T: Debug + Send + 'static,
-    Buffer<T>: Package,
-{
-    pub fn new(tx: Sender<Box<dyn Package>>, stream: &str, max: usize) -> Self {
-        let buffer = Buffer::new(stream.to_owned(), max);
-        Bucket { buffer, tx }
+        let error = self.stream.clone() + ".sequence: " + &last.to_string() + ", " + &current.to_string();
+        self.anomalies.push_str(&error)
     }
 
-    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
-        if let Some(buffer) = self.buffer.fill(data) {
-            info!("Flushing {} buffer!!", buffer.stream);
-
-            let buffer = Box::new(buffer);
-            self.tx.send(buffer).await?;
+    pub fn add_timestamp_anomaly(&mut self, last: u64, current: u64) {
+        self.anomaly_count += 1;
+        if self.anomalies.len() >= 100 {
+            return;
         }
 
-        Ok(())
+        let error = "timestamp: ".to_owned() + &last.to_string() + ", " + &current.to_string();
+        self.anomalies.push_str(&error)
+    }
+
+    pub fn anomalies(&self) -> Option<(String, usize)> {
+        if self.anomalies.len() == 0 {
+            return None;
+        }
+
+        Some((self.anomalies.clone(), self.anomaly_count))
     }
 }
 
-impl<T> Clone for Bucket<T> {
+impl<T> Clone for Stream<T> {
     fn clone(&self) -> Self {
-        Bucket { buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.max_buffer_size), tx: self.tx.clone() }
-    }
-}
-
-/// Partitions has handles to fill data segregated by stream, send
-/// filled data to the serializer when a stream is full
-pub struct Partitions<T> {
-    collection: HashMap<String, Buffer<T>>,
-    tx: Sender<Box<dyn Package>>,
-}
-
-impl<T> Partitions<T>
-where
-    T: Debug + Send + 'static,
-    Buffer<T>: Package,
-{
-    /// Create a new collection of buffers mapped to a (configured) stream
-    pub fn new<S: Into<String>>(tx: Sender<Box<dyn Package>>, streams: Vec<(S, usize)>) -> Self {
-        let mut partitions = Partitions { collection: HashMap::new(), tx };
-
-        for stream in streams.into_iter() {
-            let buffer = Buffer::new(stream.0, stream.1);
-            partitions.collection.insert(buffer.stream.to_owned(), buffer);
-        }
-
-        partitions
-    }
-
-    pub async fn fill(&mut self, stream: &str, data: T) -> Result<(), Error> {
-        let o = match self.collection.get_mut(stream) {
-            Some(buffer) => {
-                debug!("Filling {} buffer. Count = {}", stream, buffer.buffer.len());
-                buffer.fill(data)
-            }
-            None => {
-                error!("Invalid stream = {:?}", stream);
-                None
-            }
-        };
-
-        if let Some(buffer) = o {
-            info!("Flushing {} buffer!! Count = {}", stream, buffer.max_buffer_size);
-            let buffer = Box::new(buffer);
-            self.tx.send(buffer).await?;
-        }
-
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod test {
-
-    use super::Buffer;
-    use serde::Serialize;
-
-    #[derive(Clone, Debug, Serialize)]
-    pub struct Dummy {
-        a: i32,
-        b: String,
-        c: Vec<u8>,
-    }
-
-    #[test]
-    fn return_filled_buffer_after_it_is_full() {
-        let mut buffer = Buffer::new("dummy", 10);
-        let dummy = Dummy { a: 10, b: "hello".to_owned(), c: vec![1, 2, 3] };
-
-        for i in 1..100 {
-            let o = buffer.fill(dummy.clone());
-
-            if i % 10 == 0 {
-                assert!(o.is_some());
-                assert_eq!(o.unwrap().buffer.len(), 10);
-            } else {
-                assert!(o.is_none())
-            }
+        Stream {
+            name: self.name.clone(),
+            last_sequence: 0,
+            last_timestamp: 0,
+            max_buffer_size: self.max_buffer_size,
+            buffer: Buffer::new(self.buffer.stream.clone()),
+            tx: self.tx.clone(),
         }
     }
 }
