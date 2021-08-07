@@ -4,6 +4,7 @@ extern crate log;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::thread;
 
 use anyhow::{Context, Error};
 use async_channel::{bounded, Sender};
@@ -14,11 +15,17 @@ use tokio::task;
 mod base;
 mod collector;
 
+use crate::base::actions::{
+    self,
+    tunshell::{Relay, TunshellSession},
+};
 use crate::base::mqtt::Mqtt;
 use crate::base::serializer::Serializer;
+
 use crate::collector::simulator::Simulator;
 use crate::collector::tcpjson::Bridge;
 use base::actions;
+
 use base::Config;
 use disk::Storage;
 use std::sync::Arc;
@@ -105,6 +112,7 @@ async fn main() -> Result<(), Error> {
     let (collector_tx, collector_rx) = bounded(10);
     let (native_actions_tx, native_actions_rx) = bounded(10);
     let (bridge_actions_tx, bridge_actions_rx) = bounded(10);
+    let (tunshell_keys_tx, tunshell_keys_rx) = bounded(10);
 
     let storage = Storage::new(&config.persistence.path, config.persistence.max_file_size, config.persistence.max_file_count);
     let storage = storage.with_context(|| format!("Storage = {:?}", config.persistence))?;
@@ -136,9 +144,15 @@ async fn main() -> Result<(), Error> {
             simulator.start().await;
         });
     }
+    
+    let tunshell_collector_tx = collector_tx.clone();
+    thread::spawn(move || {
+        let tunshell_session = TunshellSession::new(Relay::default(), false, tunshell_keys_rx, tunshell_collector_tx);
+        tunshell_session.start()
+    });
 
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    let mut actions = actions::new(collector_tx, controllers, native_actions_rx).await;
+    let mut actions = actions::new(collector_tx, controllers, native_actions_rx, tunshell_keys_tx).await;
     actions.start().await;
     Ok(())
 }

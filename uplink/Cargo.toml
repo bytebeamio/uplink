@@ -9,6 +9,7 @@ disk = { path = "../disk" }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.6", features = ["codec"] }
 tokio-stream = "0.1"
+tokio-compat-02 = "0.2.0"
 async-channel = "1.5"
 rumqttc = "0.7"
 # rumqttc = { path = "../../rumqtt/rumqttc" }
@@ -22,3 +23,4 @@ rand = "0.7"
 toml = "0.5"
 log = "0.4"
 simplelog = "0.9"
+tunshell-client = { git = "https://github.com/TimeToogo/tunshell.git" }
