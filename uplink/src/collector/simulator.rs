@@ -34,7 +34,7 @@ impl Simulator {
         let mut can_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
         for i in 0..1_000_000 {
-            let sleep_millis = 1;
+            let sleep_millis = 100000;
             tokio::time::sleep(Duration::from_millis(sleep_millis)).await;
             gps_timestamp += sleep_millis;
             can_timestamp += sleep_millis;

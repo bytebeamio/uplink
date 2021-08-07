@@ -240,7 +240,7 @@ impl Serializer {
 
     async fn normal(&mut self) -> Result<Status, Error> {
         info!("Switching to normal mode!!");
-        let mut interval = time::interval(time::Duration::from_secs(2));
+        let mut interval = time::interval(time::Duration::from_secs(10));
 
         loop {
             let (topic, payload) = select! {
