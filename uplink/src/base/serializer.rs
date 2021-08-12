@@ -57,12 +57,10 @@ impl Serializer {
 
         loop {
             let data = self.collector_rx.recv().await?;
-            let (topic, payload) = match topic_and_payload(&self.config, data) {
-                Some(v) => v,
-                None => continue,
-            };
+            let topic = data.topic();
+            let payload = data.serialize();
 
-            let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
+            let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
             publish.pkid = 1;
 
             if let Err(e) = publish.write(&mut self.storage.writer()) {
@@ -97,13 +95,10 @@ impl Serializer {
                         self.metrics.add_errors(errors, count);
                       }
 
-                      let (topic, payload) = match topic_and_payload(&self.config, data) {
-                            Some(v) => v,
-                            None => continue
-                      };
-
+                      let topic = data.topic();
+                      let payload = data.serialize();
                       let payload_size = payload.len();
-                      let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
+                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
                       match publish.write(&mut self.storage.writer()) {
@@ -169,13 +164,10 @@ impl Serializer {
                         self.metrics.add_errors(errors, count);
                       }
 
-                      let (topic, payload) = match topic_and_payload(&self.config, data) {
-                            Some(v) => v,
-                            None => continue
-                      };
-
+                      let topic = data.topic();
+                      let payload = data.serialize();
                       let payload_size = payload.len();
-                      let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
+                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
                       match publish.write(&mut storage.writer()) {
@@ -243,7 +235,7 @@ impl Serializer {
         let mut interval = time::interval(time::Duration::from_secs(10));
 
         loop {
-            let (topic, payload) = select! {
+            let failed = select! {
                 data = self.collector_rx.recv() => {
                     let data = data?;
 
@@ -252,29 +244,34 @@ impl Serializer {
                         self.metrics.add_errors(errors, count);
                     }
 
-                    let (topic, payload) = match topic_and_payload(&self.config, data) {
-                        Some(v) => v,
-                        None => continue,
-                    };
+                    let topic = data.topic();
+                    let payload = data.serialize();
+                    let payload_size = payload.len();
+                    match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
+                        Ok(_) => {
+                            self.metrics.add_total_sent_size(payload_size);
+                            continue;
+                        }
+                        Err(ClientError::TryRequest(request)) => request,
+                        Err(e) => return Err(e.into()),
+                    }
 
-                    (topic, payload)
                 }
                 _ = interval.tick() => {
                     let (topic, payload) = self.metrics.next();
-                    (topic, payload)
+                    let payload_size = payload.len();
+                    match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
+                        Ok(_) => {
+                            self.metrics.add_total_sent_size(payload_size);
+                            continue;
+                        }
+                        Err(ClientError::TryRequest(request)) => request,
+                        Err(e) => return Err(e.into()),
+                    }
                 }
             };
 
-            let payload_size = payload.len();
-            let failed = match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
-                Ok(_) => {
-                    self.metrics.add_total_sent_size(payload_size);
-                    continue;
-                }
-                Err(ClientError::TryRequest(request)) => request,
-                Err(e) => return Err(e.into()),
-            };
-
+            
             match failed.into_inner() {
                 Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
                 request => unreachable!("{:?}", request),
@@ -303,24 +300,6 @@ async fn send_publish(client: AsyncClient, topic: String, payload: Bytes) -> Res
     Ok(client)
 }
 
-fn topic_and_payload(config: &Arc<Config>, data: Box<dyn Package>) -> Option<(String, Vec<u8>)> {
-    let stream = &data.stream();
-    let topic = match config.streams.get(stream) {
-        Some(s) => s.topic.clone(),
-        None => {
-            error!("Unconfigured stream = {}", stream);
-            return None;
-        }
-    };
-
-    let payload = data.serialize();
-    if payload.is_empty() {
-        warn!("Empty payload. Stream = {}", stream);
-        return None;
-    }
-
-    Some((topic, payload))
-}
 
 #[derive(Debug, Default, Clone, Serialize)]
 struct Metrics {
@@ -376,7 +355,7 @@ impl Metrics {
         self.errors.push_str(" | ");
     }
 
-    pub fn next(&mut self) -> (String, Vec<u8>) {
+    pub fn next(&mut self) -> (&str, Vec<u8>) {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
         self.sequence += 1;
@@ -384,6 +363,6 @@ impl Metrics {
         let payload = serde_json::to_vec(&vec![&self]).unwrap();
         self.errors.clear();
         self.lost_segments = 0;
-        (self.topic.clone(), payload)
+        (&self.topic, payload)
     }
 }

@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use std::io;
 use std::time::SystemTimeError;
 
 use super::{ActionResponse, Control, Package};
-use crate::base::{self, Stream};
+use crate::base::{self, Config, Stream};
 use async_channel::{SendError, Sender, TrySendError};
 use thiserror::Error;
 
@@ -58,8 +58,9 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn new(controllers: HashMap<String, Sender<Control>>, collector_tx: Sender<Box<dyn Package>>) -> Self {
-        let status_stream = Stream::new("action_status", 1, collector_tx);
+    pub fn new(config: Arc<Config>, controllers: HashMap<String, Sender<Control>>, collector_tx: Sender<Box<dyn Package>>) -> Self {
+        let status_topic = &config.streams.get("action_status").unwrap().topic;
+        let status_stream = Stream::new("action_status", status_topic, 1, collector_tx);
         let controller = Controller { status_stream, collector_controllers: controllers, collector_run_status: HashMap::new() };
         controller
     }

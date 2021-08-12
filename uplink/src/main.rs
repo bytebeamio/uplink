@@ -155,7 +155,7 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    profile: {}", commandline.profile);
     println!("    commit_sha: {}", commandline.commit_sha);
     println!("    commit_date: {}", commandline.commit_date);
-    println!("    device_id: {}", config.project_id);
+    println!("    project_id: {}", config.project_id);
     println!("    device_id: {}", config.device_id);
     println!("    remote: {}:{}", config.broker, config.port);
     println!("    authentication: {}", config.authentication.is_some());
@@ -206,21 +206,23 @@ async fn main() -> Result<(), Error> {
     });
 
     if enable_simulator {
+        let simulator_config = config.clone();
         let data_tx = collector_tx.clone();
         task::spawn(async {
-            let mut simulator = Simulator::new(config, data_tx);
+            let mut simulator = Simulator::new(simulator_config, data_tx);
             simulator.start().await;
         });
     }
 
+    let tunshell_config = config.clone();
     let tunshell_collector_tx = collector_tx.clone();
     thread::spawn(move || {
-        let tunshell_session = TunshellSession::new(Relay::default(), false, tunshell_keys_rx, tunshell_collector_tx);
+        let tunshell_session = TunshellSession::new(tunshell_config, Relay::default(), false, tunshell_keys_rx, tunshell_collector_tx);
         tunshell_session.start()
     });
 
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    let mut actions = actions::new(collector_tx, controllers, native_actions_rx, tunshell_keys_tx).await;
+    let mut actions = actions::new(config.clone(), collector_tx, controllers, native_actions_rx, tunshell_keys_tx).await;
     actions.start().await;
     Ok(())
 }

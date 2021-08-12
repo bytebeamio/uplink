@@ -1,14 +1,15 @@
-use super::{Control, Package};
+use super::{Config, Control, Package};
 use async_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod controller;
-pub mod tunshell;
 mod process;
+pub mod tunshell;
 
 use crate::base::{Buffer, Point, Stream};
 pub use controller::Controller;
@@ -109,18 +110,21 @@ pub struct Actions {
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
-    tunshell_tx: Sender<String>
+    tunshell_tx: Sender<String>,
 }
 
 pub async fn new(
+    config: Arc<Config>,
     collector_tx: Sender<Box<dyn Package>>,
     controllers: HashMap<String, Sender<Control>>,
     actions_rx: Receiver<Action>,
-    tunshell_tx: Sender<String>
+    tunshell_tx: Sender<String>,
 ) -> Actions {
-    let controller = Controller::new(controllers, collector_tx.clone());
-    let process = process::Process::new(collector_tx.clone());
-    let status_bucket = Stream::new("action_status", 1, collector_tx);
+    let controller = Controller::new(config.clone(), controllers, collector_tx.clone());
+    let process = process::Process::new(config.clone(), collector_tx.clone());
+
+    let status_topic = &config.streams.get("action_status").unwrap().topic;
+    let status_bucket = Stream::new("action_status", status_topic, 1, collector_tx);
     Actions { status_bucket, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
 }
 
@@ -185,8 +189,8 @@ impl Actions {
 }
 
 impl Package for Buffer<ActionResponse> {
-    fn stream(&self) -> String {
-        return "action_status".to_owned();
+    fn topic(&self) -> Arc<String> {
+        return self.topic.clone();
     }
 
     fn serialize(&self) -> Vec<u8> {

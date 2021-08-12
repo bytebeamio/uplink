@@ -44,10 +44,12 @@ impl Bridge {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
+        let status_topic = &self.config.streams.get("action_status").unwrap().topic;
+        let mut status_stream = Stream::new("action_status", status_topic, 1, self.data_tx.clone());
+
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
             let listener = TcpListener::bind(&addr).await?;
-            let mut status_stream = Stream::new("action_status", 1, self.data_tx.clone());
 
             let (stream, addr) = loop {
                 select! {
@@ -82,10 +84,11 @@ impl Bridge {
     pub async fn collect(&mut self, mut framed: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
         let mut bridge_partitions = HashMap::new();
         for (stream, config) in self.config.streams.clone() {
-            bridge_partitions.insert(stream.clone(), Stream::new(stream, config.buf_size, self.data_tx.clone()));
+            bridge_partitions.insert(stream.clone(), Stream::new(stream, config.topic, config.buf_size, self.data_tx.clone()));
         }
 
-        let mut status_stream = Stream::new("action_status", 1, self.data_tx.clone());
+        let status_topic = &self.config.streams.get("action_status").unwrap().topic;
+        let mut status_stream = Stream::new("action_status", status_topic, 1, self.data_tx.clone());
         let action_timeout = time::sleep(Duration::from_secs(10));
 
         tokio::pin!(action_timeout);
@@ -115,14 +118,24 @@ impl Bridge {
                         }
                     }
 
-                    match bridge_partitions.get_mut(&data.stream) {
-                        Some(partition) => if let Err(e) = partition.fill(data).await {
-                            error!("Failed to send data. Error = {:?}", e.to_string());
-                        }
+                    let partition = match bridge_partitions.get_mut(&data.stream) {
+                        Some(partition) => partition,
                         None => {
-                            error!("Data on invalid stream = {:?}", data.stream);
+                            if bridge_partitions.keys().len() > 20 {
+                                error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
+                                continue
+                            }
+
+                            let topic = String::from("/tenants/") + &self.config.project_id + "/devices/" + &self.config.device_id + "/" + &data.stream + "/jsonarray";
+                            let stream = Stream::new(data.stream.clone(), topic, 100, self.data_tx.clone());
+                            bridge_partitions.entry(data.stream.clone()).or_insert(stream)
                         }
+                    };
+
+                    if let Err(e) = partition.fill(data).await {
+                        error!("Failed to send data. Error = {:?}", e.to_string());
                     }
+
                 }
                 action = self.actions_rx.recv() => {
                     let action = action?;
@@ -178,8 +191,8 @@ impl Point for Payload {
 }
 
 impl Package for Buffer<Payload> {
-    fn stream(&self) -> String {
-        return self.stream.clone();
+    fn topic(&self) -> Arc<String> {
+        return self.topic.clone();
     }
 
     fn serialize(&self) -> Vec<u8> {

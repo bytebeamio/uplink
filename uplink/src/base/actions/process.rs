@@ -6,7 +6,7 @@ use tokio::{pin, select, task, time};
 
 use super::{ActionResponse, Package};
 
-use crate::base::Stream;
+use crate::base::{Config, Stream};
 use std::io;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -17,6 +17,7 @@ use std::time::Duration;
 /// is in progress.
 /// It sends result and errors to the broker over collector_tx
 pub struct Process {
+    _config: Arc<Config>,
     // buffer to send status messages to cloud
     status_bucket: Stream<ActionResponse>,
     // we use this flag to ignore new process spawn while previous process is in progress
@@ -38,9 +39,10 @@ pub enum Error {
 }
 
 impl Process {
-    pub fn new(collector_tx: Sender<Box<dyn Package>>) -> Process {
-        let status_bucket = Stream::new("action_status", 1, collector_tx);
-        Process { status_bucket, last_process_done: Arc::new(Mutex::new(true)) }
+    pub fn new(config: Arc<Config>, collector_tx: Sender<Box<dyn Package>>) -> Process {
+        let status_topic = &config.streams.get("action_status").unwrap().topic;
+        let status_bucket = Stream::new("action_status", status_topic, 1, collector_tx);
+        Process { _config: config, status_bucket, last_process_done: Arc::new(Mutex::new(true)) }
     }
 
     /// Run a process of specified command
