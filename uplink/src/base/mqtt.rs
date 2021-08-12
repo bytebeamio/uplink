@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::base::actions::Action;
 use crate::base::Config;
-use rumqttc::{AsyncClient, Event, EventLoop, Incoming, MqttOptions, Publish, QoS};
+use rumqttc::{AsyncClient, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS, TlsConfiguration, Transport};
 use std::sync::Arc;
 
 #[derive(Error, Debug)]
@@ -99,6 +99,20 @@ fn mqttoptions(config: &Config) -> MqttOptions {
     mqttoptions.set_max_packet_size(config.max_packet_size, config.max_packet_size);
     mqttoptions.set_keep_alive(60);
     mqttoptions.set_inflight(config.max_inflight);
+
+    if let Some(auth) = config.authentication.clone() {
+        let ca = auth.ca_certificate.into_bytes();
+        let device_certificate = auth.device_certificate.into_bytes();
+        let device_private_key = auth.device_private_key.into_bytes();
+        let transport = Transport::Tls(TlsConfiguration::Simple {
+            ca,
+            alpn: None,
+            client_auth: Some((device_certificate, Key::RSA(device_private_key))),
+        });
+
+        mqttoptions.set_transport(transport);
+    }
+
     mqttoptions
 }
 

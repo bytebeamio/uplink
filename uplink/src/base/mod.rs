@@ -28,15 +28,21 @@ pub struct Persistence {
     pub max_file_count: usize,
 }
 
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Authentication {
+    ca_certificate: String, 
+    device_certificate: String, 
+    device_private_key: String
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
     pub broker: String,
     pub port: u16,
-    pub ca_certificate: Option<String>,
-    pub device_certificate: Option<String>, 
-    pub device_private_key: Option<String>,
+    pub authentication: Option<Authentication>,
     pub bridge_port: u16,
     pub max_packet_size: usize,
     pub max_inflight: u16,
