@@ -2,12 +2,11 @@
 extern crate log;
 
 use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
 use std::thread;
 
 use anyhow::{Context, Error};
 use async_channel::{bounded, Sender};
+use figment::{providers::Format, providers::Json, providers::Toml, Figment};
 use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
@@ -32,18 +31,12 @@ use std::sync::Arc;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
 pub struct CommandLine {
-    /// device id
-    #[structopt(short = "t", help = "Tenant id")]
-    tenant_id: String,
-    /// device id
-    #[structopt(short = "i", help = "Device id")]
-    device_id: String,
     /// config file
     #[structopt(short = "c", help = "Config file")]
     config: String,
-    /// directory with certificates
-    #[structopt(short = "a", help = "certs")]
-    certs_dir: PathBuf,
+    /// config file
+    #[structopt(short = "a", help = "Authentication file")]
+    auth: String,
     /// list of modules to log
     #[structopt(short = "s", long = "simulator")]
     simulator: bool,
@@ -58,18 +51,14 @@ pub struct CommandLine {
 /// Reads config file to generate config struct and replaces places holders
 /// like bike id and data version
 fn initalize_config(commandline: CommandLine) -> Result<Config, Error> {
-    let config = fs::read_to_string(&commandline.config);
-    let config = config.with_context(|| format!("Config = {}", commandline.config))?;
+    let mut config: Config = Figment::new()
+        .merge(Toml::file(&commandline.config))
+        .join(Json::file(&commandline.auth))
+        .extract()
+        .with_context(|| format!("Config = {}", commandline.config))?;
 
-    let device_id = commandline.device_id.trim();
-    let tenant_id = commandline.tenant_id.trim();
-
-    let mut config: Config = toml::from_str(&config)?;
-    config.ca = Some(commandline.certs_dir.join(device_id).join("roots.pem"));
-    config.key = Some(commandline.certs_dir.join(device_id).join("rsa_private.pem"));
-    config.device_id = str::replace(&config.device_id, "{device_id}", device_id);
-    config.tenant_id = str::replace(&config.tenant_id, "{tenant_id}", tenant_id);
-
+    let tenant_id = config.project_id.trim();
+    let device_id = config.device_id.trim();
     for config in config.streams.values_mut() {
         let topic = str::replace(&config.topic, "{tenant_id}", tenant_id);
         config.topic = topic;
@@ -78,6 +67,7 @@ fn initalize_config(commandline: CommandLine) -> Result<Config, Error> {
         config.topic = topic;
     }
 
+    dbg!(&config);
     Ok(config)
 }
 
@@ -151,7 +141,7 @@ async fn main() -> Result<(), Error> {
             simulator.start().await;
         });
     }
-    
+
     let tunshell_collector_tx = collector_tx.clone();
     thread::spawn(move || {
         let tunshell_session = TunshellSession::new(Relay::default(), false, tunshell_keys_rx, tunshell_collector_tx);

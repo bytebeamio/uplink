@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::mem;
-use std::path::PathBuf;
 
 use async_channel::{SendError, Sender};
 use serde::Deserialize;
@@ -31,18 +30,19 @@ pub struct Persistence {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub tenant_id: String,
+    pub project_id: String,
     pub device_id: String,
     pub broker: String,
     pub port: u16,
+    pub ca_certificate: Option<String>,
+    pub device_certificate: Option<String>, 
+    pub device_private_key: Option<String>,
     pub bridge_port: u16,
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub actions: Vec<String>,
     pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
-    pub key: Option<PathBuf>,
-    pub ca: Option<PathBuf>,
 }
 
 pub trait Point: Send + Debug {

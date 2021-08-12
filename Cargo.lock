@@ -76,6 +76,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3410529e8288c463bedb5930f82833bc0c90e5d2fe639a56582a4d09220b281"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -329,6 +338,20 @@ name = "event-listener"
 version = "2.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7531096570974c3a9dcf9e4b8e1cede1ec26cf5046219fb3b9d897503b9be59"
+
+[[package]]
+name = "figment"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "790b4292c72618abbab50f787a477014fe15634f96291de45672ce46afe122df"
+dependencies = [
+ "atomic",
+ "serde",
+ "serde_json",
+ "toml",
+ "uncased",
+ "version_check",
+]
 
 [[package]]
 name = "filedescriptor"
@@ -2029,6 +2052,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "uncased"
+version = "0.9.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5baeed7327e25054889b9bd4f975f32e5f4c5d434042d59ab6cd4142c0a76ed0"
+dependencies = [
+ "version_check",
+]
+
+[[package]]
 name = "unicode-bidi"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2072,12 +2104,13 @@ checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 
 [[package]]
 name = "uplink"
-version = "1.0.2"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "async-channel",
  "bytes 1.0.0",
  "disk",
+ "figment",
  "log",
  "rand 0.7.3",
  "rumqttc",
@@ -2090,7 +2123,6 @@ dependencies = [
  "tokio-compat-02",
  "tokio-stream",
  "tokio-util 0.6.0",
- "toml",
  "tunshell-client",
 ]
 
