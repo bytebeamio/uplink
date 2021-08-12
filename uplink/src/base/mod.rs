@@ -28,12 +28,11 @@ pub struct Persistence {
     pub max_file_count: usize,
 }
 
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct Authentication {
-    ca_certificate: String, 
-    device_certificate: String, 
-    device_private_key: String
+    ca_certificate: String,
+    device_certificate: String,
+    device_private_key: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

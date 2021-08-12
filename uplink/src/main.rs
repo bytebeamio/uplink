@@ -1,12 +1,16 @@
 #[macro_use]
 extern crate log;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fs};
 use std::thread;
 
 use anyhow::{Context, Error};
 use async_channel::{bounded, Sender};
-use figment::{providers::Format, providers::Json, providers::Toml, Figment};
+use figment::{
+    providers::Toml,
+    providers::{Data, Json},
+    Figment,
+};
 use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
@@ -31,9 +35,21 @@ use std::sync::Arc;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
 pub struct CommandLine {
+    /// Binary version
+    #[structopt(skip = env!("VERGEN_BUILD_SEMVER"))]
+    version: String,
+    /// Build profile
+    #[structopt(skip= env!("VERGEN_CARGO_PROFILE"))]
+    profile: String,
+    /// Commit SHA
+    #[structopt(skip= env!("VERGEN_GIT_SHA"))]
+    commit_sha: String,
+    /// Commit SHA
+    #[structopt(skip= env!("VERGEN_GIT_COMMIT_TIMESTAMP"))]
+    commit_date: String,
     /// config file
     #[structopt(short = "c", help = "Config file")]
-    config: String,
+    config: Option<String>,
     /// config file
     #[structopt(short = "a", help = "Authentication file")]
     auth: String,
@@ -48,14 +64,44 @@ pub struct CommandLine {
     modules: Vec<String>,
 }
 
+const DEFAULT_CONFIG: &'static str = r#"
+    bridge_port = 5555
+    max_packet_size = 102400
+    max_inflight = 100
+    
+    # Whitelist of binaries which uplink can spawn as a process
+    # This makes sure that user is protected against random actions
+    # triggered from cloud.
+    actions = ["tunshell"]
+    
+    [persistence]
+    path = "/tmp/uplink"
+    max_file_size = 104857600 # 100MB
+    max_file_count = 3
+    
+    [streams.metrics]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/metrics/jsonarray"
+    buf_size = 10
+    
+    # Action status stream from status messages from bridge
+    [streams.action_status]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
+    buf_size = 1
+"#;
+
 /// Reads config file to generate config struct and replaces places holders
 /// like bike id and data version
-fn initalize_config(commandline: CommandLine) -> Result<Config, Error> {
-    let mut config: Config = Figment::new()
-        .merge(Toml::file(&commandline.config))
-        .join(Json::file(&commandline.auth))
-        .extract()
-        .with_context(|| format!("Config = {}", commandline.config))?;
+fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
+    let mut config = Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG));
+
+    if let Some(c) = &commandline.config {
+        config = config.merge(Data::<Toml>::file(c));
+    }
+
+    let mut config: Config =
+        config.join(Data::<Json>::file(&commandline.auth)).extract().with_context(|| format!("Config error"))?;
+
+    fs::create_dir_all(&config.persistence.path)?;
 
     let tenant_id = config.project_id.trim();
     let device_id = config.device_id.trim();
@@ -67,7 +113,6 @@ fn initalize_config(commandline: CommandLine) -> Result<Config, Error> {
         config.topic = topic;
     }
 
-    dbg!(&config);
     Ok(config)
 }
 
@@ -98,13 +143,39 @@ fn initialize_logging(commandline: &CommandLine) {
     CombinedLogger::init(vec![loggers]).unwrap();
 }
 
+fn banner(commandline: &CommandLine, config: &Arc<Config>) {
+    const B: &str = r#"
+    ░█░▒█░▄▀▀▄░█░░░▀░░█▀▀▄░█░▄
+    ░█░▒█░█▄▄█░█░░░█▀░█░▒█░█▀▄
+    ░░▀▀▀░█░░░░▀▀░▀▀▀░▀░░▀░▀░▀
+    "#;
+
+    println!("{}", B);
+    println!("    version: {}", commandline.version);
+    println!("    profile: {}", commandline.profile);
+    println!("    commit_sha: {}", commandline.commit_sha);
+    println!("    commit_date: {}", commandline.commit_date);
+    println!("    device_id: {}", config.project_id);
+    println!("    device_id: {}", config.device_id);
+    println!("    remote: {}:{}", config.broker, config.port);
+    println!("    authentication: {}", config.authentication.is_some());
+    println!("    max_packet_size: {}", config.max_packet_size);
+    println!("    max_inflight_messages: {}", config.max_inflight);
+    println!("    persistence_dir: {}", config.persistence.path);
+    println!("    persistence_max_segment_size: {}", config.persistence.max_file_size);
+    println!("    persistence_max_segment_count: {}", config.persistence.max_file_count);
+    println!("\n");
+}
+
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
     let enable_simulator = commandline.simulator;
 
     initialize_logging(&commandline);
-    let config = Arc::new(initalize_config(commandline)?);
+    let config = Arc::new(initalize_config(&commandline)?);
+
+    banner(&commandline, &config);
 
     let (collector_tx, collector_rx) = bounded(10);
     let (native_actions_tx, native_actions_rx) = bounded(10);

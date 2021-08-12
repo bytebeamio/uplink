@@ -5,6 +5,10 @@ authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
 
 [dependencies]
+structopt = "0.3"
+figment = { version = "0.10.6", features = ["toml", "json"] }
+log = "0.4"
+simplelog = "0.9"
 disk = { path = "../disk" }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.6", features = ["codec"] }
@@ -18,9 +22,8 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 anyhow = "1"
 serde_json = "1.0"
-structopt = "0.3"
 rand = "0.7"
-figment = { version = "0.10.6", features = ["toml", "json"] }
-log = "0.4"
-simplelog = "0.9"
 tunshell-client = { git = "https://github.com/TimeToogo/tunshell.git" }
+
+[build-dependencies]
+vergen = { version = "5.1", features = ["git", "build", "chrono"] }
