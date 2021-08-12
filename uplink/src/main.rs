@@ -33,6 +33,9 @@ use std::sync::Arc;
 #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
 pub struct CommandLine {
     /// device id
+    #[structopt(short = "t", help = "Tenant id")]
+    tenant_id: String,
+    /// device id
     #[structopt(short = "i", help = "Device id")]
     device_id: String,
     /// config file
@@ -59,15 +62,20 @@ fn initalize_config(commandline: CommandLine) -> Result<Config, Error> {
     let config = config.with_context(|| format!("Config = {}", commandline.config))?;
 
     let device_id = commandline.device_id.trim();
+    let tenant_id = commandline.tenant_id.trim();
 
     let mut config: Config = toml::from_str(&config)?;
     config.ca = Some(commandline.certs_dir.join(device_id).join("roots.pem"));
     config.key = Some(commandline.certs_dir.join(device_id).join("rsa_private.pem"));
     config.device_id = str::replace(&config.device_id, "{device_id}", device_id);
+    config.tenant_id = str::replace(&config.tenant_id, "{tenant_id}", tenant_id);
 
     for config in config.streams.values_mut() {
+        let topic = str::replace(&config.topic, "{tenant_id}", tenant_id);
+        config.topic = topic;
+
         let topic = str::replace(&config.topic, "{device_id}", device_id);
-        config.topic = topic
+        config.topic = topic;
     }
 
     Ok(config)

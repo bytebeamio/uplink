@@ -31,6 +31,7 @@ pub struct Persistence {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
+    pub tenant_id: String,
     pub device_id: String,
     pub broker: String,
     pub port: u16,
