@@ -24,6 +24,7 @@ use crate::base::actions::{
 };
 use crate::base::mqtt::Mqtt;
 use crate::base::serializer::Serializer;
+use crate::base::Stream;
 
 use crate::collector::simulator::Simulator;
 use crate::collector::tcpjson::Bridge;
@@ -191,6 +192,9 @@ async fn main() -> Result<(), Error> {
     );
     let storage = storage.with_context(|| format!("Storage = {:?}", config.persistence))?;
 
+    let action_status_topic = &config.streams.get("action_status").unwrap().topic;
+    let action_status = Stream::new("action_status", action_status_topic, 1, collector_tx.clone());
+
     let mut mqtt = Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
     let mut serializer = Serializer::new(config.clone(), collector_rx, mqtt.client(), storage)?;
 
@@ -204,7 +208,8 @@ async fn main() -> Result<(), Error> {
         mqtt.start().await;
     });
 
-    let mut bridge = Bridge::new(config.clone(), collector_tx.clone(), bridge_actions_rx);
+    let mut bridge =
+        Bridge::new(config.clone(), collector_tx.clone(), bridge_actions_rx, action_status.clone());
     task::spawn(async move {
         if let Err(e) = bridge.start().await {
             error!("Bridge stopped!! Error = {:?}", e);
@@ -221,25 +226,22 @@ async fn main() -> Result<(), Error> {
     }
 
     let tunshell_config = config.clone();
-    let tunshell_collector_tx = collector_tx.clone();
-    thread::spawn(move || {
-        let tunshell_session = TunshellSession::new(
-            tunshell_config,
-            Relay::default(),
-            false,
-            tunshell_keys_rx,
-            tunshell_collector_tx,
-        );
-        tunshell_session.start()
-    });
+    let tunshell_session = TunshellSession::new(
+        tunshell_config,
+        Relay::default(),
+        false,
+        tunshell_keys_rx,
+        action_status.clone(),
+    );
+    thread::spawn(move || tunshell_session.start());
 
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
     let mut actions = actions::new(
         config.clone(),
-        collector_tx,
         controllers,
         native_actions_rx,
         tunshell_keys_tx,
+        action_status,
     )
     .await;
     actions.start().await;

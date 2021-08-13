@@ -1,16 +1,12 @@
 use std::sync::{Arc, Mutex};
 
-use async_channel::{Receiver, Sender};
+use async_channel::Receiver;
 use log::error;
 use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
-use crate::base::{
-    self,
-    actions::{ActionResponse, Package},
-    Stream,
-};
+use crate::base::{self, actions::ActionResponse, Stream};
 
 pub struct Relay {
     host: String,
@@ -29,7 +25,7 @@ pub struct TunshellSession {
     relay: Relay,
     echo_stdout: bool,
     keys_rx: Receiver<String>,
-    status_stream: Stream<ActionResponse>,
+    action_status: Stream<ActionResponse>,
     last_process_done: Arc<Mutex<bool>>,
 }
 
@@ -39,16 +35,14 @@ impl TunshellSession {
         relay: Relay,
         echo_stdout: bool,
         tunshell_rx: Receiver<String>,
-        collector_tx: Sender<Box<dyn Package>>,
+        action_status: Stream<ActionResponse>,
     ) -> Self {
-        let status_topic = &config.streams.get("action_status").unwrap().topic;
-        let status_stream = Stream::new("action_status", status_topic, 1, collector_tx);
         Self {
             _config: config,
             relay,
             echo_stdout,
             keys_rx: tunshell_rx,
-            status_stream,
+            action_status,
             last_process_done: Arc::new(Mutex::new(true)),
         }
     }
@@ -71,7 +65,7 @@ impl TunshellSession {
         while let Ok(keys) = self.keys_rx.recv().await {
             if *self.last_process_done.lock().unwrap() == false {
                 let status = ActionResponse::failure("tunshell", "busy".to_owned());
-                if let Err(e) = self.status_stream.fill(status).await {
+                if let Err(e) = self.action_status.fill(status).await {
                     error!("Failed to send status, Error = {:?}", e);
                 };
 
@@ -84,7 +78,7 @@ impl TunshellSession {
                 Err(e) => {
                     error!("Failed to deserialize keys. Error = {:?}", e);
                     let status = ActionResponse::failure("tunshell", "corruptkeys".to_owned());
-                    if let Err(e) = self.status_stream.fill(status).await {
+                    if let Err(e) = self.action_status.fill(status).await {
                         error!("Failed to send status, Error = {:?}", e);
                     };
 
@@ -94,7 +88,7 @@ impl TunshellSession {
 
             let mut client = Client::new(self.config(keys), HostShell::new().unwrap());
             let last_process_done = self.last_process_done.clone();
-            let mut status_tx = self.status_stream.clone();
+            let mut status_tx = self.action_status.clone();
 
             tokio::spawn(async move {
                 *last_process_done.lock().unwrap() = false;
@@ -102,9 +96,8 @@ impl TunshellSession {
                 let send_status = match client.start_session().compat().await {
                     Ok(status) => {
                         if status != 0 {
-                            status_tx
-                                .fill(ActionResponse::failure("tunshell", status.to_string()))
-                                .await
+                            let response = ActionResponse::failure("tunshell", status.to_string());
+                            status_tx.fill(response).await
                         } else {
                             status_tx.fill(ActionResponse::success("tunshell")).await
                         }

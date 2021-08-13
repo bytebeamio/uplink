@@ -99,6 +99,32 @@ where
         Stream { name, topic, last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
     }
 
+    pub fn dynamic<S: Into<String>>(
+        stream: S,
+        project_id: S,
+        device_id: S,
+        tx: Sender<Box<dyn Package>>,
+    ) -> Stream<T> {
+        let stream = stream.into();
+        let project_id = project_id.into();
+        let device_id = device_id.into();
+
+        let topic = String::from("/tenants/")
+            + &project_id
+            + "/devices/"
+            + &device_id
+            + "/"
+            + &stream
+            + "/jsonarray";
+
+
+        let name = Arc::new(stream);
+        let topic = Arc::new(topic);
+        let buffer = Buffer::new(name.clone(), topic.clone());
+
+        Stream { name, topic, last_sequence: 0, last_timestamp: 0, max_buffer_size: 100, buffer, tx }
+    }
+
     pub async fn fill(&mut self, data: T) -> Result<(), Error> {
         let current_sequence = data.sequence();
         let current_timestamp = data.timestamp();

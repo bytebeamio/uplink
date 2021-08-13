@@ -55,14 +55,7 @@ impl Simulator {
             let partition = match self.partitions.get_mut(stream) {
                 Some(partition) => partition,
                 None => {
-                    let topic = String::from("/tenants/")
-                        + &self.config.project_id
-                        + "/devices/"
-                        + &self.config.device_id
-                        + "/"
-                        + stream
-                        + "/jsonarray";
-                    let s = Stream::new(stream, &topic, 100, self.data_tx.clone());
+                    let s = Stream::dynamic(stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
                     self.partitions.entry(stream.to_owned()).or_insert(s)
                 }
             };
@@ -73,14 +66,7 @@ impl Simulator {
             let partition = match self.partitions.get_mut(stream) {
                 Some(partition) => partition,
                 None => {
-                    let topic = String::from("/tenants/")
-                        + &self.config.project_id
-                        + "/devices/"
-                        + &self.config.device_id
-                        + "/"
-                        + stream
-                        + "/jsonarray";
-                    let s = Stream::new(stream, &topic, 100, self.data_tx.clone());
+                    let s = Stream::dynamic(stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
                     self.partitions.entry(stream.to_owned()).or_insert(s)
                 }
             };

@@ -1,9 +1,9 @@
 use std::io;
 use std::time::SystemTimeError;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use super::{ActionResponse, Control, Package};
-use crate::base::{self, Config, Stream};
+use crate::base::{self, Stream};
 use async_channel::{SendError, Sender, TrySendError};
 use thiserror::Error;
 
@@ -49,7 +49,7 @@ pub enum Error {
 pub struct Controller {
     // Storage to send action status to serializer. This is also cloned to spawn
     // a new collector
-    status_stream: Stream<ActionResponse>,
+    action_status: Stream<ActionResponse>,
     // controller_tx per collector
     collector_controllers: HashMap<String, Sender<Control>>,
     // collector running status. Used to spawn a new collector thread based on current
@@ -59,16 +59,13 @@ pub struct Controller {
 
 impl Controller {
     pub fn new(
-        config: Arc<Config>,
         controllers: HashMap<String, Sender<Control>>,
-        collector_tx: Sender<Box<dyn Package>>,
+        action_status: Stream<ActionResponse>,
     ) -> Self {
-        let status_topic = &config.streams.get("action_status").unwrap().topic;
-        let status_stream = Stream::new("action_status", status_topic, 1, collector_tx);
         let controller = Controller {
-            status_stream,
             collector_controllers: controllers,
             collector_run_status: HashMap::new(),
+            action_status,
         };
         controller
     }
@@ -85,7 +82,7 @@ impl Controller {
                 }
 
                 let status = ActionResponse::new(id);
-                self.status_stream.fill(status).await?;
+                self.action_status.fill(status).await?;
             }
             "start_collector_channel" => {
                 let collector_name = args.remove(0);
@@ -95,7 +92,7 @@ impl Controller {
                 }
 
                 let status = ActionResponse::new(id);
-                self.status_stream.fill(status).await?;
+                self.action_status.fill(status).await?;
             }
             "stop_collector" => {
                 let collector_name = args.remove(0);
@@ -109,7 +106,7 @@ impl Controller {
                         // control action based on action status from the controller
                         *running = false;
                         let status = ActionResponse::new(id);
-                        self.status_stream.fill(status).await?;
+                        self.action_status.fill(status).await?;
                     }
                 }
             }
@@ -118,7 +115,7 @@ impl Controller {
                 if let Some(running) = self.collector_run_status.get_mut(&collector_name) {
                     if !*running {
                         let status = ActionResponse::success(id);
-                        self.status_stream.fill(status).await?;
+                        self.action_status.fill(status).await?;
                     }
                 }
 

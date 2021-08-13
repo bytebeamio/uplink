@@ -36,6 +36,7 @@ pub struct Bridge {
     data_tx: Sender<Box<dyn Package>>,
     actions_rx: Receiver<Action>,
     current_action: Option<String>,
+    action_status: Stream<ActionResponse>
 }
 
 impl Bridge {
@@ -43,13 +44,13 @@ impl Bridge {
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
         actions_rx: Receiver<Action>,
+        action_status: Stream<ActionResponse>
     ) -> Bridge {
-        Bridge { config, data_tx, actions_rx, current_action: None }
+        Bridge { config, data_tx, actions_rx, current_action: None, action_status }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let status_topic = &self.config.streams.get("action_status").unwrap().topic;
-        let mut status_stream = Stream::new("action_status", status_topic, 1, self.data_tx.clone());
+        let mut action_status = self.action_status.clone();
 
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
@@ -70,7 +71,7 @@ impl Bridge {
                         let action = action.unwrap();
                         error!("Bridge down!! Action ID = {}", action.id);
                         let status = ActionResponse::failure(&action.id, "Bridge down");
-                        if let Err(e) = status_stream.fill(status).await {
+                        if let Err(e) = action_status.fill(status).await {
                             error!("Failed to send busy status. Error = {:?}", e);
                         }
                     }
@@ -97,8 +98,7 @@ impl Bridge {
             );
         }
 
-        let status_topic = &self.config.streams.get("action_status").unwrap().topic;
-        let mut status_stream = Stream::new("action_status", status_topic, 1, self.data_tx.clone());
+        let mut action_status = self.action_status.clone();
         let action_timeout = time::sleep(Duration::from_secs(10));
 
         tokio::pin!(action_timeout);
@@ -136,8 +136,7 @@ impl Bridge {
                                 continue
                             }
 
-                            let topic = String::from("/tenants/") + &self.config.project_id + "/devices/" + &self.config.device_id + "/" + &data.stream + "/jsonarray";
-                            let stream = Stream::new(data.stream.clone(), topic, 100, self.data_tx.clone());
+                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
                             bridge_partitions.entry(data.stream.clone()).or_insert(stream)
                         }
                     };
@@ -169,7 +168,7 @@ impl Bridge {
 
                     // Send failure response to cloud
                     let status = ActionResponse::failure(&action, "Action timed out");
-                    if let Err(e) = status_stream.fill(status).await {
+                    if let Err(e) = action_status.fill(status).await {
                         error!("Failed to fill. Error = {:?}", e);
                     }
                 }

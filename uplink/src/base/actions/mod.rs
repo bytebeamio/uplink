@@ -109,7 +109,7 @@ impl Point for ActionResponse {
 }
 
 pub struct Actions {
-    status_bucket: Stream<ActionResponse>,
+    action_status: Stream<ActionResponse>,
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
@@ -117,18 +117,15 @@ pub struct Actions {
 }
 
 pub async fn new(
-    config: Arc<Config>,
-    collector_tx: Sender<Box<dyn Package>>,
+    _config: Arc<Config>,
     controllers: HashMap<String, Sender<Control>>,
     actions_rx: Receiver<Action>,
     tunshell_tx: Sender<String>,
+    action_status: Stream<ActionResponse>,
 ) -> Actions {
-    let controller = Controller::new(config.clone(), controllers, collector_tx.clone());
-    let process = process::Process::new(config.clone(), collector_tx.clone());
-
-    let status_topic = &config.streams.get("action_status").unwrap().topic;
-    let status_bucket = Stream::new("action_status", status_topic, 1, collector_tx);
-    Actions { status_bucket, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
+    let controller = Controller::new(controllers, action_status.clone());
+    let process = process::Process::new(action_status.clone());
+    Actions { action_status, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
 }
 
 impl Actions {
@@ -185,7 +182,7 @@ impl Actions {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
         let status = ActionResponse::failure(id, error.to_string());
 
-        if let Err(e) = self.status_bucket.fill(status).await {
+        if let Err(e) = self.action_status.fill(status).await {
             error!("Failed to send status. Error = {:?}", e);
         }
     }
