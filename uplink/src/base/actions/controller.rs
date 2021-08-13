@@ -1,6 +1,6 @@
-use std::{collections::HashMap, sync::Arc};
 use std::io;
 use std::time::SystemTimeError;
+use std::{collections::HashMap, sync::Arc};
 
 use super::{ActionResponse, Control, Package};
 use crate::base::{self, Config, Stream};
@@ -58,10 +58,18 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn new(config: Arc<Config>, controllers: HashMap<String, Sender<Control>>, collector_tx: Sender<Box<dyn Package>>) -> Self {
+    pub fn new(
+        config: Arc<Config>,
+        controllers: HashMap<String, Sender<Control>>,
+        collector_tx: Sender<Box<dyn Package>>,
+    ) -> Self {
         let status_topic = &config.streams.get("action_status").unwrap().topic;
         let status_stream = Stream::new("action_status", status_topic, 1, collector_tx);
-        let controller = Controller { status_stream, collector_controllers: controllers, collector_run_status: HashMap::new() };
+        let controller = Controller {
+            status_stream,
+            collector_controllers: controllers,
+            collector_run_status: HashMap::new(),
+        };
         controller
     }
 
@@ -93,7 +101,8 @@ impl Controller {
                 let collector_name = args.remove(0);
                 if let Some(running) = self.collector_run_status.get_mut(&collector_name) {
                     if *running {
-                        let controller_tx = self.collector_controllers.get_mut(&collector_name).unwrap();
+                        let controller_tx =
+                            self.collector_controllers.get_mut(&collector_name).unwrap();
                         controller_tx.try_send(Control::Shutdown).unwrap();
                         // there is no way of knowing if collector thread is actually shutdown. so
                         // tihs flag is an optimistic assignment. But UI should only enable next

@@ -1,8 +1,8 @@
 #[macro_use]
 extern crate log;
 
-use std::{collections::HashMap, fs};
 use std::thread;
+use std::{collections::HashMap, fs};
 
 use anyhow::{Context, Error};
 use async_channel::{bounded, Sender};
@@ -98,8 +98,10 @@ fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
         config = config.merge(Data::<Toml>::file(c));
     }
 
-    let mut config: Config =
-        config.join(Data::<Json>::file(&commandline.auth)).extract().with_context(|| format!("Config error"))?;
+    let mut config: Config = config
+        .join(Data::<Json>::file(&commandline.auth))
+        .extract()
+        .with_context(|| format!("Config error"))?;
 
     fs::create_dir_all(&config.persistence.path)?;
 
@@ -182,7 +184,11 @@ async fn main() -> Result<(), Error> {
     let (bridge_actions_tx, bridge_actions_rx) = bounded(10);
     let (tunshell_keys_tx, tunshell_keys_rx) = bounded(10);
 
-    let storage = Storage::new(&config.persistence.path, config.persistence.max_file_size, config.persistence.max_file_count);
+    let storage = Storage::new(
+        &config.persistence.path,
+        config.persistence.max_file_size,
+        config.persistence.max_file_count,
+    );
     let storage = storage.with_context(|| format!("Storage = {:?}", config.persistence))?;
 
     let mut mqtt = Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
@@ -217,12 +223,25 @@ async fn main() -> Result<(), Error> {
     let tunshell_config = config.clone();
     let tunshell_collector_tx = collector_tx.clone();
     thread::spawn(move || {
-        let tunshell_session = TunshellSession::new(tunshell_config, Relay::default(), false, tunshell_keys_rx, tunshell_collector_tx);
+        let tunshell_session = TunshellSession::new(
+            tunshell_config,
+            Relay::default(),
+            false,
+            tunshell_keys_rx,
+            tunshell_collector_tx,
+        );
         tunshell_session.start()
     });
 
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    let mut actions = actions::new(config.clone(), collector_tx, controllers, native_actions_rx, tunshell_keys_tx).await;
+    let mut actions = actions::new(
+        config.clone(),
+        collector_tx,
+        controllers,
+        native_actions_rx,
+        tunshell_keys_tx,
+    )
+    .await;
     actions.start().await;
     Ok(())
 }

@@ -58,7 +58,8 @@ pub struct ActionResponse {
 
 impl ActionResponse {
     pub fn new(id: &str) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
 
         ActionResponse {
             id: id.to_owned(),
@@ -71,7 +72,8 @@ impl ActionResponse {
     }
 
     pub fn success(id: &str) -> ActionResponse {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         ActionResponse {
             id: id.to_owned(),
             sequence: 0,
@@ -83,7 +85,8 @@ impl ActionResponse {
     }
 
     pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         ActionResponse {
             id: id.to_owned(),
             sequence: 0,

@@ -71,7 +71,10 @@ impl Serializer {
             match self.storage.flush_on_overflow() {
                 Ok(_) => {}
                 Err(e) => {
-                    error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
+                    error!(
+                        "Failed to flush write buffer to disk during bad network. Error = {:?}",
+                        e
+                    );
                     continue;
                 }
             }
@@ -84,7 +87,8 @@ impl Serializer {
 
         // Note: self.client.publish() is executing code before await point
         // in publish method every time. Verify this behaviour later
-        let publish = self.client.publish(&publish.topic, QoS::AtLeastOnce, false, &publish.payload[..]);
+        let publish =
+            self.client.publish(&publish.topic, QoS::AtLeastOnce, false, &publish.payload[..]);
         tokio::pin!(publish);
 
         loop {
@@ -271,7 +275,6 @@ impl Serializer {
                 }
             };
 
-            
             match failed.into_inner() {
                 Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
                 request => unreachable!("{:?}", request),
@@ -295,11 +298,14 @@ impl Serializer {
     }
 }
 
-async fn send_publish(client: AsyncClient, topic: String, payload: Bytes) -> Result<AsyncClient, ClientError> {
+async fn send_publish(
+    client: AsyncClient,
+    topic: String,
+    payload: Bytes,
+) -> Result<AsyncClient, ClientError> {
     client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
 }
-
 
 #[derive(Debug, Default, Clone, Serialize)]
 struct Metrics {
@@ -356,7 +362,8 @@ impl Metrics {
     }
 
     pub fn next(&mut self) -> (&str, Vec<u8>) {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
         self.sequence += 1;
 

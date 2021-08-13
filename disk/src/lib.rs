@@ -23,7 +23,11 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn new<P: Into<PathBuf>>(backlog_dir: P, max_file_size: usize, max_file_count: usize) -> io::Result<Storage> {
+    pub fn new<P: Into<PathBuf>>(
+        backlog_dir: P,
+        max_file_size: usize,
+        max_file_count: usize,
+    ) -> io::Result<Storage> {
         let backup_path = backlog_dir.into();
         let backlog_file_ids = get_file_ids(&backup_path)?;
 

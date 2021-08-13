@@ -102,12 +102,16 @@ impl TunshellSession {
                 let send_status = match client.start_session().compat().await {
                     Ok(status) => {
                         if status != 0 {
-                            status_tx.fill(ActionResponse::failure("tunshell", status.to_string())).await
+                            status_tx
+                                .fill(ActionResponse::failure("tunshell", status.to_string()))
+                                .await
                         } else {
                             status_tx.fill(ActionResponse::success("tunshell")).await
                         }
                     }
-                    Err(e) => status_tx.fill(ActionResponse::failure("tunshell", e.to_string())).await,
+                    Err(e) => {
+                        status_tx.fill(ActionResponse::failure("tunshell", e.to_string())).await
+                    }
                 };
 
                 if let Err(e) = send_status {

@@ -39,7 +39,11 @@ pub struct Bridge {
 }
 
 impl Bridge {
-    pub fn new(config: Arc<Config>, data_tx: Sender<Box<dyn Package>>, actions_rx: Receiver<Action>) -> Bridge {
+    pub fn new(
+        config: Arc<Config>,
+        data_tx: Sender<Box<dyn Package>>,
+        actions_rx: Receiver<Action>,
+    ) -> Bridge {
         Bridge { config, data_tx, actions_rx, current_action: None }
     }
 
@@ -81,10 +85,16 @@ impl Bridge {
         }
     }
 
-    pub async fn collect(&mut self, mut framed: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
+    pub async fn collect(
+        &mut self,
+        mut framed: Framed<TcpStream, LinesCodec>,
+    ) -> Result<(), Error> {
         let mut bridge_partitions = HashMap::new();
         for (stream, config) in self.config.streams.clone() {
-            bridge_partitions.insert(stream.clone(), Stream::new(stream, config.topic, config.buf_size, self.data_tx.clone()));
+            bridge_partitions.insert(
+                stream.clone(),
+                Stream::new(stream, config.topic, config.buf_size, self.data_tx.clone()),
+            );
         }
 
         let status_topic = &self.config.streams.get("action_status").unwrap().topic;

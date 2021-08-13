@@ -24,16 +24,20 @@ impl Simulator {
     pub fn new(config: Arc<Config>, data_tx: Sender<Box<dyn Package>>) -> Self {
         let mut partitions = HashMap::new();
         for (stream, config) in config.streams.clone() {
-            partitions.insert(stream.clone(), Stream::new(stream, config.topic, config.buf_size, data_tx.clone()));
+            partitions.insert(
+                stream.clone(),
+                Stream::new(stream, config.topic, config.buf_size, data_tx.clone()),
+            );
         }
 
         Simulator { config, partitions, data_tx }
     }
 
-
     pub(crate) async fn start(&mut self) {
-        let mut gps_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-        let mut can_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let mut gps_timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let mut can_timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
         for i in 0..1_000_000 {
             let sleep_millis = 10;
@@ -42,11 +46,22 @@ impl Simulator {
             can_timestamp += sleep_millis;
 
             let stream = "can";
-            let can = Payload { stream: stream.to_string(), sequence: i, timestamp: can_timestamp, payload: json!(Can::new()) };
+            let can = Payload {
+                stream: stream.to_string(),
+                sequence: i,
+                timestamp: can_timestamp,
+                payload: json!(Can::new()),
+            };
             let partition = match self.partitions.get_mut(stream) {
                 Some(partition) => partition,
                 None => {
-                    let topic = String::from("/tenants/") + &self.config.project_id + "/devices/" + &self.config.device_id + "/" + stream + "/jsonarray";
+                    let topic = String::from("/tenants/")
+                        + &self.config.project_id
+                        + "/devices/"
+                        + &self.config.device_id
+                        + "/"
+                        + stream
+                        + "/jsonarray";
                     let s = Stream::new(stream, &topic, 100, self.data_tx.clone());
                     self.partitions.entry(stream.to_owned()).or_insert(s)
                 }
@@ -58,13 +73,24 @@ impl Simulator {
             let partition = match self.partitions.get_mut(stream) {
                 Some(partition) => partition,
                 None => {
-                    let topic = String::from("/tenants/") + &self.config.project_id + "/devices/" + &self.config.device_id + "/" + stream + "/jsonarray";
+                    let topic = String::from("/tenants/")
+                        + &self.config.project_id
+                        + "/devices/"
+                        + &self.config.device_id
+                        + "/"
+                        + stream
+                        + "/jsonarray";
                     let s = Stream::new(stream, &topic, 100, self.data_tx.clone());
                     self.partitions.entry(stream.to_owned()).or_insert(s)
                 }
             };
 
-            let gps = Payload { stream: stream.to_string(), sequence: i, timestamp: gps_timestamp, payload: json!(Gps::new()) };
+            let gps = Payload {
+                stream: stream.to_string(),
+                sequence: i,
+                timestamp: gps_timestamp,
+                payload: json!(Gps::new()),
+            };
             partition.fill(gps).await.unwrap();
         }
     }

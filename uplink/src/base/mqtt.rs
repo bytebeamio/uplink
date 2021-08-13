@@ -9,7 +9,10 @@ use std::path::Path;
 
 use crate::base::actions::Action;
 use crate::base::Config;
-use rumqttc::{AsyncClient, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS, TlsConfiguration, Transport};
+use rumqttc::{
+    AsyncClient, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS, TlsConfiguration,
+    Transport,
+};
 use std::sync::Arc;
 
 #[derive(Error, Debug)]
@@ -30,12 +33,23 @@ pub struct Mqtt {
 }
 
 impl Mqtt {
-    pub fn new(config: Arc<Config>, actions_tx: Sender<Action>, bridge_actions_tx: Sender<Action>) -> Mqtt {
+    pub fn new(
+        config: Arc<Config>,
+        actions_tx: Sender<Action>,
+        bridge_actions_tx: Sender<Action>,
+    ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let (client, eventloop) = AsyncClient::new(options, 10);
         let actions_subscription = format!("/devices/{}/actions", config.device_id);
-        Mqtt { config, client, eventloop, native_actions_tx: actions_tx, bridge_actions_tx, actions_subscription }
+        Mqtt {
+            config,
+            client,
+            eventloop,
+            native_actions_tx: actions_tx,
+            bridge_actions_tx,
+            actions_subscription,
+        }
     }
 
     pub fn client(&mut self) -> AsyncClient {

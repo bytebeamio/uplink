@@ -86,7 +86,12 @@ where
     T: Point + Debug + Send + 'static,
     Buffer<T>: Package,
 {
-    pub fn new<S: Into<String>>(stream: S, topic: S, max_buffer_size: usize, tx: Sender<Box<dyn Package>>) -> Stream<T> {
+    pub fn new<S: Into<String>>(
+        stream: S,
+        topic: S,
+        max_buffer_size: usize,
+        tx: Sender<Box<dyn Package>>,
+    ) -> Stream<T> {
         let name = Arc::new(stream.into());
         let topic = Arc::new(topic.into());
         let buffer = Buffer::new(name.clone(), topic.clone());
@@ -103,12 +108,12 @@ where
 
         // Anomaly detection
         if current_sequence <= self.last_sequence {
-            warn!("Sequence number anomaly detected!! Current = {}, last = {}", current_sequence, self.last_sequence);
+            warn!("Sequence number anomaly! [{}, {}]", current_sequence, self.last_sequence);
             self.buffer.add_sequence_anomaly(self.last_sequence, current_sequence);
         }
 
         if current_timestamp < self.last_timestamp {
-            warn!("Timestamp anomaly detected!! Current = {}, last = {}", current_timestamp, self.last_timestamp);
+            warn!("Timestamp anomaly!! [{}, {}]", current_timestamp, self.last_timestamp);
             self.buffer.add_timestamp_anomaly(self.last_timestamp, current_timestamp);
         }
 
@@ -142,7 +147,13 @@ pub struct Buffer<T> {
 
 impl<T> Buffer<T> {
     pub fn new(stream: Arc<String>, topic: Arc<String>) -> Buffer<T> {
-        Buffer { stream, topic, buffer: vec![], anomalies: String::with_capacity(100), anomaly_count: 0 }
+        Buffer {
+            stream,
+            topic,
+            buffer: vec![],
+            anomalies: String::with_capacity(100),
+            anomaly_count: 0,
+        }
     }
 
     pub fn add_sequence_anomaly(&mut self, last: u32, current: u32) {
@@ -151,7 +162,11 @@ impl<T> Buffer<T> {
             return;
         }
 
-        let error = String::from(self.stream.as_ref()) + ".sequence: " + &last.to_string() + ", " + &current.to_string();
+        let error = String::from(self.stream.as_ref())
+            + ".sequence: "
+            + &last.to_string()
+            + ", "
+            + &current.to_string();
         self.anomalies.push_str(&error)
     }
 

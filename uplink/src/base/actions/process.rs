@@ -46,7 +46,12 @@ impl Process {
     }
 
     /// Run a process of specified command
-    pub async fn run(&mut self, id: String, command: String, payload: String) -> Result<Child, Error> {
+    pub async fn run(
+        &mut self,
+        id: String,
+        command: String,
+        payload: String,
+    ) -> Result<Child, Error> {
         *self.last_process_done.lock().unwrap() = false;
 
         let mut cmd = Command::new(command);
@@ -97,7 +102,12 @@ impl Process {
         Ok(())
     }
 
-    pub async fn execute<S: Into<String>>(&mut self, id: S, command: S, payload: S) -> Result<(), Error> {
+    pub async fn execute<S: Into<String>>(
+        &mut self,
+        id: S,
+        command: S,
+        payload: S,
+    ) -> Result<(), Error> {
         let command = String::from("tools/") + &command.into();
 
         // Check if last process is in progress
