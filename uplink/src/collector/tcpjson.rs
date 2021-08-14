@@ -36,7 +36,7 @@ pub struct Bridge {
     data_tx: Sender<Box<dyn Package>>,
     actions_rx: Receiver<Action>,
     current_action: Option<String>,
-    action_status: Stream<ActionResponse>
+    action_status: Stream<ActionResponse>,
 }
 
 impl Bridge {
@@ -44,7 +44,7 @@ impl Bridge {
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
         actions_rx: Receiver<Action>,
-        action_status: Stream<ActionResponse>
+        action_status: Stream<ActionResponse>,
     ) -> Bridge {
         Bridge { config, data_tx, actions_rx, current_action: None, action_status }
     }

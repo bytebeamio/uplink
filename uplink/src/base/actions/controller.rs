@@ -1,6 +1,6 @@
+use std::collections::HashMap;
 use std::io;
 use std::time::SystemTimeError;
-use std::collections::HashMap;
 
 use super::{ActionResponse, Control, Package};
 use crate::base::{self, Stream};
