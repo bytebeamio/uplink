@@ -40,8 +40,9 @@ impl Mqtt {
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
+        dbg!(&options);
         let (client, eventloop) = AsyncClient::new(options, 10);
-        let actions_subscription = format!("/devices/{}/actions", config.device_id);
+        let actions_subscription = format!("/tenants/{}/devices/{}/actions", config.project_id, config.device_id);
         Mqtt {
             config,
             client,

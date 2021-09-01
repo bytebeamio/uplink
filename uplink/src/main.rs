@@ -161,7 +161,7 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    project_id: {}", config.project_id);
     println!("    device_id: {}", config.device_id);
     println!("    remote: {}:{}", config.broker, config.port);
-    println!("    authentication: {}", config.authentication.is_some());
+    println!("    secure_transport: {}", config.authentication.is_some());
     println!("    max_packet_size: {}", config.max_packet_size);
     println!("    max_inflight_messages: {}", config.max_inflight);
     println!("    persistence_dir: {}", config.persistence.path);
