@@ -1,3 +1,13 @@
+### v1.2 [03/September/2021]
+-------------
+
+- Features
+  - Layered configuration 
+  - Authenticaiton configuration support
+  - Dynamic streams 
+  - Uplink banner
+
+
 ### v1.1 [12/August/2021]
 -------------
 
