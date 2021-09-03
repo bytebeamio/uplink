@@ -49,6 +49,7 @@ pub struct Config {
     pub actions: Vec<String>,
     pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
+    pub ota_path: String,
 }
 
 pub trait Point: Send + Debug {

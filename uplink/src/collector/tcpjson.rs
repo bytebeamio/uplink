@@ -10,7 +10,7 @@ use tokio_util::codec::{LinesCodec, LinesCodecError};
 
 use std::io;
 
-use crate::base::actions::{Action, ActionResponse};
+use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
 use crate::base::{Buffer, Config, Package, Point, Stream};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -29,6 +29,8 @@ pub enum Error {
     Codec(#[from] LinesCodecError),
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
+    #[error("Download OTA error")]
+    ActionsError(#[from] ActionsError)
 }
 
 pub struct Bridge {
@@ -149,6 +151,8 @@ impl Bridge {
                 action = self.actions_rx.recv() => {
                     let action = action?;
                     self.current_action = Some(action.id.to_owned());
+
+                    action.if_ota_download_update(&self.config.ota_path).await?;
 
                     action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
                     let data = match serde_json::to_vec(&action) {

@@ -41,6 +41,18 @@ pub struct Action {
     payload: String,
 }
 
+impl Action {
+    pub async fn if_ota_download_update(&self, ota_path: &str) -> Result<(), Error> {
+        if &self.name == "update_firmware" {
+            if let Some(url) = serde_json::from_str::<HashMap<String, String>>(&self.payload)?.get("url") {
+                // spawn task to download file
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
     id: String,
