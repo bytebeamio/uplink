@@ -36,18 +36,25 @@ pub struct Bridge {
     data_tx: Sender<Box<dyn Package>>,
     actions_rx: Receiver<Action>,
     current_action: Option<String>,
+    action_status: Stream<ActionResponse>,
 }
 
 impl Bridge {
-    pub fn new(config: Arc<Config>, data_tx: Sender<Box<dyn Package>>, actions_rx: Receiver<Action>) -> Bridge {
-        Bridge { config, data_tx, actions_rx, current_action: None }
+    pub fn new(
+        config: Arc<Config>,
+        data_tx: Sender<Box<dyn Package>>,
+        actions_rx: Receiver<Action>,
+        action_status: Stream<ActionResponse>,
+    ) -> Bridge {
+        Bridge { config, data_tx, actions_rx, current_action: None, action_status }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
+        let mut action_status = self.action_status.clone();
+
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
             let listener = TcpListener::bind(&addr).await?;
-            let mut status_stream = Stream::new("action_status", 1, self.data_tx.clone());
 
             let (stream, addr) = loop {
                 select! {
@@ -64,7 +71,7 @@ impl Bridge {
                         let action = action.unwrap();
                         error!("Bridge down!! Action ID = {}", action.id);
                         let status = ActionResponse::failure(&action.id, "Bridge down");
-                        if let Err(e) = status_stream.fill(status).await {
+                        if let Err(e) = action_status.fill(status).await {
                             error!("Failed to send busy status. Error = {:?}", e);
                         }
                     }
@@ -79,13 +86,19 @@ impl Bridge {
         }
     }
 
-    pub async fn collect(&mut self, mut framed: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
+    pub async fn collect(
+        &mut self,
+        mut framed: Framed<TcpStream, LinesCodec>,
+    ) -> Result<(), Error> {
         let mut bridge_partitions = HashMap::new();
         for (stream, config) in self.config.streams.clone() {
-            bridge_partitions.insert(stream.clone(), Stream::new(stream, config.buf_size, self.data_tx.clone()));
+            bridge_partitions.insert(
+                stream.clone(),
+                Stream::new(stream, config.topic, config.buf_size, self.data_tx.clone()),
+            );
         }
 
-        let mut status_stream = Stream::new("action_status", 1, self.data_tx.clone());
+        let mut action_status = self.action_status.clone();
         let action_timeout = time::sleep(Duration::from_secs(10));
 
         tokio::pin!(action_timeout);
@@ -115,14 +128,23 @@ impl Bridge {
                         }
                     }
 
-                    match bridge_partitions.get_mut(&data.stream) {
-                        Some(partition) => if let Err(e) = partition.fill(data).await {
-                            error!("Failed to send data. Error = {:?}", e.to_string());
-                        }
+                    let partition = match bridge_partitions.get_mut(&data.stream) {
+                        Some(partition) => partition,
                         None => {
-                            error!("Data on invalid stream = {:?}", data.stream);
+                            if bridge_partitions.keys().len() > 20 {
+                                error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
+                                continue
+                            }
+
+                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
+                            bridge_partitions.entry(data.stream.clone()).or_insert(stream)
                         }
+                    };
+
+                    if let Err(e) = partition.fill(data).await {
+                        error!("Failed to send data. Error = {:?}", e.to_string());
                     }
+
                 }
                 action = self.actions_rx.recv() => {
                     let action = action?;
@@ -146,7 +168,7 @@ impl Bridge {
 
                     // Send failure response to cloud
                     let status = ActionResponse::failure(&action, "Action timed out");
-                    if let Err(e) = status_stream.fill(status).await {
+                    if let Err(e) = action_status.fill(status).await {
                         error!("Failed to fill. Error = {:?}", e);
                     }
                 }
@@ -178,8 +200,8 @@ impl Point for Payload {
 }
 
 impl Package for Buffer<Payload> {
-    fn stream(&self) -> String {
-        return self.stream.clone();
+    fn topic(&self) -> Arc<String> {
+        return self.topic.clone();
     }
 
     fn serialize(&self) -> Vec<u8> {

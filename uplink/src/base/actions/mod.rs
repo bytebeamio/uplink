@@ -1,14 +1,15 @@
-use super::{Control, Package};
+use super::{Config, Control, Package};
 use async_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod controller;
-pub mod tunshell;
 mod process;
+pub mod tunshell;
 
 use crate::base::{Buffer, Point, Stream};
 pub use controller::Controller;
@@ -57,7 +58,8 @@ pub struct ActionResponse {
 
 impl ActionResponse {
     pub fn new(id: &str) -> Self {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
 
         ActionResponse {
             id: id.to_owned(),
@@ -70,7 +72,8 @@ impl ActionResponse {
     }
 
     pub fn success(id: &str) -> ActionResponse {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         ActionResponse {
             id: id.to_owned(),
             sequence: 0,
@@ -82,7 +85,8 @@ impl ActionResponse {
     }
 
     pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         ActionResponse {
             id: id.to_owned(),
             sequence: 0,
@@ -105,23 +109,23 @@ impl Point for ActionResponse {
 }
 
 pub struct Actions {
-    status_bucket: Stream<ActionResponse>,
+    action_status: Stream<ActionResponse>,
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
-    tunshell_tx: Sender<String>
+    tunshell_tx: Sender<String>,
 }
 
 pub async fn new(
-    collector_tx: Sender<Box<dyn Package>>,
+    _config: Arc<Config>,
     controllers: HashMap<String, Sender<Control>>,
     actions_rx: Receiver<Action>,
-    tunshell_tx: Sender<String>
+    tunshell_tx: Sender<String>,
+    action_status: Stream<ActionResponse>,
 ) -> Actions {
-    let controller = Controller::new(controllers, collector_tx.clone());
-    let process = process::Process::new(collector_tx.clone());
-    let status_bucket = Stream::new("action_status", 1, collector_tx);
-    Actions { status_bucket, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
+    let controller = Controller::new(controllers, action_status.clone());
+    let process = process::Process::new(action_status.clone());
+    Actions { action_status, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
 }
 
 impl Actions {
@@ -178,15 +182,15 @@ impl Actions {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
         let status = ActionResponse::failure(id, error.to_string());
 
-        if let Err(e) = self.status_bucket.fill(status).await {
+        if let Err(e) = self.action_status.fill(status).await {
             error!("Failed to send status. Error = {:?}", e);
         }
     }
 }
 
 impl Package for Buffer<ActionResponse> {
-    fn stream(&self) -> String {
-        return "action_status".to_owned();
+    fn topic(&self) -> Arc<String> {
+        return self.topic.clone();
     }
 
     fn serialize(&self) -> Vec<u8> {

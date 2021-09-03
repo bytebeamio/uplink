@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::mem;
-use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_channel::{SendError, Sender};
 use serde::Deserialize;
@@ -30,19 +30,25 @@ pub struct Persistence {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct Authentication {
+    ca_certificate: String,
+    device_certificate: String,
+    device_private_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub tenant_id: String,
+    pub project_id: String,
     pub device_id: String,
     pub broker: String,
     pub port: u16,
+    pub authentication: Option<Authentication>,
     pub bridge_port: u16,
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub actions: Vec<String>,
     pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
-    pub key: Option<PathBuf>,
-    pub ca: Option<PathBuf>,
 }
 
 pub trait Point: Send + Debug {
@@ -51,7 +57,7 @@ pub trait Point: Send + Debug {
 }
 
 pub trait Package: Send + Debug {
-    fn stream(&self) -> String;
+    fn topic(&self) -> Arc<String>;
     fn serialize(&self) -> Vec<u8>;
     fn anomalies(&self) -> Option<(String, usize)>;
 }
@@ -66,7 +72,8 @@ pub enum Control {
 
 #[derive(Debug)]
 pub struct Stream<T> {
-    name: String,
+    name: Arc<String>,
+    topic: Arc<String>,
     last_sequence: u32,
     last_timestamp: u64,
     max_buffer_size: usize,
@@ -79,10 +86,50 @@ where
     T: Point + Debug + Send + 'static,
     Buffer<T>: Package,
 {
-    pub fn new<S: Into<String>>(stream: S, max_buffer_size: usize, tx: Sender<Box<dyn Package>>) -> Stream<T> {
+    pub fn new<S: Into<String>>(
+        stream: S,
+        topic: S,
+        max_buffer_size: usize,
+        tx: Sender<Box<dyn Package>>,
+    ) -> Stream<T> {
+        let name = Arc::new(stream.into());
+        let topic = Arc::new(topic.into());
+        let buffer = Buffer::new(name.clone(), topic.clone());
+
+        Stream { name, topic, last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
+    }
+
+    pub fn dynamic<S: Into<String>>(
+        stream: S,
+        project_id: S,
+        device_id: S,
+        tx: Sender<Box<dyn Package>>,
+    ) -> Stream<T> {
         let stream = stream.into();
-        let buffer = Buffer::new(&stream);
-        Stream { name: stream, last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
+        let project_id = project_id.into();
+        let device_id = device_id.into();
+
+        let topic = String::from("/tenants/")
+            + &project_id
+            + "/devices/"
+            + &device_id
+            + "/"
+            + &stream
+            + "/jsonarray";
+
+        let name = Arc::new(stream);
+        let topic = Arc::new(topic);
+        let buffer = Buffer::new(name.clone(), topic.clone());
+
+        Stream {
+            name,
+            topic,
+            last_sequence: 0,
+            last_timestamp: 0,
+            max_buffer_size: 100,
+            buffer,
+            tx,
+        }
     }
 
     pub async fn fill(&mut self, data: T) -> Result<(), Error> {
@@ -94,12 +141,12 @@ where
 
         // Anomaly detection
         if current_sequence <= self.last_sequence {
-            warn!("Sequence number anomaly detected!! Current = {}, last = {}", current_sequence, self.last_sequence);
+            warn!("Sequence number anomaly! [{}, {}]", current_sequence, self.last_sequence);
             self.buffer.add_sequence_anomaly(self.last_sequence, current_sequence);
         }
 
         if current_timestamp < self.last_timestamp {
-            warn!("Timestamp anomaly detected!! Current = {}, last = {}", current_timestamp, self.last_timestamp);
+            warn!("Timestamp anomaly!! [{}, {}]", current_timestamp, self.last_timestamp);
             self.buffer.add_timestamp_anomaly(self.last_timestamp, current_timestamp);
         }
 
@@ -108,7 +155,9 @@ where
 
         // Send buffer to serializer
         if self.buffer.buffer.len() >= self.max_buffer_size {
-            let buffer = mem::replace(&mut self.buffer, Buffer::new(self.name.clone()));
+            let name = self.name.clone();
+            let topic = self.topic.clone();
+            let buffer = mem::replace(&mut self.buffer, Buffer::new(name, topic));
             self.tx.send(Box::new(buffer)).await?;
         }
 
@@ -122,15 +171,22 @@ where
 /// Buffer doesn't put any restriction on type of `T`
 #[derive(Debug)]
 pub struct Buffer<T> {
-    pub stream: String,
+    pub stream: Arc<String>,
+    pub topic: Arc<String>,
     pub buffer: Vec<T>,
     pub anomalies: String,
     pub anomaly_count: usize,
 }
 
 impl<T> Buffer<T> {
-    pub fn new<S: Into<String>>(stream: S) -> Buffer<T> {
-        Buffer { stream: stream.into(), buffer: vec![], anomalies: String::with_capacity(100), anomaly_count: 0 }
+    pub fn new(stream: Arc<String>, topic: Arc<String>) -> Buffer<T> {
+        Buffer {
+            stream,
+            topic,
+            buffer: vec![],
+            anomalies: String::with_capacity(100),
+            anomaly_count: 0,
+        }
     }
 
     pub fn add_sequence_anomaly(&mut self, last: u32, current: u32) {
@@ -139,7 +195,11 @@ impl<T> Buffer<T> {
             return;
         }
 
-        let error = self.stream.clone() + ".sequence: " + &last.to_string() + ", " + &current.to_string();
+        let error = String::from(self.stream.as_ref())
+            + ".sequence: "
+            + &last.to_string()
+            + ", "
+            + &current.to_string();
         self.anomalies.push_str(&error)
     }
 
@@ -166,10 +226,11 @@ impl<T> Clone for Stream<T> {
     fn clone(&self) -> Self {
         Stream {
             name: self.name.clone(),
+            topic: self.topic.clone(),
             last_sequence: 0,
             last_timestamp: 0,
             max_buffer_size: self.max_buffer_size,
-            buffer: Buffer::new(self.buffer.stream.clone()),
+            buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
             tx: self.tx.clone(),
         }
     }

@@ -1,13 +1,16 @@
 #[macro_use]
 extern crate log;
 
-use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
 use std::thread;
+use std::{collections::HashMap, fs};
 
 use anyhow::{Context, Error};
 use async_channel::{bounded, Sender};
+use figment::{
+    providers::Toml,
+    providers::{Data, Json},
+    Figment,
+};
 use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
@@ -21,6 +24,7 @@ use crate::base::actions::{
 };
 use crate::base::mqtt::Mqtt;
 use crate::base::serializer::Serializer;
+use crate::base::Stream;
 
 use crate::collector::simulator::Simulator;
 use crate::collector::tcpjson::Bridge;
@@ -32,18 +36,24 @@ use std::sync::Arc;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
 pub struct CommandLine {
-    /// device id
-    #[structopt(short = "t", help = "Tenant id")]
-    tenant_id: String,
-    /// device id
-    #[structopt(short = "i", help = "Device id")]
-    device_id: String,
+    /// Binary version
+    #[structopt(skip = env!("VERGEN_BUILD_SEMVER"))]
+    version: String,
+    /// Build profile
+    #[structopt(skip= env!("VERGEN_CARGO_PROFILE"))]
+    profile: String,
+    /// Commit SHA
+    #[structopt(skip= env!("VERGEN_GIT_SHA"))]
+    commit_sha: String,
+    /// Commit SHA
+    #[structopt(skip= env!("VERGEN_GIT_COMMIT_TIMESTAMP"))]
+    commit_date: String,
     /// config file
     #[structopt(short = "c", help = "Config file")]
-    config: String,
-    /// directory with certificates
-    #[structopt(short = "a", help = "certs")]
-    certs_dir: PathBuf,
+    config: Option<String>,
+    /// config file
+    #[structopt(short = "a", help = "Authentication file")]
+    auth: String,
     /// list of modules to log
     #[structopt(short = "s", long = "simulator")]
     simulator: bool,
@@ -55,21 +65,49 @@ pub struct CommandLine {
     modules: Vec<String>,
 }
 
+const DEFAULT_CONFIG: &'static str = r#"
+    bridge_port = 5555
+    max_packet_size = 102400
+    max_inflight = 100
+    
+    # Whitelist of binaries which uplink can spawn as a process
+    # This makes sure that user is protected against random actions
+    # triggered from cloud.
+    actions = ["tunshell"]
+    
+    [persistence]
+    path = "/tmp/uplink"
+    max_file_size = 104857600 # 100MB
+    max_file_count = 3
+    
+    [streams.metrics]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/metrics/jsonarray"
+    buf_size = 10
+    
+    # Action status stream from status messages from bridge
+    [streams.action_status]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
+    buf_size = 1
+"#;
+
 /// Reads config file to generate config struct and replaces places holders
 /// like bike id and data version
-fn initalize_config(commandline: CommandLine) -> Result<Config, Error> {
-    let config = fs::read_to_string(&commandline.config);
-    let config = config.with_context(|| format!("Config = {}", commandline.config))?;
+fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
+    let mut config = Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG));
 
-    let device_id = commandline.device_id.trim();
-    let tenant_id = commandline.tenant_id.trim();
+    if let Some(c) = &commandline.config {
+        config = config.merge(Data::<Toml>::file(c));
+    }
 
-    let mut config: Config = toml::from_str(&config)?;
-    config.ca = Some(commandline.certs_dir.join(device_id).join("roots.pem"));
-    config.key = Some(commandline.certs_dir.join(device_id).join("rsa_private.pem"));
-    config.device_id = str::replace(&config.device_id, "{device_id}", device_id);
-    config.tenant_id = str::replace(&config.tenant_id, "{tenant_id}", tenant_id);
+    let mut config: Config = config
+        .join(Data::<Json>::file(&commandline.auth))
+        .extract()
+        .with_context(|| format!("Config error"))?;
 
+    fs::create_dir_all(&config.persistence.path)?;
+
+    let tenant_id = config.project_id.trim();
+    let device_id = config.device_id.trim();
     for config in config.streams.values_mut() {
         let topic = str::replace(&config.topic, "{tenant_id}", tenant_id);
         config.topic = topic;
@@ -108,21 +146,54 @@ fn initialize_logging(commandline: &CommandLine) {
     CombinedLogger::init(vec![loggers]).unwrap();
 }
 
+fn banner(commandline: &CommandLine, config: &Arc<Config>) {
+    const B: &str = r#"
+    ░█░▒█░▄▀▀▄░█░░░▀░░█▀▀▄░█░▄
+    ░█░▒█░█▄▄█░█░░░█▀░█░▒█░█▀▄
+    ░░▀▀▀░█░░░░▀▀░▀▀▀░▀░░▀░▀░▀
+    "#;
+
+    println!("{}", B);
+    println!("    version: {}", commandline.version);
+    println!("    profile: {}", commandline.profile);
+    println!("    commit_sha: {}", commandline.commit_sha);
+    println!("    commit_date: {}", commandline.commit_date);
+    println!("    project_id: {}", config.project_id);
+    println!("    device_id: {}", config.device_id);
+    println!("    remote: {}:{}", config.broker, config.port);
+    println!("    secure_transport: {}", config.authentication.is_some());
+    println!("    max_packet_size: {}", config.max_packet_size);
+    println!("    max_inflight_messages: {}", config.max_inflight);
+    println!("    persistence_dir: {}", config.persistence.path);
+    println!("    persistence_max_segment_size: {}", config.persistence.max_file_size);
+    println!("    persistence_max_segment_count: {}", config.persistence.max_file_count);
+    println!("\n");
+}
+
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
     let enable_simulator = commandline.simulator;
 
     initialize_logging(&commandline);
-    let config = Arc::new(initalize_config(commandline)?);
+    let config = Arc::new(initalize_config(&commandline)?);
+
+    banner(&commandline, &config);
 
     let (collector_tx, collector_rx) = bounded(10);
     let (native_actions_tx, native_actions_rx) = bounded(10);
     let (bridge_actions_tx, bridge_actions_rx) = bounded(10);
     let (tunshell_keys_tx, tunshell_keys_rx) = bounded(10);
 
-    let storage = Storage::new(&config.persistence.path, config.persistence.max_file_size, config.persistence.max_file_count);
+    let storage = Storage::new(
+        &config.persistence.path,
+        config.persistence.max_file_size,
+        config.persistence.max_file_count,
+    );
     let storage = storage.with_context(|| format!("Storage = {:?}", config.persistence))?;
+
+    let action_status_topic = &config.streams.get("action_status").unwrap().topic;
+    let action_status = Stream::new("action_status", action_status_topic, 1, collector_tx.clone());
 
     let mut mqtt = Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
     let mut serializer = Serializer::new(config.clone(), collector_rx, mqtt.client(), storage)?;
@@ -137,7 +208,8 @@ async fn main() -> Result<(), Error> {
         mqtt.start().await;
     });
 
-    let mut bridge = Bridge::new(config.clone(), collector_tx.clone(), bridge_actions_rx);
+    let mut bridge =
+        Bridge::new(config.clone(), collector_tx.clone(), bridge_actions_rx, action_status.clone());
     task::spawn(async move {
         if let Err(e) = bridge.start().await {
             error!("Bridge stopped!! Error = {:?}", e);
@@ -145,21 +217,33 @@ async fn main() -> Result<(), Error> {
     });
 
     if enable_simulator {
+        let simulator_config = config.clone();
         let data_tx = collector_tx.clone();
         task::spawn(async {
-            let mut simulator = Simulator::new(config, data_tx);
+            let mut simulator = Simulator::new(simulator_config, data_tx);
             simulator.start().await;
         });
     }
-    
-    let tunshell_collector_tx = collector_tx.clone();
-    thread::spawn(move || {
-        let tunshell_session = TunshellSession::new(Relay::default(), false, tunshell_keys_rx, tunshell_collector_tx);
-        tunshell_session.start()
-    });
+
+    let tunshell_config = config.clone();
+    let tunshell_session = TunshellSession::new(
+        tunshell_config,
+        Relay::default(),
+        false,
+        tunshell_keys_rx,
+        action_status.clone(),
+    );
+    thread::spawn(move || tunshell_session.start());
 
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    let mut actions = actions::new(collector_tx, controllers, native_actions_rx, tunshell_keys_tx).await;
+    let mut actions = actions::new(
+        config.clone(),
+        controllers,
+        native_actions_rx,
+        tunshell_keys_tx,
+        action_status,
+    )
+    .await;
     actions.start().await;
     Ok(())
 }

@@ -1,4 +1,4 @@
-use async_channel::{SendError, Sender};
+use async_channel::SendError;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
@@ -18,7 +18,7 @@ use std::time::Duration;
 /// It sends result and errors to the broker over collector_tx
 pub struct Process {
     // buffer to send status messages to cloud
-    status_bucket: Stream<ActionResponse>,
+    action_status: Stream<ActionResponse>,
     // we use this flag to ignore new process spawn while previous process is in progress
     last_process_done: Arc<Mutex<bool>>,
 }
@@ -38,13 +38,17 @@ pub enum Error {
 }
 
 impl Process {
-    pub fn new(collector_tx: Sender<Box<dyn Package>>) -> Process {
-        let status_bucket = Stream::new("action_status", 1, collector_tx);
-        Process { status_bucket, last_process_done: Arc::new(Mutex::new(true)) }
+    pub fn new(action_status: Stream<ActionResponse>) -> Process {
+        Process { last_process_done: Arc::new(Mutex::new(true)), action_status }
     }
 
     /// Run a process of specified command
-    pub async fn run(&mut self, id: String, command: String, payload: String) -> Result<Child, Error> {
+    pub async fn run(
+        &mut self,
+        id: String,
+        command: String,
+        payload: String,
+    ) -> Result<Child, Error> {
         *self.last_process_done.lock().unwrap() = false;
 
         let mut cmd = Command::new(command);
@@ -64,7 +68,7 @@ impl Process {
         let stdout = child.stdout.take().ok_or(Error::NoStdout)?;
         let mut stdout = BufReader::new(stdout).lines();
 
-        let mut status_bucket = self.status_bucket.clone();
+        let mut status_bucket = self.action_status.clone();
         let last_process_done = self.last_process_done.clone();
 
         task::spawn(async move {
@@ -95,7 +99,12 @@ impl Process {
         Ok(())
     }
 
-    pub async fn execute<S: Into<String>>(&mut self, id: S, command: S, payload: S) -> Result<(), Error> {
+    pub async fn execute<S: Into<String>>(
+        &mut self,
+        id: S,
+        command: S,
+        payload: S,
+    ) -> Result<(), Error> {
         let command = String::from("tools/") + &command.into();
 
         // Check if last process is in progress
