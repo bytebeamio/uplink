@@ -1,16 +1,17 @@
 use async_channel::SendError;
+use log::{debug, error, info};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::{pin, select, task, time};
 
-use super::{ActionResponse, Package};
-
-use crate::base::Stream;
 use std::io;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use super::{ActionResponse, Package};
+use crate::base::Stream;
 
 /// Process abstracts functions to spawn process and handle their output
 /// It makes sure that a new process isn't executed when the previous process

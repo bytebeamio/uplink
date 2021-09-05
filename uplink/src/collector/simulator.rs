@@ -1,10 +1,11 @@
-use crate::base::{Config, Package, Stream};
 use async_channel::Sender;
 use serde::Serialize;
 use serde_json::json;
-use std::io;
-use std::sync::Arc;
 use thiserror::Error;
+
+use std::{io, sync::Arc};
+
+use crate::base::{Config, Package, Stream};
 
 #[derive(Error, Debug)]
 pub enum Error {

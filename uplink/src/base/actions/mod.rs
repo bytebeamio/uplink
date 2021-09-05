@@ -1,7 +1,8 @@
-use super::{Config, Control, Package};
 use async_channel::{Receiver, Sender};
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::time::Duration;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,9 +12,9 @@ pub mod controller;
 mod process;
 pub mod tunshell;
 
+use super::{Config, Control, Package};
 use crate::base::{Buffer, Point, Stream};
 pub use controller::Controller;
-use tokio::time::Duration;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -29,30 +30,34 @@ pub enum Error {
     InvalidActionKind(String),
 }
 
+/// On the Bytebeam platform, an Action is how beamd and through it,
+/// the end-user, can communicate the tasks they want to perform on
+/// said device, in this case, uplink.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Action {
-    // action id
+    /// Action identifier
     pub id: String,
-    // control or process
+    /// Can be either control or process
     kind: String,
-    // action name
+    /// Action name, can be used to identify action
     name: String,
-    // action payload. json. can be args/payload. depends on the invoked command
+    /// Action payload, usually json. Can be used as args, depending on the invoked command
     payload: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
+    ///
     id: String,
-    // sequence number
+    /// Sequence number
     sequence: u32,
-    // timestamp
+    /// Timestamp on response creation
     timestamp: u64,
-    // running, failed
+    /// Can be either running or failed
     state: String,
-    // progress percentage for processes
+    /// Progress percentage for given Action
     progress: u8,
-    // list of error
+    /// List of errors faced on performing said Action
     errors: Vec<String>,
 }
 
@@ -116,19 +121,19 @@ pub struct Actions {
     tunshell_tx: Sender<String>,
 }
 
-pub async fn new(
-    _config: Arc<Config>,
-    controllers: HashMap<String, Sender<Control>>,
-    actions_rx: Receiver<Action>,
-    tunshell_tx: Sender<String>,
-    action_status: Stream<ActionResponse>,
-) -> Actions {
-    let controller = Controller::new(controllers, action_status.clone());
-    let process = process::Process::new(action_status.clone());
-    Actions { action_status, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
-}
-
 impl Actions {
+    pub async fn new(
+        _config: Arc<Config>,
+        controllers: HashMap<String, Sender<Control>>,
+        actions_rx: Receiver<Action>,
+        tunshell_tx: Sender<String>,
+        action_status: Stream<ActionResponse>,
+    ) -> Actions {
+        let controller = Controller::new(controllers, action_status.clone());
+        let process = process::Process::new(action_status.clone());
+        Actions { action_status, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
+    }
+
     pub async fn start(&mut self) {
         let action_stream = self.actions_rx.take().unwrap();
 

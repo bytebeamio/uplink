@@ -1,11 +1,10 @@
-use std::collections::HashMap;
-use std::io;
-use std::time::SystemTimeError;
+use async_channel::{SendError, Sender, TrySendError};
+use thiserror::Error;
+
+use std::{collections::HashMap, io, time::SystemTimeError};
 
 use super::{ActionResponse, Control, Package};
 use crate::base::{self, Stream};
-use async_channel::{SendError, Sender, TrySendError};
-use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {

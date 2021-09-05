@@ -1,19 +1,15 @@
 use async_channel::{Sender, TrySendError};
-use thiserror::Error;
-use tokio::task;
-use tokio::time::Duration;
-
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
-
-use crate::base::actions::Action;
-use crate::base::Config;
+use log::{debug, error, info};
 use rumqttc::{
     AsyncClient, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS, TlsConfiguration,
     Transport,
 };
-use std::sync::Arc;
+use thiserror::Error;
+use tokio::{task, time::Duration};
+
+use std::{fs::File, io::Read, path::Path, sync::Arc};
+
+use crate::base::{actions::Action, Config};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -23,12 +19,18 @@ pub enum Error {
     ActionForward(#[from] TrySendError<Action>),
 }
 
+/// Interface implementing MQTT protocol to communicate with broker
 pub struct Mqtt {
+    /// Shared reference to system config
     config: Arc<Config>,
+    /// Client handle
     client: AsyncClient,
+    /// Event loop handle
     eventloop: EventLoop,
+    /// Handles to channels between threads
     native_actions_tx: Sender<Action>,
     bridge_actions_tx: Sender<Action>,
+    /// Currently subscribed topic
     actions_subscription: String,
 }
 
@@ -41,7 +43,8 @@ impl Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let (client, eventloop) = AsyncClient::new(options, 10);
-        let actions_subscription = format!("/tenants/{}/devices/{}/actions", config.project_id, config.device_id);
+        let actions_subscription =
+            format!("/tenants/{}/devices/{}/actions", config.project_id, config.device_id);
         Mqtt {
             config,
             client,

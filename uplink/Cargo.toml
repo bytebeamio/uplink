@@ -3,6 +3,8 @@ name = "uplink"
 version = "1.2.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
+description = "A utility for devices running an OS to interact with the Bytebeam platform, recieving and forwarding data on-behalf of other processes on the same device."
+license-file = "LICENSE"
 
 [dependencies]
 structopt = "0.3"
@@ -16,7 +18,6 @@ tokio-stream = "0.1"
 tokio-compat-02 = "0.2.0"
 async-channel = "1.5"
 rumqttc = "0.7"
-# rumqttc = { path = "../../rumqtt/rumqttc" }
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"

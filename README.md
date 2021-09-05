@@ -1,3 +1,6 @@
+# Uplink
+A utility for devices running an OS to interact with the Bytebeam platform, recieving and forwarding data on-behalf of other processes on the same device.
+
 Setup and run
 --------------
 
