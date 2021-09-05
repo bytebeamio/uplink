@@ -2,6 +2,8 @@ use super::{Config, Control, Package};
 use async_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -42,10 +44,32 @@ pub struct Action {
 }
 
 impl Action {
-    pub async fn if_ota_download_update(&self, ota_path: &str) -> Result<(), Error> {
+    /// Download contents of the OTA update if action is named "update_firmware"
+    pub async fn if_ota_download_update(&self, ota_path: String) -> Result<(), Error> {
+        println!("Dowload?");
         if &self.name == "update_firmware" {
-            if let Some(url) = serde_json::from_str::<HashMap<String, String>>(&self.payload)?.get("url") {
-                // spawn task to download file
+            println!("Dowloading firmware");
+            if let Some(url) =
+                serde_json::from_str::<HashMap<String, String>>(&self.payload)?.get("url")
+            {
+                println!("Dowloading {}", url);
+                let url = url.clone();
+                tokio::task::spawn(async move {
+                    match reqwest::get(url).await {
+                        Ok(resp) => match resp.bytes().await {
+                            Ok(content) => match File::create(ota_path).await {
+                                Ok(mut file) => file
+                                    .write_all(&content)
+                                    .await
+                                    .unwrap_or_else(|e| error!("Error: {}", e)),
+                                Err(e) => error!("Error: {}", e),
+                            },
+                            Err(e) => error!("Couldn't unpack downloaded OTA update: {}", e),
+                        },
+                        Err(e) => error!("Couldn't download OTA update: {}", e),
+                    }
+                })
+                .await;
             }
         }
 
