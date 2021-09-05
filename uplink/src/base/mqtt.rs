@@ -1,4 +1,5 @@
 use async_channel::{Sender, TrySendError};
+use log::{debug, error, info};
 use thiserror::Error;
 use tokio::task;
 use tokio::time::Duration;
@@ -41,7 +42,8 @@ impl Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let (client, eventloop) = AsyncClient::new(options, 10);
-        let actions_subscription = format!("/tenants/{}/devices/{}/actions", config.project_id, config.device_id);
+        let actions_subscription =
+            format!("/tenants/{}/devices/{}/actions", config.project_id, config.device_id);
         Mqtt {
             config,
             client,

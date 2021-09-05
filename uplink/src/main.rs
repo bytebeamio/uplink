@@ -1,6 +1,3 @@
-#[macro_use]
-extern crate log;
-
 use std::thread;
 use std::{collections::HashMap, fs};
 
@@ -11,6 +8,7 @@ use figment::{
     providers::{Data, Json},
     Figment,
 };
+use log::error;
 use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
