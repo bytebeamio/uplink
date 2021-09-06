@@ -28,11 +28,13 @@ pub enum Error {
     Controller(#[from] controller::Error),
     #[error("Error sending keys to tunshell thread {0}")]
     TunshellSendError(#[from] async_channel::SendError<String>),
+    #[error("Error sending Action through bridge {0}")]
+    BridgeSendError(#[from] async_channel::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Action {
     // action id
     pub id: String,
@@ -46,32 +48,39 @@ pub struct Action {
 
 impl Action {
     /// Download contents of the OTA update if action is named "update_firmware"
-    pub async fn if_ota_download_update(&self, ota_path: String) -> Result<(), Error> {
-        println!("Dowload?");
-        if &self.name == "update_firmware" {
-            println!("Dowloading firmware");
-            if let Some(url) =
-                serde_json::from_str::<HashMap<String, String>>(&self.payload)?.get("url")
-            {
-                println!("Dowloading {}", url);
-                let url = url.clone();
-                tokio::task::spawn(async move {
-                    match reqwest::get(url).await {
-                        Ok(resp) => match resp.bytes().await {
-                            Ok(content) => match File::create(ota_path).await {
-                                Ok(mut file) => file
-                                    .write_all(&content)
-                                    .await
-                                    .unwrap_or_else(|e| error!("Error: {}", e)),
-                                Err(e) => error!("Error: {}", e),
-                            },
-                            Err(e) => error!("Couldn't unpack downloaded OTA update: {}", e),
+    pub async fn firmware_downloader(
+        self,
+        ota_path: String,
+        bridge_tx: Sender<Action>,
+    ) -> Result<(), Error> {
+        println!("Dowloading firmware");
+        if let Some(url) =
+            serde_json::from_str::<HashMap<String, String>>(&self.payload)?.get("url")
+        {
+            println!("Dowloading {}", url);
+            let url = url.clone();
+            let action = self.clone();
+            tokio::task::spawn(async move {
+                match reqwest::get(url).await {
+                    Ok(resp) => match resp.bytes().await {
+                        Ok(content) => match File::create(ota_path).await {
+                            Ok(mut file) => {
+                                file.write_all(&content).await.unwrap_or_else(|e| {
+                                    error!("Failed to download | Error: {}", e)
+                                });
+
+                                bridge_tx.try_send(action).unwrap_or_else(|e| {
+                                    error!("Failed forwarding to bridge | Error: {}", e)
+                                });
+                            }
+                            Err(e) => error!("Error: {}", e),
                         },
-                        Err(e) => error!("Couldn't download OTA update: {}", e),
-                    }
-                })
-                .await;
-            }
+                        Err(e) => error!("Couldn't unpack downloaded OTA update: {}", e),
+                    },
+                    Err(e) => error!("Couldn't download OTA update: {}", e),
+                }
+            })
+            .await;
         }
 
         Ok(())
@@ -146,26 +155,36 @@ impl Point for ActionResponse {
 }
 
 pub struct Actions {
+    config: Arc<Config>,
     action_status: Stream<ActionResponse>,
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
     tunshell_tx: Sender<String>,
-}
-
-pub async fn new(
-    _config: Arc<Config>,
-    controllers: HashMap<String, Sender<Control>>,
-    actions_rx: Receiver<Action>,
-    tunshell_tx: Sender<String>,
-    action_status: Stream<ActionResponse>,
-) -> Actions {
-    let controller = Controller::new(controllers, action_status.clone());
-    let process = process::Process::new(action_status.clone());
-    Actions { action_status, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
+    bridge_tx: Sender<Action>,
 }
 
 impl Actions {
+    pub async fn new(
+        config: Arc<Config>,
+        controllers: HashMap<String, Sender<Control>>,
+        actions_rx: Receiver<Action>,
+        tunshell_tx: Sender<String>,
+        action_status: Stream<ActionResponse>,
+        bridge_tx: Sender<Action>,
+    ) -> Actions {
+        let controller = Controller::new(controllers, action_status.clone());
+        let process = process::Process::new(action_status.clone());
+        Actions {
+            config,
+            action_status,
+            process,
+            controller,
+            actions_rx: Some(actions_rx),
+            tunshell_tx,
+            bridge_tx,
+        }
+    }
     pub async fn start(&mut self) {
         let action_stream = self.actions_rx.take().unwrap();
 
@@ -192,7 +211,29 @@ impl Actions {
         }
     }
 
+    /// Handle received actions
     async fn handle(&mut self, action: Action) -> Result<(), Error> {
+        match action.name.as_ref() {
+            "tunshell" => {
+                self.tunshell_tx.send(action.payload).await?;
+                return Ok(());
+            }
+            "firmware_update" => {
+                action
+                    .firmware_downloader(self.config.ota_path.clone(), self.bridge_tx.clone())
+                    .await?;
+                return Ok(());
+            }
+            _ => (),
+        }
+
+        // Bridge actions are forwarded
+        if !self.config.actions.contains(&action.name) {
+            self.bridge_tx.try_send(action)?;
+            return Ok(());
+        }
+
+        // Regular actions are executed natively
         match action.kind.as_ref() {
             "control" => {
                 let command = action.name.clone();
@@ -205,9 +246,6 @@ impl Actions {
                 let id = action.id;
 
                 self.process.execute(id.clone(), command.clone(), payload).await?;
-            }
-            "tunshell" => {
-                self.tunshell_tx.send(action.payload).await?;
             }
             v => return Err(Error::InvalidActionKind(v.to_owned())),
         }

@@ -16,10 +16,7 @@ use tokio::task;
 mod base;
 mod collector;
 
-use crate::base::actions::{
-    self,
-    tunshell::{Relay, TunshellSession},
-};
+use crate::base::actions::{Actions, tunshell::{Relay, TunshellSession}};
 use crate::base::mqtt::Mqtt;
 use crate::base::serializer::Serializer;
 use crate::base::Stream;
@@ -193,7 +190,7 @@ async fn main() -> Result<(), Error> {
     let action_status_topic = &config.streams.get("action_status").unwrap().topic;
     let action_status = Stream::new("action_status", action_status_topic, 1, collector_tx.clone());
 
-    let mut mqtt = Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
+    let mut mqtt = Mqtt::new(config.clone(), native_actions_tx);
     let mut serializer = Serializer::new(config.clone(), collector_rx, mqtt.client(), storage)?;
 
     task::spawn(async move {
@@ -234,12 +231,13 @@ async fn main() -> Result<(), Error> {
     thread::spawn(move || tunshell_session.start());
 
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    let mut actions = actions::new(
+    let mut actions = Actions::new(
         config.clone(),
         controllers,
         native_actions_rx,
         tunshell_keys_tx,
         action_status,
+        bridge_actions_tx,
     )
     .await;
     actions.start().await;

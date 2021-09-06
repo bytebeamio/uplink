@@ -25,33 +25,20 @@ pub enum Error {
 }
 
 pub struct Mqtt {
-    config: Arc<Config>,
     client: AsyncClient,
     eventloop: EventLoop,
     native_actions_tx: Sender<Action>,
-    bridge_actions_tx: Sender<Action>,
     actions_subscription: String,
 }
 
 impl Mqtt {
-    pub fn new(
-        config: Arc<Config>,
-        actions_tx: Sender<Action>,
-        bridge_actions_tx: Sender<Action>,
-    ) -> Mqtt {
+    pub fn new(config: Arc<Config>, actions_tx: Sender<Action>) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let (client, eventloop) = AsyncClient::new(options, 10);
         let actions_subscription =
             format!("/tenants/{}/devices/{}/actions", config.project_id, config.device_id);
-        Mqtt {
-            config,
-            client,
-            eventloop,
-            native_actions_tx: actions_tx,
-            bridge_actions_tx,
-            actions_subscription,
-        }
+        Mqtt { client, eventloop, native_actions_tx: actions_tx, actions_subscription }
     }
 
     pub fn client(&mut self) -> AsyncClient {
@@ -98,12 +85,7 @@ impl Mqtt {
 
         let action: Action = serde_json::from_slice(&publish.payload)?;
         debug!("Action = {:?}", action);
-
-        if !self.config.actions.contains(&action.id) {
-            self.bridge_actions_tx.try_send(action)?;
-        } else {
-            self.native_actions_tx.try_send(action)?;
-        }
+        self.native_actions_tx.try_send(action)?;
 
         Ok(())
     }

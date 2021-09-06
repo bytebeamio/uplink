@@ -153,9 +153,6 @@ impl Bridge {
                     let action = action?;
                     self.current_action = Some(action.id.to_owned());
 
-                    // If action is 'update_firmware', download file to ota_path
-                    action.if_ota_download_update(self.config.ota_path.clone()).await?;
-
                     action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
                     let data = match serde_json::to_vec(&action) {
                         Ok(d) => d,
