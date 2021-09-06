@@ -1,10 +1,12 @@
 use super::{Config, Control, Package};
 use async_channel::{Receiver, Sender};
+use futures_util::StreamExt;
 use log::{debug, error, info};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::Write;
 use thiserror::Error;
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -44,50 +46,6 @@ pub struct Action {
     name: String,
     // action payload. json. can be args/payload. depends on the invoked command
     payload: String,
-}
-
-impl Action {
-    /// Download contents of the OTA update if action is named "update_firmware"
-    pub async fn firmware_downloader(
-        self,
-        ota_path: String,
-        bridge_tx: Sender<Action>,
-        host: String,
-    ) -> Result<(), Error> {
-        info!("Dowloading firmware");
-        if let Some(url) =
-            serde_json::from_str::<HashMap<String, String>>(&self.payload)?.get("url")
-        {
-            // TODO: Undo use of hardcoded key
-            let url = host + url + "?key=<key-goes-here>";
-            let action =
-                Action { id: self.id, kind: self.kind, name: self.name, payload: ota_path.clone() };
-            info!("Dowloading from {}", url);
-            tokio::task::spawn(async move {
-                match reqwest::get(url).await {
-                    Ok(resp) => match resp.bytes().await {
-                        Ok(content) => match File::create(ota_path).await {
-                            Ok(mut file) => {
-                                file.write_all(&content).await.unwrap_or_else(|e| {
-                                    error!("Failed to download | Error: {}", e)
-                                });
-
-                                bridge_tx.try_send(action).unwrap_or_else(|e| {
-                                    error!("Failed forwarding to bridge | Error: {}", e)
-                                });
-                            }
-                            Err(e) => error!("Error: {}", e),
-                        },
-                        Err(e) => error!("Couldn't unpack downloaded OTA update: {}", e),
-                    },
-                    Err(e) => error!("Couldn't download OTA update: {}", e),
-                }
-            })
-            .await;
-        }
-
-        Ok(())
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -223,9 +181,13 @@ impl Actions {
             }
             "update_firmware" => {
                 let host = "https://".to_string() + &self.config.broker;
-                action
-                    .firmware_downloader(self.config.ota_path.clone(), self.bridge_tx.clone(), host)
-                    .await?;
+                firmware_downloader(
+                    action,
+                    self.config.ota_path.clone(),
+                    self.bridge_tx.clone(),
+                    host,
+                )
+                .await?;
                 return Ok(());
             }
             _ => (),
@@ -279,4 +241,68 @@ impl Package for Buffer<ActionResponse> {
     fn anomalies(&self) -> Option<(String, usize)> {
         self.anomalies()
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct FirmwareUpdate {
+    pub url: String,
+    version: String,
+}
+
+/// Download contents of the OTA update if action is named "update_firmware"
+pub async fn firmware_downloader(
+    action: Action,
+    ota_path: String,
+    bridge_tx: Sender<Action>,
+    host: String,
+) -> Result<(), Error> {
+    info!("Dowloading firmware");
+    // TODO: Undo use of hardcoded key
+    let url = serde_json::from_str::<FirmwareUpdate>(&action.payload)?.url;
+    let url = host + &url + "?key=<key-goes-here>";
+    let Action { id, kind, name, .. } = action;
+    let action = Action { id, kind, name, payload: ota_path.clone() };
+    info!("Dowloading from {}", url);
+    tokio::task::spawn(async move {
+        let client = Client::default();
+        let mut file = match File::create(ota_path) {
+            Ok(file) => file,
+            Err(e) => {
+                error!("Filed to create file: {}", e);
+                return;
+            }
+        };
+
+        let resp = match client.get(url).send().await {
+            Ok(resp) => resp,
+            Err(e) => {
+                error!("Couldn't download OTA update: {}", e);
+                return;
+            }
+        };
+        let mut stream = resp.bytes_stream();
+
+        while let Some(item) = stream.next().await {
+            let chunk = match item {
+                Ok(chunk) => chunk,
+                Err(e) => {
+                    error!("Error while downloading: {}", e);
+                    return;
+                }
+            };
+            if let Err(e) = file.write(&chunk) {
+                error!("Error while writing to file: {}", e);
+                return;
+            }
+        }
+
+        info!("Firmware dowloaded sucessfully");
+
+        if let Err(e) = bridge_tx.try_send(action) {
+            error!("Failed forwarding to bridge | Error: {}", e);
+            return;
+        }
+    });
+
+    Ok(())
 }

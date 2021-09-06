@@ -2443,6 +2443,7 @@ dependencies = [
  "bytes 1.0.0",
  "disk",
  "figment",
+ "futures-util",
  "log",
  "rand 0.7.3",
  "reqwest",
