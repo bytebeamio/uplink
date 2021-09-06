@@ -1,6 +1,6 @@
 use super::{Config, Control, Package};
 use async_channel::{Receiver, Sender};
-use log::{debug, error};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::fs::File;
@@ -52,14 +52,17 @@ impl Action {
         self,
         ota_path: String,
         bridge_tx: Sender<Action>,
+        host: String,
     ) -> Result<(), Error> {
-        println!("Dowloading firmware");
+        info!("Dowloading firmware");
         if let Some(url) =
             serde_json::from_str::<HashMap<String, String>>(&self.payload)?.get("url")
         {
-            println!("Dowloading {}", url);
-            let url = url.clone();
-            let action = self.clone();
+            // TODO: Undo use of hardcoded key
+            let url = host + url + "?key=<key-goes-here>";
+            let action =
+                Action { id: self.id, kind: self.kind, name: self.name, payload: ota_path.clone() };
+            info!("Dowloading from {}", url);
             tokio::task::spawn(async move {
                 match reqwest::get(url).await {
                     Ok(resp) => match resp.bytes().await {
@@ -218,9 +221,10 @@ impl Actions {
                 self.tunshell_tx.send(action.payload).await?;
                 return Ok(());
             }
-            "firmware_update" => {
+            "update_firmware" => {
+                let host = "https://".to_string() + &self.config.broker;
                 action
-                    .firmware_downloader(self.config.ota_path.clone(), self.bridge_tx.clone())
+                    .firmware_downloader(self.config.ota_path.clone(), self.bridge_tx.clone(), host)
                     .await?;
                 return Ok(());
             }
