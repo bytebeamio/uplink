@@ -36,7 +36,7 @@ pub struct Action {
     // control or process
     kind: String,
     // action name
-    name: String,
+    pub name: String,
     // action payload. json. can be args/payload. depends on the invoked command
     payload: String,
 }
