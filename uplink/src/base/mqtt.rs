@@ -97,7 +97,7 @@ impl Mqtt {
         let action: Action = serde_json::from_slice(&publish.payload)?;
         debug!("Action = {:?}", action);
 
-        if !self.config.actions.contains(&action.id) {
+        if !self.config.actions.contains(&action.action_id) {
             self.bridge_actions_tx.try_send(action)?;
         } else {
             self.native_actions_tx.try_send(action)?;
