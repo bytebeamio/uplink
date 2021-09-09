@@ -1,11 +1,15 @@
 use async_channel::Sender;
+use rand::Rng;
 use serde::Serialize;
 use serde_json::json;
 use thiserror::Error;
+use tokio::time::Duration;
 
-use std::{io, sync::Arc};
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{collections::HashMap, io, sync::Arc};
 
 use crate::base::{Config, Package, Stream};
+use crate::collector::tcpjson::Payload;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -92,12 +96,6 @@ impl Simulator {
         }
     }
 }
-
-use crate::collector::tcpjson::Payload;
-use rand::Rng;
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Gps {
