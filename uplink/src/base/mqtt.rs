@@ -55,10 +55,12 @@ impl Mqtt {
         }
     }
 
+    /// Returns a client handle to MQTT interface
     pub fn client(&mut self) -> AsyncClient {
         self.client.clone()
     }
 
+    /// Poll eventloop to receive packets from broker
     pub async fn start(&mut self) {
         loop {
             match self.eventloop.poll().await {
@@ -111,7 +113,6 @@ impl Mqtt {
 }
 
 fn mqttoptions(config: &Config) -> MqttOptions {
-    // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
     let mut mqttoptions = MqttOptions::new(&config.device_id, &config.broker, config.port);
     mqttoptions.set_max_packet_size(config.max_packet_size, config.max_packet_size);
     mqttoptions.set_keep_alive(60);
@@ -131,17 +132,4 @@ fn mqttoptions(config: &Config) -> MqttOptions {
     }
 
     mqttoptions
-}
-
-fn _get_certs(key_path: &Path, ca_path: &Path) -> (Vec<u8>, Vec<u8>) {
-    println!("{:?}", key_path);
-    let mut key = Vec::new();
-    let mut key_file = File::open(key_path).unwrap();
-    key_file.read_to_end(&mut key).unwrap();
-
-    let mut ca = Vec::new();
-    let mut ca_file = File::open(ca_path).unwrap();
-    ca_file.read_to_end(&mut ca).unwrap();
-
-    (key, ca)
 }
