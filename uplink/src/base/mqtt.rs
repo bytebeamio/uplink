@@ -7,7 +7,7 @@ use rumqttc::{
 use thiserror::Error;
 use tokio::{task, time::Duration};
 
-use std::{fs::File, io::Read, path::Path, sync::Arc};
+use std::sync::Arc;
 
 use crate::base::{actions::Action, Config};
 
@@ -133,3 +133,4 @@ fn mqttoptions(config: &Config) -> MqttOptions {
 
     mqttoptions
 }
+
