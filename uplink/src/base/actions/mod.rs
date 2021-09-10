@@ -78,9 +78,24 @@ impl ActionResponse {
         }
     }
 
+    pub fn progress(id: &str, progress: u8) -> Self {
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+
+        ActionResponse {
+            id: id.to_owned(),
+            sequence: 0,
+            timestamp: timestamp.as_millis() as u64,
+            state: "Downloading".to_owned(),
+            progress,
+            errors: vec![],
+        }
+    }
+
     pub fn success(id: &str) -> ActionResponse {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+
         ActionResponse {
             id: id.to_owned(),
             sequence: 0,
@@ -94,6 +109,7 @@ impl ActionResponse {
     pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+
         ActionResponse {
             id: id.to_owned(),
             sequence: 0,
@@ -182,6 +198,7 @@ impl Actions {
             "update_firmware" => {
                 let host = "https://".to_string() + &self.config.broker;
                 firmware_downloader(
+                    self.action_status.clone(),
                     action,
                     self.config.ota_path.clone(),
                     self.bridge_tx.clone(),
@@ -251,6 +268,7 @@ struct FirmwareUpdate {
 
 /// Download contents of the OTA update if action is named "update_firmware"
 pub async fn firmware_downloader(
+    mut status_bucket: Stream<ActionResponse>,
     action: Action,
     ota_path: String,
     bridge_tx: Sender<Action>,
@@ -261,6 +279,7 @@ pub async fn firmware_downloader(
     let url = serde_json::from_str::<FirmwareUpdate>(&action.payload)?.url;
     let url = host + &url + "?key=<key-goes-here>";
     let Action { id, kind, name, .. } = action;
+    let action_id = id.clone();
     let action = Action { id, kind, name, payload: ota_path.clone() };
     info!("Dowloading from {}", url);
     tokio::task::spawn(async move {
@@ -268,7 +287,11 @@ pub async fn firmware_downloader(
         let mut file = match File::create(ota_path) {
             Ok(file) => file,
             Err(e) => {
-                error!("Filed to create file: {}", e);
+                send_status(
+                    &mut status_bucket,
+                    ActionResponse::failure(&action_id, format!("Filed to create file: {}", e)),
+                )
+                .await;
                 return;
             }
         };
@@ -276,33 +299,84 @@ pub async fn firmware_downloader(
         let resp = match client.get(url).send().await {
             Ok(resp) => resp,
             Err(e) => {
-                error!("Couldn't download OTA update: {}", e);
+                send_status(
+                    &mut status_bucket,
+                    ActionResponse::failure(
+                        &action_id,
+                        format!("Couldn't download OTA update: {}", e),
+                    ),
+                )
+                .await;
                 return;
             }
         };
+
+        // Supposing content length is defined in bytes
+        let content_length = resp.content_length().unwrap_or(0) as usize;
+        let mut downloaded = 0;
         let mut stream = resp.bytes_stream();
 
         while let Some(item) = stream.next().await {
             let chunk = match item {
                 Ok(chunk) => chunk,
                 Err(e) => {
-                    error!("Error while downloading: {}", e);
+                    send_status(
+                        &mut status_bucket,
+                        ActionResponse::failure(
+                            &action_id,
+                            format!("Error while downloading: {}", e),
+                        ),
+                    )
+                    .await;
                     return;
                 }
             };
+            downloaded += chunk.len();
+
             if let Err(e) = file.write(&chunk) {
-                error!("Error while writing to file: {}", e);
+                send_status(
+                    &mut status_bucket,
+                    ActionResponse::failure(
+                        &action_id,
+                        format!("Error while writing to file: {}", e),
+                    ),
+                )
+                .await;
                 return;
             }
+
+            send_status(
+                &mut status_bucket,
+                ActionResponse::progress(&action_id, (downloaded / content_length) as u8 * 100),
+            )
+            .await;
         }
 
         info!("Firmware dowloaded sucessfully");
 
-        if let Err(e) = bridge_tx.try_send(action) {
-            error!("Failed forwarding to bridge | Error: {}", e);
-            return;
+        match bridge_tx.try_send(action) {
+            Ok(()) => {
+                send_status(&mut status_bucket, ActionResponse::success(&action_id)).await;
+            }
+            Err(e) => {
+                send_status(
+                    &mut status_bucket,
+                    ActionResponse::failure(
+                        &action_id,
+                        format!("Failed forwarding to bridge | Error: {}", e),
+                    ),
+                )
+                .await;
+            }
         }
     });
 
     Ok(())
+}
+
+async fn send_status(status_bucket: &mut Stream<ActionResponse>, status: ActionResponse) {
+    debug!("Action status: {:?}", status);
+    if let Err(e) = status_bucket.fill(status).await {
+        error!("Failed to send downloader status. Error = {:?}", e);
+    }
 }
