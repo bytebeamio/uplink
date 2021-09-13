@@ -1,5 +1,6 @@
 use super::{Config, Control, Package};
 use async_channel::{Receiver, Sender};
+use bytes::BytesMut;
 use futures_util::StreamExt;
 use log::{debug, error, info};
 use reqwest::{Certificate, ClientBuilder, Identity};
@@ -283,11 +284,11 @@ pub async fn firmware_downloader(
     let client_builder = ClientBuilder::new();
     let client = match &config.authentication {
         Some(certs) => {
-            let ca = Certificate::from_der(certs.ca_certificate.as_bytes())?;
-            let device = Identity::from_pkcs12_der(
-                certs.device_certificate.as_bytes(),
-                &certs.device_private_key,
-            )?;
+            let ca = Certificate::from_pem(certs.ca_certificate.as_bytes())?;
+            let mut buf = BytesMut::from(certs.device_private_key.as_bytes());
+            buf.extend_from_slice(certs.device_certificate.as_bytes());
+            // buf contains the private key and certificate of device
+            let device = Identity::from_pem(&buf)?;
             client_builder.add_root_certificate(ca).identity(device)
         }
         None => client_builder,
