@@ -2,7 +2,7 @@ use super::{Config, Control, Package};
 use async_channel::{Receiver, Sender};
 use futures_util::StreamExt;
 use log::{debug, error, info};
-use reqwest::Client;
+use reqwest::{Certificate, ClientBuilder, Identity};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
@@ -34,6 +34,8 @@ pub enum Error {
     BridgeSendError(#[from] async_channel::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
+    #[error("Error from reqwest")]
+    ReqwestError(#[from] reqwest::Error),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -196,13 +198,11 @@ impl Actions {
                 return Ok(());
             }
             "update_firmware" => {
-                let host = "https://".to_string() + &self.config.broker;
                 firmware_downloader(
                     self.action_status.clone(),
                     action,
-                    self.config.ota_path.clone(),
+                    self.config.clone(),
                     self.bridge_tx.clone(),
-                    host,
                 )
                 .await?;
                 return Ok(());
@@ -270,21 +270,33 @@ struct FirmwareUpdate {
 pub async fn firmware_downloader(
     mut status_bucket: Stream<ActionResponse>,
     action: Action,
-    ota_path: String,
+    config: Arc<Config>,
     bridge_tx: Sender<Action>,
-    host: String,
 ) -> Result<(), Error> {
     info!("Dowloading firmware");
-    // TODO: Undo use of hardcoded key
-    let url = serde_json::from_str::<FirmwareUpdate>(&action.payload)?.url;
-    let url = host + &url + "?key=<key-goes-here>";
-    let Action { id, kind, name, .. } = action;
+    let Action { id, kind, name, payload } = action;
+    let url = serde_json::from_str::<FirmwareUpdate>(&payload)?.url;
     let action_id = id.clone();
-    let action = Action { id, kind, name, payload: ota_path.clone() };
+    let action = Action { id, kind, name, payload: config.ota_path.clone() };
+
+    // Authenticate with TLS certs from config
+    let client_builder = ClientBuilder::new();
+    let client = match &config.authentication {
+        Some(certs) => {
+            let ca = Certificate::from_der(certs.ca_certificate.as_bytes())?;
+            let device = Identity::from_pkcs12_der(
+                certs.device_certificate.as_bytes(),
+                &certs.device_private_key,
+            )?;
+            client_builder.add_root_certificate(ca).identity(device)
+        }
+        None => client_builder,
+    }
+    .build()?;
+
     info!("Dowloading from {}", url);
     tokio::task::spawn(async move {
-        let client = Client::default();
-        let mut file = match File::create(ota_path) {
+        let mut file = match File::create(config.ota_path.clone()) {
             Ok(file) => file,
             Err(e) => {
                 send_status(
