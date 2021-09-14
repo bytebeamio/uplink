@@ -16,7 +16,10 @@ use tokio::task;
 mod base;
 mod collector;
 
-use crate::base::actions::{Actions, tunshell::{Relay, TunshellSession}};
+use crate::base::actions::{
+    tunshell::{Relay, TunshellSession},
+    Actions,
+};
 use crate::base::mqtt::Mqtt;
 use crate::base::serializer::Serializer;
 use crate::base::Stream;
@@ -58,6 +61,13 @@ pub struct CommandLine {
     /// list of modules to log
     #[structopt(short = "m", long = "modules")]
     modules: Vec<String>,
+    /// list of modules to log
+    #[structopt(
+        short = "d",
+        long = "downloader",
+        help = "Enables built-in OTA firmware downloader"
+    )]
+    download_updates: bool,
 }
 
 const DEFAULT_CONFIG: &'static str = r#"
@@ -89,6 +99,10 @@ const DEFAULT_CONFIG: &'static str = r#"
 /// like bike id and data version
 fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
     let mut config = Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG));
+    config = config.merge(Data::<Toml>::string(&format!(
+        "download_updates = {}",
+        commandline.download_updates
+    )));
 
     if let Some(c) = &commandline.config {
         config = config.merge(Data::<Toml>::file(c));

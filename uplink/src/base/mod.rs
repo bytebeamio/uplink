@@ -4,8 +4,8 @@ use std::mem;
 use std::sync::Arc;
 
 use async_channel::{SendError, Sender};
-use serde::Deserialize;
 use log::warn;
+use serde::Deserialize;
 
 pub mod actions;
 pub mod mqtt;
@@ -51,6 +51,7 @@ pub struct Config {
     pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
     pub ota_path: String,
+    pub download_updates: bool,
 }
 
 pub trait Point: Send + Debug {

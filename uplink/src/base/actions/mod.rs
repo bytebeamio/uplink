@@ -199,14 +199,16 @@ impl Actions {
                 return Ok(());
             }
             "update_firmware" => {
-                firmware_downloader(
-                    self.action_status.clone(),
-                    action,
-                    self.config.clone(),
-                    self.bridge_tx.clone(),
-                )
-                .await?;
-                return Ok(());
+                if self.config.download_updates {
+                    firmware_downloader(
+                        self.action_status.clone(),
+                        action,
+                        self.config.clone(),
+                        self.bridge_tx.clone(),
+                    )
+                    .await?;
+                    return Ok(());
+                }
             }
             _ => (),
         }
