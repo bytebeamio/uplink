@@ -263,8 +263,10 @@ impl Package for Buffer<ActionResponse> {
 
 #[derive(Serialize, Deserialize)]
 struct FirmwareUpdate {
-    pub url: String,
+    url: String,
     version: String,
+    /// Path to location in fs where download will be stored
+    ota_path: Option<String>,
 }
 
 /// Download contents of the OTA update if action is named "update_firmware"
@@ -276,9 +278,13 @@ pub async fn firmware_downloader(
 ) -> Result<(), Error> {
     info!("Dowloading firmware");
     let Action { id, kind, name, payload } = action;
-    let url = serde_json::from_str::<FirmwareUpdate>(&payload)?.url;
+    // Extract url and add ota_path in payload before recreating action to be sent to bridge
+    let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;
+    let url = update.url.clone();
+    update.ota_path = Some(config.ota_path.to_owned());
+    let payload = serde_json::to_string(&update)?;
     let action_id = id.clone();
-    let action = Action { id, kind, name, payload: config.ota_path.clone() };
+    let action = Action { id, kind, name, payload };
 
     // Authenticate with TLS certs from config
     let client_builder = ClientBuilder::new();
