@@ -113,7 +113,7 @@ where
             + &project_id
             + "/devices/"
             + &device_id
-            + "/"
+            + "/events/"
             + &stream
             + "/jsonarray";
 
