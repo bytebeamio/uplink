@@ -194,7 +194,7 @@ impl Actions {
                 return Ok(());
             }
             "update_firmware" => {
-                if self.config.download_updates {
+                if self.config.ota.enabled {
                     ota::firmware_downloader(
                         self.action_status.clone(),
                         action,

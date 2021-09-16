@@ -38,7 +38,8 @@ pub async fn firmware_downloader(
     // Extract url and add ota_path in payload before recreating action to be sent to bridge
     let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;
     let url = update.url.clone();
-    update.ota_path = Some(config.ota_path.to_owned());
+    let ota_path = config.ota.path.clone();
+    update.ota_path = Some(ota_path.clone());
     let payload = serde_json::to_string(&update)?;
     let action_id = id.clone();
     let action = Action { id, kind, name, payload };
@@ -60,7 +61,7 @@ pub async fn firmware_downloader(
 
     info!("Dowloading from {}", url);
     tokio::task::spawn(async move {
-        let mut file = match File::create(config.ota_path.clone()) {
+        let mut file = match File::create(ota_path) {
             Ok(file) => file,
             Err(e) => {
                 send_status(
