@@ -86,6 +86,10 @@ const DEFAULT_CONFIG: &'static str = r#"
     [streams.action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     buf_size = 1
+
+    [ota]
+    enabled = false
+    path = ""
 "#;
 
 /// Reads config file to generate config struct and replaces places holders
