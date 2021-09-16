@@ -233,3 +233,22 @@ impl<T> Clone for Stream<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn buffer_add_seq_anomaly() {
+        let mut buffer = Buffer::<usize>::new(Arc::new("stream".to_owned()), Arc::new("topic".to_owned()));
+        buffer.add_sequence_anomaly(1, 3);
+        assert_eq!(buffer.anomalies(), Some(("stream.sequence: 1, 3".to_owned(), 1)))
+    }
+
+    #[test]
+    fn buffer_add_timestamp_anomaly() {
+        let mut buffer = Buffer::<usize>::new(Arc::new("stream".to_owned()), Arc::new("topic".to_owned()));
+        buffer.add_timestamp_anomaly(1, 3);
+        assert_eq!(buffer.anomalies(), Some(("timestamp: 1, 3".to_owned(), 1)))
+    }
+}
