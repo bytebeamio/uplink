@@ -5,7 +5,8 @@ use log::{debug, error, info};
 use reqwest::{Certificate, ClientBuilder, Identity};
 use serde::{Deserialize, Serialize};
 
-use std::{fs::File, io::Write, sync::Arc};
+use std::fs::{create_dir_all, File};
+use std::{io::Write, path::PathBuf, sync::Arc};
 
 use super::{Action, ActionResponse};
 use crate::base::{Config, Stream};
@@ -43,6 +44,7 @@ pub async fn firmware_downloader(
     let payload = serde_json::to_string(&update)?;
     let action_id = id.clone();
     let action = Action { id, kind, name, payload };
+    let ota_path = PathBuf::from(ota_path);
 
     // Authenticate with TLS certs from config
     let client_builder = ClientBuilder::new();
@@ -61,18 +63,31 @@ pub async fn firmware_downloader(
 
     info!("Dowloading from {}", url);
     tokio::task::spawn(async move {
+        // Ensure that directory for downloading updates into, exists
+        let ota_dir = ota_path.parent().unwrap();
+        if let Err(e) = create_dir_all(ota_dir) {
+            send_status(
+                &mut status_bucket,
+                ActionResponse::failure(&action_id, format!("Failed to create file: {}", e)),
+            )
+            .await;
+            return;
+        }
+
+        // Create file to download files into
         let mut file = match File::create(ota_path) {
             Ok(file) => file,
             Err(e) => {
                 send_status(
                     &mut status_bucket,
-                    ActionResponse::failure(&action_id, format!("Filed to create file: {}", e)),
+                    ActionResponse::failure(&action_id, format!("Failed to create file: {}", e)),
                 )
                 .await;
                 return;
             }
         };
 
+        // Create handler to perform download from URL
         let resp = match client.get(url).send().await {
             Ok(resp) => resp,
             Err(e) => {
@@ -93,6 +108,7 @@ pub async fn firmware_downloader(
         let mut downloaded = 0;
         let mut stream = resp.bytes_stream();
 
+        // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
             let chunk = match item {
                 Ok(chunk) => chunk,
@@ -131,6 +147,7 @@ pub async fn firmware_downloader(
 
         info!("Firmware dowloaded sucessfully");
 
+        // Forward Action packet through bridge
         match bridge_tx.try_send(action) {
             Ok(()) => {
                 send_status(&mut status_bucket, ActionResponse::success(&action_id)).await;

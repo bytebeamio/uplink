@@ -89,7 +89,7 @@ const DEFAULT_CONFIG: &'static str = r#"
 
     [ota]
     enabled = false
-    path = ""
+    path = "/var/tmp/ota-file"
 "#;
 
 /// Reads config file to generate config struct and replaces places holders
@@ -169,6 +169,9 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    persistence_dir: {}", config.persistence.path);
     println!("    persistence_max_segment_size: {}", config.persistence.max_file_size);
     println!("    persistence_max_segment_count: {}", config.persistence.max_file_count);
+    if config.ota.enabled {
+        println!("    ota_path: {}", config.ota.path);
+    }
     println!("\n");
 }
 
