@@ -19,80 +19,50 @@ pub enum Error {
     ReqwestError(#[from] reqwest::Error),
     #[error("File io Error {0}")]
     IoError(#[from] std::io::Error),
+    #[error("Error forwarding to Bridge {0}")]
+    TrySendError(#[from] async_channel::TrySendError<Action>),
 }
 
 struct OtaDownloader {
-    status_bucket: Stream<ActionResponse>,
     action_id: String,
-    ota_path: PathBuf,
+    status_bucket: Stream<ActionResponse>,
     bridge_tx: Sender<Action>,
-    client: Client,
 }
 
 impl OtaDownloader {
-    async fn run(&mut self, action: Action, url: String) {
+    async fn run(
+        &mut self,
+        ota_path: &PathBuf,
+        client: Client,
+        action: Action,
+        url: String,
+    ) -> Result<(), Error> {
         // Create file to download files into
-        let mut file = match self.create_file().await {
-            Ok(file) => file,
-            Err(e) => {
-                self.send_status(ActionResponse::failure(
-                    &self.action_id,
-                    format!("Failed to create file: {}", e),
-                ))
-                .await;
-                return;
-            }
-        };
+        let file = self.create_file(ota_path).await?;
 
         // Create handler to perform download from URL
-        let resp = match self.client.get(url).send().await {
-            Ok(resp) => resp,
-            Err(e) => {
-                self.send_status(ActionResponse::failure(
-                    &self.action_id,
-                    format!("Couldn't download OTA update: {}", e),
-                ))
-                .await;
-                return;
-            }
-        };
+        let resp = client.get(url).send().await?;
 
-        if let Err(e) = self.download(resp, &mut file).await {
-            self.send_status(ActionResponse::failure(
-                &self.action_id,
-                format!("Error while downloading: {}", e),
-            ))
-            .await;
-            return;
-        }
+        self.download(resp, file).await?;
 
         // Forward Action packet through bridge
-        match self.bridge_tx.try_send(action) {
-            Ok(()) => {
-                self.send_status(ActionResponse::success(&self.action_id)).await;
-            }
-            Err(e) => {
-                self.send_status(ActionResponse::failure(
-                    &self.action_id,
-                    format!("Failed forwarding to bridge | Error: {}", e),
-                ))
-                .await;
-            }
-        }
+        self.bridge_tx.try_send(action)?;
+
+        Ok(())
     }
 
     /// Ensure that directory for downloading file into, exists
-    async fn create_file(&mut self) -> Result<File, Error> {
+    async fn create_file(&mut self, ota_path: &PathBuf) -> Result<File, Error> {
         let curr_dir = PathBuf::from("./");
-        let ota_dir = self.ota_path.parent().unwrap_or(curr_dir.as_path());
+        let ota_dir = ota_path.parent().unwrap_or(curr_dir.as_path());
         create_dir_all(ota_dir)?;
-        let file = File::create(self.ota_path.clone())?;
+        let file = File::create(ota_path)?;
 
         Ok(file)
     }
 
     /// Downloads from server and stores into file
-    async fn download(&mut self, resp: Response, file: &mut File) -> Result<(), Error> {
+    async fn download(&mut self, resp: Response, mut file: File) -> Result<(), Error> {
         // Supposing content length is defined in bytes
         let content_length = resp.content_length().unwrap_or(0) as usize;
         let mut downloaded = 0;
@@ -165,10 +135,20 @@ pub async fn firmware_downloader(
         None => client_builder,
     }
     .build()?;
-    let mut downloader = OtaDownloader { status_bucket, action_id, ota_path, bridge_tx, client };
+    let mut downloader = OtaDownloader { status_bucket, action_id, bridge_tx };
 
     info!("Dowloading from {}", url);
-    tokio::task::spawn(async move { downloader.run(action, url).await });
+    tokio::task::spawn(async move {
+        match downloader.run(&ota_path, client, action, url).await {
+            Ok(_) => downloader.send_status(ActionResponse::success(&downloader.action_id)).await,
+            Err(e) => {
+                downloader
+                    .send_status(ActionResponse::failure(&downloader.action_id, e.to_string()))
+                    .await;
+                return;
+            }
+        }
+    });
 
     Ok(())
 }
