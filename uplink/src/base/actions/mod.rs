@@ -193,17 +193,24 @@ impl Actions {
                 self.tunshell_tx.send(action.payload).await?;
                 return Ok(());
             }
-            "update_firmware" => {
-                if self.config.ota.enabled {
-                    ota::firmware_downloader(
-                        self.action_status.clone(),
-                        action,
-                        self.config.clone(),
-                        self.bridge_tx.clone(),
-                    )
-                    .await?;
-                    return Ok(());
-                }
+            "update_firmware" if self.config.ota.enabled => {
+                let action_id = action.id.clone();
+                // Download OTA, if Error, update cloud
+                if let Err(e) = ota::spawn_firmware_downloader(
+                    self.action_status.clone(),
+                    action,
+                    self.config.clone(),
+                    self.bridge_tx.clone(),
+                )
+                .await
+                {
+                    let status = ActionResponse::failure(&action_id, e.to_string());
+                    debug!("Action status: {:?}", status);
+                    if let Err(e) = self.action_status.fill(status).await {
+                        error!("Failed to send downloader status. Error = {:?}", e);
+                    }
+                };
+                return Ok(());
             }
             _ => (),
         }

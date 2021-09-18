@@ -103,7 +103,7 @@ struct FirmwareUpdate {
 }
 
 /// Download contents of the OTA update if action is named "update_firmware"
-pub async fn firmware_downloader(
+pub async fn spawn_firmware_downloader(
     status_bucket: Stream<ActionResponse>,
     action: Action,
     config: Arc<Config>,
