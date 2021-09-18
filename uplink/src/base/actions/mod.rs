@@ -30,8 +30,8 @@ pub enum Error {
     BridgeSendError(#[from] async_channel::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
-    #[error("Error from reqwest")]
-    ReqwestError(#[from] ota::Error),
+    #[error("Error from firmware downloader {0}")]
+    OtaError(#[from] ota::Error),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -209,6 +209,7 @@ impl Actions {
                     if let Err(e) = self.action_status.fill(status).await {
                         error!("Failed to send downloader status. Error = {:?}", e);
                     }
+                    return Err(Error::OtaError(e));
                 };
                 return Ok(());
             }
