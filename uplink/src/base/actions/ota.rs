@@ -145,8 +145,7 @@ pub async fn spawn_firmware_downloader(
             Err(e) => {
                 downloader
                     .send_status(ActionResponse::failure(&downloader.action_id, e.to_string()))
-                    .await;
-                return;
+                    .await
             }
         }
     });
