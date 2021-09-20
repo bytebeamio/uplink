@@ -102,7 +102,7 @@ struct FirmwareUpdate {
     ota_path: Option<String>,
 }
 
-/// Download contents of the OTA update if action is named "update_firmware"
+/// Spawn a task to download and forward "update_firmware" actions
 pub async fn spawn_firmware_downloader(
     status_bucket: Stream<ActionResponse>,
     action: Action,
@@ -138,6 +138,7 @@ pub async fn spawn_firmware_downloader(
     let mut downloader = OtaDownloader { status_bucket, action_id, bridge_tx };
 
     info!("Dowloading from {}", url);
+    // TODO: Spawned task may fail to execute as expected and status may not be forwarded to cloud
     tokio::task::spawn(async move {
         match downloader.run(&ota_path, client, action, url).await {
             Ok(_) => downloader.send_status(ActionResponse::success(&downloader.action_id)).await,

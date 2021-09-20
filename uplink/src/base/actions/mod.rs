@@ -194,7 +194,7 @@ impl Actions {
                 return Ok(());
             }
             "update_firmware" if self.config.ota.enabled => {
-                // Download OTA, if Error, update cloud
+                // Download the OTA update if action is named "update_firmware" and feature is enabled
                 ota::spawn_firmware_downloader(
                     self.action_status.clone(),
                     action,
