@@ -27,7 +27,7 @@ pub enum Error {
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
     #[error("Download OTA error")]
-    ActionsError(#[from] actions::Error),
+    Actions(#[from] actions::Error),
 }
 
 pub struct Bridge {

@@ -11,8 +11,8 @@ mod base;
 mod cli;
 mod collector;
 
-use crate::base::actions::tunshell::{Relay, TunshellSession};
-use crate::base::{actions::Actions, mqtt::Mqtt, serializer::Serializer, Stream};
+use crate::base::actions::{tunshell::{Relay, TunshellSession}, Actions};
+use crate::base::{mqtt::Mqtt, serializer::Serializer, Stream};
 use crate::cli::CommandLine;
 use crate::collector::{simulator::Simulator, tcpjson::Bridge};
 
@@ -81,9 +81,10 @@ async fn main() -> Result<(), Error> {
     );
     thread::spawn(move || tunshell_session.start());
 
+    let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
     let mut actions = Actions::new(
         config.clone(),
-        HashMap::<String, Sender<base::Control>>::new(),
+        controllers,
         native_actions_rx,
         tunshell_keys_tx,
         action_status,
