@@ -1,19 +1,20 @@
-use super::{Config, Control, Package};
 use async_channel::{Receiver, Sender};
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::time::Duration;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod controller;
+mod ota;
 mod process;
 pub mod tunshell;
 
-use crate::base::{Buffer, Point, Stream};
+use crate::base::{Buffer, Config, Control, Package, Point, Stream};
 pub use controller::Controller;
-use tokio::time::Duration;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -25,11 +26,15 @@ pub enum Error {
     Controller(#[from] controller::Error),
     #[error("Error sending keys to tunshell thread {0}")]
     TunshellSendError(#[from] async_channel::SendError<String>),
+    #[error("Error sending Action through bridge {0}")]
+    BridgeSendError(#[from] async_channel::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
+    #[error("Error from firmware downloader {0}")]
+    OtaError(#[from] ota::Error),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Action {
     // action id
     pub action_id: String,
@@ -71,9 +76,24 @@ impl ActionResponse {
         }
     }
 
+    pub fn progress(id: &str, progress: u8) -> Self {
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+
+        ActionResponse {
+            id: id.to_owned(),
+            sequence: 0,
+            timestamp: timestamp.as_millis() as u64,
+            state: "Downloading".to_owned(),
+            progress,
+            errors: vec![],
+        }
+    }
+
     pub fn success(id: &str) -> ActionResponse {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+
         ActionResponse {
             id: id.to_owned(),
             sequence: 0,
@@ -87,6 +107,7 @@ impl ActionResponse {
     pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+
         ActionResponse {
             id: id.to_owned(),
             sequence: 0,
@@ -109,26 +130,36 @@ impl Point for ActionResponse {
 }
 
 pub struct Actions {
+    config: Arc<Config>,
     action_status: Stream<ActionResponse>,
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
     tunshell_tx: Sender<String>,
-}
-
-pub async fn new(
-    _config: Arc<Config>,
-    controllers: HashMap<String, Sender<Control>>,
-    actions_rx: Receiver<Action>,
-    tunshell_tx: Sender<String>,
-    action_status: Stream<ActionResponse>,
-) -> Actions {
-    let controller = Controller::new(controllers, action_status.clone());
-    let process = process::Process::new(action_status.clone());
-    Actions { action_status, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
+    bridge_tx: Sender<Action>,
 }
 
 impl Actions {
+    pub async fn new(
+        config: Arc<Config>,
+        controllers: HashMap<String, Sender<Control>>,
+        actions_rx: Receiver<Action>,
+        tunshell_tx: Sender<String>,
+        action_status: Stream<ActionResponse>,
+        bridge_tx: Sender<Action>,
+    ) -> Actions {
+        let controller = Controller::new(controllers, action_status.clone());
+        let process = process::Process::new(action_status.clone());
+        Actions {
+            config,
+            action_status,
+            process,
+            controller,
+            actions_rx: Some(actions_rx),
+            tunshell_tx,
+            bridge_tx,
+        }
+    }
     pub async fn start(&mut self) {
         let action_stream = self.actions_rx.take().unwrap();
 
@@ -155,7 +186,34 @@ impl Actions {
         }
     }
 
+    /// Handle received actions
     async fn handle(&mut self, action: Action) -> Result<(), Error> {
+        match action.name.as_ref() {
+            "tunshell" => {
+                self.tunshell_tx.send(action.payload).await?;
+                return Ok(());
+            }
+            "update_firmware" if self.config.ota.enabled => {
+                // Download the OTA update if action is named "update_firmware" and feature is enabled
+                ota::spawn_firmware_downloader(
+                    self.action_status.clone(),
+                    action,
+                    self.config.clone(),
+                    self.bridge_tx.clone(),
+                )
+                .await?;
+                return Ok(());
+            }
+            _ => (),
+        }
+
+        // Bridge actions are forwarded
+        if !self.config.actions.contains(&action.name) {
+            self.bridge_tx.try_send(action)?;
+            return Ok(());
+        }
+
+        // Regular actions are executed natively
         match action.kind.as_ref() {
             "control" => {
                 let command = action.name.clone();
@@ -168,9 +226,6 @@ impl Actions {
                 let id = action.action_id;
 
                 self.process.execute(id.clone(), command.clone(), payload).await?;
-            }
-            "tunshell" => {
-                self.tunshell_tx.send(action.payload).await?;
             }
             v => return Err(Error::InvalidActionKind(v.to_owned())),
         }

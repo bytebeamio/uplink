@@ -1,4 +1,5 @@
 use async_channel::{Receiver, RecvError, Sender};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
@@ -10,7 +11,7 @@ use tokio_util::codec::{LinesCodec, LinesCodecError};
 
 use std::io;
 
-use crate::base::actions::{Action, ActionResponse};
+use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
 use crate::base::{Buffer, Config, Package, Point, Stream};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -29,6 +30,8 @@ pub enum Error {
     Codec(#[from] LinesCodecError),
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
+    #[error("Download OTA error")]
+    ActionsError(#[from] ActionsError),
 }
 
 pub struct Bridge {
