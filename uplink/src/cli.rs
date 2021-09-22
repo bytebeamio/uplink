@@ -14,7 +14,7 @@ const B: &str = r#"
     ░░▀▀▀░█░░░░▀▀░▀▀▀░▀░░▀░▀░▀
 "#;
 
-const DEFAULT_CONFIG: &'static str = r#"
+const DEFAULT_CONFIG: &str = r#"
     bridge_port = 5555
     max_packet_size = 102400
     max_inflight = 100
@@ -121,7 +121,7 @@ impl CommandLine {
             logger_config.add_filter_allow_str("uplink").add_filter_allow_str("disk");
         } else {
             for module in self.modules.iter() {
-                logger_config.add_filter_allow(format!("{}", module));
+                logger_config.add_filter_allow(module.to_string());
             }
         }
 

@@ -20,7 +20,7 @@ fn id(path: &Path) -> io::Result<u64> {
         }
     }
 
-    let id: Vec<&str> = path.file_name().unwrap().to_str().unwrap().split("@").collect();
+    let id: Vec<&str> = path.file_name().unwrap().to_str().unwrap().split('@').collect();
     let id: u64 = id[1].parse().unwrap();
     Ok(id)
 }
@@ -44,6 +44,6 @@ fn get_file_ids(path: &Path) -> io::Result<Vec<u64>> {
         }
     }
 
-    file_ids.sort();
+    file_ids.sort_unstable();
     Ok(file_ids)
 }

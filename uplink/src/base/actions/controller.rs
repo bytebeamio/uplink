@@ -61,12 +61,11 @@ impl Controller {
         controllers: HashMap<String, Sender<Control>>,
         action_status: Stream<ActionResponse>,
     ) -> Self {
-        let controller = Controller {
+        Controller {
             collector_controllers: controllers,
             collector_run_status: HashMap::new(),
             action_status,
-        };
-        controller
+        }
     }
 
     pub async fn execute(&mut self, id: &str, command: String) -> Result<(), Error> {

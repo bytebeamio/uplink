@@ -2,6 +2,7 @@ use async_channel::{SendError, Sender};
 use log::{error, warn};
 use serde::Deserialize;
 
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug, mem, sync::Arc};
 
 pub mod actions;
@@ -212,7 +213,7 @@ impl<T> Buffer<T> {
     }
 
     pub fn anomalies(&self) -> Option<(String, usize)> {
-        if self.anomalies.len() == 0 {
+        if self.anomalies.is_empty() {
             return None;
         }
 
@@ -234,20 +235,29 @@ impl<T> Clone for Stream<T> {
     }
 }
 
+pub(crate) fn timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_millis() as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn buffer_add_seq_anomaly() {
-        let mut buffer = Buffer::<usize>::new(Arc::new("stream".to_owned()), Arc::new("topic".to_owned()));
+        let mut buffer =
+            Buffer::<usize>::new(Arc::new("stream".to_owned()), Arc::new("topic".to_owned()));
         buffer.add_sequence_anomaly(1, 3);
         assert_eq!(buffer.anomalies(), Some(("stream.sequence: 1, 3".to_owned(), 1)))
     }
 
     #[test]
     fn buffer_add_timestamp_anomaly() {
-        let mut buffer = Buffer::<usize>::new(Arc::new("stream".to_owned()), Arc::new("topic".to_owned()));
+        let mut buffer =
+            Buffer::<usize>::new(Arc::new("stream".to_owned()), Arc::new("topic".to_owned()));
         buffer.add_timestamp_anomaly(1, 3);
         assert_eq!(buffer.anomalies(), Some(("timestamp: 1, 3".to_owned(), 1)))
     }

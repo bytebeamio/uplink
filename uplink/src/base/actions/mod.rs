@@ -2,19 +2,19 @@ use async_channel::{Receiver, Sender};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::time::Duration;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use super::{Config, Control, Package, Stream};
 
 pub mod controller;
 mod process;
+mod response;
 pub mod tunshell;
 
-use super::{Config, Control, Package};
-use crate::base::{Buffer, Point, Stream};
 pub use controller::Controller;
+pub use response::ActionResponse;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -25,7 +25,7 @@ pub enum Error {
     #[error("Controller error {0}")]
     Controller(#[from] controller::Error),
     #[error("Error sending keys to tunshell thread {0}")]
-    TunshellSendError(#[from] async_channel::SendError<String>),
+    TunshellSend(#[from] async_channel::SendError<String>),
     #[error("Invalid action")]
     InvalidActionKind(String),
 }
@@ -45,74 +45,6 @@ pub struct Action {
     payload: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ActionResponse {
-    ///
-    id: String,
-    /// Sequence number
-    sequence: u32,
-    /// Timestamp on response creation
-    timestamp: u64,
-    /// Can be either running or failed
-    state: String,
-    /// Progress percentage for given Action
-    progress: u8,
-    /// List of errors faced on performing said Action
-    errors: Vec<String>,
-}
-
-impl ActionResponse {
-    pub fn new(id: &str) -> Self {
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
-
-        ActionResponse {
-            id: id.to_owned(),
-            sequence: 0,
-            timestamp: timestamp.as_millis() as u64,
-            state: "Running".to_owned(),
-            progress: 0,
-            errors: vec![],
-        }
-    }
-
-    pub fn success(id: &str) -> ActionResponse {
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
-        ActionResponse {
-            id: id.to_owned(),
-            sequence: 0,
-            timestamp: timestamp.as_millis() as u64,
-            state: "Completed".to_owned(),
-            progress: 100,
-            errors: vec![],
-        }
-    }
-
-    pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
-        ActionResponse {
-            id: id.to_owned(),
-            sequence: 0,
-            timestamp: timestamp.as_millis() as u64,
-            state: "Failed".to_owned(),
-            progress: 100,
-            errors: vec![error.into()],
-        }
-    }
-}
-
-impl Point for ActionResponse {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-}
-
 pub struct Actions {
     action_status: Stream<ActionResponse>,
     process: process::Process,
@@ -122,6 +54,7 @@ pub struct Actions {
 }
 
 impl Actions {
+    /// Create new Action processor/forwarder
     pub async fn new(
         _config: Arc<Config>,
         controllers: HashMap<String, Sender<Control>>,
@@ -131,9 +64,11 @@ impl Actions {
     ) -> Actions {
         let controller = Controller::new(controllers, action_status.clone());
         let process = process::Process::new(action_status.clone());
+
         Actions { action_status, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
     }
 
+    /// Loop through, receiving
     pub async fn start(&mut self) {
         let action_stream = self.actions_rx.take().unwrap();
 
@@ -190,19 +125,5 @@ impl Actions {
         if let Err(e) = self.action_status.fill(status).await {
             error!("Failed to send status. Error = {:?}", e);
         }
-    }
-}
-
-impl Package for Buffer<ActionResponse> {
-    fn topic(&self) -> Arc<String> {
-        return self.topic.clone();
-    }
-
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
-    }
-
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
     }
 }

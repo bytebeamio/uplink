@@ -58,8 +58,8 @@ impl Storage {
     /// Initializes read buffer before reading data from the file
     fn prepare_current_read_buffer(&mut self, file_len: usize) {
         self.current_read_file.clear();
-        let mut init = vec![0u8; file_len];
-        self.current_read_file.put_slice(&mut init[..]);
+        let init = vec![0u8; file_len];
+        self.current_read_file.put_slice(&init[..]);
     }
 
     /// Opens file to flush current inmemory write buffer to disk.
@@ -109,7 +109,7 @@ impl Storage {
     pub fn reload(&mut self) -> io::Result<bool> {
         // Swap read buffer with write buffer to read data in inmemory write
         // buffer when all the backlog disk files are done
-        if self.backlog_file_ids.len() == 0 {
+        if self.backlog_file_ids.is_empty() {
             mem::swap(&mut self.current_read_file, &mut self.current_write_file);
 
             // If read buffer is 0 after swapping, all the data is caught up
@@ -179,7 +179,7 @@ mod test {
         assert_eq!(storage.writer().len(), 1036);
 
         // other messages on disk
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(backup.path()).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
@@ -196,7 +196,7 @@ mod test {
             storage.flush_on_overflow().unwrap();
         }
 
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(backup.path()).unwrap();
         assert_eq!(files, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
         // 11 files created. 10 on disk
@@ -208,7 +208,7 @@ mod test {
         }
 
         assert_eq!(storage.writer().len(), 0);
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(backup.path()).unwrap();
         assert_eq!(files, vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
 

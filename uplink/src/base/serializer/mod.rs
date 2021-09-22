@@ -3,14 +3,16 @@ use bytes::Bytes;
 use disk::Storage;
 use log::{error, info};
 use rumqttc::*;
-use serde::Serialize;
 use thiserror::Error;
 use tokio::{select, time};
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{io, sync::Arc};
 
 use crate::base::{Config, Package};
+
+mod metrics;
+
+use metrics::Metrics;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -40,7 +42,7 @@ pub struct Serializer {
 }
 
 impl Serializer {
-    pub fn new(
+    pub(crate) fn new(
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
         client: AsyncClient,
@@ -89,7 +91,7 @@ impl Serializer {
         // Note: self.client.publish() is executing code before await point
         // in publish method every time. Verify this behaviour later
         let publish =
-            self.client.publish(&publish.topic, QoS::AtLeastOnce, false, &publish.payload[..]);
+            self.client.publish(publish.topic, QoS::AtLeastOnce, false, publish.payload.to_vec());
         tokio::pin!(publish);
 
         loop {
@@ -252,7 +254,7 @@ impl Serializer {
                     let topic = data.topic();
                     let payload = data.serialize();
                     let payload_size = payload.len();
-                    match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
+                    match self.client.try_publish((*topic).to_owned(), QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
                             self.metrics.add_total_sent_size(payload_size);
                             continue;
@@ -265,7 +267,7 @@ impl Serializer {
                 _ = interval.tick() => {
                     let (topic, payload) = self.metrics.next();
                     let payload_size = payload.len();
-                    match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
+                    match self.client.try_publish((*topic).to_owned(), QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
                             self.metrics.add_total_sent_size(payload_size);
                             continue;
@@ -304,73 +306,6 @@ async fn send_publish(
     topic: String,
     payload: Bytes,
 ) -> Result<AsyncClient, ClientError> {
-    client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
+    client.publish(topic, QoS::AtLeastOnce, false, payload.to_vec()).await?;
     Ok(client)
-}
-
-#[derive(Debug, Default, Clone, Serialize)]
-struct Metrics {
-    #[serde(skip_serializing)]
-    topic: String,
-    sequence: u32,
-    timestamp: u64,
-    total_sent_size: usize,
-    total_disk_size: usize,
-    lost_segments: usize,
-    errors: String,
-    error_count: usize,
-}
-
-impl Metrics {
-    pub fn new<T: Into<String>>(topic: T) -> Metrics {
-        Metrics { topic: topic.into(), errors: String::with_capacity(1024), ..Default::default() }
-    }
-
-    pub fn add_total_sent_size(&mut self, size: usize) {
-        self.total_sent_size = self.total_sent_size.saturating_add(size);
-    }
-
-    pub fn add_total_disk_size(&mut self, size: usize) {
-        self.total_disk_size = self.total_disk_size.saturating_add(size);
-    }
-
-    pub fn sub_total_disk_size(&mut self, size: usize) {
-        self.total_disk_size = self.total_disk_size.saturating_sub(size);
-    }
-
-    pub fn increment_lost_segments(&mut self) {
-        self.lost_segments += 1;
-    }
-
-    // pub fn add_error<S: Into<String>>(&mut self, error: S) {
-    //     self.error_count += 1;
-    //     if self.errors.len() > 1024 {
-    //         return;
-    //     }
-    //
-    //     self.errors.push_str(", ");
-    //     self.errors.push_str(&error.into());
-    // }
-
-    pub fn add_errors<S: Into<String>>(&mut self, error: S, count: usize) {
-        self.error_count += count;
-        if self.errors.len() > 1024 {
-            return;
-        }
-
-        self.errors.push_str(&error.into());
-        self.errors.push_str(" | ");
-    }
-
-    pub fn next(&mut self) -> (&str, Vec<u8>) {
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
-        self.timestamp = timestamp.as_millis() as u64;
-        self.sequence += 1;
-
-        let payload = serde_json::to_vec(&vec![&self]).unwrap();
-        self.errors.clear();
-        self.lost_segments = 0;
-        (&self.topic, payload)
-    }
 }

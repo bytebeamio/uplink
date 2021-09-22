@@ -5,10 +5,9 @@ use serde_json::json;
 use thiserror::Error;
 use tokio::time::Duration;
 
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, io, sync::Arc};
 
-use crate::base::{Config, Package, Stream};
+use crate::base::{timestamp, Config, Package, Stream};
 use crate::collector::tcpjson::Payload;
 
 #[derive(Error, Debug)]
@@ -39,10 +38,8 @@ impl Simulator {
     }
 
     pub(crate) async fn start(&mut self) {
-        let mut gps_timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-        let mut can_timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let mut gps_timestamp = timestamp();
+        let mut can_timestamp = timestamp();
 
         for i in 0..1_000_000 {
             let sleep_millis = 10;

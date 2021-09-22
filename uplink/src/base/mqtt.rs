@@ -9,7 +9,7 @@ use tokio::{task, time::Duration};
 
 use std::sync::Arc;
 
-use crate::base::{actions::Action, Config};
+use super::{actions::Action, Config};
 
 #[derive(Error, Debug)]
 pub enum Error {
