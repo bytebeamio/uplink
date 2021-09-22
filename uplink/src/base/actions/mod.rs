@@ -61,7 +61,7 @@ pub struct Actions {
 }
 
 impl Actions {
-    pub async fn new(
+    pub fn new(
         config: Arc<Config>,
         controllers: HashMap<String, Sender<Control>>,
         actions_rx: Receiver<Action>,

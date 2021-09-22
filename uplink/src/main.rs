@@ -65,8 +65,8 @@ async fn main() -> Result<(), Error> {
     if commandline.enable_simulator {
         let simulator_config = config.clone();
         let data_tx = collector_tx.clone();
-        task::spawn(async {
-            let mut simulator = Simulator::new(simulator_config, data_tx);
+        let mut simulator = Simulator::new(simulator_config, data_tx);
+        task::spawn(async move {
             simulator.start().await;
         });
     }
@@ -89,8 +89,7 @@ async fn main() -> Result<(), Error> {
         tunshell_keys_tx,
         action_status,
         bridge_actions_tx,
-    )
-    .await;
+    );
     actions.start().await;
     Ok(())
 }
