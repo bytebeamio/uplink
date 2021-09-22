@@ -7,7 +7,7 @@ use tokio::{pin, select, task, time};
 
 use std::io;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
 
 use super::{ActionResponse, Package};
@@ -21,7 +21,7 @@ pub struct Process {
     // buffer to send status messages to cloud
     action_status: Stream<ActionResponse>,
     // we use this flag to ignore new process spawn while previous process is in progress
-    last_process_done: Arc<Mutex<bool>>,
+    last_process_done: Arc<AtomicBool>,
 }
 
 #[derive(Error, Debug)]
@@ -40,7 +40,7 @@ pub enum Error {
 
 impl Process {
     pub fn new(action_status: Stream<ActionResponse>) -> Process {
-        Process { last_process_done: Arc::new(Mutex::new(true)), action_status }
+        Process { last_process_done: Arc::new(AtomicBool::new(true)), action_status }
     }
 
     /// Run a process of specified command
@@ -50,7 +50,7 @@ impl Process {
         command: String,
         payload: String,
     ) -> Result<Child, Error> {
-        *self.last_process_done.lock().unwrap() = false;
+        self.last_process_done.store(false, Ordering::Relaxed);
 
         let mut cmd = Command::new(command);
         cmd.arg(id).arg(payload).kill_on_drop(true).stdout(Stdio::piped());
@@ -58,8 +58,8 @@ impl Process {
         match cmd.spawn() {
             Ok(child) => Ok(child),
             Err(e) => {
-                *self.last_process_done.lock().unwrap() = true;
-                return Err(e.into());
+                self.last_process_done.store(true, Ordering::Relaxed);
+                Err(e.into())
             }
         }
     }
@@ -94,7 +94,7 @@ impl Process {
                 }
             }
 
-            *last_process_done.lock().unwrap() = true;
+            last_process_done.store(true, Ordering::Relaxed);
         });
 
         Ok(())
@@ -109,7 +109,7 @@ impl Process {
         let command = String::from("tools/") + &command.into();
 
         // Check if last process is in progress
-        if *self.last_process_done.lock().unwrap() == false {
+        if !self.last_process_done.load(Ordering::Relaxed) {
             return Err(Error::Busy);
         }
 

@@ -1,10 +1,10 @@
-use std::sync::{Arc, Mutex};
-
 use async_channel::Receiver;
 use log::error;
 use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
+
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use crate::base::{self, actions::ActionResponse, Stream};
 
@@ -26,7 +26,7 @@ pub struct TunshellSession {
     echo_stdout: bool,
     keys_rx: Receiver<String>,
     action_status: Stream<ActionResponse>,
-    last_process_done: Arc<Mutex<bool>>,
+    last_process_done: Arc<AtomicBool>,
 }
 
 impl TunshellSession {
@@ -43,7 +43,7 @@ impl TunshellSession {
             echo_stdout,
             keys_rx: tunshell_rx,
             action_status,
-            last_process_done: Arc::new(Mutex::new(true)),
+            last_process_done: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -63,7 +63,7 @@ impl TunshellSession {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) {
         while let Ok(keys) = self.keys_rx.recv().await {
-            if *self.last_process_done.lock().unwrap() == false {
+            if !self.last_process_done.load(Ordering::Relaxed) {
                 let status = ActionResponse::failure("tunshell", "busy".to_owned());
                 if let Err(e) = self.action_status.fill(status).await {
                     error!("Failed to send status, Error = {:?}", e);
@@ -91,7 +91,7 @@ impl TunshellSession {
             let mut status_tx = self.action_status.clone();
 
             tokio::spawn(async move {
-                *last_process_done.lock().unwrap() = false;
+                last_process_done.store(false, Ordering::Relaxed);
 
                 let send_status = match client.start_session().compat().await {
                     Ok(status) => {
@@ -111,7 +111,7 @@ impl TunshellSession {
                     error!("Failed to send status. Error {:?}", e);
                 }
 
-                *last_process_done.lock().unwrap() = true;
+                last_process_done.store(true, Ordering::Relaxed);
             });
         }
     }
