@@ -11,8 +11,8 @@ mod base;
 mod cli;
 mod collector;
 
-use crate::base::actions::{tunshell::{Relay, TunshellSession}, Actions};
-use crate::base::{mqtt::Mqtt, serializer::Serializer, Stream};
+use crate::base::actions::tunshell::{Relay, TunshellSession};
+use crate::base::{actions::Actions, mqtt::Mqtt, serializer::Serializer, Stream};
 use crate::cli::CommandLine;
 use crate::collector::{simulator::Simulator, tcpjson::Bridge};
 
@@ -40,32 +40,37 @@ async fn main() -> Result<(), Error> {
     let action_status = Stream::new("action_status", action_status_topic, 1, collector_tx.clone());
 
     let mut mqtt_processor = Mqtt::new(config.clone(), native_actions_tx);
-    let mut serializer = Serializer::new(config.clone(), collector_rx, mqtt_processor.client(), storage)?;
+    let mut serializer =
+        Serializer::new(config.clone(), collector_rx, mqtt_processor.client(), storage)?;
 
+    // Spawn serializer, to handle outflow of `ActionResponse`s
     task::spawn(async move {
         if let Err(e) = serializer.start().await {
             error!("Serializer stopped!! Error = {:?}", e);
         }
     });
 
+    // Spawn mqtt processor, to handle inflow of `Action`s
     task::spawn(async move {
         mqtt_processor.start().await;
     });
 
-    // Configure and spawn a bridge instance for uplink
-    let mut bridge =
-        Bridge::new(config.clone(), collector_tx.clone(), bridge_actions_rx, action_status.clone());
-    task::spawn(async move {
-        if let Err(e) = bridge.start().await {
-            error!("Bridge stopped!! Error = {:?}", e);
-        }
-    });
-
-    // If enabled, configure and spawn a simulator instance for uplink
-    if commandline.enable_simulator {
-        let simulator_config = config.clone();
-        let data_tx = collector_tx.clone();
-        let mut simulator = Simulator::new(simulator_config, data_tx);
+    // If enabled, configure and spawn a simulator instance for uplink.
+    // Else, configure and spawn a bridge for uplink.
+    if !commandline.enable_simulator {
+        let mut bridge = Bridge::new(
+            config.clone(),
+            collector_tx.clone(),
+            bridge_actions_rx,
+            action_status.clone(),
+        );
+        task::spawn(async move {
+            if let Err(e) = bridge.start().await {
+                error!("Bridge stopped!! Error = {:?}", e);
+            }
+        });
+    } else {
+        let mut simulator = Simulator::new(config.clone(), collector_tx.clone());
         task::spawn(async move {
             simulator.start().await;
         });
