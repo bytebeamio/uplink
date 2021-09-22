@@ -11,7 +11,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::{collections::HashMap, io, sync::Arc};
 
-use crate::base::actions::{Action, ActionResponse};
+use crate::base::actions::{self, Action, ActionResponse};
 use crate::base::{Buffer, Config, Package, Point, Stream};
 
 #[derive(Error, Debug)]
@@ -26,6 +26,8 @@ pub enum Error {
     Codec(#[from] LinesCodecError),
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
+    #[error("Download OTA error")]
+    ActionsError(#[from] actions::Error),
 }
 
 pub struct Bridge {

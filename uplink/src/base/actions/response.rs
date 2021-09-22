@@ -42,6 +42,17 @@ impl ActionResponse {
         }
     }
 
+    /// Report progress of action in execution
+    pub fn progress(id: &str, progress: u8) -> ActionResponse {
+        ActionResponse {
+            id: id.to_owned(),
+            timestamp: timestamp(),
+            state: "Failed".to_owned(),
+            progress,
+            errors: vec![],
+        }
+    }
+
     /// Execution ended in failure response
     pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
         ActionResponse {

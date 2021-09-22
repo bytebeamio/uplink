@@ -21,38 +21,24 @@ pub enum Error {
 
 /// Interface implementing MQTT protocol to communicate with broker
 pub struct Mqtt {
-    /// Shared reference to system config
-    config: Arc<Config>,
     /// Client handle
     client: AsyncClient,
     /// Event loop handle
     eventloop: EventLoop,
     /// Handles to channels between threads
     native_actions_tx: Sender<Action>,
-    bridge_actions_tx: Sender<Action>,
     /// Currently subscribed topic
     actions_subscription: String,
 }
 
 impl Mqtt {
-    pub fn new(
-        config: Arc<Config>,
-        actions_tx: Sender<Action>,
-        bridge_actions_tx: Sender<Action>,
-    ) -> Mqtt {
+    pub fn new(config: Arc<Config>, actions_tx: Sender<Action>) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let (client, eventloop) = AsyncClient::new(options, 10);
         let actions_subscription =
             format!("/tenants/{}/devices/{}/actions", config.project_id, config.device_id);
-        Mqtt {
-            config,
-            client,
-            eventloop,
-            native_actions_tx: actions_tx,
-            bridge_actions_tx,
-            actions_subscription,
-        }
+        Mqtt { client, eventloop, native_actions_tx: actions_tx, actions_subscription }
     }
 
     /// Returns a client handle to MQTT interface
@@ -101,12 +87,7 @@ impl Mqtt {
 
         let action: Action = serde_json::from_slice(&publish.payload)?;
         debug!("Action = {:?}", action);
-
-        if !self.config.actions.contains(&action.id) {
-            self.bridge_actions_tx.try_send(action)?;
-        } else {
-            self.native_actions_tx.try_send(action)?;
-        }
+        self.native_actions_tx.try_send(action)?;
 
         Ok(())
     }
@@ -133,4 +114,3 @@ fn mqttoptions(config: &Config) -> MqttOptions {
 
     mqttoptions
 }
-

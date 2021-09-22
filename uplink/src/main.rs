@@ -39,9 +39,8 @@ async fn main() -> Result<(), Error> {
     let action_status_topic = &config.streams.get("action_status").unwrap().topic;
     let action_status = Stream::new("action_status", action_status_topic, 1, collector_tx.clone());
 
-    let mut mqtt_processor = Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
-    let mut serializer =
-        Serializer::new(config.clone(), collector_rx, mqtt_processor.client(), storage)?;
+    let mut mqtt_processor = Mqtt::new(config.clone(), native_actions_tx);
+    let mut serializer = Serializer::new(config.clone(), collector_rx, mqtt_processor.client(), storage)?;
 
     task::spawn(async move {
         if let Err(e) = serializer.start().await {
@@ -88,6 +87,7 @@ async fn main() -> Result<(), Error> {
         native_actions_rx,
         tunshell_keys_tx,
         action_status,
+        bridge_actions_tx,
     )
     .await;
     actions.start().await;

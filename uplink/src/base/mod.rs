@@ -36,6 +36,12 @@ pub struct Authentication {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct Ota {
+    pub enabled: bool,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -48,6 +54,7 @@ pub struct Config {
     pub actions: Vec<String>,
     pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
+    pub ota: Ota,
 }
 
 pub trait Point: Send + Debug {
@@ -112,7 +119,7 @@ where
             + &project_id
             + "/devices/"
             + &device_id
-            + "/"
+            + "/events/"
             + &stream
             + "/jsonarray";
 

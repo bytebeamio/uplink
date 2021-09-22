@@ -9,6 +9,7 @@ use std::sync::Arc;
 use super::{Config, Control, Package, Stream};
 
 pub mod controller;
+mod ota;
 mod process;
 mod response;
 pub mod tunshell;
@@ -26,8 +27,12 @@ pub enum Error {
     Controller(#[from] controller::Error),
     #[error("Error sending keys to tunshell thread {0}")]
     TunshellSend(#[from] async_channel::SendError<String>),
+    #[error("Error sending Action through bridge {0}")]
+    BridgeSend(#[from] async_channel::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
+    #[error("Error from firmware downloader {0}")]
+    OtaError(#[from] ota::Error),
 }
 
 /// On the Bytebeam platform, an Action is how beamd and through it,
@@ -46,29 +51,36 @@ pub struct Action {
 }
 
 pub struct Actions {
+    config: Arc<Config>,
     action_status: Stream<ActionResponse>,
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
     tunshell_tx: Sender<String>,
+    bridge_tx: Sender<Action>,
 }
 
 impl Actions {
-    /// Create new Action processor/forwarder
     pub async fn new(
-        _config: Arc<Config>,
+        config: Arc<Config>,
         controllers: HashMap<String, Sender<Control>>,
         actions_rx: Receiver<Action>,
         tunshell_tx: Sender<String>,
         action_status: Stream<ActionResponse>,
+        bridge_tx: Sender<Action>,
     ) -> Actions {
         let controller = Controller::new(controllers, action_status.clone());
         let process = process::Process::new(action_status.clone());
-
-        Actions { action_status, process, controller, actions_rx: Some(actions_rx), tunshell_tx }
+        Actions {
+            config,
+            action_status,
+            process,
+            controller,
+            actions_rx: Some(actions_rx),
+            tunshell_tx,
+            bridge_tx,
+        }
     }
-
-    /// Loop through, receiving
     pub async fn start(&mut self) {
         let action_stream = self.actions_rx.take().unwrap();
 
@@ -95,7 +107,34 @@ impl Actions {
         }
     }
 
+    /// Handle received actions
     async fn handle(&mut self, action: Action) -> Result<(), Error> {
+        match action.name.as_ref() {
+            "tunshell" => {
+                self.tunshell_tx.send(action.payload).await?;
+                return Ok(());
+            }
+            "update_firmware" if self.config.ota.enabled => {
+                // Download the OTA update if action is named "update_firmware" and feature is enabled
+                ota::spawn_firmware_downloader(
+                    self.action_status.clone(),
+                    action,
+                    self.config.clone(),
+                    self.bridge_tx.clone(),
+                )
+                .await?;
+                return Ok(());
+            }
+            _ => (),
+        }
+
+        // Bridge actions are forwarded
+        if !self.config.actions.contains(&action.name) {
+            self.bridge_tx.try_send(action)?;
+            return Ok(());
+        }
+
+        // Regular actions are executed natively
         match action.kind.as_ref() {
             "control" => {
                 let command = action.name.clone();
@@ -108,9 +147,6 @@ impl Actions {
                 let id = action.id;
 
                 self.process.execute(id.clone(), command.clone(), payload).await?;
-            }
-            "tunshell" => {
-                self.tunshell_tx.send(action.payload).await?;
             }
             v => return Err(Error::InvalidActionKind(v.to_owned())),
         }
