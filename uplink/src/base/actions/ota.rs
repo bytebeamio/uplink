@@ -72,7 +72,7 @@ impl OtaDownloader {
         while let Some(item) = stream.next().await {
             let chunk = item?;
             downloaded += chunk.len();
-            file.write(&chunk)?;
+            file.write_all(&chunk)?;
 
             self.send_status(ActionResponse::progress(
                 &self.action_id,
