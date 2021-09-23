@@ -37,6 +37,7 @@ pub enum Error {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Action {
     // action id
+    #[serde(alias = "id")]
     pub action_id: String,
     // control or process
     kind: String,
