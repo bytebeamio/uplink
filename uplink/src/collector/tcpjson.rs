@@ -72,8 +72,8 @@ impl Bridge {
                     }
                     action = self.actions_rx.recv() => {
                         let action = action.unwrap();
-                        error!("Bridge down!! Action ID = {}", action.id);
-                        let status = ActionResponse::failure(&action.id, "Bridge down");
+                        error!("Bridge down!! Action ID = {}", action.action_id);
+                        let status = ActionResponse::failure(&action.action_id, "Bridge down");
                         if let Err(e) = action_status.fill(status).await {
                             error!("Failed to send busy status. Error = {:?}", e);
                         }
@@ -151,7 +151,7 @@ impl Bridge {
                 }
                 action = self.actions_rx.recv() => {
                     let action = action?;
-                    self.current_action = Some(action.id.to_owned());
+                    self.current_action = Some(action.action_id.to_owned());
 
                     action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
                     let data = match serde_json::to_vec(&action) {

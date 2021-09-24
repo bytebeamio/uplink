@@ -37,11 +37,12 @@ pub enum Error {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Action {
     // action id
-    pub id: String,
+    #[serde(alias = "id")]
+    pub action_id: String,
     // control or process
     kind: String,
     // action name
-    name: String,
+    pub name: String,
     // action payload. json. can be args/payload. depends on the invoked command
     payload: String,
 }
@@ -175,7 +176,7 @@ impl Actions {
 
             debug!("Action = {:?}", action);
 
-            let action_id = action.id.clone();
+            let action_id = action.action_id.clone();
             let action_name = action.name.clone();
             let error = match self.handle(action).await {
                 Ok(_) => continue,
@@ -217,13 +218,13 @@ impl Actions {
         match action.kind.as_ref() {
             "control" => {
                 let command = action.name.clone();
-                let id = action.id;
+                let id = action.action_id;
                 self.controller.execute(&id, command).await?;
             }
             "process" => {
                 let command = action.name.clone();
                 let payload = action.payload.clone();
-                let id = action.id;
+                let id = action.action_id;
 
                 self.process.execute(id.clone(), command.clone(), payload).await?;
             }
