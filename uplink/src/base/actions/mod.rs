@@ -40,13 +40,14 @@ pub enum Error {
 /// said device, in this case, uplink.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Action {
-    /// Action identifier
-    pub id: String,
-    /// Can be either control or process
+    // action id
+    #[serde(alias = "id")]
+    pub action_id: String,
+    // control or process
     kind: String,
-    /// Action name, can be used to identify action
-    name: String,
-    /// Action payload, usually json. Can be used as args, depending on the invoked command
+    // action name
+    pub name: String,
+    // action payload. json. can be args/payload. depends on the invoked command
     payload: String,
 }
 
@@ -96,7 +97,7 @@ impl Actions {
 
             debug!("Action = {:?}", action);
 
-            let action_id = action.id.clone();
+            let action_id = action.action_id.clone();
             let action_name = action.name.clone();
             let error = match self.handle(action).await {
                 Ok(_) => continue,
@@ -138,13 +139,13 @@ impl Actions {
         match action.kind.as_ref() {
             "control" => {
                 let command = action.name.clone();
-                let id = action.id;
+                let id = action.action_id;
                 self.controller.execute(&id, command).await?;
             }
             "process" => {
                 let command = action.name.clone();
                 let payload = action.payload.clone();
-                let id = action.id;
+                let id = action.action_id;
 
                 self.process.execute(id.clone(), command.clone(), payload).await?;
             }

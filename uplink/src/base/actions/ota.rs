@@ -72,7 +72,7 @@ impl OtaDownloader {
         while let Some(item) = stream.next().await {
             let chunk = item?;
             downloaded += chunk.len();
-            file.write(&chunk)?;
+            file.write_all(&chunk)?;
 
             self.send_status(ActionResponse::progress(
                 &self.action_id,
@@ -110,15 +110,15 @@ pub async fn spawn_firmware_downloader(
     bridge_tx: Sender<Action>,
 ) -> Result<(), Error> {
     info!("Dowloading firmware");
-    let Action { id, kind, name, payload } = action;
+    let Action { action_id, kind, name, payload } = action;
     // Extract url and add ota_path in payload before recreating action to be sent to bridge
     let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;
     let url = update.url.clone();
     let ota_path = config.ota.path.clone();
     update.ota_path = Some(ota_path.clone());
     let payload = serde_json::to_string(&update)?;
-    let action_id = id.clone();
-    let action = Action { id, kind, name, payload };
+    let mut downloader = OtaDownloader { status_bucket, action_id: action_id.clone(), bridge_tx };
+    let action = Action { action_id, kind, name, payload };
     let ota_path = PathBuf::from(ota_path);
 
     // Authenticate with TLS certs from config
@@ -135,7 +135,6 @@ pub async fn spawn_firmware_downloader(
         None => client_builder,
     }
     .build()?;
-    let mut downloader = OtaDownloader { status_bucket, action_id, bridge_tx };
 
     info!("Dowloading from {}", url);
     // TODO: Spawned task may fail to execute as expected and status may not be forwarded to cloud
