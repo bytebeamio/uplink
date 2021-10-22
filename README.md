@@ -1,6 +1,6 @@
 # uplink
 
-[![Rust](https://github.com/bytebeamio/uplink/actions/workflows/rust.yml/badge.svg)](https://github.com/bytebeamio/uplink/actions/workflows/rust.yml) [![@bytebeamio](https://twitter.com/intent/follow?screen_name=bytebeamio)](https://img.shields.io/twitter/follow/bytebeamio.svg?style=social&label=Follow)
+[![Rust](https://github.com/bytebeamio/uplink/actions/workflows/rust.yml/badge.svg)](https://github.com/bytebeamio/uplink/actions/workflows/rust.yml) [![@bytebeamio](https://img.shields.io/twitter/follow/bytebeamio.svg?style=social&label=Follow)](https://twitter.com/intent/follow?screen_name=bytebeamio)
 
 <img align="right" src="docs/logo.png" height="150px" alt="the uplink logo">
 
