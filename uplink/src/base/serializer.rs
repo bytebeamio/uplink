@@ -30,6 +30,8 @@ enum Status {
     EventLoopCrash(Publish),
 }
 
+/// The uplink Serializer is the component that deals with sending data to the Bytebeam platform.
+/// In case of network issues, the Serializer enters various states depending on severeness, managed by `Serializer::start()`.
 pub(crate) struct Serializer {
     config: Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
@@ -51,6 +53,7 @@ impl Serializer {
         Ok(Serializer { config, collector_rx, client, storage, metrics })
     }
 
+    /// Write all data received, from here-on, to disk only.
     async fn crash(&mut self, mut publish: Publish) -> Result<Status, Error> {
         // Write failed publish to disk first
         publish.pkid = 1;
