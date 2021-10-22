@@ -12,7 +12,7 @@ use std::sync::Arc;
 use super::{actions::Action, Config};
 
 #[derive(Error, Debug)]
-pub enum Error {
+pub(crate) enum Error {
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Serde error {0}")]
@@ -20,7 +20,7 @@ pub enum Error {
 }
 
 /// Interface implementing MQTT protocol to communicate with broker
-pub struct Mqtt {
+pub(crate) struct Mqtt {
     /// Client handle
     client: AsyncClient,
     /// Event loop handle
@@ -32,7 +32,7 @@ pub struct Mqtt {
 }
 
 impl Mqtt {
-    pub fn new(config: Arc<Config>, actions_tx: Sender<Action>) -> Mqtt {
+    pub(crate) fn new(config: Arc<Config>, actions_tx: Sender<Action>) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let (client, eventloop) = AsyncClient::new(options, 10);
@@ -42,12 +42,12 @@ impl Mqtt {
     }
 
     /// Returns a client handle to MQTT interface
-    pub fn client(&mut self) -> AsyncClient {
+    pub(crate) fn client(&mut self) -> AsyncClient {
         self.client.clone()
     }
 
     /// Poll eventloop to receive packets from broker
-    pub async fn start(&mut self) {
+    pub(crate) async fn start(&mut self) {
         loop {
             match self.eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::ConnAck(_))) => {

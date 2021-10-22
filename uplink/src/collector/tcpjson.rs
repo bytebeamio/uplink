@@ -1,7 +1,5 @@
 use async_channel::{Receiver, RecvError, Sender};
 use log::{debug, error, info};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{self, Duration, Instant};
@@ -11,8 +9,9 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::{collections::HashMap, io, sync::Arc};
 
+use super::Payload;
 use crate::base::actions::{self, Action, ActionResponse};
-use crate::base::{Buffer, Config, Package, Point, Stream};
+use crate::base::{Config, Package, Stream};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -173,41 +172,5 @@ impl Bridge {
                 }
             }
         }
-    }
-}
-
-// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
-// TODO which cloud will double deserialize (Batch 1st and messages next)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Payload {
-    #[serde(skip_serializing)]
-    pub(crate) stream: String,
-    pub(crate) sequence: u32,
-    pub(crate) timestamp: u64,
-    #[serde(flatten)]
-    pub(crate) payload: Value,
-}
-
-impl Point for Payload {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-}
-
-impl Package for Buffer<Payload> {
-    fn topic(&self) -> Arc<String> {
-        return self.topic.clone();
-    }
-
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
-    }
-
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
     }
 }

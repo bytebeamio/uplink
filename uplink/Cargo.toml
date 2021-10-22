@@ -30,3 +30,7 @@ futures-util = "0.3.14"
 
 [build-dependencies]
 vergen = { version = "5.1", features = ["git", "build", "chrono"] }
+
+[[bin]]
+name = "uplink"
+path = "bin/main.rs"

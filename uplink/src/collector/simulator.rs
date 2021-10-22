@@ -8,7 +8,7 @@ use tokio::time::Duration;
 use std::{collections::HashMap, io, sync::Arc};
 
 use crate::base::{timestamp, Config, Package, Stream};
-use crate::collector::tcpjson::Payload;
+use super::Payload;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -37,7 +37,7 @@ impl Simulator {
         Simulator { config, partitions, data_tx }
     }
 
-    pub(crate) async fn start(&mut self) {
+    pub async fn start(&mut self) {
         let mut gps_timestamp = timestamp();
         let mut can_timestamp = timestamp();
 
