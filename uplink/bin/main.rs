@@ -3,7 +3,6 @@ use async_channel::{bounded, Sender};
 use log::error;
 use structopt::StructOpt;
 use tokio::task;
-use uplink::Uplink;
 
 use std::{collections::HashMap, sync::Arc, thread};
 
@@ -21,7 +20,7 @@ async fn main() -> Result<(), Error> {
 
     let (bridge_actions_tx, bridge_actions_rx) = bounded(10);
     let (tunshell_keys_tx, tunshell_keys_rx) = bounded(10);
-    let (collector_tx, native_actions_rx) = Uplink::spawn_intefaces(config.clone())?;
+    let (collector_tx, native_actions_rx) = uplink::spawn_intefaces(config.clone())?;
 
     let action_status_topic = &config.streams.get("action_status").unwrap().topic;
     let action_status = Stream::new("action_status", action_status_topic, 1, collector_tx.clone());
