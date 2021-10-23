@@ -32,32 +32,34 @@ enum Status {
 
 /// The uplink Serializer is the component that deals with sending data to the Bytebeam platform.
 /// In case of network issues, the Serializer enters various states depending on severeness, managed by `Serializer::start()`.                                                                                       
-///       ┌─────────────────────┐                                                                            
-///       │`Serializer::start()`│
-///       └──────────┬──────────┘ 
-///                  │ 
+///
+///        ┌───────────────────┐                                                                            
+///        │Serializer::start()│
+///        └─────────┬─────────┘ 
+///                  │
 ///                  │ State transitions happen
 ///                  │ within the loop{}             Load data in Storage from
 ///                  │                               previouse sessions/iterations                  AsyncClient has crashed
-///          ┌───────▼──────┐                       ┌───────────────────────┐                      ┌───────────────────────┐
-///          │EventLoopReady├───────────────────────►`Serializer::catchup()`├──────────────────────►EventLoopCrash(publish)│
-///          └───────▲──────┘                       └───────────┬───────────┘                      └───────────┬───────────┘  
-///                  │                                          │                                              │
-///                  │                                          │ No more data left in Storage                 │
-///                  │                                          │                                              │
-///    ┌─────────────┴─────────────┐                        ┌───▼──┐                            ┌──────────────▼─────────────┐
-///    │`Serializer::disk(publish)`│                        │Normal│                            │`Serializer::crash(publish)`├──┐
-///    └─────────────▲─────────────┘                        └───┬──┘                            └───────────────────────────▲┘  │
-///                  │                                          │                                Write all data to Storage  │   │
-///                  │                                          │                                                           └───┘
-///                  │                                          │                             
-///      ┌───────────┴──────────┐                   ┌───────────▼──────────┐
-///      │SlowEventloop(publish)◄───────────────────┤`Serializer::normal()`│
-///      └──────────────────────┘                   └──────────────────────┘
-///       Slow Network,                              Forward all data to Bytebeam,
-///       save to Storage before forwarding          through AsyncClient
+///          ┌───────▼──────┐                       ┌─────────────────────┐                      ┌───────────────────────┐
+///          │EventLoopReady├───────────────────────►Serializer::catchup()├──────────────────────►EventLoopCrash(publish)│
+///          └───────▲──────┘                       └──────────┬──────────┘                      └───────────┬───────────┘  
+///                  │                                         │                                             │
+///                  │                                         │ No more data left in Storage                │
+///                  │                                         │                                             │
+///     ┌────────────┴────────────┐                        ┌───▼──┐                             ┌────────────▼─────────────┐
+///     │Serializer::disk(publish)│                        │Normal│                             │Serializer::crash(publish)├──┐
+///     └────────────▲────────────┘                        └───┬──┘                             └─────────────────────────▲┘  │
+///                  │                                         │                                 Write all data to Storage└───┘
+///                  │                                         │
+///                  │                                         │
+///      ┌───────────┴──────────┐                   ┌──────────▼─────────┐
+///      │SlowEventloop(publish)◄───────────────────┤Serializer::normal()│
+///      └──────────────────────┘                   └────────────────────┘
+///       Slow Network,                             Forward all data to Bytebeam,
+///       save to Storage before forwarding         through AsyncClient
 ///
-pub(crate) struct Serializer {
+///
+pub struct Serializer {
     config: Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
     client: AsyncClient,

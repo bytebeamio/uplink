@@ -23,7 +23,7 @@ pub enum Error {
     TrySendError(#[from] async_channel::TrySendError<Action>),
 }
 
-struct OtaDownloader {
+pub struct OtaDownloader {
     action_id: String,
     status_bucket: Stream<ActionResponse>,
     bridge_tx: Sender<Action>,

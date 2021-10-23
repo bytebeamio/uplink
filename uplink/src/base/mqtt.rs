@@ -20,7 +20,7 @@ pub(crate) enum Error {
 }
 
 /// Interface implementing MQTT protocol to communicate with broker
-pub(crate) struct Mqtt {
+pub struct Mqtt {
     /// Client handle
     client: AsyncClient,
     /// Event loop handle

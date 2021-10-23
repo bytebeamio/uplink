@@ -9,9 +9,9 @@ use std::sync::Arc;
 use super::{Config, Control, Package, Stream};
 
 pub mod controller;
-mod ota;
-mod process;
-mod response;
+pub mod ota;
+pub mod process;
+pub mod response;
 pub mod tunshell;
 
 pub use controller::Controller;
