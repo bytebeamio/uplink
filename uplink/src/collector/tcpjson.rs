@@ -11,7 +11,8 @@ use std::{collections::HashMap, io, sync::Arc};
 
 use super::Payload;
 use crate::base::actions::{self, Action, ActionResponse};
-use crate::base::{Config, Package, Stream};
+use crate::base::{Package, Stream};
+use crate::Config;
 
 #[derive(Error, Debug)]
 pub enum Error {

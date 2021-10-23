@@ -9,7 +9,8 @@ use tokio::{select, time};
 
 use std::{io, sync::Arc};
 
-use crate::base::{timestamp, Config, Package};
+use crate::base::{timestamp, Package};
+use crate::Config;
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {

@@ -6,7 +6,8 @@ use thiserror::Error;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::{Config, Control, Package, Stream};
+use super::{Control, Package, Stream};
+use crate::Config;
 
 pub mod controller;
 pub mod ota;

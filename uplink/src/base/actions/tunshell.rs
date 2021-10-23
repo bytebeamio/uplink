@@ -6,7 +6,7 @@ use tunshell_client::{Client, ClientMode, Config, HostShell};
 
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
-use crate::base::{self, actions::ActionResponse, Stream};
+use crate::base::{actions::ActionResponse, Stream};
 
 pub struct Relay {
     host: String,
@@ -21,7 +21,7 @@ pub struct Keys {
 }
 
 pub struct TunshellSession {
-    _config: Arc<base::Config>,
+    _config: Arc<crate::Config>,
     relay: Relay,
     echo_stdout: bool,
     keys_rx: Receiver<String>,
@@ -31,7 +31,7 @@ pub struct TunshellSession {
 
 impl TunshellSession {
     pub fn new(
-        config: Arc<base::Config>,
+        config: Arc<crate::Config>,
         relay: Relay,
         echo_stdout: bool,
         tunshell_rx: Receiver<String>,

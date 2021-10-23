@@ -7,8 +7,9 @@ use tokio::time::Duration;
 
 use std::{collections::HashMap, io, sync::Arc};
 
-use crate::base::{timestamp, Config, Package, Stream};
 use super::Payload;
+use crate::base::{timestamp, Package, Stream};
+use crate::Config;
 
 #[derive(Error, Debug)]
 pub enum Error {

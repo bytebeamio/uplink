@@ -6,7 +6,7 @@ use structopt::StructOpt;
 
 use std::{fs, sync::Arc};
 
-use crate::base::Config;
+use crate::Config;
 
 const B: &str = r#"
     ░█░▒█░▄▀▀▄░█░░░▀░░█▀▀▄░█░▄
@@ -37,6 +37,10 @@ const DEFAULT_CONFIG: &str = r#"
     [streams.action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     buf_size = 1
+
+    [ota]
+    enabled = false
+    path = "/tmp/uplink/ota"
 "#;
 
 #[derive(StructOpt, Debug)]

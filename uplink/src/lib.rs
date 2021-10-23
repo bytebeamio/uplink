@@ -62,11 +62,12 @@ use std::sync::Arc;
 pub mod base;
 pub mod cli;
 pub mod collector;
+pub mod config;
 
 pub use base::actions::tunshell;
-use base::{actions::Action, mqtt::Mqtt, serializer::Serializer, Config, Package};
+use base::{actions::Action, mqtt::Mqtt, serializer::Serializer, Package};
 pub use base::{actions::Actions, Control, Stream};
-
+pub use config::Config;
 /// uplink communicates with Bytebeam using the MQTT protocol, which is implemented with the rumqtt crate.
 /// All data exchanges happening between broker and client in uplink are handled via the
 /// [`AsyncClient`](rumqttc::AsyncClient) and [`EventLoop`](rumqttc::EventLoop) instances.
