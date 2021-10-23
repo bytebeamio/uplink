@@ -3,8 +3,11 @@ name = "uplink"
 version = "1.2.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
-description = "A utility for devices running an OS to interact with the Bytebeam platform, recieving and forwarding data on-behalf of other processes on the same device."
+description = "A a utility and a library written in Rust to connect multiple devices running locally with the Bytebeam platform."
 license-file = "LICENSE"
+
+[lib]
+doctest = false
 
 [dependencies]
 structopt = "0.3"
