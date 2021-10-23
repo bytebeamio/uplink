@@ -44,34 +44,37 @@ const DEFAULT_CONFIG: &str = r#"
 "#;
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "uplink", about = "collect, batch, compress, publish")]
+#[structopt(
+    name = "uplink",
+    about = "A utility to interact with the Bytebeam platform. Collect, batch, compress and publish to https://bytebeam.io/"
+)]
 pub struct CommandLine {
     /// Binary's version
     #[structopt(skip = env!("VERGEN_BUILD_SEMVER"))]
     version: String,
     /// Build's profile
-    #[structopt(skip= env!("VERGEN_CARGO_PROFILE"))]
+    #[structopt(skip = env!("VERGEN_CARGO_PROFILE"))]
     profile: String,
     /// SHA of commit
-    #[structopt(skip= env!("VERGEN_GIT_SHA"))]
+    #[structopt(skip = env!("VERGEN_GIT_SHA"))]
     commit_sha: String,
     /// Date of commit
-    #[structopt(skip= env!("VERGEN_GIT_COMMIT_TIMESTAMP"))]
+    #[structopt(skip = env!("VERGEN_GIT_COMMIT_TIMESTAMP"))]
     commit_date: String,
-    /// Path to config file
-    #[structopt(short = "c", help = "Config file")]
+    /// Path to configuration file
+    #[structopt(short = "c")]
     config: Option<String>,
-    /// Path to authorization file
-    #[structopt(short = "a", help = "Authentication file")]
+    /// Path to authentication file
+    #[structopt(short = "a")]
     auth: String,
-    /// Whether to use simulator
-    #[structopt(short = "s", long = "Enable uplink simulator")]
+    /// To enable use of simulator mode
+    #[structopt(short = "s", long = "simulator")]
     pub enable_simulator: bool,
     /// Log level / Verbosity (v: info, vv: debug, vvv: trace)
-    #[structopt(short = "v", long = "Verbosity of logger", parse(from_occurrences))]
+    #[structopt(short = "v", long = "verbosity", parse(from_occurrences))]
     verbose: u8,
-    /// List of modules to log
-    #[structopt(short = "m", long = "Modules to be logged")]
+    /// List of modules to be logged
+    #[structopt(short = "m", long = "modules")]
     modules: Vec<String>,
 }
 
