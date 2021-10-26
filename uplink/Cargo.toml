@@ -3,7 +3,7 @@ name = "uplink"
 version = "1.2.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
-description = "A a utility and a library written in Rust to connect multiple devices running locally with the Bytebeam platform."
+description = "A utility/library written in Rust for connecting devices running a supported OS with an MQTT backend"
 license-file = "LICENSE"
 
 [lib]
