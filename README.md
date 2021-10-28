@@ -1,15 +1,15 @@
 # uplink
 
-[![Rust](https://github.com/bytebeamio/uplink/actions/workflows/rust.yml/badge.svg)](https://github.com/bytebeamio/uplink/actions/workflows/rust.yml) [![@bytebeamio](https://img.shields.io/twitter/follow/bytebeamio.svg?style=social&label=Follow)](https://twitter.com/intent/follow?screen_name=bytebeamio)
+[![Rust][workflow-badge]][workflow] [![@bytebeamio][twitter-badge]][twitter]
 
 <img align="right" src="docs/logo.png" height="150px" alt="the uplink logo">
 
-uplink is a *utility/library* written in Rust for connecting devices running a supported OS with an MQTT backend. The primary target for uplink is the [**Bytebeam**](https://bytebeam.io) platform, however uplink can also be used with any broker supporting MQTT 3.1.
+uplink is a *utility/library* written in Rust for connecting devices running a supported OS with an MQTT backend. The primary target for uplink is the [**Bytebeam**][bytebeam] platform, however uplink can also be used with any broker supporting MQTT 3.1.
 
 ### Features
 
 - Customizable, with easy to write configuration files in TOML/JSON that help you use uplink to meet your needs.
-- Supports TLS by default, with [rumqtt](https://github.com/bytebeamio/rumqtt).
+- Supports TLS by default, with [rumqtt][rumqtt].
 - JSON formatted data push to cloud.
 - Receives commands from the cloud, executes them and updates progress of execution.
 - Auto downloads updates from the cloud to perform OTA.
@@ -112,13 +112,20 @@ cargo build --release --target armv7-unknown-linux-gnueabihf
 The complete API reference for the uplink library is available within the [library documentation][docs.rs].
 
 ### Contributing
-Please follow the [code of conduct][coc] while opening issues to report bugs or before you contribute fixes, also do read our [contributor guide](CONTRIBUTE.md) to get a better idea of what we'd appreciate and what we won't.
+Please follow the [code of conduct][coc] while opening issues to report bugs or before you contribute fixes, also do read our [contributor guide][contribute] to get a better idea of what we'd appreciate and what we won't.
 
+[workflow-badge]: https://github.com/bytebeamio/uplink/actions/workflows/rust.yml/badge.svg
+[workflow]: https://github.com/bytebeamio/uplink/actions/workflows/rust.yml
+[twitter-badge]: https://img.shields.io/twitter/follow/bytebeamio.svg?style=social&label=Follow
+[twitter]: https://twitter.com/intent/follow?screen_name=bytebeamio
+[bytebeam]: https://bytebeam.io
+[rumqtt]: https://github.com/bytebeamio/rumqtt
 [crates.io]: https://crates.io/crates/uplink
 [releases]: https://github.com/bytebeamio/uplink/releases
 [action]: #
 [action_response]: #
 [docs.rs]: https://docs.rs/uplink
-[coc]: #
+[coc]: docs/CoC.md
+[contribute]: CONTRIBUTING.md
 
 NOTE: Add link to doc/wiki about Actions and ActionResponses
