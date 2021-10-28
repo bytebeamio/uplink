@@ -115,10 +115,10 @@ The complete API reference for the uplink library is available within the [libra
 Please follow the [code of conduct][coc] while opening issues to report bugs or before you contribute fixes, also do read our [contributor guide](CONTRIBUTE.md) to get a better idea of what we'd appreciate and what we won't.
 
 [crates.io]: https://crates.io/crates/uplink
-[releases]: (https://github.com/bytebeamio/uplink/releases)
-[action]: (#)
-[action_response]: (#)
-[docs.rs]: (https://docs.rs/uplink)
-[coc]: (#)
+[releases]: https://github.com/bytebeamio/uplink/releases
+[action]: #
+[action_response]: #
+[docs.rs]: https://docs.rs/uplink
+[coc]: #
 
 NOTE: Add link to doc/wiki about Actions and ActionResponses
