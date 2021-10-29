@@ -8,7 +8,8 @@ use crate::base::{timestamp, Buffer, Package, Point};
 /// progress of Actions in execution on the device.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
-    id: String,
+    #[serde(alias = "id")]
+    action_id: String,
     /// Timestamp on response creation
     timestamp: u64,
     /// Can be either running or failed
@@ -23,7 +24,7 @@ impl ActionResponse {
     /// Default/Execution begun Response
     pub fn new(id: &str) -> Self {
         ActionResponse {
-            id: id.to_owned(),
+            action_id: id.to_owned(),
             timestamp: timestamp(),
             state: "Running".to_owned(),
             progress: 0,
@@ -34,7 +35,7 @@ impl ActionResponse {
     /// Execution completed successfully response
     pub fn success(id: &str) -> ActionResponse {
         ActionResponse {
-            id: id.to_owned(),
+            action_id: id.to_owned(),
             timestamp: timestamp(),
             state: "Completed".to_owned(),
             progress: 100,
@@ -45,7 +46,7 @@ impl ActionResponse {
     /// Report progress of action in execution
     pub fn progress(id: &str, progress: u8) -> ActionResponse {
         ActionResponse {
-            id: id.to_owned(),
+            action_id: id.to_owned(),
             timestamp: timestamp(),
             state: "Failed".to_owned(),
             progress,
@@ -56,7 +57,7 @@ impl ActionResponse {
     /// Execution ended in failure response
     pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
         ActionResponse {
-            id: id.to_owned(),
+            action_id: id.to_owned(),
             timestamp: timestamp(),
             state: "Failed".to_owned(),
             progress: 100,

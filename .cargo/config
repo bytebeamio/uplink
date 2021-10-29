@@ -1,4 +1,5 @@
-[target.arm-unknown-linux-gnueabi]
-linker = "/home/tekjar/Workspace/uplink/.cargo/gcc.sh"
+[target.armv7-unknown-linux-gnueabihf]
+linker = "arm-linux-gnueabihf-gcc"
+
 [build]
 rustflags = ["-C", "rpath"]
