@@ -11,6 +11,7 @@ uplink is a *utility/library* written in Rust for connecting devices running lin
 - JSON formatted data push to cloud.
 - Receives commands from the cloud, executes them and updates progress of execution.
 - Auto downloads updates from the cloud to perform OTA.
+- Handles network interruptions by persisting data to disk.
 - Supports TLS.
 
 ### Build and Install
@@ -18,7 +19,7 @@ uplink is a *utility/library* written in Rust for connecting devices running lin
 Build and install with [Cargo][crates.io]:
 
 ```sh
-cargo install uplink # NOTE: This should work in the future
+cargo install uplink # NOTE: This should work once crate is published
 ```
 
 #### Build and run from source:
@@ -28,7 +29,7 @@ git clone https://github.com/bytebeamio/uplink.git
 cd uplink
 cargo run --bin uplink -- -a <device auth json file>
 ```
-#### Build and from source for ARM systems
+#### Build from source for ARM systems
 
 In case you want to run uplink on an ARM system, follow instruction given below
 
@@ -58,34 +59,15 @@ See [releases][releases] for other options.
 
 ### Getting Started
 
-- To use uplink, you need to provide it with an authenication file, let us first source it from the Bytebeam platform.
-    1. Login to your account on [demo.bytebeam.io](https://demo.bytebeam.io) and ensure that you are in the right organization.
-    2. From within the "Device Management" UI, select the "Devices" tab and press on the "Create Device" button.
-    3. Press "Submit" and your browser will download the newly created device's authentication file with a JSON format mentioned in the [Secure Communication over TLS section](#secure-communication-over-tls).
-
+You can use uplink with the following command, where you will need to provide an `auth.json` file, which you can read more about in the [uplink Security document][security]. On Bytebeam, you could download this file [from the platform][platform]. If you are using your own broker instead of Bytebeam, you could do it [without TLS][unsecure], but if you wish to use TLS we recommend that you also [provision your own certificates][provision].
 ```sh
-uplink -a certificates.json -vv # use `cargo run --bin uplink --` incase uplink isn't installed
+uplink -a auth.json -vv
 ```
+
 ### Architecture
 uplink acts as an intermediary between the user's applications and the Bytebeam platform. Connecting the applications to the bridge port one can communciate with the platform over MQTT with TLS, accepting JSON structured [Action][action]s and forwarding either JSON formatted data(from applications such as sensing) or [Action Response][action_response]s that report the progress of aforementioned Actions.
 
 <img src="docs/uplink.png" height="150px" alt="uplink architecture">
-
-### Secure Communication over TLS
-uplink communicates with the Bytebeam platform over MQTT+TLS, ensuring application data is encrypted in transit. Bytebeam also uses SSL certificates to authenticate connections and identify devices, and uplink expects users to provide it with an auth file with the `-a` flag. This file contains certificate information for the device and the certifying authority in the following JSON format:
-```js
-{
-    "project_id": "xxxx",
-    "broker": "example.com",
-    "port": 8883,
-    "device_id": "yyyy",
-    "authentication": {
-        "ca_certificate": "...",
-        "device_certificate": "...",
-        "device_private_key": "..."
-    }
-}
-```
 
 ### Testing with netcat
 
@@ -111,10 +93,12 @@ Please follow the [code of conduct][coc] while opening issues to report bugs or 
 [rumqtt]: https://github.com/bytebeamio/rumqtt
 [crates.io]: https://crates.io/crates/uplink
 [releases]: https://github.com/bytebeamio/uplink/releases
-[action]: #
-[action_response]: #
+[action]: docs/actions.md/#Action
+[action_response]: docs/actions.md/#ActionResponse
+[security]: docs/security.md
+[platform]: docs/security.md#Configuring-uplink-for-use-with-TLS
+[unsecure]: docs/security.md#Using-uplink-without-TLS
+[provision]: docs/security.md#Provisioning-your-own-certificates
 [docs.rs]: https://docs.rs/uplink
 [coc]: docs/CoC.md
 [contribute]: CONTRIBUTING.md
-
-NOTE: Add link to doc/wiki about Actions and ActionResponses
