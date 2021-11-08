@@ -4,7 +4,7 @@
 
 <img align="right" src="docs/logo.png" height="150px" alt="the uplink logo">
 
-uplink is a *utility/library* written in Rust for connecting devices running linux with an MQTT backend. The primary target for uplink is the [**Bytebeam**][bytebeam] platform, however uplink can also be used with any broker supporting MQTT 3.1.
+uplink is a *utility/library* written in Rust for efficiently sending large amounts of data to the MQTT broker, robustly handling flaky network conditions and to establish remote shell access to your device with [Tunshell][tunshell]. The primary backend for uplink is the [**Bytebeam**][bytebeam] platform, however uplink can also be used with any broker supporting MQTT 3.1.
 
 ### Features
 
@@ -31,29 +31,18 @@ cargo run --bin uplink -- -a <device auth json file>
 ```
 #### Build from source for ARM systems
 
-In case you want to run uplink on an ARM system, follow instruction given below
+In case you want to run uplink on an ARM system, follow instruction given below to create an ARM compatible binary.
 
-1. Install arm compilers and linkers
+1. Install `cross`, a `Zero setup` cross compilation crate.
 
 ```sh
-apt install gcc-9-arm-linux-gnueabihf
-ln -s /usr/bin/arm-linux-gnueabihf-gcc-9 /usr/bin/arm-linux-gnueabihf-gcc
+cargo install cross
 ```
-2. Create `.cargo/config`
-
-```toml
-[target.armv7-unknown-linux-gnueabihf]
-linker = "arm-linux-gnueabihf-gcc"
-
-[build]
-rustflags = ["-C", "rpath"]
-```
-3. Install necessary architecture target with rustup and build binary 
+2. Build binary for the target `armv7-unknown-linux-gnueabihf`.
 ```sh
-rustup target install armv7-unknown-linux-gnueabihf
-cargo build --release --target armv7-unknown-linux-gnueabihf
+cross build --release --target armv7-unknown-linux-gnueabihf
 ```
-4. Retreive executable from `/target/release/uplink` and execute it on target device.
+3. Retreive executable from `/target/armv7-unknown-linux-gnueabihf/release/uplink` and execute it on target device.
 
 See [releases][releases] for other options.
 
@@ -64,7 +53,6 @@ You can use uplink with the following command, where you will need to provide an
 uplink -a auth.json -vv
 ```
 
-### Architecture
 uplink acts as an intermediary between the user's applications and the Bytebeam platform. Connecting the applications to the bridge port one can communciate with the platform over MQTT with TLS, accepting JSON structured [Action][action]s and forwarding either JSON formatted data(from applications such as sensing) or [Action Response][action_response]s that report the progress of aforementioned Actions.
 
 <img src="docs/uplink.png" height="150px" alt="uplink architecture">
@@ -90,6 +78,7 @@ Please follow the [code of conduct][coc] while opening issues to report bugs or 
 [twitter-badge]: https://img.shields.io/twitter/follow/bytebeamio.svg?style=social&label=Follow
 [twitter]: https://twitter.com/intent/follow?screen_name=bytebeamio
 [bytebeam]: https://bytebeam.io
+[tunshell]: https://tunshell.com
 [rumqtt]: https://github.com/bytebeamio/rumqtt
 [crates.io]: https://crates.io/crates/uplink
 [releases]: https://github.com/bytebeamio/uplink/releases

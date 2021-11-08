@@ -1,5 +1,5 @@
 # Contributing to uplink
-If you have loved using uplink and want to give back, we would love to have you open Pull Requests with bug fixes, performance optimizations or documentary changes and Issue to notify us of any issues with the code.
+If you have loved using uplink and want to give back, we would love to have you open GitHub issues and PRs for features, bugs and documentation improvements.
 
 uplink is licensed under the permissive [Apache License Version 2.0][license] and we accept contributions under the implied notion that they are made in complete renunciation of the contributors any rights or claims to the same after the code has been merged into the codebase.
 
