@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// Struct used to transport ActionResonses/data to bridge
 type Payload struct {
 	Stream    string       `json:"stream"`
 	Sequence  int32        `json:"sequence"`
@@ -14,19 +15,49 @@ type Payload struct {
 	Payload   ActionStatus `json:"payload"`
 }
 
+// Struct to notify status of action in execution
 type ActionStatus struct {
-	Id        int64    `json:"id"`
+	Id        int64    `json:"action_id"`
 	Timestamp int64    `json:"timestamp"`
 	State     string   `json:"state"`
 	Progress  int8     `json:"progress"`
 	Errors    []string `json:"errors"`
 }
 
+// Struct received from uplink
 type Action struct {
 	Id      int64  `json:"id"`
 	Kind    string `json:"timestamp"`
 	Name    string `json:"name"`
 	Payload string `json:"payload"`
+}
+
+// Creates and sends template status, with provided state and progress
+func reply(writer *json.Encoder, action *Action, state string, progresss int8) {
+	// Sleep for 5s
+	time.Sleep(5)
+
+	// Reply that serves no other purpose but as a ping before timeout
+	reply := Payload{
+		Stream:    "action_status",
+		Sequence:  0,
+		Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
+		Payload: ActionStatus{
+			Id:        action.Id,
+			Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
+			State:     state,
+			Progress:  progresss,
+		},
+	}
+
+	fmt.Println(reply)
+
+	// Send data to uplink
+	err := writer.Encode(reply)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 }
 
 func main() {
@@ -39,6 +70,7 @@ func main() {
 	defer c.Close()
 
 	fmt.Printf("Connected to %s\n", c.RemoteAddr().String())
+	// Create new handlers for encoding and decoding JSON
 	reader := json.NewDecoder(c)
 	writer := json.NewEncoder(c)
 	for {
@@ -47,26 +79,12 @@ func main() {
 		if err := reader.Decode(&action); err != nil {
 			fmt.Println("failed to unmarshal:", err)
 		} else {
-			fmt.Println(action) // 5
+			fmt.Println(action)
 		}
 
-		// Reply that serves no other purpose but as a ping before timeout
-		reply := Payload{
-			Stream:    "action_status",
-			Sequence:  1,
-			Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
-			Payload: ActionStatus{
-				Id:        action.Id,
-				Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
-			},
-		}
-
-		fmt.Println(reply)
-
-		err := writer.Encode(reply)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
+		// Status: started execution
+		reply(writer, &action, "Running", 0)
+		// Status: completed execution
+		reply(writer, &action, "Completed", 100)
 	}
 }
