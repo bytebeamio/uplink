@@ -8,13 +8,14 @@
 //! Response data can be of multiple types, of interest to us are [`ActionResponse`](base::actions::response::ActionResponse)s, which are forwarded to Actions
 //! and then to Serializer where depending on the network, it may be stored onto disk with [`Storage`](disk::Storage) to ensure packets aren't lost.
 //!
+//!```text
 //!                                                                                 ┌────────────┐
-//!                                                                                 │MQTT backend│
-//!                                                                                 └─────┐▲─────┘
+//!                                                                                 │MQTT backend│
+//!                                                                                 └─────┐▲─────┘
 //!                                                                                       ││
-//!                                                                                Action ││ ActionResponse
-//!                                                                                       ││ / Data
-//!                                                                           Action    ┌─▼└─┐
+//!                                                                                Action ││ ActionResponse
+//!                                                                                       ││ / Data
+//!                                                                           Action    ┌─▼└─┐
 //!                                                                       ┌─────────────┤Mqtt◄───────────┐
 //!                                                                       │             └────┘           │ ActionResponse
 //!                                                                       │                              │ / Data
@@ -24,19 +25,19 @@
 //!                                                  │                └┬─┬─┬─┬┘                     └────▲─────┘
 //!                                                  │                 │ │ │ │                           │
 //!                                                  │                 │ │ │ └───────────────────┐       │Data
-//!                                                  │     Tunshell Key│ │ │ Action              │    ┌──┴───┐   Action       ┌───────────┐
-//!                                                  │        ┌────────┘ │ └───────────┐         ├────►Bridge◄────────────────►Application│
+//!                                                  │     Tunshell Key│ │ │ Action              │    ┌──┴───┐   Action       ┌───────────┐
+//!                                                  │        ┌────────┘ │ └───────────┐         ├────►Bridge◄────────────────►Application│
 //!                                                  │  ------│----------│-------------│-------- │    └──┬───┘ ActionResponse │ / Device  │
-//!                                                  │  '     │          │             │       ' │       │       / Data       └───────────┘
-//!                                                  │  '┌────▼───┐  ┌───▼───┐  ┌──────▼──────┐' │       │
-//!                                                  │  '│Tunshell│  │Process│  │OtaDownloader├──┘       │
+//!                                                  │  '     │          │             │       ' │       │       / Data       └───────────┘
+//!                                                  │  '┌────▼───┐  ┌───▼───┐  ┌──────▼──────┐' │       │
+//!                                                  │  '│Tunshell│  │Process│  │OtaDownloader├──┘       │
 //!                                                  │  '└────┬───┘  └───┬───┘  └──────┬──────┘'         │
 //!                                                  │  '     │          │             │       '         │
 //!                                                  │  ------│----------│-------------│--------         │
 //!                                                  │        │          │             │                 │
 //!                                                  └────────┴──────────┴─────────────┴─────────────────┘
 //!                                                                      ActionResponse
-//!
+//!```
 
 use anyhow::{Context, Error};
 use async_channel::{bounded, Receiver, Sender};

@@ -6,9 +6,6 @@ edition = "2018"
 description = "A utility/library written in Rust for connecting devices running a supported OS with an MQTT backend"
 license-file = "LICENSE"
 
-[lib]
-doctest = false
-
 [dependencies]
 structopt = "0.3"
 figment = { version = "0.10.6", features = ["toml", "json"] }
