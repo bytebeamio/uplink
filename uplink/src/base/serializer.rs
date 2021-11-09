@@ -3,6 +3,7 @@ use crate::base::{Config, Package};
 use async_channel::{Receiver, RecvError};
 use bytes::Bytes;
 use disk::Storage;
+use log::{error, info};
 use rumqttc::*;
 use serde::Serialize;
 use std::io;

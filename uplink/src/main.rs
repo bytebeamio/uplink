@@ -39,9 +39,6 @@
 //!                                                                      ActionResponse
 //!```
 
-#[macro_use]
-extern crate log;
-
 use std::thread;
 use std::{collections::HashMap, fs};
 
@@ -52,6 +49,7 @@ use figment::{
     providers::{Data, Json},
     Figment,
 };
+use log::error;
 use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
@@ -60,8 +58,8 @@ mod base;
 mod collector;
 
 use crate::base::actions::{
-    self,
     tunshell::{Relay, TunshellSession},
+    Actions,
 };
 use crate::base::mqtt::Mqtt;
 use crate::base::serializer::Serializer;
@@ -129,6 +127,10 @@ const DEFAULT_CONFIG: &'static str = r#"
     [streams.action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     buf_size = 1
+
+    [ota]
+    enabled = false
+    path = "/var/tmp/ota-file"
 "#;
 
 /// Reads config file to generate config struct and replaces places holders
@@ -208,6 +210,9 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    persistence_dir: {}", config.persistence.path);
     println!("    persistence_max_segment_size: {}", config.persistence.max_file_size);
     println!("    persistence_max_segment_count: {}", config.persistence.max_file_count);
+    if config.ota.enabled {
+        println!("    ota_path: {}", config.ota.path);
+    }
     println!("\n");
 }
 
@@ -236,7 +241,7 @@ async fn main() -> Result<(), Error> {
     let action_status_topic = &config.streams.get("action_status").unwrap().topic;
     let action_status = Stream::new("action_status", action_status_topic, 1, collector_tx.clone());
 
-    let mut mqtt = Mqtt::new(config.clone(), native_actions_tx, bridge_actions_tx);
+    let mut mqtt = Mqtt::new(config.clone(), native_actions_tx);
     let mut serializer = Serializer::new(config.clone(), collector_rx, mqtt.client(), storage)?;
 
     task::spawn(async move {
@@ -277,12 +282,13 @@ async fn main() -> Result<(), Error> {
     thread::spawn(move || tunshell_session.start());
 
     let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    let mut actions = actions::new(
+    let mut actions = Actions::new(
         config.clone(),
         controllers,
         native_actions_rx,
         tunshell_keys_tx,
         action_status,
+        bridge_actions_tx,
     )
     .await;
     actions.start().await;
