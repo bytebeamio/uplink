@@ -100,8 +100,6 @@ impl Bridge {
         let mut action_status = self.action_status.clone();
         let action_timeout = time::sleep(Duration::from_secs(10));
 
-        dbg!(&framed);
-
         tokio::pin!(action_timeout);
         loop {
             select! {
@@ -117,16 +115,29 @@ impl Bridge {
                         }
                     };
 
-                    // If incoming data is a response for an action, drop it
-                    // if timeout is already sent to cloud
+                    // If incoming data is a response of state "Completed" | "Failed" for an action,
+                    // drop it if timeout is already sent to cloud
                     if data.stream == "action_status" {
-                        match self.current_action.take() {
+                        match &self.current_action {
                             Some(id) => debug!("Response for action = {:?}", id),
                             None => {
-                                error!("Action timed out already");
+                                error!("Action out of execution");
                                 continue
                             }
                         }
+
+                        let resp: ActionResponse = match serde_json::from_value(data.payload.clone()) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                error!("Deserialization error = {:?}", e);
+                                continue
+                            }
+                        };
+
+                        match resp.state.as_ref() {
+                            "Completed" | "Failed" => self.current_action.take(),
+                            _ => None
+                        };
                     }
 
                     let partition = match bridge_partitions.get_mut(&data.stream) {

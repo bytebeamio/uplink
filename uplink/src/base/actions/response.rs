@@ -13,7 +13,7 @@ pub struct ActionResponse {
     /// Timestamp on response creation
     timestamp: u64,
     /// Can be either running or failed
-    state: String,
+    pub state: String,
     /// Progress percentage for given Action
     progress: u8,
     /// List of errors faced on performing said Action
@@ -48,7 +48,7 @@ impl ActionResponse {
         ActionResponse {
             action_id: id.to_owned(),
             timestamp: timestamp(),
-            state: "Failed".to_owned(),
+            state: "Progress".to_owned(),
             progress,
             errors: vec![],
         }
