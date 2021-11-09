@@ -9,14 +9,14 @@ import (
 
 // Struct used to transport ActionResonses/data to bridge
 type Payload struct {
-	Stream    string       `json:"stream"`
-	Sequence  int32        `json:"sequence"`
-	Timestamp int64        `json:"timestamp"`
-	Payload   ActionStatus `json:"payload"`
+	Stream    string                 `json:"stream"`
+	Sequence  int32                  `json:"sequence"`
+	Timestamp int64                  `json:"timestamp"`
+	Payload   map[string]interface{} `json:"payload"`
 }
 
 // Struct to notify status of action in execution
-type ActionStatus struct {
+type ActionResponse struct {
 	Id        string   `json:"action_id"`
 	Timestamp int64    `json:"timestamp"`
 	State     string   `json:"state"`
@@ -26,29 +26,44 @@ type ActionStatus struct {
 
 // Struct received from uplink
 type Action struct {
-	Id      string `json:"id"`
+	Id      string `json:"action_id"`
 	Kind    string `json:"timestamp"`
 	Name    string `json:"name"`
 	Payload string `json:"payload"`
 }
 
-// Creates and sends template status, with provided state and progress
-func reply(writer *json.Encoder, action_id string, state string, progresss int8) {
-	// Sleep for 5s
-	time.Sleep(5)
+// Generate ActionResponse payload provided executing action information
+func actionResponse(action_id string, state string, progresss int8) Payload {
+	t := time.Now().UnixNano() / int64(time.Millisecond)
+	response := ActionResponse{
+		Id:        action_id,
+		Timestamp: t,
+		State:     state,
+		Progress:  progresss,
+	}
+	var resp map[string]interface{}
+	r, err := json.Marshal(response)
+	json.Unmarshal(r, &resp)
+	if err != nil {
+		fmt.Println(err)
+	}
+	return payload("action_status", resp)
+}
 
-	// Reply that serves no other purpose but as a ping before timeout
-	reply := Payload{
-		Stream:    "action_status",
+// Generate payload provided stream and data values
+func payload(stream string, data map[string]interface{}) Payload {
+	return Payload{
+		Stream:    stream,
 		Sequence:  0,
 		Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
-		Payload: ActionStatus{
-			Id:        action_id,
-			Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
-			State:     state,
-			Progress:  progresss,
-		},
+		Payload:   data,
 	}
+}
+
+// Creates and sends template status, with provided state and progress
+func reply(writer *json.Encoder, reply Payload) {
+	// Sleep for 5s
+	time.Sleep(5)
 
 	fmt.Println(reply)
 
@@ -83,8 +98,10 @@ func main() {
 		}
 
 		// Status: started execution
-		reply(writer, action.Id, "Running", 0)
+		status := actionResponse(action.Id, "Running", 0)
+		reply(writer, status)
 		// Status: completed execution
-		reply(writer, action.Id, "Completed", 100)
+		status = actionResponse(action.Id, "Completed", 100)
+		reply(writer, status)
 	}
 }

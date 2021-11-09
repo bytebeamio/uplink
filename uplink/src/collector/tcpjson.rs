@@ -102,7 +102,7 @@ impl Bridge {
         }
 
         let mut action_status = self.action_status.clone();
-        let action_timeout = time::sleep(Duration::from_secs(10));
+        let action_timeout = time::sleep(Duration::from_secs(100));
 
         tokio::pin!(action_timeout);
         loop {
