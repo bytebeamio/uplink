@@ -40,8 +40,6 @@ while True:
     recv = json.loads(r)
     print("Received:\n", recv)
     action_id = recv["action_id"]
-    if not action_id:
-        action_id = recv["id"]
 
     # Status: started execution
     reply(s, action_id, "Running", 0)
