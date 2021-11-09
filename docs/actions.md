@@ -30,9 +30,9 @@ Actions and their responses can be demonstrated by connecting the provided pytho
 2. Run the python/golang examples
 ```sh
 # For python
-python demo/bridge.py
+python demo/app.py
 # For golang
-go run demo/bridge.go
+go run demo/app.go
 ```
 3. Create and send an action targeted at device(using relevant topic on broker).
 4. Monitor how action status is received as response on action_status topic.
