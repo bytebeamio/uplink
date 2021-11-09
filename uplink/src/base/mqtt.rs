@@ -1,19 +1,22 @@
 use async_channel::{Sender, TrySendError};
-use log::{debug, error, info};
+use thiserror::Error;
+use tokio::task;
+use tokio::time::Duration;
+
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+
+use crate::base::actions::Action;
+use crate::base::Config;
 use rumqttc::{
     AsyncClient, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS, TlsConfiguration,
     Transport,
 };
-use thiserror::Error;
-use tokio::{task, time::Duration};
-
 use std::sync::Arc;
 
-use super::{actions::Action};
-use crate::Config;
-
 #[derive(Error, Debug)]
-pub(crate) enum Error {
+pub enum Error {
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Serde error {0}")]
@@ -22,24 +25,36 @@ pub(crate) enum Error {
 
 /// Interface implementing MQTT protocol to communicate with broker
 pub struct Mqtt {
+    config: Arc<Config>,
     /// Client handle
     client: AsyncClient,
     /// Event loop handle
     eventloop: EventLoop,
     /// Handles to channels between threads
     native_actions_tx: Sender<Action>,
+    bridge_actions_tx: Sender<Action>,
     /// Currently subscribed topic
     actions_subscription: String,
 }
 
 impl Mqtt {
-    pub(crate) fn new(config: Arc<Config>, actions_tx: Sender<Action>) -> Mqtt {
+    pub fn new(
+        config: Arc<Config>,
+        actions_tx: Sender<Action>,
+        bridge_actions_tx: Sender<Action>,
+    ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let (client, eventloop) = AsyncClient::new(options, 10);
-        let actions_subscription =
-            format!("/tenants/{}/devices/{}/actions", config.project_id, config.device_id);
-        Mqtt { client, eventloop, native_actions_tx: actions_tx, actions_subscription }
+        let actions_subscription = format!("/tenants/{}/devices/{}/actions", config.project_id, config.device_id);
+        Mqtt {
+            config,
+            client,
+            eventloop,
+            native_actions_tx: actions_tx,
+            bridge_actions_tx,
+            actions_subscription,
+        }
     }
 
     /// Returns a client handle to MQTT interface
@@ -88,13 +103,19 @@ impl Mqtt {
 
         let action: Action = serde_json::from_slice(&publish.payload)?;
         debug!("Action = {:?}", action);
-        self.native_actions_tx.try_send(action)?;
+
+        if !self.config.actions.contains(&action.id) {
+            self.bridge_actions_tx.try_send(action)?;
+        } else {
+            self.native_actions_tx.try_send(action)?;
+        }
 
         Ok(())
     }
 }
 
 fn mqttoptions(config: &Config) -> MqttOptions {
+    // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
     let mut mqttoptions = MqttOptions::new(&config.device_id, &config.broker, config.port);
     mqttoptions.set_max_packet_size(config.max_packet_size, config.max_packet_size);
     mqttoptions.set_keep_alive(60);
@@ -114,4 +135,17 @@ fn mqttoptions(config: &Config) -> MqttOptions {
     }
 
     mqttoptions
+}
+
+fn _get_certs(key_path: &Path, ca_path: &Path) -> (Vec<u8>, Vec<u8>) {
+    println!("{:?}", key_path);
+    let mut key = Vec::new();
+    let mut key_file = File::open(key_path).unwrap();
+    key_file.read_to_end(&mut key).unwrap();
+
+    let mut ca = Vec::new();
+    let mut ca_file = File::open(ca_path).unwrap();
+    ca_file.read_to_end(&mut ca).unwrap();
+
+    (key, ca)
 }

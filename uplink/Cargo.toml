@@ -3,8 +3,6 @@ name = "uplink"
 version = "1.2.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2018"
-description = "A utility/library written in Rust for connecting devices running a supported OS with an MQTT backend"
-license-file = "LICENSE"
 
 [dependencies]
 structopt = "0.3"
@@ -18,6 +16,7 @@ tokio-stream = "0.1"
 tokio-compat-02 = "0.2.0"
 async-channel = "1.5"
 rumqttc = "0.7"
+# rumqttc = { path = "../../rumqtt/rumqttc" }
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
@@ -25,12 +24,6 @@ anyhow = "1"
 serde_json = "1.0"
 rand = "0.7"
 tunshell-client = { git = "https://github.com/TimeToogo/tunshell.git" }
-reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
-futures-util = "0.3.14"
 
 [build-dependencies]
 vergen = { version = "5.1", features = ["git", "build", "chrono"] }
-
-[[bin]]
-name = "uplink"
-path = "bin/main.rs"

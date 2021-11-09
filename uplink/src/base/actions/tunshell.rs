@@ -1,12 +1,12 @@
+use std::sync::{Arc, Mutex};
+
 use async_channel::Receiver;
 use log::error;
 use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-
-use crate::base::{actions::ActionResponse, Stream};
+use crate::base::{self, actions::ActionResponse, Stream};
 
 pub struct Relay {
     host: String,
@@ -21,17 +21,17 @@ pub struct Keys {
 }
 
 pub struct TunshellSession {
-    _config: Arc<crate::Config>,
+    _config: Arc<base::Config>,
     relay: Relay,
     echo_stdout: bool,
     keys_rx: Receiver<String>,
     action_status: Stream<ActionResponse>,
-    last_process_done: Arc<AtomicBool>,
+    last_process_done: Arc<Mutex<bool>>,
 }
 
 impl TunshellSession {
     pub fn new(
-        config: Arc<crate::Config>,
+        config: Arc<base::Config>,
         relay: Relay,
         echo_stdout: bool,
         tunshell_rx: Receiver<String>,
@@ -43,7 +43,7 @@ impl TunshellSession {
             echo_stdout,
             keys_rx: tunshell_rx,
             action_status,
-            last_process_done: Arc::new(AtomicBool::new(true)),
+            last_process_done: Arc::new(Mutex::new(true)),
         }
     }
 
@@ -63,7 +63,7 @@ impl TunshellSession {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) {
         while let Ok(keys) = self.keys_rx.recv().await {
-            if !self.last_process_done.load(Ordering::Relaxed) {
+            if *self.last_process_done.lock().unwrap() == false {
                 let status = ActionResponse::failure("tunshell", "busy".to_owned());
                 if let Err(e) = self.action_status.fill(status).await {
                     error!("Failed to send status, Error = {:?}", e);
@@ -91,7 +91,7 @@ impl TunshellSession {
             let mut status_tx = self.action_status.clone();
 
             tokio::spawn(async move {
-                last_process_done.store(false, Ordering::Relaxed);
+                *last_process_done.lock().unwrap() = false;
 
                 let send_status = match client.start_session().compat().await {
                     Ok(status) => {
@@ -111,7 +111,7 @@ impl TunshellSession {
                     error!("Failed to send status. Error {:?}", e);
                 }
 
-                last_process_done.store(true, Ordering::Relaxed);
+                *last_process_done.lock().unwrap() = true;
             });
         }
     }

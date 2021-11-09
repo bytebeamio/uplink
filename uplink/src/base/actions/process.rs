@@ -1,17 +1,16 @@
 use async_channel::SendError;
-use log::{debug, error, info};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::{pin, select, task, time};
 
+use super::{ActionResponse, Package};
+
+use crate::base::Stream;
 use std::io;
 use std::process::Stdio;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
-use super::{ActionResponse, Package};
-use crate::base::Stream;
 
 /// Process abstracts functions to spawn process and handle their output
 /// It makes sure that a new process isn't executed when the previous process
@@ -21,7 +20,7 @@ pub struct Process {
     // buffer to send status messages to cloud
     action_status: Stream<ActionResponse>,
     // we use this flag to ignore new process spawn while previous process is in progress
-    last_process_done: Arc<AtomicBool>,
+    last_process_done: Arc<Mutex<bool>>,
 }
 
 #[derive(Error, Debug)]
@@ -40,7 +39,7 @@ pub enum Error {
 
 impl Process {
     pub fn new(action_status: Stream<ActionResponse>) -> Process {
-        Process { last_process_done: Arc::new(AtomicBool::new(true)), action_status }
+        Process { last_process_done: Arc::new(Mutex::new(true)), action_status }
     }
 
     /// Run a process of specified command
@@ -50,7 +49,7 @@ impl Process {
         command: String,
         payload: String,
     ) -> Result<Child, Error> {
-        self.last_process_done.store(false, Ordering::Relaxed);
+        *self.last_process_done.lock().unwrap() = false;
 
         let mut cmd = Command::new(command);
         cmd.arg(id).arg(payload).kill_on_drop(true).stdout(Stdio::piped());
@@ -58,8 +57,8 @@ impl Process {
         match cmd.spawn() {
             Ok(child) => Ok(child),
             Err(e) => {
-                self.last_process_done.store(true, Ordering::Relaxed);
-                Err(e.into())
+                *self.last_process_done.lock().unwrap() = true;
+                return Err(e.into());
             }
         }
     }
@@ -94,7 +93,7 @@ impl Process {
                 }
             }
 
-            last_process_done.store(true, Ordering::Relaxed);
+            *last_process_done.lock().unwrap() = true;
         });
 
         Ok(())
@@ -109,7 +108,7 @@ impl Process {
         let command = String::from("tools/") + &command.into();
 
         // Check if last process is in progress
-        if !self.last_process_done.load(Ordering::Relaxed) {
+        if *self.last_process_done.lock().unwrap() == false {
             return Err(Error::Busy);
         }
 

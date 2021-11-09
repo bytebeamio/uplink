@@ -1,18 +1,21 @@
 use async_channel::{Receiver, RecvError, Sender};
-use log::{debug, error, info};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::time::{self, Duration, Instant};
-use tokio::{io::AsyncWriteExt, select};
+use tokio::{select, time};
 use tokio_stream::StreamExt;
-use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
+use tokio_util::codec::Framed;
+use tokio_util::codec::{LinesCodec, LinesCodecError};
 
-use std::{collections::HashMap, io, sync::Arc};
+use std::io;
 
-use super::Payload;
-use crate::base::actions::{self, Action, ActionResponse};
-use crate::base::{Package, Stream};
-use crate::Config;
+use crate::base::actions::{Action, ActionResponse};
+use crate::base::{Buffer, Config, Package, Point, Stream};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::time::{Duration, Instant};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -26,8 +29,6 @@ pub enum Error {
     Codec(#[from] LinesCodecError),
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
-    #[error("Download OTA error")]
-    Actions(#[from] actions::Error),
 }
 
 pub struct Bridge {
@@ -68,8 +69,8 @@ impl Bridge {
                     }
                     action = self.actions_rx.recv() => {
                         let action = action.unwrap();
-                        error!("Bridge down!! Action ID = {}", action.action_id);
-                        let status = ActionResponse::failure(&action.action_id, "Bridge down");
+                        error!("Bridge down!! Action ID = {}", action.id);
+                        let status = ActionResponse::failure(&action.id, "Bridge down");
                         if let Err(e) = action_status.fill(status).await {
                             error!("Failed to send busy status. Error = {:?}", e);
                         }
@@ -115,29 +116,16 @@ impl Bridge {
                         }
                     };
 
-                    // If incoming data is a response of state "Completed" | "Failed" for an action,
-                    // drop it if timeout is already sent to cloud
+                    // If incoming data is a response for an action, drop it
+                    // if timeout is already sent to cloud
                     if data.stream == "action_status" {
-                        match &self.current_action {
+                        match self.current_action.take() {
                             Some(id) => debug!("Response for action = {:?}", id),
                             None => {
-                                error!("Action out of execution");
+                                error!("Action timed out already");
                                 continue
                             }
                         }
-
-                        let resp: ActionResponse = match serde_json::from_value(data.payload.clone()) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                error!("Deserialization error = {:?}", e);
-                                continue
-                            }
-                        };
-
-                        match resp.state.as_ref() {
-                            "Completed" | "Failed" => self.current_action.take(),
-                            _ => None
-                        };
                     }
 
                     let partition = match bridge_partitions.get_mut(&data.stream) {
@@ -160,7 +148,7 @@ impl Bridge {
                 }
                 action = self.actions_rx.recv() => {
                     let action = action?;
-                    self.current_action = Some(action.action_id.to_owned());
+                    self.current_action = Some(action.id.to_owned());
 
                     action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
                     let data = match serde_json::to_vec(&action) {
@@ -186,5 +174,41 @@ impl Bridge {
                 }
             }
         }
+    }
+}
+
+// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
+// TODO which cloud will double deserialize (Batch 1st and messages next)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Payload {
+    #[serde(skip_serializing)]
+    pub(crate) stream: String,
+    pub(crate) sequence: u32,
+    pub(crate) timestamp: u64,
+    #[serde(flatten)]
+    pub(crate) payload: Value,
+}
+
+impl Point for Payload {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+}
+
+impl Package for Buffer<Payload> {
+    fn topic(&self) -> Arc<String> {
+        return self.topic.clone();
+    }
+
+    fn serialize(&self) -> Vec<u8> {
+        serde_json::to_vec(&self.buffer).unwrap()
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        self.anomalies()
     }
 }

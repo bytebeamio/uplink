@@ -1,8 +1,10 @@
-use async_channel::{SendError, Sender};
-use log::{error, warn};
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::mem;
+use std::sync::Arc;
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{fmt::Debug, mem, sync::Arc};
+use async_channel::{SendError, Sender};
+use serde::Deserialize;
 
 pub mod actions;
 pub mod mqtt;
@@ -12,6 +14,41 @@ pub mod serializer;
 pub enum Error {
     #[error("Send error {0}")]
     Send(#[from] SendError<Box<dyn Package>>),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamConfig {
+    pub topic: String,
+    pub buf_size: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Persistence {
+    pub path: String,
+    pub max_file_size: usize,
+    pub max_file_count: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Authentication {
+    ca_certificate: String,
+    device_certificate: String,
+    device_private_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Config {
+    pub project_id: String,
+    pub device_id: String,
+    pub broker: String,
+    pub port: u16,
+    pub authentication: Option<Authentication>,
+    pub bridge_port: u16,
+    pub max_packet_size: usize,
+    pub max_inflight: u16,
+    pub actions: Vec<String>,
+    pub persistence: Persistence,
+    pub streams: HashMap<String, StreamConfig>,
 }
 
 pub trait Point: Send + Debug {
@@ -76,7 +113,7 @@ where
             + &project_id
             + "/devices/"
             + &device_id
-            + "/events/"
+            + "/"
             + &stream
             + "/jsonarray";
 
@@ -177,7 +214,7 @@ impl<T> Buffer<T> {
     }
 
     pub fn anomalies(&self) -> Option<(String, usize)> {
-        if self.anomalies.is_empty() {
+        if self.anomalies.len() == 0 {
             return None;
         }
 
@@ -196,33 +233,5 @@ impl<T> Clone for Stream<T> {
             buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
             tx: self.tx.clone(),
         }
-    }
-}
-
-pub(crate) fn timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_else(|_| Duration::from_secs(0))
-        .as_millis() as u64
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn buffer_add_seq_anomaly() {
-        let mut buffer =
-            Buffer::<usize>::new(Arc::new("stream".to_owned()), Arc::new("topic".to_owned()));
-        buffer.add_sequence_anomaly(1, 3);
-        assert_eq!(buffer.anomalies(), Some(("stream.sequence: 1, 3".to_owned(), 1)))
-    }
-
-    #[test]
-    fn buffer_add_timestamp_anomaly() {
-        let mut buffer =
-            Buffer::<usize>::new(Arc::new("stream".to_owned()), Arc::new("topic".to_owned()));
-        buffer.add_timestamp_anomaly(1, 3);
-        assert_eq!(buffer.anomalies(), Some(("timestamp: 1, 3".to_owned(), 1)))
     }
 }

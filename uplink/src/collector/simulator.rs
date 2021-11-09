@@ -1,15 +1,10 @@
+use crate::base::{Config, Package, Stream};
 use async_channel::Sender;
-use rand::Rng;
 use serde::Serialize;
 use serde_json::json;
+use std::io;
+use std::sync::Arc;
 use thiserror::Error;
-use tokio::time::Duration;
-
-use std::{collections::HashMap, io, sync::Arc};
-
-use super::Payload;
-use crate::base::{timestamp, Package, Stream};
-use crate::Config;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -38,9 +33,11 @@ impl Simulator {
         Simulator { config, partitions, data_tx }
     }
 
-    pub async fn start(&mut self) {
-        let mut gps_timestamp = timestamp();
-        let mut can_timestamp = timestamp();
+    pub(crate) async fn start(&mut self) {
+        let mut gps_timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let mut can_timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
         for i in 0..1_000_000 {
             let sleep_millis = 10;
@@ -94,6 +91,12 @@ impl Simulator {
         }
     }
 }
+
+use crate::collector::tcpjson::Payload;
+use rand::Rng;
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Gps {

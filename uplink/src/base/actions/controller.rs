@@ -1,10 +1,11 @@
-use async_channel::{SendError, Sender, TrySendError};
-use thiserror::Error;
-
-use std::{collections::HashMap, io, time::SystemTimeError};
+use std::collections::HashMap;
+use std::io;
+use std::time::SystemTimeError;
 
 use super::{ActionResponse, Control, Package};
 use crate::base::{self, Stream};
+use async_channel::{SendError, Sender, TrySendError};
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -61,11 +62,12 @@ impl Controller {
         controllers: HashMap<String, Sender<Control>>,
         action_status: Stream<ActionResponse>,
     ) -> Self {
-        Controller {
+        let controller = Controller {
             collector_controllers: controllers,
             collector_run_status: HashMap::new(),
             action_status,
-        }
+        };
+        controller
     }
 
     pub async fn execute(&mut self, id: &str, command: String) -> Result<(), Error> {
