@@ -1,10 +1,11 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, ErrorKind, Read, Write};
-use std::mem;
-use std::path::{Path, PathBuf};
+#[macro_use]
+extern crate log;
 
 use bytes::{Buf, BufMut, BytesMut};
-use log::{info, warn};
+use std::fs::{File, OpenOptions};
+use std::io::{ErrorKind, Read, Write};
+use std::path::{Path, PathBuf};
+use std::{fs, io, mem};
 
 pub struct Storage {
     /// list of backlog file ids. Mutated only be the serialization part of the sender
@@ -28,9 +29,10 @@ impl Storage {
         max_file_count: usize,
     ) -> io::Result<Storage> {
         let backup_path = backlog_dir.into();
+        let backlog_file_ids = get_file_ids(&backup_path)?;
 
         Ok(Storage {
-            backlog_file_ids: get_file_ids(&backup_path)?,
+            backlog_file_ids,
             backup_path,
             max_file_size,
             max_file_count,
@@ -57,8 +59,8 @@ impl Storage {
     /// Initializes read buffer before reading data from the file
     fn prepare_current_read_buffer(&mut self, file_len: usize) {
         self.current_read_file.clear();
-        let init = vec![0u8; file_len];
-        self.current_read_file.put_slice(&init[..]);
+        let mut init = vec![0u8; file_len];
+        self.current_read_file.put_slice(&mut init[..]);
     }
 
     /// Opens file to flush current inmemory write buffer to disk.
@@ -108,7 +110,7 @@ impl Storage {
     pub fn reload(&mut self) -> io::Result<bool> {
         // Swap read buffer with write buffer to read data in inmemory write
         // buffer when all the backlog disk files are done
-        if self.backlog_file_ids.is_empty() {
+        if self.backlog_file_ids.len() == 0 {
             mem::swap(&mut self.current_read_file, &mut self.current_write_file);
 
             // If read buffer is 0 after swapping, all the data is caught up
@@ -144,12 +146,6 @@ impl Storage {
     }
 }
 
-struct NextFile {
-    path: PathBuf,
-    file: File,
-    deleted: Option<u64>,
-}
-
 /// Converts file path to file id
 fn id(path: &Path) -> io::Result<u64> {
     if let Some(file_name) = path.file_name() {
@@ -159,7 +155,7 @@ fn id(path: &Path) -> io::Result<u64> {
         }
     }
 
-    let id: Vec<&str> = path.file_name().unwrap().to_str().unwrap().split('@').collect();
+    let id: Vec<&str> = path.file_name().unwrap().to_str().unwrap().split("@").collect();
     let id: u64 = id[1].parse().unwrap();
     Ok(id)
 }
@@ -183,8 +179,14 @@ fn get_file_ids(path: &Path) -> io::Result<Vec<u64>> {
         }
     }
 
-    file_ids.sort_unstable();
+    file_ids.sort();
     Ok(file_ids)
+}
+
+struct NextFile {
+    path: PathBuf,
+    file: File,
+    deleted: Option<u64>,
 }
 
 #[cfg(test)]
@@ -221,7 +223,7 @@ mod test {
         assert_eq!(storage.writer().len(), 1036);
 
         // other messages on disk
-        let files = get_file_ids(backup.path()).unwrap();
+        let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
@@ -238,7 +240,7 @@ mod test {
             storage.flush_on_overflow().unwrap();
         }
 
-        let files = get_file_ids(backup.path()).unwrap();
+        let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
         // 11 files created. 10 on disk
@@ -250,7 +252,7 @@ mod test {
         }
 
         assert_eq!(storage.writer().len(), 0);
-        let files = get_file_ids(backup.path()).unwrap();
+        let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
 
