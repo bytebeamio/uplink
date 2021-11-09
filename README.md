@@ -4,14 +4,16 @@
 
 <img align="right" src="docs/logo.png" height="150px" alt="the uplink logo">
 
-uplink is a *utility/library* written in Rust for efficiently sending large amounts of data to the MQTT broker, robustly handling flaky network conditions and to establish remote shell access to your device with [Tunshell][tunshell]. The primary backend for uplink is the [**Bytebeam**][bytebeam] platform, however uplink can also be used with any broker supporting MQTT 3.1.
+Uplink is a rust based utility for efficiently sending data and receiving commands from and IoT Backend. The primary backend for uplink is the [**Bytebeam**][bytebeam] platform, however uplink can also be used with any broker supporting MQTT 3.1.
 
 ### Features
-
 - JSON formatted data push to cloud.
 - Receives commands from the cloud, executes them and updates progress of execution.
 - Auto downloads updates from the cloud to perform OTA.
 - Handles network interruptions by persisting data to disk.
+- Remote shell access with [Tunshell][tunshell]
+- Robust handling of flaky network conditions.
+- Persist data to disk in case of network issues.
 - Supports TLS.
 
 ### Build and Install
