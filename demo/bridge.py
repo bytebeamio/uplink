@@ -7,9 +7,10 @@ s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect(("localhost", 5555))
 
 # Creates and sends template status, with provided state and progress
-def reply(s, recv, state, progress):
+def reply(s, action_id, state, progress):
     # Wait for 5s
-    time.sleep(2)
+    time.sleep(5)
+    t = int(time.time()*1000000)
 
     # Create Payload to contain Action Status
     p = {
@@ -17,9 +18,9 @@ def reply(s, recv, state, progress):
         "sequence": 0,
         "timestamp": t,
         "payload": {
-            "action_id": recv["action_id"],
-            "timestamp": t,
+            "id": action_id,
             "state": state,
+            "timestamp": t,
             "progress": progress,
             "errors": []
         }
@@ -38,9 +39,11 @@ while True:
     # Decode received json
     recv = json.loads(r)
     print("Received:\n", recv)
-    t = int(time.time()*1000000)
+    action_id = recv["action_id"]
+    if not action_id:
+        action_id = recv["id"]
 
     # Status: started execution
-    reply(s, recv, "running", 0)
+    reply(s, action_id, "Running", 0)
     # Status: completed execution
-    reply(s, recv, "completed", 100)
+    reply(s, action_id, "Completed", 100)

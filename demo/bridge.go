@@ -17,7 +17,7 @@ type Payload struct {
 
 // Struct to notify status of action in execution
 type ActionStatus struct {
-	Id        int64    `json:"action_id"`
+	Id        string   `json:"action_id"`
 	Timestamp int64    `json:"timestamp"`
 	State     string   `json:"state"`
 	Progress  int8     `json:"progress"`
@@ -26,14 +26,14 @@ type ActionStatus struct {
 
 // Struct received from uplink
 type Action struct {
-	Id      int64  `json:"id"`
+	Id      string `json:"id"`
 	Kind    string `json:"timestamp"`
 	Name    string `json:"name"`
 	Payload string `json:"payload"`
 }
 
 // Creates and sends template status, with provided state and progress
-func reply(writer *json.Encoder, action *Action, state string, progresss int8) {
+func reply(writer *json.Encoder, action_id string, state string, progresss int8) {
 	// Sleep for 5s
 	time.Sleep(5)
 
@@ -43,7 +43,7 @@ func reply(writer *json.Encoder, action *Action, state string, progresss int8) {
 		Sequence:  0,
 		Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 		Payload: ActionStatus{
-			Id:        action.Id,
+			Id:        action_id,
 			Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 			State:     state,
 			Progress:  progresss,
@@ -83,8 +83,8 @@ func main() {
 		}
 
 		// Status: started execution
-		reply(writer, &action, "Running", 0)
+		reply(writer, action.Id, "Running", 0)
 		// Status: completed execution
-		reply(writer, &action, "Completed", 100)
+		reply(writer, action.Id, "Completed", 100)
 	}
 }
