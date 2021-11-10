@@ -4,17 +4,15 @@
 
 <img align="right" src="docs/logo.png" height="150px" alt="the uplink logo">
 
-Uplink is a rust based utility for efficiently sending data and receiving commands from and IoT Backend. The primary backend for uplink is the [**Bytebeam**][bytebeam] platform, however uplink can also be used with any broker supporting MQTT 3.1.
+Uplink is a rust based utility for efficiently sending data and receiving commands from an IoT Backend. The primary backend for uplink is the [**Bytebeam**][bytebeam] platform, however uplink can also be used with any broker supporting MQTT 3.1.1.
 
 ### Features
-- JSON formatted data push to cloud.
-- Receives commands from the cloud, executes them and updates progress of execution.
-- Auto downloads updates from the cloud to perform OTA.
-- Handles network interruptions by persisting data to disk.
-- Remote shell access with [Tunshell][tunshell]
-- Robust handling of flaky network conditions.
+- Efficiently send data to cloud with robust handling of flaky network conditions.
 - Persist data to disk in case of network issues.
-- Supports TLS.
+- Receive commands from the cloud, execute them and update progress of execution.
+- Can auto download updates from the cloud to perform OTA firmware updates.
+- Provides remote shell access through [Tunshell][tunshell]
+- Supports TLS with easy cross-compilation.
 
 ### Build and Install
 
@@ -36,7 +34,6 @@ cargo run --bin uplink -- -a <device auth json file>
 In case you want to run uplink on an ARM system, follow instruction given below to create an ARM compatible binary.
 
 1. Install `cross`, a `Zero setup` cross compilation crate.
-
 ```sh
 cargo install cross
 ```
@@ -53,17 +50,17 @@ See [releases][releases] for other options.
 #### Setup
 You can start uplink with the following command, where you will need to provide an `auth.json` file:
 ```sh
-uplink -a auth.json -vv
+uplink -a auth.json
 ```
 
-The `auth.json` file might contain something similar to the following JSON, pointing uplink to a certain broker and providing necessary information to initiate an authenticated connection over TLS:
+The `auth.json` file might contain something similar to the following JSON, pointing uplink to a certain broker and providing any information necessary to initiate an authenticated connection over TLS:
 ```js
 {
     "project_id": "xxxx",
     "device_id": "1234",
     "broker": "example.com",
     "port": 8883,
-    "authentication": {
+    "authentication": {			// Optional, use only with TLS enabled brokers
         "ca_certificate": "...",
         "device_certificate": "...",
         "device_private_key": "..."
@@ -74,54 +71,58 @@ The `auth.json` file might contain something similar to the following JSON, poin
 > **NOTE**: You could download this file [from the Bytebeam UI][platform]. If you are using your own broker instead, you could use uplink [without TLS][unsecure], but we recommend that you use TLS and [provision your own certificates][provision] to do it. You can read more about securing uplink in the [uplink Security document][security]
 
 #### Writing Applications
-uplink acts as an intermediary between the user's applications and the Bytebeam platform. Connecting the applications to uplink's bridge port one can communciate with the platform over MQTT + TLS, accepting JSON structured [Action][action]s and forwarding either JSON formatted data(from applications such as sensing) or [Action Response][action_response]s that report the progress of aforementioned Actions.
+uplink acts as an intermediary between the user's applications and the Bytebeam platform/MQTT 3.1.1 broker of choice. One can accept [Action][action]s from the cloud and push data(from applications such as sensing) or [Action Response][action_response]s back.
 
 <img src="docs/uplink.png" height="150px" alt="uplink architecture">
 
 **Receiving Actions**:
-Actions are messages that uplink receives from the broker and is executable on the user's device. It can execute some specific types of actions while forwarding a vast majority for execution by connected applicaitons. Developers can write their application to receive a JSON formatted as follows:
+Actions are messages that uplink expects to receive from the broker and is executable on the user's device. The JSON format for Actions are as such:
 ```js
 {
     "action_id": "...",
-    "kind": "process",
-    "name": "update_firmware",
-    "payload": {...}
+    "kind": "...",
+    "name": "...",
+    "payload": "..."
 }
 ```
+> **NOTE**: Some Actions are executed by built-in "collectors", e.g. Actions with `kind: process` and `kind: collector`. The tunshell action, i.e. Action with `name: tunshell` is used to [initiate a remote connection over tunshell](#Remote-Shell-Connection) while the OTA action, i.e. Action with `name: update_firmware` can [download OTA updates](#Downloading-OTA-updates).
 
 **Streaming data**:
-Data from the connected application is handled as payload in a stream. An example Streamed Payload is JSON formatted as follows:
+Data from the connected application is handled as payload within a stream. uplink expects the following JSON format for Streamed Payload:
 ```js
 {
-    "stream": "action_status",
+    "stream": "...",
     "sequence": ...,
     "timestamp": ...,
     "payload": {...}
 }
 ```
-> **NOTE**: data contained in payload must be JSON formatted as it will be deserialized for a variety of purposes upstream.
+> **NOTE**: data contained in payload must be JSON formatted as it will be deserialized for a variety of purposes within the IoT platform.
 
 **Responding with Action Responses**:
-Action Responses are messages that applications can use to update uplink regarding the execution of any received action, which it then forwards to the broker. These usually contain information such as progress counter and a backtrace in cause of failure due to error. Action Responses are handled as Streamed Payload in the "action_status" stream and thus have to be enclosed as such. Developers can write their application to respond with a JSON formatted as follows:
+Applications can use Action Response messages to update uplink on the progress of an executing Action. They usually contain information such as a progress counter and error backtrace. Action Responses are handled as Streamed Payloads in the "action_status" stream and thus have to be enclosed as such. uplink expects Action Responses to have the following JSON format:
 ```js
 {
     "action_id": "...",
     "timestamp": ...,
-    "state": "Running",
-    "progress": 0,
-    "errors": []
+    "state": "...",
+    "progress": ...,
+    "errors": [...]
 }
 ```
 
 #### Downloading OTA updates
-uplink has an in-built feature that enables it to download OTA firmware updates, this can be enabled by setting the following fields in the `config.toml`:
+uplink has a built-in feature that enables it to download OTA firmware updates, this can be enabled by setting the following fields in the `config.toml` and using the `-c` option while starting uplink:
 ```toml
 [ota]
 enabled = true
 path = "/path/to/directory" # Where you want the update file to be downloaded
 ```
+```sh
+uplink -c config.toml -a auth.json
+```
 
-Once enabled, Actions with the following JSON will trigger uplink to download the file:
+Once enabled, Actions with the following JSON will trigger uplink to download the file and hand-over the action to a connected application to perform the necessary firmware updation:
 ```js
 {
     "action_id": "...",
@@ -133,7 +134,7 @@ Once enabled, Actions with the following JSON will trigger uplink to download th
     }"
 }
 ```
-Once the downloded, the payload JSON is updated with the location of the file on the device, as such:
+Once downloded, the payload JSON is updated with the file's on device path, as such:
 ```js
 {
     "action_id": "...",
@@ -148,18 +149,19 @@ Once the downloded, the payload JSON is updated with the location of the file on
 ```
 
 #### Remote Shell Connection
-With the help of tunshell, uplink allows you to connect to the device shell. One can provide the necessary details for uplink to initiate such a connection by creating a tunshell action, with the following JSON:
+With the help of tunshell, uplink allows you to remotely connect to a device shell. One can provide the necessary details for uplink to initiate such a connection by creating a tunshell action, with the following JSON format:
 ```js
 {
     "action_id": "...",
     "kind": "...",
     "name": "tunshell",
-    "payload": "Keys {
+    "payload": "{
         \"session\": \"...\",
         \"encryption\": \"...\"
     }"
 }
 ```
+> **NOTE**: Bytebeam has built-in support for tunshell, if you are using any other MQTT broker, you may have to manage your own tunshell server to use this feature.
 
 ### Testing with netcat
 
