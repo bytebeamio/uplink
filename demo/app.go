@@ -40,6 +40,7 @@ func actionResponse(action_id string, state string, progresss int8) Payload {
 		Timestamp: t,
 		State:     state,
 		Progress:  progresss,
+		Errors:    []string{},
 	}
 	var resp map[string]interface{}
 	r, err := json.Marshal(response)
