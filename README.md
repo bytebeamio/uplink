@@ -50,12 +50,66 @@ See [releases][releases] for other options.
 
 ### Getting Started
 
-You can use uplink with the following command, where you will need to provide an `auth.json` file, which you can read more about in the [uplink Security document][security]. On Bytebeam, you could download this file [from the platform][platform]. If you are using your own broker instead of Bytebeam, you could do it [without TLS][unsecure], but if you wish to use TLS we recommend that you also [provision your own certificates][provision].
+#### Setup
+You can start uplink with the following command, where you will need to provide an `auth.json` file:
 ```sh
 uplink -a auth.json -vv
 ```
 
-uplink acts as an intermediary between the user's applications and the Bytebeam platform. Connecting the applications to the bridge port one can communciate with the platform over MQTT with TLS, accepting JSON structured [Action][action]s and forwarding either JSON formatted data(from applications such as sensing) or [Action Response][action_response]s that report the progress of aforementioned Actions.
+The `auth.json` file might contain something similar to the following JSON, pointing uplink to a certain broker and providing necessary information to initiate an authenticated connection over TLS:
+```js
+{
+    "project_id": "xxxx",
+    "device_id": "1234",
+    "broker": "example.com",
+    "port": 8883,
+    "authentication": {
+        "ca_certificate": "...",
+        "device_certificate": "...",
+        "device_private_key": "..."
+    }
+}
+```
+
+> **NOTE**: You could download this file [from the Bytebeam UI][platform]. If you are using your own broker instead, you could use uplink [without TLS][unsecure], but we recommend that you use TLS and [provision your own certificates][provision] to do it. You can read more about securing uplink in the [uplink Security document][security]
+
+#### Writing Applications
+uplink acts as an intermediary between the user's applications and the Bytebeam platform. Connecting the applications to uplink's bridge port one can communciate with the platform over MQTT + TLS, accepting JSON structured [Action][action]s and forwarding either JSON formatted data(from applications such as sensing) or [Action Response][action_response]s that report the progress of aforementioned Actions.
+
+**Receiving Actions**:
+Actions are messages that uplink receives from the broker and is executable on the user's device. It can execute some specific types of actions while forwarding a vast majority for execution by connected applicaitons. Developers can write their application to receive a JSON formatted as follows:
+```js
+{
+    "action_id": "...",
+    "kind": "process",
+    "name": "update_firmware",
+    "payload": {...}
+}
+```
+
+**Streaming data**:
+Data from the connected application is handled as payload in a stream. An example Streamed Payload is JSON formatted as follows:
+```js
+{
+    "stream": "action_status",
+    "sequence": ...,
+    "timestamp": ...,
+    "payload": {...},
+}
+```
+> **NOTE**: data contained in payload must be JSON formatted as it will be deserialized for a variety of purposes upstream.
+
+**Responding with Action Responses**:
+Action Responses are messages that applications can use to update uplink regarding the execution of any received action, which it then forwards to the broker. These usually contain information such as progress counter and a backtrace in cause of failure due to error. Action Responses are handled as Streamed Payload in the "action_status" stream and thus have to be enclosed as such. Developers can write their application to respond with a JSON formatted as follows:
+```js
+{
+    "action_id": "...",
+    "timestamp": ...,
+    "state": "Running",
+    "progress": 0,
+    "errors": []
+}
+```
 
 <img src="docs/uplink.png" height="150px" alt="uplink architecture">
 
@@ -84,8 +138,8 @@ Please follow the [code of conduct][coc] while opening issues to report bugs or 
 [rumqtt]: https://github.com/bytebeamio/rumqtt
 [crates.io]: https://crates.io/crates/uplink
 [releases]: https://github.com/bytebeamio/uplink/releases
-[action]: docs/actions.md/#Action
-[action_response]: docs/actions.md/#ActionResponse
+[action]: docs/apps.md/#Action
+[action_response]: docs/apps.md/#ActionResponse
 [security]: docs/security.md
 [platform]: docs/security.md#Configuring-uplink-for-use-with-TLS
 [unsecure]: docs/security.md#Using-uplink-without-TLS

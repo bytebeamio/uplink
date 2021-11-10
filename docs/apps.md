@@ -1,0 +1,55 @@
+# User Applications
+uplink handles device data, `Action`s and `ActionResponse`s. An action is received from the broker and sent to user apps that can also send either user data or action responses, containing status of actions in execution.
+
+## Action
+An `Action` is the term used to refer to messages that carry commands and other information that can be used by uplink or apps connected to it. Some common Actions include the `firmware_update` and `config_update` actions which when executed by the target device will lead to the initiation of an OTA update. A firmware update `Action` messages in JSON would be structured as follows:
+```js
+{
+    "action_id": "...",         // An integer value that can be used to maintain indempotence
+    "kind": "process",          // May hold values such as control, process, depending on end-use
+    "name": "update_firmware",  // Name given to Action
+    "payload": "{...}"          // Can contain JSON formatted data as a string
+}
+```
+
+## Streamed Data
+Connected application can send data to the broker as Streamed Payload. Streams enable uplink to send large amounts of data together, packaged as a single message. An example Streamed Payload is JSON formatted as follows:
+```js
+{
+    "stream": "action_status",  // Name of stream to which data is being sent
+    "sequence": ...,            // Sequence number
+    "timestamp": ...,           // Timestamp at message generation
+    "payload": {                // An Action Response as epayload
+        "action_id": "100",
+        "timestamp": ...,
+        "state": "Completed",
+        "progress": 100,
+        "errors": []
+    }
+}
+```
+
+## Action Response
+Connected user applications can send back progress updates for an Action by publishing an `ActionResponse` message to the "action_status" stream, where uplink immediately forwards the update, given their low frequency.
+```js
+{
+    "action_id": "...", // The same as the executing Action
+    "timestamp": ...,   // Timestamp at response generation, unsigned 64bit integer value
+    "state": "Running", // "Running", "Completed", "Progress" or "Failed", depending on status of Action in execution
+    "progress": 0,      // Denote progress towards Expected Completion, out of 0..100
+    "errors": []        // Contains a list of errors or a backtrace
+}
+```
+
+## Demonstration
+We have provided examples written in python and golang to demonstrate how you can receive Actions and reply back with either data or responses. You can checkout the examples provided in the `demo/` directory and execute them as such:
+1. Ensure uplink is running on device and connected to relevant broker.
+2. Run the python/golang examples
+```sh
+# For python
+python demo/app.py
+# For golang
+go run demo/app.go
+```
+3. Create and send an action targeted at device(using relevant topic on broker).
+4. Monitor how action status is received as response on action_status topic.
