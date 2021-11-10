@@ -76,6 +76,8 @@ The `auth.json` file might contain something similar to the following JSON, poin
 #### Writing Applications
 uplink acts as an intermediary between the user's applications and the Bytebeam platform. Connecting the applications to uplink's bridge port one can communciate with the platform over MQTT + TLS, accepting JSON structured [Action][action]s and forwarding either JSON formatted data(from applications such as sensing) or [Action Response][action_response]s that report the progress of aforementioned Actions.
 
+<img src="docs/uplink.png" height="150px" alt="uplink architecture">
+
 **Receiving Actions**:
 Actions are messages that uplink receives from the broker and is executable on the user's device. It can execute some specific types of actions while forwarding a vast majority for execution by connected applicaitons. Developers can write their application to receive a JSON formatted as follows:
 ```js
@@ -94,7 +96,7 @@ Data from the connected application is handled as payload in a stream. An exampl
     "stream": "action_status",
     "sequence": ...,
     "timestamp": ...,
-    "payload": {...},
+    "payload": {...}
 }
 ```
 > **NOTE**: data contained in payload must be JSON formatted as it will be deserialized for a variety of purposes upstream.
@@ -111,7 +113,53 @@ Action Responses are messages that applications can use to update uplink regardi
 }
 ```
 
-<img src="docs/uplink.png" height="150px" alt="uplink architecture">
+#### Downloading OTA updates
+uplink has an in-built feature that enables it to download OTA firmware updates, this can be enabled by setting the following fields in the `config.toml`:
+```toml
+[ota]
+enabled = true
+path = "/path/to/directory" # Where you want the update file to be downloaded
+```
+
+Once enabled, Actions with the following JSON will trigger uplink to download the file:
+```js
+{
+    "action_id": "...",
+    "kind": "process",
+    "name": "update_firmware",
+    "payload": "{
+        \"url\": \"https://example.com/file\",
+        \"version\":\"1.0\"
+    }"
+}
+```
+Once the downloded, the payload JSON is updated with the location of the file on the device, as such:
+```js
+{
+    "action_id": "...",
+    "kind": "process",
+    "name": "update_firmware",
+    "payload": "{
+        \"url\": \"https://example.com/file\",
+        \"ota_path\": \"/path/to/directory\",
+        \"version\":\"1.0\"
+    }"
+}
+```
+
+#### Remote Shell Connection
+With the help of tunshell, uplink allows you to connect to the device shell. One can provide the necessary details for uplink to initiate such a connection by creating a tunshell action, with the following JSON:
+```js
+{
+    "action_id": "...",
+    "kind": "...",
+    "name": "tunshell",
+    "payload": "Keys {
+        \"session\": \"...\",
+        \"encryption\": \"...\"
+    }"
+}
+```
 
 ### Testing with netcat
 
