@@ -97,7 +97,7 @@ Data from the connected application is handled as payload within a stream. uplin
     "payload": {...}
 }
 ```
-> **NOTE**: data contained in payload must be JSON formatted as it will be deserialized for a variety of purposes within the IoT platform.
+> **NOTE**: uplink expects values for the `stream`, `sequence` and `timestamp` field to be properly set, the payload maybe as per the requirements of the IoT platform/application.
 
 **Responding with Action Responses**:
 Applications can use Action Response messages to update uplink on the progress of an executing Action. They usually contain information such as a progress counter and error backtrace. Action Responses are handled as Streamed Payloads in the "action_status" stream and thus have to be enclosed as such. uplink expects Action Responses to have the following JSON format:
