@@ -48,14 +48,14 @@ func actionResponse(action_id string, state string, progresss int8) Payload {
 	if err != nil {
 		fmt.Println(err)
 	}
-	return payload("action_status", resp)
+	return payload("action_status", 0, resp)
 }
 
 // Generate payload provided stream and data values
-func payload(stream string, data map[string]interface{}) Payload {
+func payload(stream string, seq int32, data map[string]interface{}) Payload {
 	return Payload{
 		Stream:    stream,
-		Sequence:  0,
+		Sequence:  seq,
 		Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
 		Payload:   data,
 	}
@@ -76,6 +76,26 @@ func reply(writer *json.Encoder, reply Payload) {
 	}
 }
 
+// Example usecase sending gps data
+type GPS struct {
+	Lat float32 `json:"latitude"`
+	Lon float32 `json:"longitude"`
+}
+
+func sendData(writer *json.Encoder) {
+	for i := 0.0; i < 10; i += 0.1 {
+		gpsData := GPS{Lat: float32(i + i*10), Lon: float32(100 - i + i*0.1)}
+		var gps map[string]interface{}
+		r, err := json.Marshal(gpsData)
+		json.Unmarshal(r, &gps)
+		if err != nil {
+			fmt.Println(err)
+		}
+		data := payload("gps", int32(i*10), gps)
+		reply(writer, data)
+	}
+}
+
 func main() {
 	// Connect to uplink via bridge port
 	c, err := net.Dial("tcp", "localhost:5555")
@@ -89,6 +109,9 @@ func main() {
 	// Create new handlers for encoding and decoding JSON
 	reader := json.NewDecoder(c)
 	writer := json.NewEncoder(c)
+
+	go sendData(writer)
+
 	for {
 		// Read data from uplink
 		var action Action
