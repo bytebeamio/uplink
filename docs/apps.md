@@ -5,27 +5,21 @@ uplink handles device data, `Action`s and `ActionResponse`s. An action is receiv
 An `Action` is the term used to refer to messages that carry commands and other information that can be used by uplink or apps connected to it. Some common Actions include the `firmware_update` and `config_update` actions which when executed by the target device will lead to the initiation of an OTA update. A firmware update `Action` messages in JSON would be structured as follows:
 ```js
 {
-    "action_id": "...",         // An integer value that can be used to maintain indempotence
-    "kind": "process",          // May hold values such as control, process, depending on end-use
-    "name": "update_firmware",  // Name given to Action
-    "payload": "{...}"          // Can contain JSON formatted data as a string
+    "action_id": "...", // An integer value that can be used to maintain indempotence
+    "kind": "...",      // May hold values such as control, process, depending on end-use
+    "name": "...",      // Name given to Action
+    "payload": "..."    // Can contain JSON formatted data as a string
 }
 ```
 
 ## Streamed Data
-Connected application can send data to the broker as Streamed Payload. Streams enable uplink to send large amounts of data together, packaged as a single message. An example Streamed Payload is JSON formatted as follows:
+Connected application can send data to the broker as Streamed Payload. Streams enable uplink to send large amounts of data together, packaged as a single message. An example Streamed Payload has the following JSON format:
 ```js
 {
-    "stream": "action_status",  // Name of stream to which data is being sent
-    "sequence": ...,            // Sequence number
-    "timestamp": ...,           // Timestamp at message generation
-    "payload": {                // An Action Response as epayload
-        "action_id": "100",
-        "timestamp": ...,
-        "state": "Completed",
-        "progress": 100,
-        "errors": []
-    }
+    "stream": "...",  // Name of stream to which data is being sent
+    "sequence": ...,  // Sequence number
+    "timestamp": ..., // Timestamp at message generation
+    "payload": {...}  // JSON data
 }
 ```
 
@@ -35,9 +29,9 @@ Connected user applications can send back progress updates for an Action by publ
 {
     "action_id": "...", // The same as the executing Action
     "timestamp": ...,   // Timestamp at response generation, unsigned 64bit integer value
-    "state": "Running", // "Running", "Completed", "Progress" or "Failed", depending on status of Action in execution
-    "progress": 0,      // Denote progress towards Expected Completion, out of 0..100
-    "errors": []        // Contains a list of errors or a backtrace
+    "state": "...",     // "Running", "Completed", "Progress" or "Failed", depending on status of Action in execution
+    "progress": ...,    // Denote progress towards Expected Completion, out of 0..100
+    "errors": [...]     // Contains a list of errors or a backtrace
 }
 ```
 
