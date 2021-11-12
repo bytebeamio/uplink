@@ -75,7 +75,7 @@ impl Storage {
 
         let backlog_files_count = self.backlog_file_ids.len();
         if backlog_files_count > self.max_file_count {
-            // Len always be > 0 due to the above push. doesn't panic
+            // Backlog should always be > 0 given the earliest push. doesn't panic
             let id = self.backlog_file_ids.remove(0);
             warn!("file limit reached. deleting backup@{}", id);
             next.deleted = Some(id);

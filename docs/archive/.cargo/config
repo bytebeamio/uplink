@@ -1,0 +1,4 @@
+[target.arm-unknown-linux-gnueabi]
+linker = "$UPLINK_DIR/.cargo/gcc.sh"
+[build]
+rustflags = ["-C", "rpath"]

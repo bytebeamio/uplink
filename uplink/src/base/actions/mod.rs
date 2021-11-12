@@ -1,3 +1,4 @@
+use super::{Config, Control, Package};
 use async_channel::{Receiver, Sender};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,7 @@ mod ota;
 mod process;
 pub mod tunshell;
 
-use crate::base::{Buffer, Config, Control, Package, Point, Stream};
+use crate::base::{Buffer, Point, Stream};
 pub use controller::Controller;
 
 #[derive(Error, Debug)]
@@ -34,7 +35,10 @@ pub enum Error {
     OtaError(#[from] ota::Error),
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// On the Bytebeam platform, an Action is how beamd and through it,
+/// the end-user, can communicate the tasks they want to perform on
+/// said device, in this case, uplink.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Action {
     // action id
     #[serde(alias = "id")]
@@ -42,9 +46,9 @@ pub struct Action {
     // control or process
     kind: String,
     // action name
-    pub name: String,
+    name: String,
     // action payload. json. can be args/payload. depends on the invoked command
-    payload: String,
+    pub payload: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -161,6 +165,7 @@ impl Actions {
             bridge_tx,
         }
     }
+
     pub async fn start(&mut self) {
         let action_stream = self.actions_rx.take().unwrap();
 

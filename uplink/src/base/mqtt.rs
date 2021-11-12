@@ -24,10 +24,15 @@ pub enum Error {
     ActionForward(#[from] TrySendError<Action>),
 }
 
+/// Interface implementing MQTT protocol to communicate with broker
 pub struct Mqtt {
+    /// Client handle
     client: AsyncClient,
+    /// Event loop handle
     eventloop: EventLoop,
+    /// Handles to channels between threads
     native_actions_tx: Sender<Action>,
+    /// Currently subscribed topic
     actions_subscription: String,
 }
 
@@ -41,10 +46,12 @@ impl Mqtt {
         Mqtt { client, eventloop, native_actions_tx: actions_tx, actions_subscription }
     }
 
+    /// Returns a client handle to MQTT interface
     pub fn client(&mut self) -> AsyncClient {
         self.client.clone()
     }
 
+    /// Poll eventloop to receive packets from broker
     pub async fn start(&mut self) {
         loop {
             match self.eventloop.poll().await {
