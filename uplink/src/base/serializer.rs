@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::io;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use sysinfo::{NetworkExt, NetworksExt, System, SystemExt};
+use sysinfo::{NetworkExt, System, SystemExt};
 use thiserror::Error;
 use tokio::{select, time};
 
@@ -409,9 +409,8 @@ impl Metrics {
 
     // Update metrics values for network and disk usage over time
     pub fn update_metrics(&mut self, last_sent: &mut SystemTime, persistence_path: &String) {
-        let networks = self.sys.networks();
         let (mut incoming_bytes, mut outgoing_bytes) = (0, 0);
-        for (_, data) in networks.iter() {
+        for (_, data) in self.sys.networks() {
             incoming_bytes += data.received();
             outgoing_bytes += data.transmitted();
         }
