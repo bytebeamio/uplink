@@ -9,6 +9,7 @@ use serde::Serialize;
 use std::io;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use sysinfo::{NetworkExt, NetworksExt, System, SystemExt};
 use thiserror::Error;
 use tokio::{select, time};
 
@@ -35,16 +36,16 @@ enum Status {
 /// In case of network issues, the Serializer enters various states depending on severeness, managed by `Serializer::start()`.                                                                                       
 ///
 /// ```text
-///        ┌───────────────────┐                                                                            
+///        ┌───────────────────┐
 ///        │Serializer::start()│
-///        └─────────┬─────────┘ 
+///        └─────────┬─────────┘
 ///                  │
 ///                  │ State transitions happen
 ///                  │ within the loop{}             Load data in Storage from
 ///                  │                               previouse sessions/iterations                  AsyncClient has crashed
 ///          ┌───────▼──────┐                       ┌─────────────────────┐                      ┌───────────────────────┐
 ///          │EventLoopReady├───────────────────────►Serializer::catchup()├──────────────────────►EventLoopCrash(publish)│
-///          └───────▲──────┘                       └──────────┬──────────┘                      └───────────┬───────────┘  
+///          └───────▲──────┘                       └──────────┬──────────┘                      └───────────┬───────────┘
 ///                  │                                         │                                             │
 ///                  │                                         │ No more data left in Storage                │
 ///                  │                                         │                                             │
@@ -67,6 +68,7 @@ pub struct Serializer {
     client: AsyncClient,
     storage: Storage,
     metrics: Metrics,
+    metrics_last_sent: SystemTime,
 }
 
 impl Serializer {
@@ -79,7 +81,14 @@ impl Serializer {
         let metrics_config = config.streams.get("metrics").unwrap();
         let metrics = Metrics::new(&metrics_config.topic);
 
-        Ok(Serializer { config, collector_rx, client, storage, metrics })
+        Ok(Serializer {
+            config,
+            collector_rx,
+            client,
+            storage,
+            metrics,
+            metrics_last_sent: SystemTime::now(),
+        })
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -294,7 +303,7 @@ impl Serializer {
 
                 }
                 _ = interval.tick() => {
-                    let (topic, payload) = self.metrics.next();
+                    let (topic, payload) = self.metrics.next(&mut self.metrics_last_sent, &self.config.persistence.path);
                     let payload_size = payload.len();
                     match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
@@ -339,10 +348,12 @@ async fn send_publish(
     Ok(client)
 }
 
-#[derive(Debug, Default, Clone, Serialize)]
+#[derive(Debug, Default, Serialize)]
 struct Metrics {
     #[serde(skip_serializing)]
     topic: String,
+    #[serde(skip_serializing)]
+    sys: System,
     sequence: u32,
     timestamp: u64,
     total_sent_size: usize,
@@ -350,6 +361,9 @@ struct Metrics {
     lost_segments: usize,
     errors: String,
     error_count: usize,
+    incoming_data_rate: u64,
+    outgoing_data_rate: u64,
+    file_count: usize,
 }
 
 impl Metrics {
@@ -393,7 +407,40 @@ impl Metrics {
         self.errors.push_str(" | ");
     }
 
-    pub fn next(&mut self) -> (&str, Vec<u8>) {
+    pub fn update_metrics(&mut self, last_sent: &mut SystemTime, persistence_path: &String) {
+        let networks = self.sys.networks();
+        let (mut incoming_bytes, mut outgoing_bytes) = (0, 0);
+        for (_, data) in networks.iter() {
+            incoming_bytes += data.received();
+            outgoing_bytes += data.transmitted();
+        }
+
+        let elapsed_seconds = match last_sent.elapsed() {
+            Ok(e) => e.as_secs(),
+            Err(e) => {
+                error!("Couldn't measure time from last_sent: {}", e);
+                return;
+            }
+        };
+
+        self.file_count = match std::fs::read_dir(persistence_path) {
+            Ok(d) => d.count(),
+            Err(e) => {
+                error!("Couldn't find count: {}", e);
+                0
+            }
+        };
+        self.incoming_data_rate = incoming_bytes / elapsed_seconds;
+        self.outgoing_data_rate = outgoing_bytes / elapsed_seconds;
+        self.sys.refresh_networks();
+    }
+
+    pub fn next(
+        &mut self,
+        last_sent: &mut SystemTime,
+        persistence_path: &String,
+    ) -> (&str, Vec<u8>) {
+        self.update_metrics(last_sent, persistence_path);
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
