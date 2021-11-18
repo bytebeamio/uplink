@@ -407,6 +407,7 @@ impl Metrics {
         self.errors.push_str(" | ");
     }
 
+    // Update metrics values for network and disk usage over time
     pub fn update_metrics(&mut self, last_sent: &mut SystemTime, persistence_path: &String) {
         let networks = self.sys.networks();
         let (mut incoming_bytes, mut outgoing_bytes) = (0, 0);
@@ -432,7 +433,10 @@ impl Metrics {
         };
         self.incoming_data_rate = incoming_bytes / elapsed_seconds;
         self.outgoing_data_rate = outgoing_bytes / elapsed_seconds;
+
+        // Refresh network byte-rate counter and time handle
         self.sys.refresh_networks();
+        *last_sent = SystemTime::now();
     }
 
     pub fn next(
@@ -440,6 +444,7 @@ impl Metrics {
         last_sent: &mut SystemTime,
         persistence_path: &String,
     ) -> (&str, Vec<u8>) {
+        // Update network and disk usage metrics
         self.update_metrics(last_sent, persistence_path);
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
