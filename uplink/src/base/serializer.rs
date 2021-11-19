@@ -8,7 +8,7 @@ use rumqttc::*;
 use serde::Serialize;
 use std::io;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::{NetworkExt, System, SystemExt};
 use thiserror::Error;
 use tokio::{select, time};
@@ -68,7 +68,7 @@ pub struct Serializer {
     client: AsyncClient,
     storage: Storage,
     metrics: Metrics,
-    metrics_last_sent: SystemTime,
+    metrics_last_sent: Instant,
 }
 
 impl Serializer {
@@ -87,7 +87,7 @@ impl Serializer {
             client,
             storage,
             metrics,
-            metrics_last_sent: SystemTime::now(),
+            metrics_last_sent: Instant::now(),
         })
     }
 
@@ -408,20 +408,14 @@ impl Metrics {
     }
 
     // Update metrics values for network and disk usage over time
-    pub fn update_metrics(&mut self, last_sent: &mut SystemTime, persistence_path: &String) {
-        let (mut incoming_bytes, mut outgoing_bytes) = (0, 0);
+    pub fn update_metrics(&mut self, last_sent: &mut Instant, persistence_path: &String) {
+        let (mut incoming_bytes, mut outgoing_bytes) = (0.0, 0.0);
         for (_, data) in self.sys.networks() {
-            incoming_bytes += data.received();
-            outgoing_bytes += data.transmitted();
+            incoming_bytes += data.received() as f64;
+            outgoing_bytes += data.transmitted() as f64;
         }
 
-        let elapsed_nanos = match last_sent.elapsed() {
-            Ok(e) => e.as_nanos(),
-            Err(e) => {
-                error!("Couldn't measure time from last_sent: {}", e);
-                return;
-            }
-        };
+        let elapsed_secs = last_sent.elapsed().as_secs_f64();
 
         self.file_count = match std::fs::read_dir(persistence_path) {
             Ok(d) => d.count(),
@@ -431,22 +425,22 @@ impl Metrics {
             }
         };
 
-        if elapsed_nanos == 0 {
+        if elapsed_secs == 0.0 {
             error!("Zero time measured from last_sent");
             return;
         }
 
-        self.incoming_data_rate = incoming_bytes as f64 / elapsed_nanos as f64;
-        self.outgoing_data_rate = outgoing_bytes as f64 / elapsed_nanos as f64;
+        self.incoming_data_rate = incoming_bytes / elapsed_secs;
+        self.outgoing_data_rate = outgoing_bytes / elapsed_secs;
 
         // Refresh network byte-rate counter and time handle
         self.sys.refresh_networks();
-        *last_sent = SystemTime::now();
+        *last_sent = Instant::now();
     }
 
     pub fn next(
         &mut self,
-        last_sent: &mut SystemTime,
+        last_sent: &mut Instant,
         persistence_path: &String,
     ) -> (&str, Vec<u8>) {
         // Update network and disk usage metrics
