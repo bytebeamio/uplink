@@ -8,8 +8,7 @@ use rumqttc::*;
 use serde::Serialize;
 use std::io;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use sysinfo::{NetworkExt, System, SystemExt};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::{select, time};
 
@@ -68,7 +67,6 @@ pub struct Serializer {
     client: AsyncClient,
     storage: Storage,
     metrics: Metrics,
-    metrics_last_update: Instant,
 }
 
 impl Serializer {
@@ -81,14 +79,7 @@ impl Serializer {
         let metrics_config = config.streams.get("metrics").unwrap();
         let metrics = Metrics::new(&metrics_config.topic);
 
-        Ok(Serializer {
-            config,
-            collector_rx,
-            client,
-            storage,
-            metrics,
-            metrics_last_update: Instant::now(),
-        })
+        Ok(Serializer { config, collector_rx, client, storage, metrics })
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -303,7 +294,7 @@ impl Serializer {
 
                 }
                 _ = interval.tick() => {
-                    let (topic, payload) = self.metrics.next(&mut self.metrics_last_update, &self.config.persistence.path);
+                    let (topic, payload) = self.metrics.next();
                     let payload_size = payload.len();
                     match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
@@ -352,8 +343,6 @@ async fn send_publish(
 struct Metrics {
     #[serde(skip_serializing)]
     topic: String,
-    #[serde(skip_serializing)]
-    sys: System,
     sequence: u32,
     timestamp: u64,
     total_sent_size: usize,
@@ -361,9 +350,6 @@ struct Metrics {
     lost_segments: usize,
     errors: String,
     error_count: usize,
-    incoming_data_rate: f64,
-    outgoing_data_rate: f64,
-    file_count: usize,
 }
 
 impl Metrics {
@@ -407,47 +393,7 @@ impl Metrics {
         self.errors.push_str(" | ");
     }
 
-    // Update metrics values for network and disk usage over time
-    pub fn update_metrics(&mut self, last_update: &mut Instant, persistence_path: &String) {
-        // Accumulate byte count from all network interfaces
-        let (mut incoming_bytes, mut outgoing_bytes) = (0.0, 0.0);
-        for (_, data) in self.sys.networks() {
-            incoming_bytes += data.received() as f64;
-            outgoing_bytes += data.transmitted() as f64;
-        }
-
-        // Measure time from last update
-        let elapsed_secs = last_update.elapsed().as_secs_f64();
-        if elapsed_secs == 0.0 {
-            error!("Zero time measured from last_update");
-            return;
-        }
-
-        self.incoming_data_rate = incoming_bytes / elapsed_secs;
-        self.outgoing_data_rate = outgoing_bytes / elapsed_secs;
-
-        // Refresh network byte-rate counter and time handle
-        self.sys.refresh_networks();
-        *last_update = Instant::now();
-        
-        // Extrac file count from persistence directory
-        self.file_count = match std::fs::read_dir(persistence_path) {
-            Ok(d) => d.count(),
-            Err(e) => {
-                error!("Couldn't find file count: {}", e);
-                return;
-            }
-        };
-
-    }
-
-    pub fn next(
-        &mut self,
-        last_update: &mut Instant,
-        persistence_path: &String,
-    ) -> (&str, Vec<u8>) {
-        // Update network and disk usage metrics
-        self.update_metrics(last_update, persistence_path);
+    pub fn next(&mut self) -> (&str, Vec<u8>) {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
