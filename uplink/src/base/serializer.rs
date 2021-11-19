@@ -68,7 +68,7 @@ pub struct Serializer {
     client: AsyncClient,
     storage: Storage,
     metrics: Metrics,
-    metrics_last_sent: Instant,
+    metrics_last_update: Instant,
 }
 
 impl Serializer {
@@ -87,7 +87,7 @@ impl Serializer {
             client,
             storage,
             metrics,
-            metrics_last_sent: Instant::now(),
+            metrics_last_update: Instant::now(),
         })
     }
 
@@ -303,7 +303,7 @@ impl Serializer {
 
                 }
                 _ = interval.tick() => {
-                    let (topic, payload) = self.metrics.next(&mut self.metrics_last_sent, &self.config.persistence.path);
+                    let (topic, payload) = self.metrics.next(&mut self.metrics_last_update, &self.config.persistence.path);
                     let payload_size = payload.len();
                     match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
@@ -408,25 +408,18 @@ impl Metrics {
     }
 
     // Update metrics values for network and disk usage over time
-    pub fn update_metrics(&mut self, last_sent: &mut Instant, persistence_path: &String) {
+    pub fn update_metrics(&mut self, last_update: &mut Instant, persistence_path: &String) {
+        // Accumulate byte count from all network interfaces
         let (mut incoming_bytes, mut outgoing_bytes) = (0.0, 0.0);
         for (_, data) in self.sys.networks() {
             incoming_bytes += data.received() as f64;
             outgoing_bytes += data.transmitted() as f64;
         }
 
-        let elapsed_secs = last_sent.elapsed().as_secs_f64();
-
-        self.file_count = match std::fs::read_dir(persistence_path) {
-            Ok(d) => d.count(),
-            Err(e) => {
-                error!("Couldn't find count: {}", e);
-                0
-            }
-        };
-
+        // Measure time from last update
+        let elapsed_secs = last_update.elapsed().as_secs_f64();
         if elapsed_secs == 0.0 {
-            error!("Zero time measured from last_sent");
+            error!("Zero time measured from last_update");
             return;
         }
 
@@ -435,16 +428,26 @@ impl Metrics {
 
         // Refresh network byte-rate counter and time handle
         self.sys.refresh_networks();
-        *last_sent = Instant::now();
+        *last_update = Instant::now();
+        
+        // Extrac file count from persistence directory
+        self.file_count = match std::fs::read_dir(persistence_path) {
+            Ok(d) => d.count(),
+            Err(e) => {
+                error!("Couldn't find file count: {}", e);
+                return;
+            }
+        };
+
     }
 
     pub fn next(
         &mut self,
-        last_sent: &mut Instant,
+        last_update: &mut Instant,
         persistence_path: &String,
     ) -> (&str, Vec<u8>) {
         // Update network and disk usage metrics
-        self.update_metrics(last_sent, persistence_path);
+        self.update_metrics(last_update, persistence_path);
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
