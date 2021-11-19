@@ -361,8 +361,8 @@ struct Metrics {
     lost_segments: usize,
     errors: String,
     error_count: usize,
-    incoming_data_rate: u64,
-    outgoing_data_rate: u64,
+    incoming_data_rate: f64,
+    outgoing_data_rate: f64,
     file_count: usize,
 }
 
@@ -415,8 +415,8 @@ impl Metrics {
             outgoing_bytes += data.transmitted();
         }
 
-        let elapsed_seconds = match last_sent.elapsed() {
-            Ok(e) => e.as_secs(),
+        let elapsed_nanos = match last_sent.elapsed() {
+            Ok(e) => e.as_nanos(),
             Err(e) => {
                 error!("Couldn't measure time from last_sent: {}", e);
                 return;
@@ -430,8 +430,14 @@ impl Metrics {
                 0
             }
         };
-        self.incoming_data_rate = incoming_bytes / elapsed_seconds;
-        self.outgoing_data_rate = outgoing_bytes / elapsed_seconds;
+
+        if elapsed_nanos == 0 {
+            error!("Zero time measured from last_sent");
+            return;
+        }
+
+        self.incoming_data_rate = incoming_bytes as f64 / elapsed_nanos as f64;
+        self.outgoing_data_rate = outgoing_bytes as f64 / elapsed_nanos as f64;
 
         // Refresh network byte-rate counter and time handle
         self.sys.refresh_networks();
