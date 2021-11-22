@@ -1,4 +1,3 @@
-use async_channel::Sender;
 use log::error;
 use serde::Serialize;
 use sysinfo::{DiskExt, NetworkData, NetworkExt, System, SystemExt};
@@ -13,38 +12,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
 }
 
-pub async fn spawn_telemetry_collector(config: Arc<Config>, tx: Sender<Box<dyn Package>>) {
-    let update_duration = Duration::from_millis(10);
-    let stream_name = "telemetry";
-
-    let telemetry_cfg = match config.streams.get(stream_name) {
-        Some(c) => c,
-        None => {
-            error!("Couldn't find config for telemetry stream");
-            return;
-        }
-    };
-    let mut telemetry_stream =
-        Stream::new(stream_name, &telemetry_cfg.topic, telemetry_cfg.buf_size, tx);
-
-    let mut telemetry = TelemetryHandler::init(&update_duration, config);
-
-    loop {
-        tokio::time::sleep(update_duration).await;
-
-        let data = match telemetry.refresh() {
-            Ok(d) => d,
-            Err(e) => {
-                error!("Faced error while refreshing telemetrics: {}", e);
-                return;
-            }
-        };
-
-        if let Err(e) = telemetry_stream.fill(data).await {
-            error!("Couldn't send telemetry: {}", e);
-        }
-    }
-}
+const TIME_PERIOD_SECS: f64 = 10.0;
 
 #[derive(Debug, Default, Serialize, Clone)]
 struct SysInfo {
@@ -79,11 +47,8 @@ struct Net {
 }
 
 impl Net {
-    fn init(update_duration: &Duration) -> Self {
-        // Time between update
-        let elapsed_secs = update_duration.as_secs_f64();
-
-        Net { elapsed_secs, ..Default::default() }
+    fn init() -> Self {
+        Net { elapsed_secs: TIME_PERIOD_SECS, ..Default::default() }
     }
 
     /// Update metrics values for network usage over time
@@ -133,7 +98,7 @@ struct Mem {
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
-struct Telemetrics {
+pub struct Telemetrics {
     sysinfo: SysInfo,
     processes: HashMap<i32, Process>,
     procs: HashMap<i32, Proc>,
@@ -143,15 +108,15 @@ struct Telemetrics {
 }
 
 #[derive(Debug)]
-struct TelemetryHandler {
+pub struct TelemetryHandler {
     sys: System,
     data: Telemetrics,
     config: Arc<Config>,
-    update_duration: Duration,
+    stream: Stream<Telemetrics>,
 }
 
 impl TelemetryHandler {
-    fn init(update_duration: &Duration, config: Arc<Config>) -> Self {
+    pub fn new(config: Arc<Config>, stream: Stream<Telemetrics>) -> Self {
         let sys = System::default();
 
         let sysinfo = SysInfo::init(&sys);
@@ -164,12 +129,30 @@ impl TelemetryHandler {
 
         let mut nets = HashMap::new();
         for (name, _) in sys.networks() {
-            nets.insert(name.clone(), Net::init(update_duration));
+            nets.insert(name.clone(), Net::init());
         }
 
         let data = Telemetrics { sysinfo, disks, nets, ..Default::default() };
 
-        TelemetryHandler { sys, data, config, update_duration: update_duration.clone() }
+        TelemetryHandler { sys, data, config, stream }
+    }
+
+    pub async fn start(mut self) {
+        loop {
+            tokio::time::sleep(Duration::from_secs_f64(TIME_PERIOD_SECS)).await;
+
+            let data = match self.refresh() {
+                Ok(d) => d,
+                Err(e) => {
+                    error!("Faced error while refreshing telemetrics: {}", e);
+                    return;
+                }
+            };
+
+            if let Err(e) = self.stream.fill(data).await {
+                error!("Couldn't send telemetry: {}", e);
+            }
+        }
     }
 
     fn refresh(&mut self) -> Result<Telemetrics, Error> {
@@ -182,8 +165,7 @@ impl TelemetryHandler {
 
         // Refresh network byte rate info
         for (interface, net_data) in self.sys.networks() {
-            let net =
-                self.data.nets.entry(interface.clone()).or_insert(Net::init(&self.update_duration));
+            let net = self.data.nets.entry(interface.clone()).or_insert(Net::init());
             net.refresh(net_data)
         }
 

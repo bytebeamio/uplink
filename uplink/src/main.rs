@@ -67,7 +67,7 @@ use crate::base::Stream;
 
 use crate::collector::simulator::Simulator;
 use crate::collector::tcpjson::Bridge;
-use crate::collector::telemetry::spawn_telemetry_collector;
+use crate::collector::telemetry::TelemetryHandler;
 
 use base::Config;
 use disk::Storage;
@@ -277,10 +277,16 @@ async fn main() -> Result<(), Error> {
     }
 
     if enable_telemetry {
-        let telemetry_config = config.clone();
-        let data_tx = collector_tx.clone();
-        task::spawn(async {
-            spawn_telemetry_collector(telemetry_config, data_tx).await;
+        let telemetrics_config = config.streams.get("telemetrics").unwrap();
+        let telemetrics_stream = Stream::new(
+            "telemetrics",
+            &telemetrics_config.topic,
+            telemetrics_config.buf_size,
+            collector_tx.clone(),
+        );
+        let telemetry = TelemetryHandler::new(config.clone(), telemetrics_stream);
+        task::spawn(async move {
+            telemetry.start().await;
         });
     }
 
