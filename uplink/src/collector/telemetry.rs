@@ -1,8 +1,8 @@
 use log::error;
 use serde::Serialize;
-use sysinfo::{DiskExt, NetworkData, NetworkExt, System, SystemExt};
+use sysinfo::{DiskExt, NetworkData, NetworkExt, ProcessExt, ProcessorExt, System, SystemExt};
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 use crate::base::{Buffer, Config, Package, Point, Stream};
 
@@ -39,22 +39,16 @@ impl SysInfo {
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
-struct Net {
-    #[serde(skip_serializing)]
-    elapsed_secs: f64,
+struct Network {
     incoming_data_rate: f64,
     outgoing_data_rate: f64,
 }
 
-impl Net {
-    fn init() -> Self {
-        Net { elapsed_secs: TIME_PERIOD_SECS, ..Default::default() }
-    }
-
+impl Network {
     /// Update metrics values for network usage over time
     fn refresh(&mut self, data: &NetworkData) {
-        self.incoming_data_rate = data.received() as f64 / self.elapsed_secs;
-        self.outgoing_data_rate = data.transmitted() as f64 / self.elapsed_secs;
+        self.incoming_data_rate = data.received() as f64 / TIME_PERIOD_SECS;
+        self.outgoing_data_rate = data.transmitted() as f64 / TIME_PERIOD_SECS;
     }
 }
 
@@ -75,20 +69,47 @@ impl Disk {
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
-struct Proc {
-    frequency: f64,
-    usage: f64,
-    load_avg: f64,
+struct Processor {
+    frequency: u64,
+    usage: f32,
+    load_avg: f32,
 }
 
-impl Proc {}
+impl Processor {
+    fn refresh(&mut self, proc: &sysinfo::Processor) {
+        self.frequency = proc.frequency();
+        self.usage = proc.cpu_usage();
+        self.load_avg += self.usage;
+        self.load_avg /= 2.0 * TIME_PERIOD_SECS as f32;
+    }
+}
+
+#[derive(Debug, Default, Serialize, Clone)]
+struct DiskUsage {
+    total_written_bytes: u64,
+    written_bytes: u64,
+    total_read_bytes: u64,
+    read_bytes: u64,
+}
 
 #[derive(Debug, Default, Serialize, Clone)]
 struct Process {
-    cpu_usage: f64,
-    mem_usage: f64,
-    disk_usage: f64,
+    cpu_usage: f32,
+    mem_usage: u64,
+    disk_usage: DiskUsage,
     start_time: u64,
+}
+
+impl Process {
+    fn refresh(&mut self, proc: &sysinfo::Process) {
+        let sysinfo::DiskUsage { total_written_bytes, written_bytes, total_read_bytes, read_bytes } =
+            proc.disk_usage();
+        self.disk_usage =
+            DiskUsage { total_written_bytes, written_bytes, total_read_bytes, read_bytes };
+        self.cpu_usage = proc.cpu_usage();
+        self.mem_usage = proc.memory();
+        self.start_time = proc.start_time();
+    }
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
@@ -99,10 +120,13 @@ struct Mem {
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct Telemetrics {
+    sequence: u32,
+    timestamp: u64,
     sysinfo: SysInfo,
     processes: HashMap<i32, Process>,
-    procs: HashMap<i32, Proc>,
-    nets: HashMap<String, Net>,
+    processors: HashMap<String, Processor>,
+    networks: HashMap<String, Network>,
+    memory: Mem,
     disks: HashMap<String, Disk>,
     file_count: usize,
 }
@@ -127,12 +151,21 @@ impl TelemetryHandler {
             disks.insert(disk_name, Disk::init(disk_data));
         }
 
-        let mut nets = HashMap::new();
+        let mut networks = HashMap::new();
         for (name, _) in sys.networks() {
-            nets.insert(name.clone(), Net::init());
+            networks.insert(name.clone(), Network::default());
         }
 
-        let data = Telemetrics { sysinfo, disks, nets, ..Default::default() };
+        let mut processors = HashMap::new();
+        for proc in sys.processors().iter() {
+            processors.insert(proc.name().to_owned(), Processor::default());
+        }
+
+        let memory = Mem { total: sys.total_memory(), available: sys.available_memory() };
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+
+        let data =
+            Telemetrics { timestamp, sysinfo, disks, networks, processors, memory, ..Default::default() };
 
         TelemetryHandler { sys, data, config, stream }
     }
@@ -156,6 +189,7 @@ impl TelemetryHandler {
     }
 
     fn refresh(&mut self) -> Result<Telemetrics, Error> {
+        self.data.sequence += 1;
         self.data.sysinfo.refresh(&self.sys);
 
         for disk_data in self.sys.disks() {
@@ -165,9 +199,25 @@ impl TelemetryHandler {
 
         // Refresh network byte rate info
         for (interface, net_data) in self.sys.networks() {
-            let net = self.data.nets.entry(interface.clone()).or_insert(Net::init());
+            let net = self.data.networks.entry(interface.clone()).or_default();
             net.refresh(net_data)
         }
+
+        // Refresh processor data
+        for proc_data in self.sys.processors().iter() {
+            let proc_name = proc_data.name().to_string();
+            let proc = self.data.processors.entry(proc_name).or_default();
+            proc.refresh(proc_data)
+        }
+
+        // Refresh data on processes
+        let mut processes = HashMap::new();
+        for (&id, p) in self.sys.processes() {
+            let mut proc = Process::default();
+            proc.refresh(p);
+            processes.insert(id, proc);
+        }
+        self.data.processes = processes;
 
         // Extract file count from persistence directory
         self.data.file_count = match std::fs::read_dir(&self.config.persistence.path) {
@@ -177,6 +227,9 @@ impl TelemetryHandler {
                 return Err(Error::Io(e));
             }
         };
+
+        self.data.memory.available = self.sys.available_memory();
+        self.data.timestamp += TIME_PERIOD_SECS as u64; 
 
         // Refresh sysinfo counters
         self.sys.refresh_all();
@@ -188,11 +241,11 @@ impl TelemetryHandler {
 // TODO: Make changes to ensure this works properly
 impl Point for Telemetrics {
     fn sequence(&self) -> u32 {
-        0
+        self.sequence
     }
 
     fn timestamp(&self) -> u64 {
-        0
+        self.timestamp
     }
 }
 
@@ -203,7 +256,7 @@ impl Package for Buffer<Telemetrics> {
     }
 
     fn serialize(&self) -> Vec<u8> {
-        vec![]
+        serde_json::to_vec(&self.buffer).map_or(vec![], |c| c)
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
