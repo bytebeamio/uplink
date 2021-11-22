@@ -67,6 +67,7 @@ use crate::base::Stream;
 
 use crate::collector::simulator::Simulator;
 use crate::collector::tcpjson::Bridge;
+use crate::collector::telemetry::spawn_telemetry_collector;
 
 use base::Config;
 use disk::Storage;
@@ -96,6 +97,9 @@ pub struct CommandLine {
     /// list of modules to log
     #[structopt(short = "s", long = "simulator")]
     simulator: bool,
+    /// Toggle for telemetrics collector
+    #[structopt(short = "t", long = "telemetrics")]
+    telemetrics: bool,
     /// log level (v: info, vv: debug, vvv: trace)
     #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
     verbose: u8,
@@ -220,6 +224,7 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
     let enable_simulator = commandline.simulator;
+    let enable_telemetry = commandline.telemetrics;
 
     initialize_logging(&commandline);
     let config = Arc::new(initalize_config(&commandline)?);
@@ -268,6 +273,14 @@ async fn main() -> Result<(), Error> {
         task::spawn(async {
             let mut simulator = Simulator::new(simulator_config, data_tx);
             simulator.start().await;
+        });
+    }
+
+    if enable_telemetry {
+        let telemetry_config = config.clone();
+        let data_tx = collector_tx.clone();
+        task::spawn(async {
+            spawn_telemetry_collector(telemetry_config, data_tx).await;
         });
     }
 
