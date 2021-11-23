@@ -2,7 +2,11 @@ use log::error;
 use serde::Serialize;
 use sysinfo::{DiskExt, NetworkData, NetworkExt, ProcessExt, ProcessorExt, System, SystemExt};
 
-use std::{collections::HashMap, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use crate::base::{Buffer, Config, Package, Point, Stream};
 
@@ -15,10 +19,21 @@ pub enum Error {
 const TIME_PERIOD_SECS: f64 = 10.0;
 
 #[derive(Debug, Default, Serialize, Clone)]
+struct LoadAvg {
+    /// Average load within one minute.
+    pub one: f64,
+    /// Average load within five minutes.
+    pub five: f64,
+    /// Average load within fifteen minutes.
+    pub fifteen: f64,
+}
+
+#[derive(Debug, Default, Serialize, Clone)]
 struct SysInfo {
     kernel_version: String,
     uptime: u64,
     no_processes: usize,
+    load_avg: LoadAvg,
 }
 
 impl SysInfo {
@@ -35,6 +50,8 @@ impl SysInfo {
     fn refresh(&mut self, sys: &System) {
         self.uptime = sys.uptime();
         self.no_processes = sys.processes().len();
+        let sysinfo::LoadAvg { one, five, fifteen } = sys.load_average();
+        self.load_avg = LoadAvg { one, five, fifteen };
     }
 }
 
@@ -72,15 +89,12 @@ impl Disk {
 struct Processor {
     frequency: u64,
     usage: f32,
-    load_avg: f32,
 }
 
 impl Processor {
     fn refresh(&mut self, proc: &sysinfo::Processor) {
         self.frequency = proc.frequency();
         self.usage = proc.cpu_usage();
-        self.load_avg += self.usage;
-        self.load_avg /= 2.0 * TIME_PERIOD_SECS as f32;
     }
 }
 
@@ -164,8 +178,15 @@ impl StatCollector {
         let memory = Mem { total: sys.total_memory(), available: sys.available_memory() };
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
-        let stats =
-            SystemStats { timestamp, sysinfo, disks, networks, processors, memory, ..Default::default() };
+        let stats = SystemStats {
+            timestamp,
+            sysinfo,
+            disks,
+            networks,
+            processors,
+            memory,
+            ..Default::default()
+        };
 
         StatCollector { sys, stats, config, stat_stream }
     }
@@ -229,7 +250,7 @@ impl StatCollector {
         };
 
         self.stats.memory.available = self.sys.available_memory();
-        self.stats.timestamp += TIME_PERIOD_SECS as u64; 
+        self.stats.timestamp += TIME_PERIOD_SECS as u64;
 
         // Refresh sysinfo counters
         self.sys.refresh_all();
