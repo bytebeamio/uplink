@@ -1,3 +1,4 @@
+use flume::Sender;
 use log::error;
 use serde::Serialize;
 use sysinfo::{DiskExt, NetworkData, NetworkExt, ProcessExt, ProcessorExt, System, SystemExt};
@@ -57,11 +58,16 @@ impl SysInfo {
 
 #[derive(Debug, Default, Serialize, Clone)]
 struct Network {
+    name: String,
     incoming_data_rate: f64,
     outgoing_data_rate: f64,
 }
 
 impl Network {
+    fn init(name: String) -> Self {
+        Network { name, ..Default::default() }
+    }
+
     /// Update metrics values for network usage over time
     fn refresh(&mut self, data: &NetworkData) {
         self.incoming_data_rate = data.received() as f64 / TIME_PERIOD_SECS;
@@ -69,15 +75,42 @@ impl Network {
     }
 }
 
+// TODO: Make changes to ensure this works properly
+impl Point for Network {
+    fn sequence(&self) -> u32 {
+        0
+    }
+
+    fn timestamp(&self) -> u64 {
+        0
+    }
+}
+
+// TODO: Make changes to ensure this works properly
+impl Package for Buffer<Network> {
+    fn topic(&self) -> Arc<String> {
+        self.topic.clone()
+    }
+
+    fn serialize(&self) -> Vec<u8> {
+        serde_json::to_vec(&self.buffer).map_or(vec![], |c| c)
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        Some((self.anomalies.clone(), self.anomaly_count))
+    }
+}
+
 #[derive(Debug, Serialize, Clone)]
 struct Disk {
+    name: String,
     total: u64,
     available: u64,
 }
 
 impl Disk {
-    fn init(disk: &sysinfo::Disk) -> Self {
-        Disk { total: disk.total_space(), available: disk.available_space() }
+    fn init(name: String, disk: &sysinfo::Disk) -> Self {
+        Disk { name, total: disk.total_space(), available: disk.available_space() }
     }
 
     fn refresh(&mut self, disk: &sysinfo::Disk) {
@@ -85,16 +118,73 @@ impl Disk {
     }
 }
 
+// TODO: Make changes to ensure this works properly
+impl Point for Disk {
+    fn sequence(&self) -> u32 {
+        0
+    }
+
+    fn timestamp(&self) -> u64 {
+        0
+    }
+}
+
+// TODO: Make changes to ensure this works properly
+impl Package for Buffer<Disk> {
+    fn topic(&self) -> Arc<String> {
+        self.topic.clone()
+    }
+
+    fn serialize(&self) -> Vec<u8> {
+        serde_json::to_vec(&self.buffer).map_or(vec![], |c| c)
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        Some((self.anomalies.clone(), self.anomaly_count))
+    }
+}
+
 #[derive(Debug, Default, Serialize, Clone)]
 struct Processor {
+    name: String,
     frequency: u64,
     usage: f32,
 }
 
 impl Processor {
+    fn init(name: String) -> Self {
+        Processor { name, ..Default::default() }
+    }
+
     fn refresh(&mut self, proc: &sysinfo::Processor) {
         self.frequency = proc.frequency();
         self.usage = proc.cpu_usage();
+    }
+}
+
+// TODO: Make changes to ensure this works properly
+impl Point for Processor {
+    fn sequence(&self) -> u32 {
+        0
+    }
+
+    fn timestamp(&self) -> u64 {
+        0
+    }
+}
+
+// TODO: Make changes to ensure this works properly
+impl Package for Buffer<Processor> {
+    fn topic(&self) -> Arc<String> {
+        self.topic.clone()
+    }
+
+    fn serialize(&self) -> Vec<u8> {
+        serde_json::to_vec(&self.buffer).map_or(vec![], |c| c)
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        Some((self.anomalies.clone(), self.anomaly_count))
     }
 }
 
@@ -108,6 +198,7 @@ struct DiskUsage {
 
 #[derive(Debug, Default, Serialize, Clone)]
 struct Process {
+    id: i32,
     cpu_usage: f32,
     mem_usage: u64,
     disk_usage: DiskUsage,
@@ -115,6 +206,10 @@ struct Process {
 }
 
 impl Process {
+    fn init(id: i32, start_time: u64) -> Self {
+        Process { id, start_time, ..Default::default() }
+    }
+
     fn refresh(&mut self, proc: &sysinfo::Process) {
         let sysinfo::DiskUsage { total_written_bytes, written_bytes, total_read_bytes, read_bytes } =
             proc.disk_usage();
@@ -122,7 +217,32 @@ impl Process {
             DiskUsage { total_written_bytes, written_bytes, total_read_bytes, read_bytes };
         self.cpu_usage = proc.cpu_usage();
         self.mem_usage = proc.memory();
-        self.start_time = proc.start_time();
+    }
+}
+
+// TODO: Make changes to ensure this works properly
+impl Point for Process {
+    fn sequence(&self) -> u32 {
+        0
+    }
+
+    fn timestamp(&self) -> u64 {
+        0
+    }
+}
+
+// TODO: Make changes to ensure this works properly
+impl Package for Buffer<Process> {
+    fn topic(&self) -> Arc<String> {
+        self.topic.clone()
+    }
+
+    fn serialize(&self) -> Vec<u8> {
+        serde_json::to_vec(&self.buffer).map_or(vec![], |c| c)
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        Some((self.anomalies.clone(), self.anomaly_count))
     }
 }
 
@@ -137,126 +257,8 @@ pub struct SystemStats {
     sequence: u32,
     timestamp: u64,
     sysinfo: SysInfo,
-    processes: HashMap<i32, Process>,
-    processors: HashMap<String, Processor>,
-    networks: HashMap<String, Network>,
     memory: Mem,
-    disks: HashMap<String, Disk>,
     file_count: usize,
-}
-
-#[derive(Debug)]
-pub struct StatCollector {
-    sys: System,
-    stats: SystemStats,
-    config: Arc<Config>,
-    stat_stream: Stream<SystemStats>,
-}
-
-impl StatCollector {
-    pub fn new(config: Arc<Config>, stat_stream: Stream<SystemStats>) -> Self {
-        let sys = System::default();
-
-        let sysinfo = SysInfo::init(&sys);
-
-        let mut disks = HashMap::new();
-        for disk_data in sys.disks() {
-            let disk_name = disk_data.name().to_string_lossy().to_string();
-            disks.insert(disk_name, Disk::init(disk_data));
-        }
-
-        let mut networks = HashMap::new();
-        for (name, _) in sys.networks() {
-            networks.insert(name.clone(), Network::default());
-        }
-
-        let mut processors = HashMap::new();
-        for proc in sys.processors().iter() {
-            processors.insert(proc.name().to_owned(), Processor::default());
-        }
-
-        let memory = Mem { total: sys.total_memory(), available: sys.available_memory() };
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-
-        let stats = SystemStats {
-            timestamp,
-            sysinfo,
-            disks,
-            networks,
-            processors,
-            memory,
-            ..Default::default()
-        };
-
-        StatCollector { sys, stats, config, stat_stream }
-    }
-
-    pub fn start(mut self) {
-        loop {
-            std::thread::sleep(Duration::from_secs_f64(TIME_PERIOD_SECS));
-
-            let data = match self.refresh() {
-                Ok(d) => d,
-                Err(e) => {
-                    error!("Faced error while refreshing telemetrics: {}", e);
-                    return;
-                }
-            };
-
-            if let Err(e) = self.stat_stream.fill_sync(data) {
-                error!("Couldn't send telemetry: {}", e);
-            }
-        }
-    }
-
-    fn refresh(&mut self) -> Result<SystemStats, Error> {
-        self.stats.sequence += 1;
-        self.stats.sysinfo.refresh(&self.sys);
-
-        for disk_data in self.sys.disks() {
-            let disk_name = disk_data.name().to_string_lossy().to_string();
-            self.stats.disks.entry(disk_name).or_insert(Disk::init(disk_data)).refresh(disk_data);
-        }
-
-        // Refresh network byte rate info
-        for (interface, net_data) in self.sys.networks() {
-            let net = self.stats.networks.entry(interface.clone()).or_default();
-            net.refresh(net_data)
-        }
-
-        // Refresh processor data
-        for proc_data in self.sys.processors().iter() {
-            let proc_name = proc_data.name().to_string();
-            let proc = self.stats.processors.entry(proc_name).or_default();
-            proc.refresh(proc_data)
-        }
-
-        // Refresh data on processes
-        let mut processes = HashMap::new();
-        for (&id, p) in self.sys.processes() {
-            let mut proc = Process::default();
-            proc.refresh(p);
-            processes.insert(id, proc);
-        }
-        self.stats.processes = processes;
-
-        // Extract file count from persistence directory
-        self.stats.file_count = match std::fs::read_dir(&self.config.persistence.path) {
-            Ok(d) => d.count(),
-            Err(e) => {
-                error!("Couldn't find file count: {}", e);
-                return Err(Error::Io(e));
-            }
-        };
-
-        self.stats.memory.available = self.sys.available_memory();
-        self.stats.timestamp += TIME_PERIOD_SECS as u64;
-
-        // Refresh sysinfo counters
-        self.sys.refresh_all();
-
-        Ok(self.stats.clone())
-    }
 }
 
 // TODO: Make changes to ensure this works properly
@@ -282,5 +284,187 @@ impl Package for Buffer<SystemStats> {
 
     fn anomalies(&self) -> Option<(String, usize)> {
         Some((self.anomalies.clone(), self.anomaly_count))
+    }
+}
+
+struct Streams {
+    system: Stream<SystemStats>,
+    processors: Stream<Processor>,
+    processes: Stream<Process>,
+    disks: Stream<Disk>,
+    networks: Stream<Network>,
+}
+
+impl Streams {
+    fn init(tx: Sender<Box<dyn Package>>, config: &Arc<Config>) -> Self {
+        let system_stream_config = config.streams.get("system_stats").unwrap();
+        let system = Stream::new(
+            "system_stats",
+            &system_stream_config.topic,
+            system_stream_config.buf_size,
+            tx.clone(),
+        );
+
+        let processor_stream_config = config.streams.get("processor_stats").unwrap();
+        let processors = Stream::new(
+            "processor_stats",
+            &processor_stream_config.topic,
+            processor_stream_config.buf_size,
+            tx.clone(),
+        );
+
+        let process_stream_config = config.streams.get("process_stats").unwrap();
+        let processes = Stream::new(
+            "process_stats",
+            &process_stream_config.topic,
+            process_stream_config.buf_size,
+            tx.clone(),
+        );
+
+        let disk_stream_config = config.streams.get("disk_stats").unwrap();
+        let disks = Stream::new(
+            "disk_stats",
+            &disk_stream_config.topic,
+            disk_stream_config.buf_size,
+            tx.clone(),
+        );
+
+        let net_stream_config = config.streams.get("network_stats").unwrap();
+        let networks = Stream::new(
+            "disk_stats",
+            &net_stream_config.topic,
+            net_stream_config.buf_size,
+            tx.clone(),
+        );
+
+        Streams { system, processors, processes, disks, networks }
+    }
+}
+
+pub struct StatCollector {
+    sys: System,
+    stats: SystemStats,
+    processes: HashMap<i32, Process>,
+    processors: HashMap<String, Processor>,
+    networks: HashMap<String, Network>,
+    disks: HashMap<String, Disk>,
+    config: Arc<Config>,
+    streams: Streams,
+}
+
+impl StatCollector {
+    pub fn new(config: Arc<Config>, tx: Sender<Box<dyn Package>>) -> Self {
+        let sys = System::default();
+
+        let sysinfo = SysInfo::init(&sys);
+
+        let mut disks = HashMap::new();
+        for disk_data in sys.disks() {
+            let disk_name = disk_data.name().to_string_lossy().to_string();
+            disks.insert(disk_name.clone(), Disk::init(disk_name, disk_data));
+        }
+
+        let mut networks = HashMap::new();
+        for (name, _) in sys.networks() {
+            networks.insert(name.clone(), Network::init(name.clone()));
+        }
+
+        let mut processors = HashMap::new();
+        for proc in sys.processors().iter() {
+            let proc_name = proc.name().to_owned();
+            processors.insert(proc_name.clone(), Processor::init(proc_name));
+        }
+
+        let processes = HashMap::new();
+
+        let memory = Mem { total: sys.total_memory(), available: sys.available_memory() };
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+
+        let stats = SystemStats { timestamp, sysinfo, memory, ..Default::default() };
+
+        let streams = Streams::init(tx, &config);
+
+        StatCollector { sys, stats, config, processes, disks, networks, processors, streams }
+    }
+
+    pub fn start(mut self) {
+        loop {
+            std::thread::sleep(Duration::from_secs_f64(TIME_PERIOD_SECS));
+
+            if let Err(e) = self.refresh() {
+                error!("Faced error while refreshing telemetrics: {}", e);
+                return;
+            };
+        }
+    }
+
+    fn refresh(&mut self) -> Result<(), Error> {
+        self.stats.sequence += 1;
+        self.stats.sysinfo.refresh(&self.sys);
+
+        // Extract file count from persistence directory
+        self.stats.file_count = match std::fs::read_dir(&self.config.persistence.path) {
+            Ok(d) => d.count(),
+            Err(e) => {
+                error!("Couldn't find file count: {}", e);
+                return Err(Error::Io(e));
+            }
+        };
+
+        self.stats.memory.available = self.sys.available_memory();
+        self.stats.timestamp += TIME_PERIOD_SECS as u64;
+
+        if let Err(e) = self.streams.system.fill_sync(self.stats.clone()) {
+            error!("Couldn't send system stats: {}", e);
+        }
+
+        for disk_data in self.sys.disks() {
+            let disk_name = disk_data.name().to_string_lossy().to_string();
+            let disk =
+                self.disks.entry(disk_name.clone()).or_insert(Disk::init(disk_name, disk_data));
+            disk.refresh(disk_data);
+
+            if let Err(e) = self.streams.disks.fill_sync(disk.clone()) {
+                error!("Couldn't send disk stats: {}", e);
+            }
+        }
+
+        // Refresh network byte rate info
+        for (interface, net_data) in self.sys.networks() {
+            let net =
+                self.networks.entry(interface.clone()).or_insert(Network::init(interface.clone()));
+            net.refresh(net_data);
+
+            if let Err(e) = self.streams.networks.fill_sync(net.clone()) {
+                error!("Couldn't send network stats: {}", e);
+            }
+        }
+
+        // Refresh processor data
+        for proc_data in self.sys.processors().iter() {
+            let proc_name = proc_data.name().to_string();
+            let proc =
+                self.processors.entry(proc_name.clone()).or_insert(Processor::init(proc_name));
+            proc.refresh(proc_data);
+
+            if let Err(e) = self.streams.processors.fill_sync(proc.clone()) {
+                error!("Couldn't send processor stats: {}", e);
+            }
+        }
+
+        // Refresh data on processes
+        for (&id, p) in self.sys.processes() {
+            let proc = self.processes.entry(id).or_insert(Process::init(id, p.start_time()));
+            proc.refresh(p);
+
+            if let Err(e) = self.streams.processes.fill_sync(proc.clone()) {
+                error!("Couldn't send process stats: {}", e);
+            }
+        }
+
+        // Refresh sysinfo counters
+        self.sys.refresh_all();
+
+        Ok(())
     }
 }

@@ -43,12 +43,12 @@ use std::thread;
 use std::{collections::HashMap, fs};
 
 use anyhow::{Context, Error};
-use flume::{bounded, Sender};
 use figment::{
     providers::Toml,
     providers::{Data, Json},
     Figment,
 };
+use flume::{bounded, Sender};
 use log::error;
 use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
@@ -277,17 +277,8 @@ async fn main() -> Result<(), Error> {
     }
 
     if enable_stats {
-        let stat_stream_config = config.streams.get("telemetrics").unwrap();
-        let stat_stream = Stream::new(
-            "telemetrics",
-            &stat_stream_config.topic,
-            stat_stream_config.buf_size,
-            collector_tx.clone(),
-        );
-        let stat_collector = StatCollector::new(config.clone(), stat_stream);
-        thread::spawn(move || {
-            stat_collector.start();
-        });
+        let stat_collector = StatCollector::new(config.clone(), collector_tx.clone());
+        thread::spawn(move || stat_collector.start());
     }
 
     let tunshell_config = config.clone();
