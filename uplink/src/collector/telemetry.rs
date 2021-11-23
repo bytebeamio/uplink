@@ -9,7 +9,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::base::{Buffer, Config, Package, Point, Stream};
+use crate::base::{self, Buffer, Config, Package, Point, Stream};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -17,7 +17,42 @@ pub enum Error {
     Io(#[from] std::io::Error),
 }
 
-const TIME_PERIOD_SECS: f64 = 10.0;
+trait Stat {
+    fn set_sequence(&mut self, seq: u32);
+
+    fn set_timestamp(&mut self, seq: u64);
+}
+
+struct _Stream<T> {
+    stream: Stream<T>,
+    sequence: u32,
+    timestamp: u64,
+}
+
+impl<T> _Stream<T>
+where
+    Buffer<T>: Package,
+    T: 'static + Point + Stat,
+{
+    fn new(name: &str, tx: Sender<Box<dyn Package>>, config: &Arc<Config>) -> Self {
+        _Stream {
+            stream: Stream::dynamic(name, &config.project_id, &config.device_id, tx),
+            sequence: 0,
+            timestamp: 0,
+        }
+    }
+
+    fn set_timestamp(&mut self, time: u64) {
+        self.timestamp = time;
+    }
+
+    fn push(&mut self, mut data: T) -> Result<(), base::Error> {
+        data.set_sequence(self.sequence);
+        data.set_timestamp(self.timestamp);
+        self.sequence += 1;
+        self.stream.push(data)
+    }
+}
 
 #[derive(Debug, Default, Serialize, Clone)]
 struct LoadAvg {
@@ -58,6 +93,8 @@ impl SysInfo {
 
 #[derive(Debug, Default, Serialize, Clone)]
 struct Network {
+    sequence: u32,
+    timestamp: u64,
     name: String,
     incoming_data_rate: f64,
     outgoing_data_rate: f64,
@@ -69,40 +106,50 @@ impl Network {
     }
 
     /// Update metrics values for network usage over time
-    fn refresh(&mut self, data: &NetworkData) {
-        self.incoming_data_rate = data.received() as f64 / TIME_PERIOD_SECS;
-        self.outgoing_data_rate = data.transmitted() as f64 / TIME_PERIOD_SECS;
+    fn refresh(&mut self, data: &NetworkData, update_period: f64) {
+        self.incoming_data_rate = data.received() as f64 / update_period;
+        self.outgoing_data_rate = data.transmitted() as f64 / update_period;
     }
 }
 
-// TODO: Make changes to ensure this works properly
 impl Point for Network {
     fn sequence(&self) -> u32 {
-        0
+        self.sequence
     }
 
     fn timestamp(&self) -> u64 {
-        0
+        self.timestamp
     }
 }
 
-// TODO: Make changes to ensure this works properly
+impl Stat for Network {
+    fn set_sequence(&mut self, seq: u32) {
+        self.sequence = seq;
+    }
+
+    fn set_timestamp(&mut self, timestamp: u64) {
+        self.timestamp = timestamp;
+    }
+}
+
 impl Package for Buffer<Network> {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
     }
 
     fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).map_or(vec![], |c| c)
+        serde_json::to_vec(&self.buffer).unwrap()
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
-        Some((self.anomalies.clone(), self.anomaly_count))
+        self.anomalies()
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Default, Clone)]
 struct Disk {
+    sequence: u32,
+    timestamp: u64,
     name: String,
     total: u64,
     available: u64,
@@ -110,7 +157,12 @@ struct Disk {
 
 impl Disk {
     fn init(name: String, disk: &sysinfo::Disk) -> Self {
-        Disk { name, total: disk.total_space(), available: disk.available_space() }
+        Disk {
+            name,
+            total: disk.total_space(),
+            available: disk.available_space(),
+            ..Default::default()
+        }
     }
 
     fn refresh(&mut self, disk: &sysinfo::Disk) {
@@ -118,34 +170,44 @@ impl Disk {
     }
 }
 
-// TODO: Make changes to ensure this works properly
 impl Point for Disk {
     fn sequence(&self) -> u32 {
-        0
+        self.sequence
     }
 
     fn timestamp(&self) -> u64 {
-        0
+        self.timestamp
     }
 }
 
-// TODO: Make changes to ensure this works properly
+impl Stat for Disk {
+    fn set_sequence(&mut self, seq: u32) {
+        self.sequence = seq;
+    }
+
+    fn set_timestamp(&mut self, timestamp: u64) {
+        self.timestamp = timestamp;
+    }
+}
+
 impl Package for Buffer<Disk> {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
     }
 
     fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).map_or(vec![], |c| c)
+        serde_json::to_vec(&self.buffer).unwrap()
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
-        Some((self.anomalies.clone(), self.anomaly_count))
+        self.anomalies()
     }
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
 struct Processor {
+    sequence: u32,
+    timestamp: u64,
     name: String,
     frequency: u64,
     usage: f32,
@@ -162,29 +224,37 @@ impl Processor {
     }
 }
 
-// TODO: Make changes to ensure this works properly
 impl Point for Processor {
     fn sequence(&self) -> u32 {
-        0
+        self.sequence
     }
 
     fn timestamp(&self) -> u64 {
-        0
+        self.timestamp
     }
 }
 
-// TODO: Make changes to ensure this works properly
+impl Stat for Processor {
+    fn set_sequence(&mut self, seq: u32) {
+        self.sequence = seq;
+    }
+
+    fn set_timestamp(&mut self, timestamp: u64) {
+        self.timestamp = timestamp;
+    }
+}
+
 impl Package for Buffer<Processor> {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
     }
 
     fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).map_or(vec![], |c| c)
+        serde_json::to_vec(&self.buffer).unwrap()
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
-        Some((self.anomalies.clone(), self.anomaly_count))
+        self.anomalies()
     }
 }
 
@@ -198,6 +268,8 @@ struct DiskUsage {
 
 #[derive(Debug, Default, Serialize, Clone)]
 struct Process {
+    sequence: u32,
+    timestamp: u64,
     id: i32,
     cpu_usage: f32,
     mem_usage: u64,
@@ -220,29 +292,37 @@ impl Process {
     }
 }
 
-// TODO: Make changes to ensure this works properly
 impl Point for Process {
     fn sequence(&self) -> u32 {
-        0
+        self.sequence
     }
 
     fn timestamp(&self) -> u64 {
-        0
+        self.timestamp
     }
 }
 
-// TODO: Make changes to ensure this works properly
+impl Stat for Process {
+    fn set_sequence(&mut self, seq: u32) {
+        self.sequence = seq;
+    }
+
+    fn set_timestamp(&mut self, timestamp: u64) {
+        self.timestamp = timestamp;
+    }
+}
+
 impl Package for Buffer<Process> {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
     }
 
     fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).map_or(vec![], |c| c)
+        serde_json::to_vec(&self.buffer).unwrap()
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
-        Some((self.anomalies.clone(), self.anomaly_count))
+        self.anomalies()
     }
 }
 
@@ -261,7 +341,6 @@ pub struct SystemStats {
     file_count: usize,
 }
 
-// TODO: Make changes to ensure this works properly
 impl Point for SystemStats {
     fn sequence(&self) -> u32 {
         self.sequence
@@ -272,51 +351,61 @@ impl Point for SystemStats {
     }
 }
 
-// TODO: Make changes to ensure this works properly
+impl Stat for SystemStats {
+    fn set_sequence(&mut self, seq: u32) {
+        self.sequence = seq;
+    }
+
+    fn set_timestamp(&mut self, timestamp: u64) {
+        self.timestamp = timestamp;
+    }
+}
+
 impl Package for Buffer<SystemStats> {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
     }
 
     fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).map_or(vec![], |c| c)
+        serde_json::to_vec(&self.buffer).unwrap()
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
-        Some((self.anomalies.clone(), self.anomaly_count))
+        self.anomalies()
     }
 }
 
 struct Streams {
-    system: Stream<SystemStats>,
-    processors: Stream<Processor>,
-    processes: Stream<Process>,
-    disks: Stream<Disk>,
-    networks: Stream<Network>,
+    system: _Stream<SystemStats>,
+    processors: _Stream<Processor>,
+    processes: _Stream<Process>,
+    disks: _Stream<Disk>,
+    networks: _Stream<Network>,
 }
 
 impl Streams {
     fn init(tx: Sender<Box<dyn Package>>, config: &Arc<Config>) -> Self {
-        let system =
-            Stream::dynamic("system_stats", &config.project_id, &config.device_id, tx.clone());
+        Streams {
+            system: _Stream::new("system_stats", tx.clone(), config),
+            processors: _Stream::new("processor_stats", tx.clone(), config),
+            processes: _Stream::new("process_stats", tx.clone(), config),
+            disks: _Stream::new("disk_stats", tx.clone(), config),
+            networks: _Stream::new("network_stats", tx, config),
+        }
+    }
 
-        let processors =
-            Stream::dynamic("processor_stats", &config.project_id, &config.device_id, tx.clone());
-
-        let processes =
-            Stream::dynamic("process_stats", &config.project_id, &config.device_id, tx.clone());
-
-        let disks =
-            Stream::dynamic("disk_stats", &config.project_id, &config.device_id, tx.clone());
-
-        let networks = Stream::dynamic("network_stats", &config.project_id, &config.device_id, tx);
-
-        Streams { system, processors, processes, disks, networks }
+    fn set_timestamp(&mut self, time: u64) {
+        self.system.set_timestamp(time);
+        self.processors.set_timestamp(time);
+        self.processes.set_timestamp(time);
+        self.disks.set_timestamp(time);
+        self.networks.set_timestamp(time);
     }
 }
 
 pub struct StatCollector {
     sys: System,
+    timestamp: u64,
     stats: SystemStats,
     processes: HashMap<i32, Process>,
     processors: HashMap<String, Processor>,
@@ -352,18 +441,30 @@ impl StatCollector {
         let processes = HashMap::new();
 
         let memory = Mem { total: sys.total_memory(), available: sys.available_memory() };
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
-        let stats = SystemStats { timestamp, sysinfo, memory, ..Default::default() };
+        let stats = SystemStats { sysinfo, memory, ..Default::default() };
 
         let streams = Streams::init(tx, &config);
 
-        StatCollector { sys, stats, config, processes, disks, networks, processors, streams }
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+
+        StatCollector {
+            sys,
+            stats,
+            config,
+            processes,
+            disks,
+            networks,
+            processors,
+            streams,
+            timestamp,
+        }
     }
 
     pub fn start(mut self) {
         loop {
-            std::thread::sleep(Duration::from_secs_f64(TIME_PERIOD_SECS));
+            std::thread::sleep(Duration::from_secs_f64(self.config.stats_update_period));
+            self.timestamp += self.config.stats_update_period as u64;
 
             if let Err(e) = self.refresh() {
                 error!("Faced error while refreshing telemetrics: {}", e);
@@ -373,7 +474,7 @@ impl StatCollector {
     }
 
     fn refresh(&mut self) -> Result<(), Error> {
-        self.stats.sequence += 1;
+        self.streams.set_timestamp(self.timestamp);
         self.stats.sysinfo.refresh(&self.sys);
 
         // Extract file count from persistence directory
@@ -386,7 +487,6 @@ impl StatCollector {
         };
 
         self.stats.memory.available = self.sys.available_memory();
-        self.stats.timestamp += TIME_PERIOD_SECS as u64;
 
         if let Err(e) = self.streams.system.push(self.stats.clone()) {
             error!("Couldn't send system stats: {}", e);
@@ -407,7 +507,7 @@ impl StatCollector {
         for (interface, net_data) in self.sys.networks() {
             let net =
                 self.networks.entry(interface.clone()).or_insert(Network::init(interface.clone()));
-            net.refresh(net_data);
+            net.refresh(net_data, self.config.stats_update_period);
 
             if let Err(e) = self.streams.networks.push(net.clone()) {
                 error!("Couldn't send network stats: {}", e);
