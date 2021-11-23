@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::mem;
 use std::sync::Arc;
 
-use async_channel::{SendError, Sender};
+use flume::{SendError, Sender};
 use log::warn;
 use serde::Deserialize;
 
@@ -140,7 +140,7 @@ where
         }
     }
 
-    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
+    fn _fill(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
         let current_sequence = data.sequence();
         let current_timestamp = data.timestamp();
 
@@ -166,7 +166,24 @@ where
             let name = self.name.clone();
             let topic = self.topic.clone();
             let buffer = mem::replace(&mut self.buffer, Buffer::new(name, topic));
-            self.tx.send(Box::new(buffer)).await?;
+            Ok(Some(buffer))
+        } else {
+            Ok(None)
+        }
+            
+    }
+
+    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
+        if let Some(buf) = self._fill(data)? {
+            self.tx.send_async(Box::new(buf)).await?;
+        }
+
+        Ok(())
+    }
+
+    pub fn fill_sync(&mut self, data: T) -> Result<(), Error> {
+        if let Some(buf) = self._fill(data)? {
+            self.tx.send(Box::new(buf))?;
         }
 
         Ok(())

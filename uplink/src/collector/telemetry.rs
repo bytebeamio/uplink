@@ -170,9 +170,9 @@ impl StatCollector {
         StatCollector { sys, stats, config, stat_stream }
     }
 
-    pub async fn start(mut self) {
+    pub fn start(mut self) {
         loop {
-            tokio::time::sleep(Duration::from_secs_f64(TIME_PERIOD_SECS)).await;
+            std::thread::sleep(Duration::from_secs_f64(TIME_PERIOD_SECS));
 
             let data = match self.refresh() {
                 Ok(d) => d,
@@ -182,7 +182,7 @@ impl StatCollector {
                 }
             };
 
-            if let Err(e) = self.stat_stream.fill(data).await {
+            if let Err(e) = self.stat_stream.fill_sync(data) {
                 error!("Couldn't send telemetry: {}", e);
             }
         }

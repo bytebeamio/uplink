@@ -1,6 +1,6 @@
 use crate::base::{Config, Package};
 
-use async_channel::{Receiver, RecvError};
+use flume::{Receiver, RecvError};
 use bytes::Bytes;
 use disk::Storage;
 use log::{error, info};
@@ -88,7 +88,7 @@ impl Serializer {
         publish.pkid = 1;
 
         loop {
-            let data = self.collector_rx.recv().await?;
+            let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
             let payload = data.serialize();
 
@@ -125,7 +125,7 @@ impl Serializer {
 
         loop {
             select! {
-                data = self.collector_rx.recv() => {
+                data = self.collector_rx.recv_async() => {
                       let data = data?;
                       if let Some((errors, count)) = data.anomalies() {
                         self.metrics.add_errors(errors, count);
@@ -194,7 +194,7 @@ impl Serializer {
 
         loop {
             select! {
-                data = self.collector_rx.recv() => {
+                data = self.collector_rx.recv_async() => {
                       let data = data?;
                       if let Some((errors, count)) = data.anomalies() {
                         self.metrics.add_errors(errors, count);
@@ -272,7 +272,7 @@ impl Serializer {
 
         loop {
             let failed = select! {
-                data = self.collector_rx.recv() => {
+                data = self.collector_rx.recv_async() => {
                     let data = data?;
 
                     // Extract anomalies detected by package during collection

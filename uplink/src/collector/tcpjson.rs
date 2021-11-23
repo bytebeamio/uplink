@@ -1,4 +1,4 @@
-use async_channel::{Receiver, RecvError, Sender};
+use flume::{Receiver, RecvError, Sender};
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -70,7 +70,7 @@ impl Bridge {
                             }
                         }
                     }
-                    action = self.actions_rx.recv() => {
+                    action = self.actions_rx.recv_async() => {
                         let action = action.unwrap();
                         error!("Bridge down!! Action ID = {}", action.action_id);
                         let status = ActionResponse::failure(&action.action_id, "Bridge down");
@@ -149,7 +149,8 @@ impl Bridge {
                     }
 
                 }
-                action = self.actions_rx.recv() => {
+                
+                action = self.actions_rx.recv_async() => {
                     let action = action?;
                     self.current_action = Some(action.action_id.to_owned());
 
@@ -165,6 +166,7 @@ impl Bridge {
                     framed.get_mut().write_all(&data).await?;
                     framed.get_mut().write_all(b"\n").await?;
                 }
+
                 _ = &mut action_timeout, if self.current_action.is_some() => {
                     let action = self.current_action.take().unwrap();
                     error!("Timeout waiting for action response. Action ID = {}", action);

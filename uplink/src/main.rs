@@ -43,7 +43,7 @@ use std::thread;
 use std::{collections::HashMap, fs};
 
 use anyhow::{Context, Error};
-use async_channel::{bounded, Sender};
+use flume::{bounded, Sender};
 use figment::{
     providers::Toml,
     providers::{Data, Json},
@@ -285,8 +285,8 @@ async fn main() -> Result<(), Error> {
             collector_tx.clone(),
         );
         let stat_collector = StatCollector::new(config.clone(), stat_stream);
-        task::spawn(async move {
-            stat_collector.start().await;
+        thread::spawn(move || {
+            stat_collector.start();
         });
     }
 

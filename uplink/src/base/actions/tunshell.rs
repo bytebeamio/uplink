@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use async_channel::Receiver;
+use flume::Receiver;
 use log::error;
 use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
@@ -62,7 +62,7 @@ impl TunshellSession {
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) {
-        while let Ok(keys) = self.keys_rx.recv().await {
+        while let Ok(keys) = self.keys_rx.recv_async().await {
             if *self.last_process_done.lock().unwrap() == false {
                 let status = ActionResponse::failure("tunshell", "busy".to_owned());
                 if let Err(e) = self.action_status.fill(status).await {

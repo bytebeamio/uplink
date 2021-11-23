@@ -1,5 +1,5 @@
 use super::{Config, Control, Package};
-use async_channel::{Receiver, Sender};
+use flume::{Receiver, Sender};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -26,9 +26,9 @@ pub enum Error {
     #[error("Controller error {0}")]
     Controller(#[from] controller::Error),
     #[error("Error sending keys to tunshell thread {0}")]
-    TunshellSendError(#[from] async_channel::SendError<String>),
+    TunshellSendError(#[from] flume::SendError<String>),
     #[error("Error sending Action through bridge {0}")]
-    BridgeSendError(#[from] async_channel::TrySendError<Action>),
+    BridgeSendError(#[from] flume::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
     #[error("Error from firmware downloader {0}")]
@@ -171,7 +171,7 @@ impl Actions {
 
         // start receiving and processing actions
         loop {
-            let action = match action_stream.recv().await {
+            let action = match action_stream.recv_async().await {
                 Ok(v) => v,
                 Err(e) => {
                     error!("Action stream receiver error = {:?}", e);
@@ -196,7 +196,7 @@ impl Actions {
     async fn handle(&mut self, action: Action) -> Result<(), Error> {
         match action.name.as_ref() {
             "tunshell" => {
-                self.tunshell_tx.send(action.payload).await?;
+                self.tunshell_tx.send_async(action.payload).await?;
                 return Ok(());
             }
             "update_firmware" if self.config.ota.enabled => {
