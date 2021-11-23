@@ -170,7 +170,6 @@ where
         } else {
             Ok(None)
         }
-            
     }
 
     pub async fn fill(&mut self, data: T) -> Result<(), Error> {

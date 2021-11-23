@@ -1,8 +1,8 @@
 use crate::base::{Config, Package};
 
-use flume::{Receiver, RecvError};
 use bytes::Bytes;
 use disk::Storage;
+use flume::{Receiver, RecvError};
 use log::{error, info};
 use rumqttc::*;
 use serde::Serialize;

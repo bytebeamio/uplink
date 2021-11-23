@@ -149,7 +149,7 @@ impl Bridge {
                     }
 
                 }
-                
+
                 action = self.actions_rx.recv_async() => {
                     let action = action?;
                     self.current_action = Some(action.action_id.to_owned());
