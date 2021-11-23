@@ -297,45 +297,19 @@ struct Streams {
 
 impl Streams {
     fn init(tx: Sender<Box<dyn Package>>, config: &Arc<Config>) -> Self {
-        let system_stream_config = config.streams.get("system_stats").unwrap();
-        let system = Stream::new(
-            "system_stats",
-            &system_stream_config.topic,
-            system_stream_config.buf_size,
-            tx.clone(),
-        );
+        let system =
+            Stream::dynamic("system_stats", &config.project_id, &config.device_id, tx.clone());
 
-        let processor_stream_config = config.streams.get("processor_stats").unwrap();
-        let processors = Stream::new(
-            "processor_stats",
-            &processor_stream_config.topic,
-            processor_stream_config.buf_size,
-            tx.clone(),
-        );
+        let processors =
+            Stream::dynamic("processor_stats", &config.project_id, &config.device_id, tx.clone());
 
-        let process_stream_config = config.streams.get("process_stats").unwrap();
-        let processes = Stream::new(
-            "process_stats",
-            &process_stream_config.topic,
-            process_stream_config.buf_size,
-            tx.clone(),
-        );
+        let processes =
+            Stream::dynamic("process_stats", &config.project_id, &config.device_id, tx.clone());
 
-        let disk_stream_config = config.streams.get("disk_stats").unwrap();
-        let disks = Stream::new(
-            "disk_stats",
-            &disk_stream_config.topic,
-            disk_stream_config.buf_size,
-            tx.clone(),
-        );
+        let disks =
+            Stream::dynamic("disk_stats", &config.project_id, &config.device_id, tx.clone());
 
-        let net_stream_config = config.streams.get("network_stats").unwrap();
-        let networks = Stream::new(
-            "disk_stats",
-            &net_stream_config.topic,
-            net_stream_config.buf_size,
-            tx.clone(),
-        );
+        let networks = Stream::dynamic("network_stats", &config.project_id, &config.device_id, tx);
 
         Streams { system, processors, processes, disks, networks }
     }
@@ -414,7 +388,7 @@ impl StatCollector {
         self.stats.memory.available = self.sys.available_memory();
         self.stats.timestamp += TIME_PERIOD_SECS as u64;
 
-        if let Err(e) = self.streams.system.fill_sync(self.stats.clone()) {
+        if let Err(e) = self.streams.system.push(self.stats.clone()) {
             error!("Couldn't send system stats: {}", e);
         }
 
@@ -424,7 +398,7 @@ impl StatCollector {
                 self.disks.entry(disk_name.clone()).or_insert(Disk::init(disk_name, disk_data));
             disk.refresh(disk_data);
 
-            if let Err(e) = self.streams.disks.fill_sync(disk.clone()) {
+            if let Err(e) = self.streams.disks.push(disk.clone()) {
                 error!("Couldn't send disk stats: {}", e);
             }
         }
@@ -435,7 +409,7 @@ impl StatCollector {
                 self.networks.entry(interface.clone()).or_insert(Network::init(interface.clone()));
             net.refresh(net_data);
 
-            if let Err(e) = self.streams.networks.fill_sync(net.clone()) {
+            if let Err(e) = self.streams.networks.push(net.clone()) {
                 error!("Couldn't send network stats: {}", e);
             }
         }
@@ -447,7 +421,7 @@ impl StatCollector {
                 self.processors.entry(proc_name.clone()).or_insert(Processor::init(proc_name));
             proc.refresh(proc_data);
 
-            if let Err(e) = self.streams.processors.fill_sync(proc.clone()) {
+            if let Err(e) = self.streams.processors.push(proc.clone()) {
                 error!("Couldn't send processor stats: {}", e);
             }
         }
@@ -457,7 +431,7 @@ impl StatCollector {
             let proc = self.processes.entry(id).or_insert(Process::init(id, p.start_time()));
             proc.refresh(p);
 
-            if let Err(e) = self.streams.processes.fill_sync(proc.clone()) {
+            if let Err(e) = self.streams.processes.push(proc.clone()) {
                 error!("Couldn't send process stats: {}", e);
             }
         }

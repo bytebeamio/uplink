@@ -140,7 +140,7 @@ where
         }
     }
 
-    fn _fill(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
+    fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
         let current_sequence = data.sequence();
         let current_timestamp = data.timestamp();
 
@@ -172,16 +172,18 @@ where
         }
     }
 
+    /// Fill buffer with data and trigger async channel send on max_buf_size
     pub async fn fill(&mut self, data: T) -> Result<(), Error> {
-        if let Some(buf) = self._fill(data)? {
+        if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
         }
 
         Ok(())
     }
 
-    pub fn fill_sync(&mut self, data: T) -> Result<(), Error> {
-        if let Some(buf) = self._fill(data)? {
+    /// Push data into buffer and trigger sync channel send on max_buf_size
+    pub fn push(&mut self, data: T) -> Result<(), Error> {
+        if let Some(buf) = self.add(data)? {
             self.tx.send(Box::new(buf))?;
         }
 
