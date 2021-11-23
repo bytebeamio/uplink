@@ -57,6 +57,7 @@ pub struct Config {
     pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
     pub ota: Ota,
+    pub stats_update_period: f64,
 }
 
 pub trait Point: Send + Debug {
