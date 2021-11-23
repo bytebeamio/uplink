@@ -119,7 +119,7 @@ struct Mem {
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
-pub struct Telemetrics {
+pub struct SystemStats {
     sequence: u32,
     timestamp: u64,
     sysinfo: SysInfo,
@@ -132,15 +132,15 @@ pub struct Telemetrics {
 }
 
 #[derive(Debug)]
-pub struct TelemetryHandler {
+pub struct StatCollector {
     sys: System,
-    data: Telemetrics,
+    stats: SystemStats,
     config: Arc<Config>,
-    stream: Stream<Telemetrics>,
+    stat_stream: Stream<SystemStats>,
 }
 
-impl TelemetryHandler {
-    pub fn new(config: Arc<Config>, stream: Stream<Telemetrics>) -> Self {
+impl StatCollector {
+    pub fn new(config: Arc<Config>, stat_stream: Stream<SystemStats>) -> Self {
         let sys = System::default();
 
         let sysinfo = SysInfo::init(&sys);
@@ -164,10 +164,10 @@ impl TelemetryHandler {
         let memory = Mem { total: sys.total_memory(), available: sys.available_memory() };
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
-        let data =
-            Telemetrics { timestamp, sysinfo, disks, networks, processors, memory, ..Default::default() };
+        let stats =
+            SystemStats { timestamp, sysinfo, disks, networks, processors, memory, ..Default::default() };
 
-        TelemetryHandler { sys, data, config, stream }
+        StatCollector { sys, stats, config, stat_stream }
     }
 
     pub async fn start(mut self) {
@@ -182,31 +182,31 @@ impl TelemetryHandler {
                 }
             };
 
-            if let Err(e) = self.stream.fill(data).await {
+            if let Err(e) = self.stat_stream.fill(data).await {
                 error!("Couldn't send telemetry: {}", e);
             }
         }
     }
 
-    fn refresh(&mut self) -> Result<Telemetrics, Error> {
-        self.data.sequence += 1;
-        self.data.sysinfo.refresh(&self.sys);
+    fn refresh(&mut self) -> Result<SystemStats, Error> {
+        self.stats.sequence += 1;
+        self.stats.sysinfo.refresh(&self.sys);
 
         for disk_data in self.sys.disks() {
             let disk_name = disk_data.name().to_string_lossy().to_string();
-            self.data.disks.entry(disk_name).or_insert(Disk::init(disk_data)).refresh(disk_data);
+            self.stats.disks.entry(disk_name).or_insert(Disk::init(disk_data)).refresh(disk_data);
         }
 
         // Refresh network byte rate info
         for (interface, net_data) in self.sys.networks() {
-            let net = self.data.networks.entry(interface.clone()).or_default();
+            let net = self.stats.networks.entry(interface.clone()).or_default();
             net.refresh(net_data)
         }
 
         // Refresh processor data
         for proc_data in self.sys.processors().iter() {
             let proc_name = proc_data.name().to_string();
-            let proc = self.data.processors.entry(proc_name).or_default();
+            let proc = self.stats.processors.entry(proc_name).or_default();
             proc.refresh(proc_data)
         }
 
@@ -217,10 +217,10 @@ impl TelemetryHandler {
             proc.refresh(p);
             processes.insert(id, proc);
         }
-        self.data.processes = processes;
+        self.stats.processes = processes;
 
         // Extract file count from persistence directory
-        self.data.file_count = match std::fs::read_dir(&self.config.persistence.path) {
+        self.stats.file_count = match std::fs::read_dir(&self.config.persistence.path) {
             Ok(d) => d.count(),
             Err(e) => {
                 error!("Couldn't find file count: {}", e);
@@ -228,18 +228,18 @@ impl TelemetryHandler {
             }
         };
 
-        self.data.memory.available = self.sys.available_memory();
-        self.data.timestamp += TIME_PERIOD_SECS as u64; 
+        self.stats.memory.available = self.sys.available_memory();
+        self.stats.timestamp += TIME_PERIOD_SECS as u64; 
 
         // Refresh sysinfo counters
         self.sys.refresh_all();
 
-        Ok(self.data.clone())
+        Ok(self.stats.clone())
     }
 }
 
 // TODO: Make changes to ensure this works properly
-impl Point for Telemetrics {
+impl Point for SystemStats {
     fn sequence(&self) -> u32 {
         self.sequence
     }
@@ -250,7 +250,7 @@ impl Point for Telemetrics {
 }
 
 // TODO: Make changes to ensure this works properly
-impl Package for Buffer<Telemetrics> {
+impl Package for Buffer<SystemStats> {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
     }

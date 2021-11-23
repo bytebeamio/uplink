@@ -67,7 +67,7 @@ use crate::base::Stream;
 
 use crate::collector::simulator::Simulator;
 use crate::collector::tcpjson::Bridge;
-use crate::collector::telemetry::TelemetryHandler;
+use crate::collector::telemetry::StatCollector;
 
 use base::Config;
 use disk::Storage;
@@ -98,8 +98,8 @@ pub struct CommandLine {
     #[structopt(short = "s", long = "simulator")]
     simulator: bool,
     /// Toggle for telemetrics collector
-    #[structopt(short = "t", long = "telemetrics")]
-    telemetrics: bool,
+    #[structopt(short = "t", long = "stats_collector")]
+    stats: bool,
     /// log level (v: info, vv: debug, vvv: trace)
     #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
     verbose: u8,
@@ -224,7 +224,7 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
     let enable_simulator = commandline.simulator;
-    let enable_telemetry = commandline.telemetrics;
+    let enable_stats = commandline.stats;
 
     initialize_logging(&commandline);
     let config = Arc::new(initalize_config(&commandline)?);
@@ -276,17 +276,17 @@ async fn main() -> Result<(), Error> {
         });
     }
 
-    if enable_telemetry {
-        let telemetrics_config = config.streams.get("telemetrics").unwrap();
-        let telemetrics_stream = Stream::new(
+    if enable_stats {
+        let stat_stream_config = config.streams.get("telemetrics").unwrap();
+        let stat_stream = Stream::new(
             "telemetrics",
-            &telemetrics_config.topic,
-            telemetrics_config.buf_size,
+            &stat_stream_config.topic,
+            stat_stream_config.buf_size,
             collector_tx.clone(),
         );
-        let telemetry = TelemetryHandler::new(config.clone(), telemetrics_stream);
+        let stat_collector = StatCollector::new(config.clone(), stat_stream);
         task::spawn(async move {
-            telemetry.start().await;
+            stat_collector.start().await;
         });
     }
 
