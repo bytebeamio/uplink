@@ -1,0 +1,11 @@
+{
+  "project_id": "demo",
+  "broker": "demo.bytebeam.io",
+  "port": 8883,
+  "device_id":"3",
+  "authentication": {
+    "ca_certificate": "-----BEGIN CERTIFICIATE-----.....-----END CERTIFICATE-----\n",
+    "device_certificate": "-----BEGIN CERTIFICIATE-----.....-----END CERTIFICATE-----\n",
+    "device_private_key": "-----BEGIN RSA PRIVATE KEY-----.....-----END RSA PRIVATE KEY-----\n"
+  }
+}
