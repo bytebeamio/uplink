@@ -338,7 +338,6 @@ pub struct SystemStats {
     timestamp: u64,
     sysinfo: SysInfo,
     memory: Mem,
-    file_count: usize,
 }
 
 impl Point for SystemStats {
@@ -476,15 +475,6 @@ impl StatCollector {
     fn refresh(&mut self) -> Result<(), Error> {
         self.streams.set_timestamp(self.timestamp);
         self.stats.sysinfo.refresh(&self.sys);
-
-        // Extract file count from persistence directory
-        self.stats.file_count = match std::fs::read_dir(&self.config.persistence.path) {
-            Ok(d) => d.count(),
-            Err(e) => {
-                error!("Couldn't find file count: {}", e);
-                return Err(Error::Io(e));
-            }
-        };
 
         self.stats.memory.available = self.sys.available_memory();
 
