@@ -32,6 +32,7 @@ struct SysInfo {
     kernel_version: String,
     uptime: u64,
     no_processes: usize,
+    #[serde(flatten)]
     load_avg: LoadAvg,
 }
 
@@ -206,6 +207,7 @@ struct Process {
     id: i32,
     cpu_usage: f32,
     mem_usage: u64,
+    #[serde(flatten)]
     disk_usage: DiskUsage,
     start_time: u64,
 }
@@ -259,7 +261,9 @@ struct Mem {
 pub struct SystemStats {
     sequence: u32,
     timestamp: u64,
+    #[serde(flatten)]
     sysinfo: SysInfo,
+    #[serde(flatten)]
     memory: Mem,
 }
 
