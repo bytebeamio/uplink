@@ -9,49 +9,12 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::base::{self, Buffer, Config, Package, Point, Stream};
+use crate::base::{Buffer, Config, Package, Point, Stream};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] std::io::Error),
-}
-
-trait Stat {
-    fn set_sequence(&mut self, seq: u32);
-
-    fn set_timestamp(&mut self, seq: u64);
-}
-
-struct _Stream<T> {
-    stream: Stream<T>,
-    sequence: u32,
-    timestamp: u64,
-}
-
-impl<T> _Stream<T>
-where
-    Buffer<T>: Package,
-    T: 'static + Point + Stat,
-{
-    fn new(name: &str, tx: Sender<Box<dyn Package>>, config: &Arc<Config>) -> Self {
-        _Stream {
-            stream: Stream::dynamic(name, &config.project_id, &config.device_id, tx),
-            sequence: 0,
-            timestamp: 0,
-        }
-    }
-
-    fn set_timestamp(&mut self, time: u64) {
-        self.timestamp = time;
-    }
-
-    fn push(&mut self, mut data: T) -> Result<(), base::Error> {
-        data.set_sequence(self.sequence);
-        data.set_timestamp(self.timestamp);
-        self.sequence += 1;
-        self.stream.push(data)
-    }
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
@@ -122,16 +85,6 @@ impl Point for Network {
     }
 }
 
-impl Stat for Network {
-    fn set_sequence(&mut self, seq: u32) {
-        self.sequence = seq;
-    }
-
-    fn set_timestamp(&mut self, timestamp: u64) {
-        self.timestamp = timestamp;
-    }
-}
-
 impl Package for Buffer<Network> {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
@@ -180,16 +133,6 @@ impl Point for Disk {
     }
 }
 
-impl Stat for Disk {
-    fn set_sequence(&mut self, seq: u32) {
-        self.sequence = seq;
-    }
-
-    fn set_timestamp(&mut self, timestamp: u64) {
-        self.timestamp = timestamp;
-    }
-}
-
 impl Package for Buffer<Disk> {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
@@ -231,16 +174,6 @@ impl Point for Processor {
 
     fn timestamp(&self) -> u64 {
         self.timestamp
-    }
-}
-
-impl Stat for Processor {
-    fn set_sequence(&mut self, seq: u32) {
-        self.sequence = seq;
-    }
-
-    fn set_timestamp(&mut self, timestamp: u64) {
-        self.timestamp = timestamp;
     }
 }
 
@@ -302,16 +235,6 @@ impl Point for Process {
     }
 }
 
-impl Stat for Process {
-    fn set_sequence(&mut self, seq: u32) {
-        self.sequence = seq;
-    }
-
-    fn set_timestamp(&mut self, timestamp: u64) {
-        self.timestamp = timestamp;
-    }
-}
-
 impl Package for Buffer<Process> {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
@@ -350,16 +273,6 @@ impl Point for SystemStats {
     }
 }
 
-impl Stat for SystemStats {
-    fn set_sequence(&mut self, seq: u32) {
-        self.sequence = seq;
-    }
-
-    fn set_timestamp(&mut self, timestamp: u64) {
-        self.timestamp = timestamp;
-    }
-}
-
 impl Package for Buffer<SystemStats> {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
@@ -374,31 +287,49 @@ impl Package for Buffer<SystemStats> {
     }
 }
 
+type Sequence = u32;
+
+#[derive(Default)]
+struct Sequences {
+    system: Sequence,
+    processors: Sequence,
+    processes: Sequence,
+    disks: Sequence,
+    networks: Sequence,
+}
+
 struct Streams {
-    system: _Stream<SystemStats>,
-    processors: _Stream<Processor>,
-    processes: _Stream<Process>,
-    disks: _Stream<Disk>,
-    networks: _Stream<Network>,
+    system: Stream<SystemStats>,
+    processors: Stream<Processor>,
+    processes: Stream<Process>,
+    disks: Stream<Disk>,
+    networks: Stream<Network>,
 }
 
 impl Streams {
     fn init(tx: Sender<Box<dyn Package>>, config: &Arc<Config>) -> Self {
         Streams {
-            system: _Stream::new("system_stats", tx.clone(), config),
-            processors: _Stream::new("processor_stats", tx.clone(), config),
-            processes: _Stream::new("process_stats", tx.clone(), config),
-            disks: _Stream::new("disk_stats", tx.clone(), config),
-            networks: _Stream::new("network_stats", tx, config),
+            system: Stream::dynamic(
+                "system_stats",
+                &config.project_id,
+                &config.device_id,
+                tx.clone(),
+            ),
+            processors: Stream::dynamic(
+                "processor_stats",
+                &config.project_id,
+                &config.device_id,
+                tx.clone(),
+            ),
+            processes: Stream::dynamic(
+                "process_stats",
+                &config.project_id,
+                &config.device_id,
+                tx.clone(),
+            ),
+            disks: Stream::dynamic("disk_stats", &config.project_id, &config.device_id, tx.clone()),
+            networks: Stream::dynamic("network_stats", &config.project_id, &config.device_id, tx),
         }
-    }
-
-    fn set_timestamp(&mut self, time: u64) {
-        self.system.set_timestamp(time);
-        self.processors.set_timestamp(time);
-        self.processes.set_timestamp(time);
-        self.disks.set_timestamp(time);
-        self.networks.set_timestamp(time);
     }
 }
 
@@ -412,6 +343,7 @@ pub struct StatCollector {
     disks: HashMap<String, Disk>,
     config: Arc<Config>,
     streams: Streams,
+    sequences: Sequences,
 }
 
 impl StatCollector {
@@ -457,6 +389,7 @@ impl StatCollector {
             processors,
             streams,
             timestamp,
+            sequences: Default::default(),
         }
     }
 
@@ -473,10 +406,11 @@ impl StatCollector {
     }
 
     fn refresh(&mut self) -> Result<(), Error> {
-        self.streams.set_timestamp(self.timestamp);
         self.stats.sysinfo.refresh(&self.sys);
-
         self.stats.memory.available = self.sys.available_memory();
+        self.stats.timestamp = self.timestamp;
+        self.stats.sequence = self.sequences.system;
+        self.sequences.system += 1;
 
         if let Err(e) = self.streams.system.push(self.stats.clone()) {
             error!("Couldn't send system stats: {}", e);
@@ -487,6 +421,9 @@ impl StatCollector {
             let disk =
                 self.disks.entry(disk_name.clone()).or_insert(Disk::init(disk_name, disk_data));
             disk.refresh(disk_data);
+            disk.timestamp = self.timestamp;
+            disk.sequence = self.sequences.disks;
+            self.sequences.disks += 1;
 
             if let Err(e) = self.streams.disks.push(disk.clone()) {
                 error!("Couldn't send disk stats: {}", e);
@@ -498,6 +435,9 @@ impl StatCollector {
             let net =
                 self.networks.entry(interface.clone()).or_insert(Network::init(interface.clone()));
             net.refresh(net_data, self.config.stats_update_period);
+            net.timestamp = self.timestamp;
+            net.sequence = self.sequences.networks;
+            self.sequences.networks += 1;
 
             if let Err(e) = self.streams.networks.push(net.clone()) {
                 error!("Couldn't send network stats: {}", e);
@@ -510,6 +450,9 @@ impl StatCollector {
             let proc =
                 self.processors.entry(proc_name.clone()).or_insert(Processor::init(proc_name));
             proc.refresh(proc_data);
+            proc.timestamp = self.timestamp;
+            proc.sequence = self.sequences.processors;
+            self.sequences.processors += 1;
 
             if let Err(e) = self.streams.processors.push(proc.clone()) {
                 error!("Couldn't send processor stats: {}", e);
@@ -520,6 +463,9 @@ impl StatCollector {
         for (&id, p) in self.sys.processes() {
             let proc = self.processes.entry(id).or_insert(Process::init(id, p.start_time()));
             proc.refresh(p);
+            proc.timestamp = self.timestamp;
+            proc.sequence = self.sequences.processes;
+            self.sequences.processes += 1;
 
             if let Err(e) = self.streams.processes.push(proc.clone()) {
                 error!("Couldn't send process stats: {}", e);
