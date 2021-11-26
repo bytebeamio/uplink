@@ -204,7 +204,7 @@ struct DiskUsage {
 struct Process {
     sequence: u32,
     timestamp: u64,
-    id: i32,
+    pid: i32,
     cpu_usage: f32,
     mem_usage: u64,
     #[serde(flatten)]
@@ -213,8 +213,8 @@ struct Process {
 }
 
 impl Process {
-    fn init(id: i32, start_time: u64) -> Self {
-        Process { id, start_time, ..Default::default() }
+    fn init(pid: i32, start_time: u64) -> Self {
+        Process { pid, start_time, ..Default::default() }
     }
 
     fn refresh(&mut self, proc: &sysinfo::Process) {
