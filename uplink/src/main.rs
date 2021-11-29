@@ -97,9 +97,9 @@ pub struct CommandLine {
     /// list of modules to log
     #[structopt(short = "s", long = "simulator")]
     simulator: bool,
-    /// Toggle for telemetrics collector
-    #[structopt(short = "t", long = "stats_collector")]
-    stats: bool,
+    // /// Toggle for telemetrics collector
+    // #[structopt(short = "t", long = "stats_collector")]
+    // stats: bool,
     /// log level (v: info, vv: debug, vvv: trace)
     #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
     verbose: u8,
@@ -112,7 +112,6 @@ const DEFAULT_CONFIG: &'static str = r#"
     bridge_port = 5555
     max_packet_size = 102400
     max_inflight = 100
-    stats_update_period = 5
     
     # Whitelist of binaries which uplink can spawn as a process
     # This makes sure that user is protected against random actions
@@ -136,6 +135,11 @@ const DEFAULT_CONFIG: &'static str = r#"
     [ota]
     enabled = false
     path = "/var/tmp/ota-file"
+
+    [stats]
+    enabled = true
+    names = ["uplink"]
+    update_period = 5
 "#;
 
 /// Reads config file to generate config struct and replaces places holders
@@ -218,6 +222,9 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     if config.ota.enabled {
         println!("    ota_path: {}", config.ota.path);
     }
+    if config.stats.enabled {
+        println!("    processes: {:?}", config.stats.names);
+    }
     println!("\n");
 }
 
@@ -225,10 +232,10 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
     let enable_simulator = commandline.simulator;
-    let enable_stats = commandline.stats;
 
     initialize_logging(&commandline);
     let config = Arc::new(initalize_config(&commandline)?);
+    let enable_stats = config.stats.enabled;
 
     banner(&commandline, &config);
 

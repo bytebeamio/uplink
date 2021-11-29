@@ -44,6 +44,13 @@ pub struct Ota {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct Stats {
+    pub enabled: bool,
+    pub names: Vec<String>,
+    pub update_period: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -57,7 +64,7 @@ pub struct Config {
     pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
     pub ota: Ota,
-    pub stats_update_period: f64,
+    pub stats: Stats,
 }
 
 pub trait Point: Send + Debug {

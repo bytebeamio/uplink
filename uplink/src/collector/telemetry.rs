@@ -402,8 +402,8 @@ impl StatCollector {
 
     pub fn start(mut self) {
         loop {
-            std::thread::sleep(Duration::from_secs_f64(self.config.stats_update_period));
-            self.timestamp += self.config.stats_update_period as u64;
+            std::thread::sleep(Duration::from_secs_f64(self.config.stats.update_period));
+            self.timestamp += self.config.stats.update_period as u64;
 
             if let Err(e) = self.update() {
                 error!("Faced error while refreshing telemetrics: {}", e);
@@ -442,7 +442,7 @@ impl StatCollector {
         for (interface, net_data) in self.sys.networks() {
             let net =
                 self.networks.entry(interface.clone()).or_insert(Network::init(interface.clone()));
-            net.update(net_data, self.config.stats_update_period);
+            net.update(net_data, self.config.stats.update_period);
             net.timestamp = self.timestamp;
             net.sequence = self.sequences.networks;
             self.sequences.networks += 1;
@@ -470,14 +470,18 @@ impl StatCollector {
         // Refresh processes info
         for (&id, p) in self.sys.processes() {
             let name = p.name().to_owned();
-            let proc = self.processes.entry(id).or_insert(Process::init(id, name, p.start_time()));
-            proc.update(p);
-            proc.timestamp = self.timestamp;
-            proc.sequence = self.sequences.processes;
-            self.sequences.processes += 1;
 
-            if let Err(e) = self.streams.processes.push(proc.clone()) {
-                error!("Couldn't send process stats: {}", e);
+            if !self.config.stats.names.contains(&name) {
+                let proc =
+                    self.processes.entry(id).or_insert(Process::init(id, name, p.start_time()));
+                proc.update(p);
+                proc.timestamp = self.timestamp;
+                proc.sequence = self.sequences.processes;
+                self.sequences.processes += 1;
+
+                if let Err(e) = self.streams.processes.push(proc.clone()) {
+                    error!("Couldn't send process stats: {}", e);
+                }
             }
         }
 
