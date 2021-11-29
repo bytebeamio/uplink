@@ -471,7 +471,7 @@ impl StatCollector {
         for (&id, p) in self.sys.processes() {
             let name = p.name().to_owned();
 
-            if !self.config.stats.names.contains(&name) {
+            if self.config.stats.names.contains(&name) {
                 let proc =
                     self.processes.entry(id).or_insert(Process::init(id, name, p.start_time()));
                 proc.update(p);
