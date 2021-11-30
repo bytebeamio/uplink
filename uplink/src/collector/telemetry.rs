@@ -62,17 +62,21 @@ struct Network {
     name: String,
     incoming_data_rate: f64,
     outgoing_data_rate: f64,
+    #[serde(skip_serializing)]
+    update_period: f64,
 }
 
 impl Network {
-    fn init(name: String) -> Self {
-        Network { name, ..Default::default() }
+    fn init(name: String, update_period: f64) -> Self {
+        Network { name, update_period, ..Default::default() }
     }
 
     /// Update metrics values for network usage over time
-    fn update(&mut self, data: &NetworkData, update_period: f64) {
-        self.incoming_data_rate = data.received() as f64 / update_period;
-        self.outgoing_data_rate = data.transmitted() as f64 / update_period;
+    fn update(&mut self, data: &NetworkData, timestamp: u64, sequence: u32) {
+        self.incoming_data_rate = data.received() as f64 / self.update_period;
+        self.outgoing_data_rate = data.transmitted() as f64 / self.update_period;
+        self.timestamp = timestamp;
+        self.sequence = sequence;
     }
 }
 
@@ -119,8 +123,10 @@ impl Disk {
         }
     }
 
-    fn update(&mut self, disk: &sysinfo::Disk) {
+    fn update(&mut self, disk: &sysinfo::Disk, timestamp: u64, sequence: u32) {
         self.available = disk.available_space();
+        self.timestamp = timestamp;
+        self.sequence = sequence;
     }
 }
 
@@ -162,9 +168,11 @@ impl Processor {
         Processor { name, ..Default::default() }
     }
 
-    fn update(&mut self, proc: &sysinfo::Processor) {
+    fn update(&mut self, proc: &sysinfo::Processor, timestamp: u64, sequence: u32) {
         self.frequency = proc.frequency();
         self.usage = proc.cpu_usage();
+        self.timestamp = timestamp;
+        self.sequence = sequence;
     }
 }
 
@@ -218,13 +226,15 @@ impl Process {
         Process { pid, name, start_time, ..Default::default() }
     }
 
-    fn update(&mut self, proc: &sysinfo::Process) {
+    fn update(&mut self, proc: &sysinfo::Process, timestamp: u64, sequence: u32) {
         let sysinfo::DiskUsage { total_written_bytes, written_bytes, total_read_bytes, read_bytes } =
             proc.disk_usage();
         self.disk_usage =
             DiskUsage { total_written_bytes, written_bytes, total_read_bytes, read_bytes };
         self.cpu_usage = proc.cpu_usage();
         self.mem_usage = proc.memory();
+        self.timestamp = timestamp;
+        self.sequence = sequence;
     }
 }
 
@@ -254,8 +264,8 @@ impl Package for Buffer<Process> {
 
 #[derive(Debug, Default, Serialize, Clone)]
 struct Mem {
-    total: u64,
-    available: u64,
+    total_memory: u64,
+    available_memory: u64,
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
@@ -266,6 +276,22 @@ pub struct SystemStats {
     sysinfo: SysInfo,
     #[serde(flatten)]
     memory: Mem,
+}
+
+impl SystemStats {
+    fn init(sys: &System) -> SystemStats {
+        let sysinfo = SysInfo::init(sys);
+        let memory = Mem { total_memory: sys.total_memory(), ..Default::default() };
+
+        SystemStats { sysinfo, memory, ..Default::default() }
+    }
+
+    fn update(&mut self, sys: &System, timestamp: u64, sequence: u32) {
+        self.sysinfo.update(sys);
+        self.memory.available_memory = sys.available_memory();
+        self.timestamp = timestamp;
+        self.sequence = sequence;
+    }
 }
 
 impl Point for SystemStats {
@@ -357,8 +383,6 @@ impl StatCollector {
         sys.refresh_disks_list();
         sys.refresh_networks_list();
 
-        let sysinfo = SysInfo::init(&sys);
-
         let mut disks = HashMap::new();
         for disk_data in sys.disks() {
             let disk_name = disk_data.name().to_string_lossy().to_string();
@@ -367,7 +391,7 @@ impl StatCollector {
 
         let mut networks = HashMap::new();
         for (name, _) in sys.networks() {
-            networks.insert(name.clone(), Network::init(name.clone()));
+            networks.insert(name.clone(), Network::init(name.clone(), config.stats.update_period));
         }
 
         let mut processors = HashMap::new();
@@ -378,9 +402,7 @@ impl StatCollector {
 
         let processes = HashMap::new();
 
-        let memory = Mem { total: sys.total_memory(), available: sys.available_memory() };
-
-        let stats = SystemStats { sysinfo, memory, ..Default::default() };
+        let stats = SystemStats::init(&sys);
 
         let streams = Streams::init(tx, &config);
 
@@ -413,10 +435,7 @@ impl StatCollector {
     }
 
     fn update(&mut self) -> Result<(), Error> {
-        self.stats.sysinfo.update(&self.sys);
-        self.stats.memory.available = self.sys.available_memory();
-        self.stats.timestamp = self.timestamp;
-        self.stats.sequence = self.sequences.system;
+        self.stats.update(&self.sys, self.timestamp, self.sequences.system);
         self.sequences.system += 1;
 
         if let Err(e) = self.streams.system.push(self.stats.clone()) {
@@ -428,9 +447,7 @@ impl StatCollector {
             let disk_name = disk_data.name().to_string_lossy().to_string();
             let disk =
                 self.disks.entry(disk_name.clone()).or_insert(Disk::init(disk_name, disk_data));
-            disk.update(disk_data);
-            disk.timestamp = self.timestamp;
-            disk.sequence = self.sequences.disks;
+            disk.update(disk_data, self.timestamp, self.sequences.disks);
             self.sequences.disks += 1;
 
             if let Err(e) = self.streams.disks.push(disk.clone()) {
@@ -440,11 +457,11 @@ impl StatCollector {
 
         // Refresh network byte rate info
         for (interface, net_data) in self.sys.networks() {
-            let net =
-                self.networks.entry(interface.clone()).or_insert(Network::init(interface.clone()));
-            net.update(net_data, self.config.stats.update_period);
-            net.timestamp = self.timestamp;
-            net.sequence = self.sequences.networks;
+            let net = self
+                .networks
+                .entry(interface.clone())
+                .or_insert(Network::init(interface.clone(), self.config.stats.update_period));
+            net.update(net_data, self.timestamp, self.sequences.networks);
             self.sequences.networks += 1;
 
             if let Err(e) = self.streams.networks.push(net.clone()) {
@@ -457,9 +474,7 @@ impl StatCollector {
             let proc_name = proc_data.name().to_string();
             let proc =
                 self.processors.entry(proc_name.clone()).or_insert(Processor::init(proc_name));
-            proc.update(proc_data);
-            proc.timestamp = self.timestamp;
-            proc.sequence = self.sequences.processors;
+            proc.update(proc_data, self.timestamp, self.sequences.processors);
             self.sequences.processors += 1;
 
             if let Err(e) = self.streams.processors.push(proc.clone()) {
@@ -474,9 +489,7 @@ impl StatCollector {
             if self.config.stats.names.contains(&name) {
                 let proc =
                     self.processes.entry(id).or_insert(Process::init(id, name, p.start_time()));
-                proc.update(p);
-                proc.timestamp = self.timestamp;
-                proc.sequence = self.sequences.processes;
+                proc.update(p, self.timestamp, self.sequences.processes);
                 self.sequences.processes += 1;
 
                 if let Err(e) = self.streams.processes.push(proc.clone()) {
