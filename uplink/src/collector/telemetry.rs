@@ -56,6 +56,62 @@ impl SysInfo {
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
+struct Mem {
+    total_memory: u64,
+    available_memory: u64,
+}
+
+#[derive(Debug, Default, Serialize, Clone)]
+pub struct SystemStats {
+    sequence: u32,
+    timestamp: u64,
+    #[serde(flatten)]
+    sysinfo: SysInfo,
+    #[serde(flatten)]
+    memory: Mem,
+}
+
+impl SystemStats {
+    fn init(sys: &System) -> SystemStats {
+        let sysinfo = SysInfo::init(sys);
+        let memory = Mem { total_memory: sys.total_memory(), ..Default::default() };
+
+        SystemStats { sysinfo, memory, ..Default::default() }
+    }
+
+    fn update(&mut self, sys: &System, timestamp: u64, sequence: u32) {
+        self.sysinfo.update(sys);
+        self.memory.available_memory = sys.available_memory();
+        self.timestamp = timestamp;
+        self.sequence = sequence;
+    }
+}
+
+impl Point for SystemStats {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+}
+
+impl Package for Buffer<SystemStats> {
+    fn topic(&self) -> Arc<String> {
+        self.topic.clone()
+    }
+
+    fn serialize(&self) -> Vec<u8> {
+        serde_json::to_vec(&self.buffer).unwrap()
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        self.anomalies()
+    }
+}
+
+#[derive(Debug, Default, Serialize, Clone)]
 struct Network {
     sequence: u32,
     timestamp: u64,
@@ -262,64 +318,9 @@ impl Package for Buffer<Process> {
     }
 }
 
-#[derive(Debug, Default, Serialize, Clone)]
-struct Mem {
-    total_memory: u64,
-    available_memory: u64,
-}
-
-#[derive(Debug, Default, Serialize, Clone)]
-pub struct SystemStats {
-    sequence: u32,
-    timestamp: u64,
-    #[serde(flatten)]
-    sysinfo: SysInfo,
-    #[serde(flatten)]
-    memory: Mem,
-}
-
-impl SystemStats {
-    fn init(sys: &System) -> SystemStats {
-        let sysinfo = SysInfo::init(sys);
-        let memory = Mem { total_memory: sys.total_memory(), ..Default::default() };
-
-        SystemStats { sysinfo, memory, ..Default::default() }
-    }
-
-    fn update(&mut self, sys: &System, timestamp: u64, sequence: u32) {
-        self.sysinfo.update(sys);
-        self.memory.available_memory = sys.available_memory();
-        self.timestamp = timestamp;
-        self.sequence = sequence;
-    }
-}
-
-impl Point for SystemStats {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-}
-
-impl Package for Buffer<SystemStats> {
-    fn topic(&self) -> Arc<String> {
-        self.topic.clone()
-    }
-
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
-    }
-
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
-    }
-}
-
 type Sequence = u32;
 
+/// Holds current sequence number values meant for different data streams
 #[derive(Default)]
 struct Sequences {
     system: Sequence,
@@ -329,6 +330,7 @@ struct Sequences {
     networks: Sequence,
 }
 
+/// Stream handles for the various data streams
 struct Streams {
     system: Stream<SystemStats>,
     processors: Stream<Processor>,
@@ -364,20 +366,33 @@ impl Streams {
     }
 }
 
+/// Collects and forward system information such as kernel version, memory and disk space usage,
+/// information regarding running processes, network and processor usage, etc to an IoT platform.
 pub struct StatCollector {
+    /// Handle to sysinfo struct containing system information.
     sys: System,
+    /// Frequently updated timestamp value, used to ensure idempotence.
     timestamp: u64,
+    /// System information values to be serialized.
     stats: SystemStats,
+    /// Information about running processes.
     processes: HashMap<i32, Process>,
+    /// Individual Processor information.
     processors: HashMap<String, Processor>,
+    /// Information regarding individual Network interfaces.
     networks: HashMap<String, Network>,
+    /// Information regarding individual Disks.
     disks: HashMap<String, Disk>,
+    /// Uplink configuration.
     config: Arc<Config>,
+    /// Stream handles
     streams: Streams,
+    /// Data point sequence numbers.
     sequences: Sequences,
 }
 
 impl StatCollector {
+    /// Create and initialize a stat collector
     pub fn new(config: Arc<Config>, tx: Sender<Box<dyn Package>>) -> Self {
         let mut sys = System::new();
         sys.refresh_disks_list();
@@ -422,6 +437,7 @@ impl StatCollector {
         }
     }
 
+    /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
     pub fn start(mut self) {
         loop {
             std::thread::sleep(Duration::from_secs_f64(self.config.stats.update_period));
@@ -434,6 +450,7 @@ impl StatCollector {
         }
     }
 
+    /// Update system information values and increment sequence numbers, while sending to specific data streams.
     fn update(&mut self) -> Result<(), Error> {
         self.stats.update(&self.sys, self.timestamp, self.sequences.system);
         self.sequences.system += 1;
