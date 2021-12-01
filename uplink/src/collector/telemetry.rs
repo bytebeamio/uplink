@@ -2,6 +2,7 @@ use flume::Sender;
 use log::error;
 use serde::Serialize;
 use sysinfo::{DiskExt, NetworkData, NetworkExt, ProcessExt, ProcessorExt, System, SystemExt};
+use tokio::time::Instant;
 
 use std::{
     collections::HashMap,
@@ -111,7 +112,7 @@ impl Package for Buffer<SystemStats> {
     }
 }
 
-#[derive(Debug, Default, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 struct Network {
     sequence: u32,
     timestamp: u64,
@@ -119,18 +120,26 @@ struct Network {
     incoming_data_rate: f64,
     outgoing_data_rate: f64,
     #[serde(skip_serializing)]
-    update_period: f64,
+    timer: Instant,
 }
 
 impl Network {
-    fn init(name: String, update_period: f64) -> Self {
-        Network { name, update_period, ..Default::default() }
+    fn init(name: String) -> Self {
+        Network {
+            sequence: 0,
+            timestamp: 0,
+            name,
+            incoming_data_rate: 0.0,
+            outgoing_data_rate: 0.0,
+            timer: Instant::now(),
+        }
     }
 
     /// Update metrics values for network usage over time
     fn update(&mut self, data: &NetworkData, timestamp: u64, sequence: u32) {
-        self.incoming_data_rate = data.received() as f64 / self.update_period;
-        self.outgoing_data_rate = data.transmitted() as f64 / self.update_period;
+        let update_period = self.timer.elapsed().as_secs_f64();
+        self.incoming_data_rate = data.total_received() as f64 / update_period;
+        self.outgoing_data_rate = data.total_transmitted() as f64 / update_period;
         self.timestamp = timestamp;
         self.sequence = sequence;
     }
@@ -406,7 +415,7 @@ impl StatCollector {
 
         let mut networks = HashMap::new();
         for (name, _) in sys.networks() {
-            networks.insert(name.clone(), Network::init(name.clone(), config.stats.update_period));
+            networks.insert(name.clone(), Network::init(name.clone()));
         }
 
         let mut processors = HashMap::new();
@@ -474,10 +483,8 @@ impl StatCollector {
 
         // Refresh network byte rate info
         for (interface, net_data) in self.sys.networks() {
-            let net = self
-                .networks
-                .entry(interface.clone())
-                .or_insert(Network::init(interface.clone(), self.config.stats.update_period));
+            let net =
+                self.networks.entry(interface.clone()).or_insert(Network::init(interface.clone()));
             self.sequences.networks += 1;
             net.update(net_data, self.timestamp, self.sequences.networks);
 
@@ -485,6 +492,8 @@ impl StatCollector {
                 error!("Couldn't send network stats: {}", e);
             }
         }
+        self.sys.refresh_networks();
+        self.sys.refresh_networks_list();
 
         // Refresh processor info
         for proc_data in self.sys.processors().iter() {
@@ -498,6 +507,7 @@ impl StatCollector {
                 error!("Couldn't send processor stats: {}", e);
             }
         }
+        self.sys.refresh_cpu();
 
         // Refresh processes info
         for (&id, p) in self.sys.processes() {
@@ -514,11 +524,7 @@ impl StatCollector {
                 }
             }
         }
-
-        // Refresh sysinfo counters
-        self.sys.refresh_all();
-        self.sys.refresh_disks_list();
-        self.sys.refresh_networks_list();
+        self.sys.refresh_processes();
 
         Ok(())
     }
