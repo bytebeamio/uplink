@@ -452,8 +452,8 @@ impl StatCollector {
 
     /// Update system information values and increment sequence numbers, while sending to specific data streams.
     fn update(&mut self) -> Result<(), Error> {
-        self.stats.update(&self.sys, self.timestamp, self.sequences.system);
         self.sequences.system += 1;
+        self.stats.update(&self.sys, self.timestamp, self.sequences.system);
 
         if let Err(e) = self.streams.system.push(self.stats.clone()) {
             error!("Couldn't send system stats: {}", e);
@@ -464,8 +464,8 @@ impl StatCollector {
             let disk_name = disk_data.name().to_string_lossy().to_string();
             let disk =
                 self.disks.entry(disk_name.clone()).or_insert(Disk::init(disk_name, disk_data));
-            disk.update(disk_data, self.timestamp, self.sequences.disks);
             self.sequences.disks += 1;
+            disk.update(disk_data, self.timestamp, self.sequences.disks);
 
             if let Err(e) = self.streams.disks.push(disk.clone()) {
                 error!("Couldn't send disk stats: {}", e);
@@ -478,8 +478,8 @@ impl StatCollector {
                 .networks
                 .entry(interface.clone())
                 .or_insert(Network::init(interface.clone(), self.config.stats.update_period));
-            net.update(net_data, self.timestamp, self.sequences.networks);
             self.sequences.networks += 1;
+            net.update(net_data, self.timestamp, self.sequences.networks);
 
             if let Err(e) = self.streams.networks.push(net.clone()) {
                 error!("Couldn't send network stats: {}", e);
@@ -491,8 +491,8 @@ impl StatCollector {
             let proc_name = proc_data.name().to_string();
             let proc =
                 self.processors.entry(proc_name.clone()).or_insert(Processor::init(proc_name));
-            proc.update(proc_data, self.timestamp, self.sequences.processors);
             self.sequences.processors += 1;
+            proc.update(proc_data, self.timestamp, self.sequences.processors);
 
             if let Err(e) = self.streams.processors.push(proc.clone()) {
                 error!("Couldn't send processor stats: {}", e);
@@ -506,8 +506,8 @@ impl StatCollector {
             if self.config.stats.names.contains(&name) {
                 let proc =
                     self.processes.entry(id).or_insert(Process::init(id, name, p.start_time()));
-                proc.update(p, self.timestamp, self.sequences.processes);
                 self.sequences.processes += 1;
+                proc.update(p, self.timestamp, self.sequences.processes);
 
                 if let Err(e) = self.streams.processes.push(proc.clone()) {
                     error!("Couldn't send process stats: {}", e);
