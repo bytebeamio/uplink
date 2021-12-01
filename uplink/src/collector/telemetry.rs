@@ -467,6 +467,7 @@ impl StatCollector {
         if let Err(e) = self.streams.system.push(self.stats.clone()) {
             error!("Couldn't send system stats: {}", e);
         }
+        self.sys.refresh_memory();
 
         // Refresh disk info
         for disk_data in self.sys.disks() {
@@ -480,6 +481,8 @@ impl StatCollector {
                 error!("Couldn't send disk stats: {}", e);
             }
         }
+        self.sys.refresh_disks();
+        self.sys.refresh_disks_list();
 
         // Refresh network byte rate info
         for (interface, net_data) in self.sys.networks() {
