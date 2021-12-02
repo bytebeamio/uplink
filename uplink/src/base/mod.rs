@@ -47,7 +47,7 @@ pub struct Ota {
 pub struct Stats {
     pub enabled: bool,
     pub process_names: Vec<String>,
-    pub update_period: f64,
+    pub update_period: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

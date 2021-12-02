@@ -7,7 +7,7 @@ use tokio::time::Instant;
 use std::{
     collections::HashMap,
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH, Duration},
 };
 
 use crate::base::{Buffer, Config, Package, Point, Stream};
@@ -443,11 +443,11 @@ impl StatCollector {
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
     pub fn start(mut self) {
         loop {
-            std::thread::sleep(Duration::from_secs_f64(self.config.stats.update_period));
-            self.timestamp += self.config.stats.update_period as u64;
+            std::thread::sleep(Duration::from_secs(self.config.stats.update_period));
+            self.timestamp += self.config.stats.update_period;
 
             if let Err(e) = self.update() {
-                error!("Faced error while refreshing telemetrics: {}", e);
+                error!("Faced error while refreshing system statistics: {}", e);
                 return;
             };
         }

@@ -66,8 +66,8 @@ use crate::base::serializer::Serializer;
 use crate::base::Stream;
 
 use crate::collector::simulator::Simulator;
+use crate::collector::systemstats::StatCollector;
 use crate::collector::tcpjson::Bridge;
-use crate::collector::telemetry::StatCollector;
 
 use base::Config;
 use disk::Storage;
