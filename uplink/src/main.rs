@@ -138,7 +138,7 @@ const DEFAULT_CONFIG: &'static str = r#"
 
     [stats]
     enabled = true
-    names = ["uplink"]
+    process_names = ["uplink"]
     update_period = 5
 "#;
 
@@ -223,7 +223,7 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
         println!("    ota_path: {}", config.ota.path);
     }
     if config.stats.enabled {
-        println!("    processes: {:?}", config.stats.names);
+        println!("    processes: {:?}", config.stats.process_names);
     }
     println!("\n");
 }

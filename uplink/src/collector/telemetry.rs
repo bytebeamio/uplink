@@ -57,32 +57,26 @@ impl SysInfo {
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
-struct Mem {
-    total_memory: u64,
-    available_memory: u64,
-}
-
-#[derive(Debug, Default, Serialize, Clone)]
 pub struct SystemStats {
     sequence: u32,
     timestamp: u64,
     #[serde(flatten)]
     sysinfo: SysInfo,
-    #[serde(flatten)]
-    memory: Mem,
+    total_memory: u64,
+    available_memory: u64,
 }
 
 impl SystemStats {
     fn init(sys: &System) -> SystemStats {
         let sysinfo = SysInfo::init(sys);
-        let memory = Mem { total_memory: sys.total_memory(), ..Default::default() };
+        let total_memory = sys.total_memory();
 
-        SystemStats { sysinfo, memory, ..Default::default() }
+        SystemStats { sysinfo, total_memory, ..Default::default() }
     }
 
     fn update(&mut self, sys: &System, timestamp: u64, sequence: u32) {
         self.sysinfo.update(sys);
-        self.memory.available_memory = sys.available_memory();
+        self.available_memory = sys.available_memory();
         self.timestamp = timestamp;
         self.sequence = sequence;
     }
@@ -516,7 +510,7 @@ impl StatCollector {
         for (&id, p) in self.sys.processes() {
             let name = p.name().to_owned();
 
-            if self.config.stats.names.contains(&name) {
+            if self.config.stats.process_names.contains(&name) {
                 let proc =
                     self.processes.entry(id).or_insert(Process::init(id, name, p.start_time()));
                 self.sequences.processes += 1;
