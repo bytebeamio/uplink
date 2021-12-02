@@ -7,7 +7,7 @@ use tokio::time::Instant;
 use std::{
     collections::HashMap,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH, Duration},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use crate::base::{Buffer, Config, Package, Point, Stream};
@@ -334,7 +334,7 @@ struct Sequences {
 }
 
 /// Stream handles for the various data streams
-struct Streams {
+struct StatStreams {
     system: Stream<SystemStats>,
     processors: Stream<Processor>,
     processes: Stream<Process>,
@@ -342,9 +342,9 @@ struct Streams {
     networks: Stream<Network>,
 }
 
-impl Streams {
+impl StatStreams {
     fn init(tx: Sender<Box<dyn Package>>, config: &Arc<Config>) -> Self {
-        Streams {
+        StatStreams {
             system: Stream::dynamic(
                 "system_stats",
                 &config.project_id,
@@ -389,7 +389,7 @@ pub struct StatCollector {
     /// Uplink configuration.
     config: Arc<Config>,
     /// Stream handles
-    streams: Streams,
+    streams: StatStreams,
     /// Data point sequence numbers.
     sequences: Sequences,
 }
@@ -422,7 +422,7 @@ impl StatCollector {
 
         let stats = SystemStats::init(&sys);
 
-        let streams = Streams::init(tx, &config);
+        let streams = StatStreams::init(tx, &config);
 
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
