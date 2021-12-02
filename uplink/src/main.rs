@@ -97,9 +97,6 @@ pub struct CommandLine {
     /// list of modules to log
     #[structopt(short = "s", long = "simulator")]
     simulator: bool,
-    // /// Toggle for telemetrics collector
-    // #[structopt(short = "t", long = "stats_collector")]
-    // stats: bool,
     /// log level (v: info, vv: debug, vvv: trace)
     #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
     verbose: u8,
