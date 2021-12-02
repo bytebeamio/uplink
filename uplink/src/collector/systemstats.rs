@@ -10,7 +10,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::base::{Buffer, Config, Package, Point, Stream};
+use crate::base::{self, Buffer, Config, Package, Point, Stream};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -19,70 +19,50 @@ pub enum Error {
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
-struct LoadAvg {
-    /// Average load within one minute.
-    pub one: f64,
-    /// Average load within five minutes.
-    pub five: f64,
-    /// Average load within fifteen minutes.
-    pub fifteen: f64,
-}
-
-#[derive(Debug, Default, Serialize, Clone)]
-struct SysInfo {
+pub struct SystemStat {
+    sequence: u32,
+    timestamp: u64,
     kernel_version: String,
     uptime: u64,
     no_processes: usize,
-    #[serde(flatten)]
-    load_avg: LoadAvg,
-}
-
-impl SysInfo {
-    fn init(sys: &System) -> Self {
-        SysInfo {
-            kernel_version: match sys.kernel_version() {
-                Some(kv) => kv,
-                None => String::default(),
-            },
-            ..Default::default()
-        }
-    }
-
-    fn update(&mut self, sys: &System) {
-        self.uptime = sys.uptime();
-        self.no_processes = sys.processes().len();
-        let sysinfo::LoadAvg { one, five, fifteen } = sys.load_average();
-        self.load_avg = LoadAvg { one, five, fifteen };
-    }
-}
-
-#[derive(Debug, Default, Serialize, Clone)]
-pub struct SystemStats {
-    sequence: u32,
-    timestamp: u64,
-    #[serde(flatten)]
-    sysinfo: SysInfo,
+    /// Average load within one minute.
+    load_avg_one: f64,
+    /// Average load within five minutes.
+    load_avg_five: f64,
+    /// Average load within fifteen minutes.
+    load_avg_fifteen: f64,
     total_memory: u64,
     available_memory: u64,
 }
 
-impl SystemStats {
-    fn init(sys: &System) -> SystemStats {
-        let sysinfo = SysInfo::init(sys);
+impl SystemStat {
+    fn init(sys: &System) -> SystemStat {
         let total_memory = sys.total_memory();
 
-        SystemStats { sysinfo, total_memory, ..Default::default() }
+        SystemStat {
+            kernel_version: match sys.kernel_version() {
+                Some(kv) => kv,
+                None => String::default(),
+            },
+            total_memory,
+            ..Default::default()
+        }
     }
 
-    fn update(&mut self, sys: &System, timestamp: u64, sequence: u32) {
-        self.sysinfo.update(sys);
-        self.available_memory = sys.available_memory();
+    fn update(&mut self, sys: &System, timestamp: u64) {
+        self.sequence += 1;
         self.timestamp = timestamp;
-        self.sequence = sequence;
+        self.uptime = sys.uptime();
+        self.no_processes = sys.processes().len();
+        let sysinfo::LoadAvg { one, five, fifteen } = sys.load_average();
+        self.load_avg_one = one;
+        self.load_avg_five = five;
+        self.load_avg_fifteen = fifteen;
+        self.available_memory = sys.available_memory();
     }
 }
 
-impl Point for SystemStats {
+impl Point for SystemStat {
     fn sequence(&self) -> u32 {
         self.sequence
     }
@@ -92,7 +72,7 @@ impl Point for SystemStats {
     }
 }
 
-impl Package for Buffer<SystemStats> {
+impl Package for Buffer<SystemStat> {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
     }
@@ -103,6 +83,18 @@ impl Package for Buffer<SystemStats> {
 
     fn anomalies(&self) -> Option<(String, usize)> {
         self.anomalies()
+    }
+}
+
+struct SystemStats {
+    stat: SystemStat,
+    stream: Stream<SystemStat>,
+}
+
+impl SystemStats {
+    fn push(&mut self, sys: &System, timestamp: u64) -> Result<(), base::Error> {
+        self.stat.update(sys, timestamp);
+        self.stream.push(self.stat.clone())
     }
 }
 
@@ -163,6 +155,27 @@ impl Package for Buffer<Network> {
     }
 }
 
+struct Networks {
+    sequence: u32,
+    map: HashMap<String, Network>,
+    stream: Stream<Network>,
+}
+
+impl Networks {
+    fn push(
+        &mut self,
+        net_name: String,
+        net_data: &sysinfo::NetworkData,
+        timestamp: u64,
+    ) -> Result<(), base::Error> {
+        self.sequence += 1;
+        let net = self.map.entry(net_name.clone()).or_insert(Network::init(net_name));
+        net.update(net_data, timestamp, self.sequence);
+
+        self.stream.push(net.clone())
+    }
+}
+
 #[derive(Debug, Serialize, Default, Clone)]
 struct Disk {
     sequence: u32,
@@ -213,6 +226,23 @@ impl Package for Buffer<Disk> {
     }
 }
 
+struct Disks {
+    sequence: u32,
+    map: HashMap<String, Disk>,
+    stream: Stream<Disk>,
+}
+
+impl Disks {
+    fn push(&mut self, disk_data: &sysinfo::Disk, timestamp: u64) -> Result<(), base::Error> {
+        self.sequence += 1;
+        let disk_name = disk_data.name().to_string_lossy().to_string();
+        let disk = self.map.entry(disk_name.clone()).or_insert(Disk::init(disk_name, disk_data));
+        disk.update(disk_data, timestamp, self.sequence);
+
+        self.stream.push(disk.clone())
+    }
+}
+
 #[derive(Debug, Default, Serialize, Clone)]
 struct Processor {
     sequence: u32,
@@ -259,12 +289,21 @@ impl Package for Buffer<Processor> {
     }
 }
 
-#[derive(Debug, Default, Serialize, Clone)]
-struct DiskUsage {
-    total_written_bytes: u64,
-    written_bytes: u64,
-    total_read_bytes: u64,
-    read_bytes: u64,
+struct Processors {
+    sequence: u32,
+    map: HashMap<String, Processor>,
+    stream: Stream<Processor>,
+}
+
+impl Processors {
+    fn push(&mut self, proc_data: &sysinfo::Processor, timestamp: u64) -> Result<(), base::Error> {
+        let proc_name = proc_data.name().to_string();
+        self.sequence += 1;
+        let proc = self.map.entry(proc_name.clone()).or_insert(Processor::init(proc_name));
+        proc.update(proc_data, timestamp, self.sequence);
+
+        self.stream.push(proc.clone())
+    }
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
@@ -275,8 +314,10 @@ struct Process {
     name: String,
     cpu_usage: f32,
     mem_usage: u64,
-    #[serde(flatten)]
-    disk_usage: DiskUsage,
+    disk_total_written_bytes: u64,
+    disk_written_bytes: u64,
+    disk_total_read_bytes: u64,
+    disk_read_bytes: u64,
     start_time: u64,
 }
 
@@ -288,8 +329,10 @@ impl Process {
     fn update(&mut self, proc: &sysinfo::Process, timestamp: u64, sequence: u32) {
         let sysinfo::DiskUsage { total_written_bytes, written_bytes, total_read_bytes, read_bytes } =
             proc.disk_usage();
-        self.disk_usage =
-            DiskUsage { total_written_bytes, written_bytes, total_read_bytes, read_bytes };
+        self.disk_total_written_bytes = total_written_bytes;
+        self.disk_written_bytes = written_bytes;
+        self.disk_total_read_bytes = total_read_bytes;
+        self.disk_read_bytes = read_bytes;
         self.cpu_usage = proc.cpu_usage();
         self.mem_usage = proc.memory();
         self.timestamp = timestamp;
@@ -321,51 +364,25 @@ impl Package for Buffer<Process> {
     }
 }
 
-type Sequence = u32;
-
-/// Holds current sequence number values meant for different data streams
-#[derive(Default)]
-struct Sequences {
-    system: Sequence,
-    processors: Sequence,
-    processes: Sequence,
-    disks: Sequence,
-    networks: Sequence,
+struct Processes {
+    sequence: u32,
+    map: HashMap<i32, Process>,
+    stream: Stream<Process>,
 }
 
-/// Stream handles for the various data streams
-struct StatStreams {
-    system: Stream<SystemStats>,
-    processors: Stream<Processor>,
-    processes: Stream<Process>,
-    disks: Stream<Disk>,
-    networks: Stream<Network>,
-}
+impl Processes {
+    fn push(
+        &mut self,
+        id: i32,
+        proc_data: &sysinfo::Process,
+        name: String,
+        timestamp: u64,
+    ) -> Result<(), base::Error> {
+        self.sequence += 1;
+        let proc = self.map.entry(id).or_insert(Process::init(id, name, proc_data.start_time()));
+        proc.update(proc_data, timestamp, self.sequence);
 
-impl StatStreams {
-    fn init(tx: Sender<Box<dyn Package>>, config: &Arc<Config>) -> Self {
-        StatStreams {
-            system: Stream::dynamic(
-                "system_stats",
-                &config.project_id,
-                &config.device_id,
-                tx.clone(),
-            ),
-            processors: Stream::dynamic(
-                "processor_stats",
-                &config.project_id,
-                &config.device_id,
-                tx.clone(),
-            ),
-            processes: Stream::dynamic(
-                "process_stats",
-                &config.project_id,
-                &config.device_id,
-                tx.clone(),
-            ),
-            disks: Stream::dynamic("disk_stats", &config.project_id, &config.device_id, tx.clone()),
-            networks: Stream::dynamic("network_stats", &config.project_id, &config.device_id, tx),
-        }
+        self.stream.push(proc.clone())
     }
 }
 
@@ -377,21 +394,17 @@ pub struct StatCollector {
     /// Frequently updated timestamp value, used to ensure idempotence.
     timestamp: u64,
     /// System information values to be serialized.
-    stats: SystemStats,
+    system: SystemStats,
     /// Information about running processes.
-    processes: HashMap<i32, Process>,
+    processes: Processes,
     /// Individual Processor information.
-    processors: HashMap<String, Processor>,
+    processors: Processors,
     /// Information regarding individual Network interfaces.
-    networks: HashMap<String, Network>,
+    networks: Networks,
     /// Information regarding individual Disks.
-    disks: HashMap<String, Disk>,
+    disks: Disks,
     /// Uplink configuration.
     config: Arc<Config>,
-    /// Stream handles
-    streams: StatStreams,
-    /// Data point sequence numbers.
-    sequences: Sequences,
 }
 
 impl StatCollector {
@@ -401,43 +414,43 @@ impl StatCollector {
         sys.refresh_disks_list();
         sys.refresh_networks_list();
 
-        let mut disks = HashMap::new();
+        let mut map = HashMap::new();
+        let stream =
+            Stream::dynamic("disk_stats", &config.project_id, &config.device_id, tx.clone());
         for disk_data in sys.disks() {
             let disk_name = disk_data.name().to_string_lossy().to_string();
-            disks.insert(disk_name.clone(), Disk::init(disk_name, disk_data));
+            map.insert(disk_name.clone(), Disk::init(disk_name, disk_data));
         }
+        let disks = Disks { sequence: 0, map, stream };
 
-        let mut networks = HashMap::new();
-        for (name, _) in sys.networks() {
-            networks.insert(name.clone(), Network::init(name.clone()));
+        let mut map = HashMap::new();
+        let stream =
+            Stream::dynamic("network_stats", &config.project_id, &config.device_id, tx.clone());
+        for (net_name, _) in sys.networks() {
+            map.insert(net_name.to_owned(), Network::init(net_name.to_owned()));
         }
+        let networks = Networks { sequence: 0, map, stream };
 
-        let mut processors = HashMap::new();
+        let mut map = HashMap::new();
+        let stream =
+            Stream::dynamic("processor_stats", &config.project_id, &config.device_id, tx.clone());
         for proc in sys.processors().iter() {
             let proc_name = proc.name().to_owned();
-            processors.insert(proc_name.clone(), Processor::init(proc_name));
+            map.insert(proc_name.clone(), Processor::init(proc_name));
         }
+        let processors = Processors { sequence: 0, map, stream };
 
-        let processes = HashMap::new();
+        let stream =
+            Stream::dynamic("process_stats", &config.project_id, &config.device_id, tx.clone());
+        let processes = Processes { sequence: 0, map: HashMap::new(), stream };
 
-        let stats = SystemStats::init(&sys);
-
-        let streams = StatStreams::init(tx, &config);
+        let stream =
+            Stream::dynamic("system_stats", &config.project_id, &config.device_id, tx.clone());
+        let system = SystemStats { stat: SystemStat::init(&sys), stream };
 
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
-        StatCollector {
-            sys,
-            stats,
-            config,
-            processes,
-            disks,
-            networks,
-            processors,
-            streams,
-            timestamp,
-            sequences: Default::default(),
-        }
+        StatCollector { sys, system, config, processes, disks, networks, processors, timestamp }
     }
 
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
@@ -455,23 +468,14 @@ impl StatCollector {
 
     /// Update system information values and increment sequence numbers, while sending to specific data streams.
     fn update(&mut self) -> Result<(), Error> {
-        self.sequences.system += 1;
-        self.stats.update(&self.sys, self.timestamp, self.sequences.system);
-
-        if let Err(e) = self.streams.system.push(self.stats.clone()) {
+        if let Err(e) = self.system.push(&self.sys, self.timestamp) {
             error!("Couldn't send system stats: {}", e);
         }
         self.sys.refresh_memory();
 
         // Refresh disk info
         for disk_data in self.sys.disks() {
-            let disk_name = disk_data.name().to_string_lossy().to_string();
-            let disk =
-                self.disks.entry(disk_name.clone()).or_insert(Disk::init(disk_name, disk_data));
-            self.sequences.disks += 1;
-            disk.update(disk_data, self.timestamp, self.sequences.disks);
-
-            if let Err(e) = self.streams.disks.push(disk.clone()) {
+            if let Err(e) = self.disks.push(disk_data, self.timestamp) {
                 error!("Couldn't send disk stats: {}", e);
             }
         }
@@ -479,13 +483,8 @@ impl StatCollector {
         self.sys.refresh_disks_list();
 
         // Refresh network byte rate info
-        for (interface, net_data) in self.sys.networks() {
-            let net =
-                self.networks.entry(interface.clone()).or_insert(Network::init(interface.clone()));
-            self.sequences.networks += 1;
-            net.update(net_data, self.timestamp, self.sequences.networks);
-
-            if let Err(e) = self.streams.networks.push(net.clone()) {
+        for (net_name, net_data) in self.sys.networks() {
+            if let Err(e) = self.networks.push(net_name.to_owned(), net_data, self.timestamp) {
                 error!("Couldn't send network stats: {}", e);
             }
         }
@@ -494,13 +493,7 @@ impl StatCollector {
 
         // Refresh processor info
         for proc_data in self.sys.processors().iter() {
-            let proc_name = proc_data.name().to_string();
-            let proc =
-                self.processors.entry(proc_name.clone()).or_insert(Processor::init(proc_name));
-            self.sequences.processors += 1;
-            proc.update(proc_data, self.timestamp, self.sequences.processors);
-
-            if let Err(e) = self.streams.processors.push(proc.clone()) {
+            if let Err(e) = self.processors.push(proc_data, self.timestamp) {
                 error!("Couldn't send processor stats: {}", e);
             }
         }
@@ -511,12 +504,7 @@ impl StatCollector {
             let name = p.name().to_owned();
 
             if self.config.stats.process_names.contains(&name) {
-                let proc =
-                    self.processes.entry(id).or_insert(Process::init(id, name, p.start_time()));
-                self.sequences.processes += 1;
-                proc.update(p, self.timestamp, self.sequences.processes);
-
-                if let Err(e) = self.streams.processes.push(proc.clone()) {
+                if let Err(e) = self.processes.push(id, p, name, self.timestamp) {
                     error!("Couldn't send process stats: {}", e);
                 }
             }
