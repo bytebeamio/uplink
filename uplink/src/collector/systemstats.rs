@@ -423,7 +423,7 @@ impl StatCollector {
 
         let mut map = HashMap::new();
         let stream = Stream::dynamic_with_size(
-            "disk_stats",
+            "uplink_disk_stats",
             &config.project_id,
             &config.device_id,
             max_buf_size,
@@ -437,7 +437,7 @@ impl StatCollector {
 
         let mut map = HashMap::new();
         let stream = Stream::dynamic_with_size(
-            "network_stats",
+            "uplink_network_stats",
             &config.project_id,
             &config.device_id,
             max_buf_size,
@@ -450,7 +450,7 @@ impl StatCollector {
 
         let mut map = HashMap::new();
         let stream = Stream::dynamic_with_size(
-            "processor_stats",
+            "uplink_processor_stats",
             &config.project_id,
             &config.device_id,
             max_buf_size,
@@ -463,7 +463,7 @@ impl StatCollector {
         let processors = ProcessorStats { sequence: 0, map, stream };
 
         let stream = Stream::dynamic_with_size(
-            "process_stats",
+            "uplink_process_stats",
             &config.project_id,
             &config.device_id,
             max_buf_size,
@@ -472,7 +472,7 @@ impl StatCollector {
         let processes = ProcessStats { sequence: 0, map: HashMap::new(), stream };
 
         let stream = Stream::dynamic_with_size(
-            "system_stats",
+            "uplink_system_stats",
             &config.project_id,
             &config.device_id,
             max_buf_size,
