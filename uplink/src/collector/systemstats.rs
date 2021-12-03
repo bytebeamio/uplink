@@ -185,6 +185,7 @@ struct Disk {
     name: String,
     total: u64,
     available: u64,
+    used: u64,
 }
 
 impl Disk {
@@ -199,6 +200,7 @@ impl Disk {
 
     fn update(&mut self, disk: &sysinfo::Disk, timestamp: u64, sequence: u32) {
         self.available = disk.available_space();
+        self.used = self.total - self.available;
         self.timestamp = timestamp;
         self.sequence = sequence;
     }
@@ -530,6 +532,9 @@ impl StatCollector {
         self.sys.refresh_cpu();
 
         // Refresh processes info
+        // NOTE: This can be further optimized by storing pids of interested processes
+        // at init and only collecting process information for them instead of iterating
+        // over all running processes as is being done now.
         for (&id, p) in self.sys.processes() {
             let name = p.name().to_owned();
 
