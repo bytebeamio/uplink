@@ -48,6 +48,7 @@ pub struct Stats {
     pub enabled: bool,
     pub process_names: Vec<String>,
     pub update_period: u64,
+    pub stream_size: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -115,10 +116,11 @@ where
         Stream { name, topic, last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
     }
 
-    pub fn dynamic<S: Into<String>>(
+    pub fn dynamic_with_size<S: Into<String>>(
         stream: S,
         project_id: S,
         device_id: S,
+        max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
         let stream = stream.into();
@@ -133,19 +135,16 @@ where
             + &stream
             + "/jsonarray";
 
-        let name = Arc::new(stream);
-        let topic = Arc::new(topic);
-        let buffer = Buffer::new(name.clone(), topic.clone());
+        Stream::new(stream, topic, max_buffer_size, tx)
+    }
 
-        Stream {
-            name,
-            topic,
-            last_sequence: 0,
-            last_timestamp: 0,
-            max_buffer_size: 100,
-            buffer,
-            tx,
-        }
+    pub fn dynamic<S: Into<String>>(
+        stream: S,
+        project_id: S,
+        device_id: S,
+        tx: Sender<Box<dyn Package>>,
+    ) -> Stream<T> {
+        Stream::dynamic_with_size(stream, project_id, device_id, 100, tx)
     }
 
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {

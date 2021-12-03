@@ -414,9 +414,19 @@ impl StatCollector {
         sys.refresh_disks_list();
         sys.refresh_networks_list();
 
+        let max_buf_size = match config.stats.stream_size {
+            Some(stream_size) => stream_size,
+            None => 10,
+        };
+
         let mut map = HashMap::new();
-        let stream =
-            Stream::dynamic("disk_stats", &config.project_id, &config.device_id, tx.clone());
+        let stream = Stream::dynamic_with_size(
+            "disk_stats",
+            &config.project_id,
+            &config.device_id,
+            max_buf_size,
+            tx.clone(),
+        );
         for disk_data in sys.disks() {
             let disk_name = disk_data.name().to_string_lossy().to_string();
             map.insert(disk_name.clone(), Disk::init(disk_name, disk_data));
@@ -424,28 +434,48 @@ impl StatCollector {
         let disks = Disks { sequence: 0, map, stream };
 
         let mut map = HashMap::new();
-        let stream =
-            Stream::dynamic("network_stats", &config.project_id, &config.device_id, tx.clone());
+        let stream = Stream::dynamic_with_size(
+            "network_stats",
+            &config.project_id,
+            &config.device_id,
+            max_buf_size,
+            tx.clone(),
+        );
         for (net_name, _) in sys.networks() {
             map.insert(net_name.to_owned(), Network::init(net_name.to_owned()));
         }
         let networks = Networks { sequence: 0, map, stream };
 
         let mut map = HashMap::new();
-        let stream =
-            Stream::dynamic("processor_stats", &config.project_id, &config.device_id, tx.clone());
+        let stream = Stream::dynamic_with_size(
+            "processor_stats",
+            &config.project_id,
+            &config.device_id,
+            max_buf_size,
+            tx.clone(),
+        );
         for proc in sys.processors().iter() {
             let proc_name = proc.name().to_owned();
             map.insert(proc_name.clone(), Processor::init(proc_name));
         }
         let processors = Processors { sequence: 0, map, stream };
 
-        let stream =
-            Stream::dynamic("process_stats", &config.project_id, &config.device_id, tx.clone());
+        let stream = Stream::dynamic_with_size(
+            "process_stats",
+            &config.project_id,
+            &config.device_id,
+            max_buf_size,
+            tx.clone(),
+        );
         let processes = Processes { sequence: 0, map: HashMap::new(), stream };
 
-        let stream =
-            Stream::dynamic("system_stats", &config.project_id, &config.device_id, tx.clone());
+        let stream = Stream::dynamic_with_size(
+            "system_stats",
+            &config.project_id,
+            &config.device_id,
+            max_buf_size,
+            tx.clone(),
+        );
         let system = SystemStats { stat: SystemStat::init(&sys), stream };
 
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
