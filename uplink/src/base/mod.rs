@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::mem;
 use std::sync::Arc;
 
-use async_channel::{SendError, Sender};
+use flume::{SendError, Sender};
 use log::warn;
 use serde::Deserialize;
 
@@ -44,6 +44,14 @@ pub struct Ota {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct Stats {
+    pub enabled: bool,
+    pub process_names: Vec<String>,
+    pub update_period: u64,
+    pub stream_size: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -57,6 +65,7 @@ pub struct Config {
     pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
     pub ota: Ota,
+    pub stats: Stats,
 }
 
 pub trait Point: Send + Debug {
@@ -107,10 +116,11 @@ where
         Stream { name, topic, last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
     }
 
-    pub fn dynamic<S: Into<String>>(
+    pub fn dynamic_with_size<S: Into<String>>(
         stream: S,
         project_id: S,
         device_id: S,
+        max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
         let stream = stream.into();
@@ -125,22 +135,19 @@ where
             + &stream
             + "/jsonarray";
 
-        let name = Arc::new(stream);
-        let topic = Arc::new(topic);
-        let buffer = Buffer::new(name.clone(), topic.clone());
-
-        Stream {
-            name,
-            topic,
-            last_sequence: 0,
-            last_timestamp: 0,
-            max_buffer_size: 100,
-            buffer,
-            tx,
-        }
+        Stream::new(stream, topic, max_buffer_size, tx)
     }
 
-    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
+    pub fn dynamic<S: Into<String>>(
+        stream: S,
+        project_id: S,
+        device_id: S,
+        tx: Sender<Box<dyn Package>>,
+    ) -> Stream<T> {
+        Stream::dynamic_with_size(stream, project_id, device_id, 100, tx)
+    }
+
+    fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
         let current_sequence = data.sequence();
         let current_timestamp = data.timestamp();
 
@@ -166,7 +173,25 @@ where
             let name = self.name.clone();
             let topic = self.topic.clone();
             let buffer = mem::replace(&mut self.buffer, Buffer::new(name, topic));
-            self.tx.send(Box::new(buffer)).await?;
+            Ok(Some(buffer))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Fill buffer with data and trigger async channel send on max_buf_size
+    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
+        if let Some(buf) = self.add(data)? {
+            self.tx.send_async(Box::new(buf)).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Push data into buffer and trigger sync channel send on max_buf_size
+    pub fn push(&mut self, data: T) -> Result<(), Error> {
+        if let Some(buf) = self.add(data)? {
+            self.tx.send(Box::new(buf))?;
         }
 
         Ok(())

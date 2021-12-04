@@ -1,5 +1,5 @@
-use async_channel::Sender;
 use bytes::BytesMut;
+use flume::Sender;
 use futures_util::StreamExt;
 use log::{debug, error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
@@ -20,7 +20,7 @@ pub enum Error {
     #[error("File io Error {0}")]
     IoError(#[from] std::io::Error),
     #[error("Error forwarding to Bridge {0}")]
-    TrySendError(#[from] async_channel::TrySendError<Action>),
+    TrySendError(#[from] flume::TrySendError<Action>),
 }
 
 pub struct OtaDownloader {

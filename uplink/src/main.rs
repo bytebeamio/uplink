@@ -43,12 +43,12 @@ use std::thread;
 use std::{collections::HashMap, fs};
 
 use anyhow::{Context, Error};
-use async_channel::{bounded, Sender};
 use figment::{
     providers::Toml,
     providers::{Data, Json},
     Figment,
 };
+use flume::{bounded, Sender};
 use log::error;
 use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
@@ -66,6 +66,7 @@ use crate::base::serializer::Serializer;
 use crate::base::Stream;
 
 use crate::collector::simulator::Simulator;
+use crate::collector::systemstats::StatCollector;
 use crate::collector::tcpjson::Bridge;
 
 use base::Config;
@@ -131,6 +132,11 @@ const DEFAULT_CONFIG: &'static str = r#"
     [ota]
     enabled = false
     path = "/var/tmp/ota-file"
+
+    [stats]
+    enabled = true
+    process_names = ["uplink"]
+    update_period = 5
 "#;
 
 /// Reads config file to generate config struct and replaces places holders
@@ -213,6 +219,9 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     if config.ota.enabled {
         println!("    ota_path: {}", config.ota.path);
     }
+    if config.stats.enabled {
+        println!("    processes: {:?}", config.stats.process_names);
+    }
     println!("\n");
 }
 
@@ -223,6 +232,7 @@ async fn main() -> Result<(), Error> {
 
     initialize_logging(&commandline);
     let config = Arc::new(initalize_config(&commandline)?);
+    let enable_stats = config.stats.enabled;
 
     banner(&commandline, &config);
 
@@ -269,6 +279,11 @@ async fn main() -> Result<(), Error> {
             let mut simulator = Simulator::new(simulator_config, data_tx);
             simulator.start().await;
         });
+    }
+
+    if enable_stats {
+        let stat_collector = StatCollector::new(config.clone(), collector_tx.clone());
+        thread::spawn(move || stat_collector.start());
     }
 
     let tunshell_config = config.clone();

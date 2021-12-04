@@ -1,8 +1,8 @@
 use crate::base::{Config, Package};
 
-use async_channel::{Receiver, RecvError};
 use bytes::Bytes;
 use disk::Storage;
+use flume::{Receiver, RecvError};
 use log::{error, info};
 use rumqttc::*;
 use serde::Serialize;
@@ -35,16 +35,16 @@ enum Status {
 /// In case of network issues, the Serializer enters various states depending on severeness, managed by `Serializer::start()`.                                                                                       
 ///
 /// ```text
-///        ┌───────────────────┐                                                                            
+///        ┌───────────────────┐
 ///        │Serializer::start()│
-///        └─────────┬─────────┘ 
+///        └─────────┬─────────┘
 ///                  │
 ///                  │ State transitions happen
 ///                  │ within the loop{}             Load data in Storage from
 ///                  │                               previouse sessions/iterations                  AsyncClient has crashed
 ///          ┌───────▼──────┐                       ┌─────────────────────┐                      ┌───────────────────────┐
 ///          │EventLoopReady├───────────────────────►Serializer::catchup()├──────────────────────►EventLoopCrash(publish)│
-///          └───────▲──────┘                       └──────────┬──────────┘                      └───────────┬───────────┘  
+///          └───────▲──────┘                       └──────────┬──────────┘                      └───────────┬───────────┘
 ///                  │                                         │                                             │
 ///                  │                                         │ No more data left in Storage                │
 ///                  │                                         │                                             │
@@ -88,7 +88,7 @@ impl Serializer {
         publish.pkid = 1;
 
         loop {
-            let data = self.collector_rx.recv().await?;
+            let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
             let payload = data.serialize();
 
@@ -125,7 +125,7 @@ impl Serializer {
 
         loop {
             select! {
-                data = self.collector_rx.recv() => {
+                data = self.collector_rx.recv_async() => {
                       let data = data?;
                       if let Some((errors, count)) = data.anomalies() {
                         self.metrics.add_errors(errors, count);
@@ -194,7 +194,7 @@ impl Serializer {
 
         loop {
             select! {
-                data = self.collector_rx.recv() => {
+                data = self.collector_rx.recv_async() => {
                       let data = data?;
                       if let Some((errors, count)) = data.anomalies() {
                         self.metrics.add_errors(errors, count);
@@ -272,7 +272,7 @@ impl Serializer {
 
         loop {
             let failed = select! {
-                data = self.collector_rx.recv() => {
+                data = self.collector_rx.recv_async() => {
                     let data = data?;
 
                     // Extract anomalies detected by package during collection
@@ -339,7 +339,7 @@ async fn send_publish(
     Ok(client)
 }
 
-#[derive(Debug, Default, Clone, Serialize)]
+#[derive(Debug, Default, Serialize)]
 struct Metrics {
     #[serde(skip_serializing)]
     topic: String,

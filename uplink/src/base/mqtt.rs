@@ -1,4 +1,4 @@
-use async_channel::{Sender, TrySendError};
+use flume::{Sender, TrySendError};
 use log::{debug, error, info};
 use thiserror::Error;
 use tokio::task;

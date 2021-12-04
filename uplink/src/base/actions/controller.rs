@@ -4,7 +4,7 @@ use std::time::SystemTimeError;
 
 use super::{ActionResponse, Control, Package};
 use crate::base::{self, Stream};
-use async_channel::{SendError, Sender, TrySendError};
+use flume::{SendError, Sender, TrySendError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]

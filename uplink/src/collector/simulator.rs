@@ -1,5 +1,5 @@
 use crate::base::{Config, Package, Stream};
-use async_channel::Sender;
+use flume::Sender;
 use serde::Serialize;
 use serde_json::json;
 use std::io;
