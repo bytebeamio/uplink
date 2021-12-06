@@ -39,8 +39,8 @@
 //!                                                                      ActionResponse
 //!```
 
-use std::thread;
-use std::{collections::HashMap, fs};
+use std::fs;
+use std::sync::Arc;
 
 use anyhow::{Context, Error};
 use figment::{
@@ -48,30 +48,13 @@ use figment::{
     providers::{Data, Json},
     Figment,
 };
-use flume::{bounded, Sender};
+use flume::bounded;
 use log::error;
 use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
 
-mod base;
-mod collector;
-
-use crate::base::actions::{
-    tunshell::{Relay, TunshellSession},
-    Actions,
-};
-use crate::base::mqtt::Mqtt;
-use crate::base::serializer::Serializer;
-use crate::base::Stream;
-
-use crate::collector::simulator::Simulator;
-use crate::collector::systemstats::StatCollector;
-use crate::collector::tcpjson::Bridge;
-
-use base::Config;
-use disk::Storage;
-use std::sync::Arc;
+use uplink::{spawn_uplink, Bridge, Config, Simulator, Stream};
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
@@ -232,37 +215,14 @@ async fn main() -> Result<(), Error> {
 
     initialize_logging(&commandline);
     let config = Arc::new(initalize_config(&commandline)?);
-    let enable_stats = config.stats.enabled;
 
     banner(&commandline, &config);
 
     let (collector_tx, collector_rx) = bounded(10);
-    let (native_actions_tx, native_actions_rx) = bounded(10);
     let (bridge_actions_tx, bridge_actions_rx) = bounded(10);
-    let (tunshell_keys_tx, tunshell_keys_rx) = bounded(10);
-
-    let storage = Storage::new(
-        &config.persistence.path,
-        config.persistence.max_file_size,
-        config.persistence.max_file_count,
-    );
-    let storage = storage.with_context(|| format!("Storage = {:?}", config.persistence))?;
 
     let action_status_topic = &config.streams.get("action_status").unwrap().topic;
     let action_status = Stream::new("action_status", action_status_topic, 1, collector_tx.clone());
-
-    let mut mqtt = Mqtt::new(config.clone(), native_actions_tx);
-    let mut serializer = Serializer::new(config.clone(), collector_rx, mqtt.client(), storage)?;
-
-    task::spawn(async move {
-        if let Err(e) = serializer.start().await {
-            error!("Serializer stopped!! Error = {:?}", e);
-        }
-    });
-
-    task::spawn(async move {
-        mqtt.start().await;
-    });
 
     let mut bridge =
         Bridge::new(config.clone(), collector_tx.clone(), bridge_actions_rx, action_status.clone());
@@ -281,31 +241,5 @@ async fn main() -> Result<(), Error> {
         });
     }
 
-    if enable_stats {
-        let stat_collector = StatCollector::new(config.clone(), collector_tx.clone());
-        thread::spawn(move || stat_collector.start());
-    }
-
-    let tunshell_config = config.clone();
-    let tunshell_session = TunshellSession::new(
-        tunshell_config,
-        Relay::default(),
-        false,
-        tunshell_keys_rx,
-        action_status.clone(),
-    );
-    thread::spawn(move || tunshell_session.start());
-
-    let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-    let mut actions = Actions::new(
-        config.clone(),
-        controllers,
-        native_actions_rx,
-        tunshell_keys_tx,
-        action_status,
-        bridge_actions_tx,
-    )
-    .await;
-    actions.start().await;
-    Ok(())
+    spawn_uplink(config, bridge_actions_tx, collector_rx, collector_tx, action_status).await
 }

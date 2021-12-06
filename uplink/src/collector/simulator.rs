@@ -33,7 +33,7 @@ impl Simulator {
         Simulator { config, partitions, data_tx }
     }
 
-    pub(crate) async fn start(&mut self) {
+    pub async fn start(&mut self) {
         let mut gps_timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
         let mut can_timestamp =
