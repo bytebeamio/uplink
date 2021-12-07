@@ -52,7 +52,7 @@ pub struct UplinkConnector {
 impl UplinkConnector {}
 
 #[no_mangle]
-pub extern "system" fn Java_Uplink_start(
+pub extern "system" fn Java_Uplink_uplinkStart(
     env: JNIEnv,
     _class: JClass,
     device_id: JString,
@@ -94,7 +94,7 @@ pub extern "system" fn Java_Uplink_start(
 
 #[no_mangle]
 /// # Safety
-pub unsafe extern "system" fn Java_Uplink_send(
+pub unsafe extern "system" fn Java_Uplink_uplinkSend(
     env: JNIEnv,
     _class: JClass,
     obj: *mut UplinkConnector,
@@ -111,7 +111,7 @@ pub unsafe extern "system" fn Java_Uplink_send(
 
 #[no_mangle]
 /// # Safety
-pub unsafe extern "system" fn Java_Uplink_recv(
+pub unsafe extern "system" fn Java_Uplink_uplinkRecv(
     env: JNIEnv,
     _class: JClass,
     obj: *mut UplinkConnector,
