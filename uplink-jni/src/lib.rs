@@ -5,16 +5,12 @@ use figment::providers::{Data, Toml};
 use figment::Figment;
 use flume::Receiver;
 use jni::objects::{JClass, JString};
+use jni::sys::{jint, jstring};
 use jni::JNIEnv;
 
-use jni::sys::jstring;
-use uplink::{spawn_uplink, ActionResponse, Config, Stream, Action};
+use uplink::{spawn_uplink, Action, ActionResponse, Config, Stream};
 
 const DEFAULT_CONFIG: &'static str = r#"
-    device_id = "123"
-    project_id = "demo"
-    broker = "localhost"
-    port = 1883
     bridge_port = 5555
     max_packet_size = 102400
     max_inflight = 100
@@ -56,9 +52,29 @@ pub struct UplinkConnector {
 impl UplinkConnector {}
 
 #[no_mangle]
-pub extern "system" fn Java_Uplink_start(_env: JNIEnv, _class: JClass) -> *mut UplinkConnector {
+pub extern "system" fn Java_Uplink_start(
+    env: JNIEnv,
+    _class: JClass,
+    device_id: JString,
+    project_id: JString,
+    broker: JString,
+    port: jint,
+) -> *mut UplinkConnector {
+    let device_id: String = env.get_string(device_id).expect("Couldn't get java string!").into();
+    let project_id: String = env.get_string(project_id).expect("Couldn't get java string!").into();
+    let broker: String = env.get_string(broker).expect("Couldn't get java string!").into();
+    let config = format!(
+        r#"
+        device_id = "{}"
+        project_id = "{}"
+        broker = "{}"
+        port = {}
+        {}
+    "#,
+        device_id, project_id, broker, port, DEFAULT_CONFIG
+    );
     let config: Arc<Config> =
-        Arc::new(Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG)).extract().unwrap());
+        Arc::new(Figment::new().merge(Data::<Toml>::string(&config)).extract().unwrap());
 
     let (bridge_tx, bridge_rx) = flume::bounded(10);
     let (collector_tx, collector_rx) = flume::bounded(10);
