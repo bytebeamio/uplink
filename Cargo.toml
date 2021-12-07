@@ -2,6 +2,7 @@
 members = [
     "uplink",
     "disk",
+    "uplink-jni",
 ]
 
 exclude = ["tools/tunshell"]

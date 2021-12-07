@@ -4,10 +4,7 @@ use std::sync::Arc;
 use std::thread;
 
 use anyhow::{Context, Error};
-use base::{
-    actions::{Action, ActionResponse},
-    Package,
-};
+
 use flume::{bounded, Receiver, Sender};
 use log::error;
 use tokio::task;
@@ -15,10 +12,10 @@ use tokio::task;
 mod base;
 mod collector;
 
-use crate::base::actions::{
-    tunshell::{Relay, TunshellSession},
-    Actions,
-};
+use crate::base::actions::tunshell::{Relay, TunshellSession};
+use crate::base::actions::Actions;
+pub use base::actions::{Action, ActionResponse};
+pub use base::Package;
 use crate::base::mqtt::Mqtt;
 use crate::base::serializer::Serializer;
 pub use crate::base::Stream;
