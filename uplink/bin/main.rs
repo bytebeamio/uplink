@@ -48,13 +48,12 @@ use figment::{
     providers::{Data, Json},
     Figment,
 };
-use flume::bounded;
 use log::error;
 use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
 
-use uplink::{spawn_uplink, Bridge, Config, Simulator, Stream};
+use uplink::{spawn_uplink, Bridge, Config, Simulator};
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
@@ -218,11 +217,7 @@ async fn main() -> Result<(), Error> {
 
     banner(&commandline, &config);
 
-    let (collector_tx, collector_rx) = bounded(10);
-    let (bridge_actions_tx, bridge_actions_rx) = bounded(10);
-
-    let action_status_topic = &config.streams.get("action_status").unwrap().topic;
-    let action_status = Stream::new("action_status", action_status_topic, 1, collector_tx.clone());
+    let (bridge_actions_rx, collector_tx, action_status) = spawn_uplink(config.clone())?;
 
     let mut bridge =
         Bridge::new(config.clone(), collector_tx.clone(), bridge_actions_rx, action_status.clone());
@@ -233,13 +228,12 @@ async fn main() -> Result<(), Error> {
     });
 
     if enable_simulator {
-        let simulator_config = config.clone();
         let data_tx = collector_tx.clone();
         task::spawn(async {
-            let mut simulator = Simulator::new(simulator_config, data_tx);
+            let mut simulator = Simulator::new(config, data_tx);
             simulator.start().await;
         });
     }
 
-    spawn_uplink(config, bridge_actions_tx, collector_rx, collector_tx, action_status).await
+    Ok(())
 }
