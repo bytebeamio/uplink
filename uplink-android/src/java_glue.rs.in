@@ -1,0 +1,92 @@
+use std::sync::Arc;
+
+use figment::providers::{Data, Toml};
+use figment::Figment;
+use flume::{Receiver, Sender};
+use log::info;
+
+use uplink::{spawn_uplink, Action, ActionResponse, Config, Package, Stream};
+
+const DEFAULT_CONFIG: &'static str = r#"
+    bridge_port = 5555
+    max_packet_size = 102400
+    max_inflight = 100
+    
+    # Whitelist of binaries which uplink can spawn as a process
+    # This makes sure that user is protected against random actions
+    # triggered from cloud.
+    actions = ["tunshell"]
+    
+    [persistence]
+    path = "/tmp/uplink"
+    max_file_size = 104857600 # 100MB
+    max_file_count = 3
+    
+    [streams.metrics]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/metrics/jsonarray"
+    buf_size = 10
+    
+    # Action status stream from status messages from bridge
+    [streams.action_status]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
+    buf_size = 1
+
+    [ota]
+    enabled = false
+    path = "/var/tmp/ota-file"
+
+    [stats]
+    enabled = true
+    process_names = ["uplink"]
+    update_period = 5
+"#;
+
+pub struct Session {
+    stream: Stream<ActionResponse>,
+    bridge_rx: Receiver<Action>,
+    collector_tx: Sender<Box<dyn Package>>,
+}
+
+impl Session {
+    pub fn new(device_id: String, project_id: String, broker: String, port: u32) -> Session {
+        #[cfg(target_os = "android")]
+        android_logger::init_once(
+            android_logger::Config::default().with_min_level(log::Level::Debug).with_tag("Hello"),
+        );
+        log_panics::init();
+        info!("init log system - done");
+
+        let config = format!(
+            r#"
+            device_id = "{}"
+            project_id = "{}"
+            broker = "{}"
+            port = {}
+            {}
+            "#,
+            device_id, project_id, broker, port, DEFAULT_CONFIG
+        );
+        let config: Arc<Config> =
+            Arc::new(Figment::new().merge(Data::<Toml>::string(&config)).extract().unwrap());
+
+        let (bridge_rx, collector_tx, stream) = spawn_uplink(config).unwrap();
+        Session { stream, bridge_rx, collector_tx }
+    }
+
+    pub fn send(&mut self, response: String) {
+        let data: ActionResponse = serde_json::from_str(&response).unwrap();
+        self.stream.push(data).unwrap()
+    }
+
+    pub fn recv(&mut self) -> String {
+        let action = self.bridge_rx.recv().unwrap();
+        serde_json::to_string(&action).unwrap()
+    }
+}
+
+foreign_class!(class Session {
+    self_type Session;
+    constructor Session::new(device_id: String, project_id: String, broker: String, port: u32) -> Session;
+    fn Session::send(&mut self, response: String);
+    fn Session::recv(&mut self) -> String;
+});
