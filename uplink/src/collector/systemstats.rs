@@ -60,7 +60,7 @@ impl System {
         self.load_avg_five = five;
         self.load_avg_fifteen = fifteen;
         self.available_memory = sys.available_memory();
-        self.used_memory = self.total_memory - self.available_memory;
+        self.used_memory = self.total_memory.checked_sub(self.available_memory).unwrap_or_default();
     }
 }
 
@@ -200,7 +200,7 @@ impl Disk {
 
     fn update(&mut self, disk: &sysinfo::Disk, timestamp: u64, sequence: u32) {
         self.available = disk.available_space();
-        self.used = self.total - self.available;
+        self.used = self.total.checked_sub(self.available).unwrap_or_default();
         self.timestamp = timestamp;
         self.sequence = sequence;
     }
