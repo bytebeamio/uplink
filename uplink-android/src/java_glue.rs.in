@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use figment::providers::{Data, Toml};
 use figment::Figment;
-use flume::{Receiver, Sender};
+use flume::Receiver;
 use log::info;
 
-use uplink::{spawn_uplink, Action, ActionResponse, Config, Package, Stream};
+use uplink::{spawn_uplink, Action, ActionResponse, Config, Stream};
 
 const DEFAULT_CONFIG: &'static str = r#"
     bridge_port = 5555
@@ -41,14 +41,13 @@ const DEFAULT_CONFIG: &'static str = r#"
     update_period = 5
 "#;
 
-pub struct Session {
+pub struct Uplink {
     stream: Stream<ActionResponse>,
     bridge_rx: Receiver<Action>,
-    collector_tx: Sender<Box<dyn Package>>,
 }
 
-impl Session {
-    pub fn new(device_id: String, project_id: String, broker: String, port: u32) -> Session {
+impl Uplink {
+    pub fn new(device_id: String, project_id: String, broker: String, port: u32) -> Uplink {
         #[cfg(target_os = "android")]
         android_logger::init_once(
             android_logger::Config::default().with_min_level(log::Level::Debug).with_tag("Hello"),
@@ -69,8 +68,8 @@ impl Session {
         let config: Arc<Config> =
             Arc::new(Figment::new().merge(Data::<Toml>::string(&config)).extract().unwrap());
 
-        let (bridge_rx, collector_tx, stream) = spawn_uplink(config).unwrap();
-        Session { stream, bridge_rx, collector_tx }
+        let (bridge_rx, _, stream) = spawn_uplink(config).unwrap();
+        Uplink { stream, bridge_rx }
     }
 
     pub fn send(&mut self, response: String) {
@@ -84,9 +83,17 @@ impl Session {
     }
 }
 
-foreign_class!(class Session {
-    self_type Session;
-    constructor Session::new(device_id: String, project_id: String, broker: String, port: u32) -> Session;
-    fn Session::send(&mut self, response: String);
-    fn Session::recv(&mut self) -> String;
+foreign_class!(class Uplink {
+    self_type Uplink;
+    constructor Uplink::new(device_id: String, project_id: String, broker: String, port: u32) -> Uplink;
+    fn Uplink::send(&mut self, response: String);
+    fn Uplink::recv(&mut self) -> String;
+    foreign_code r#"
+        static {
+            try {
+                NativeUtils.loadLibraryFromJar("/libuplink_android.so"); // for macOS, make sure this is .dylib rather than .so
+            } catch (java.io.IOException e) {
+                e.printStackTrace();
+            }
+        }"#;
 });

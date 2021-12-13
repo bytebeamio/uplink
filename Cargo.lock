@@ -1051,6 +1051,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "log-panics"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae0136257df209261daa18d6c16394757c63e032e27aafd8b07788b051082bef"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "matches"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2741,6 +2750,7 @@ dependencies = [
  "flapigen",
  "flume",
  "log",
+ "log-panics",
  "serde_json",
  "tokio 1.0.1",
  "uplink",

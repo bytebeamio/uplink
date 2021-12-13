@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 figment = { version = "0.10.6", features = ["toml", "json"] }
 flume = "0.10.9"
 log = "0.4"
+log-panics = "2.0"
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
 uplink = { path = "../uplink" }
