@@ -88,12 +88,14 @@ foreign_class!(class Uplink {
     constructor Uplink::new(device_id: String, project_id: String, broker: String, port: u32) -> Uplink;
     fn Uplink::send(&mut self, response: String);
     fn Uplink::recv(&mut self) -> String;
+    
     foreign_code r#"
-        static {
-            try {
-                NativeUtils.loadLibraryFromJar("/libuplink_android.so"); // for macOS, make sure this is .dylib rather than .so
-            } catch (java.io.IOException e) {
-                e.printStackTrace();
-            }
-        }"#;
+    static {
+        try {
+            NativeUtils.loadLibraryFromJar("/libuplink_android.so");
+        } catch (java.io.IOException e) {
+            e.printStackTrace();
+        }
+    }
+"#;
 });

@@ -43,10 +43,11 @@ public final class Uplink {
     }
     /*package*/ long mNativeObj;
 
-        static {
-            try {
-                NativeUtils.loadLibraryFromJar("/libuplink_android.so"); // for macOS, make sure this is .dylib rather than .so
-            } catch (java.io.IOException e) {
-                e.printStackTrace();
-            }
-        }}
+    static {
+        try {
+            NativeUtils.loadLibraryFromJar("/libuplink_android.so");
+        } catch (java.io.IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
