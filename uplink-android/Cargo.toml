@@ -8,6 +8,7 @@ name = "uplink_android"
 crate-type = ["cdylib"]
 
 [dependencies]
+android_logger = "0.10"
 figment = { version = "0.10.6", features = ["toml", "json"] }
 flume = "0.10.9"
 log = "0.4"
