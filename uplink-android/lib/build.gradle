@@ -46,6 +46,8 @@ tasks.create(name: "cargo-output-dir", description: "Get cargo metadata") {
     }
 }
 
+def target = "aarch64-linux-android" // also "armv7-linux-androideabi" or "i686-linux-android"
+
 // Build with cargo
 tasks.create(name: "cargo-build", type: Exec, description: "Running Cargo build", dependsOn: "cargo-output-dir") {
     workingDir rustBasePath
@@ -53,7 +55,7 @@ tasks.create(name: "cargo-build", type: Exec, description: "Running Cargo build"
 }
 
 tasks.create(name: "rust-deploy", type: Sync, dependsOn: "cargo-build") {
-    from "${project.ext.cargo_target_directory}/release"
+    from "${project.ext.cargo_target_directory}/${target}/release"
     include "*.dylib","*.so"
     into "rust-lib/"
 }
