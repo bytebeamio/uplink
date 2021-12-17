@@ -4,10 +4,10 @@ package io.bytebeam.uplink;
 
 public final class Uplink {
 
-    public Uplink(String device_id, String project_id, String broker, long port) {
-        mNativeObj = init(device_id, project_id, broker, port);
+    public Uplink(String auth_config) {
+        mNativeObj = init(auth_config);
     }
-    private static native long init(String device_id, String project_id, String broker, long port);
+    private static native long init(String auth_config);
 
     public final void send(String response) {
         do_send(mNativeObj, response);
