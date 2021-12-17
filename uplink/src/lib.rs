@@ -19,10 +19,9 @@ use crate::base::serializer::Serializer;
 pub use crate::base::Stream;
 pub use crate::collector::simulator::Simulator;
 use crate::collector::systemstats::StatCollector;
-pub use crate::collector::tcpjson::Bridge;
+pub use crate::collector::tcpjson::{Bridge, Payload};
 pub use base::actions::{Action, ActionResponse};
-pub use base::Config;
-pub use base::Package;
+pub use base::{Config, Package, Point};
 pub use disk::Storage;
 
 pub fn spawn_uplink(

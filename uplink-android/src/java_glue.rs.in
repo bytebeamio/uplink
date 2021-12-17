@@ -1,7 +1,8 @@
 foreign_class!(class Uplink {
     self_type Uplink;
     constructor Uplink::new(auth_config: String) -> Uplink;
-    fn Uplink::send(&mut self, response: String);
+    fn Uplink::send(&mut self, data: String, stream: String);
+    fn Uplink::respond(&mut self, response: String);
     fn Uplink::recv(&mut self) -> String;
     
     foreign_code r#"

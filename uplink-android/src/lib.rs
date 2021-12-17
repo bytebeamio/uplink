@@ -13,6 +13,7 @@
 mod jni_c_header;
 use jni_c_header::*;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use figment::providers::{Data, Json, Toml};
@@ -20,7 +21,7 @@ use figment::Figment;
 use flume::Receiver;
 use log::info;
 
-use uplink::{spawn_uplink, Action, ActionResponse, Config, Stream};
+use uplink::{spawn_uplink, Action, ActionResponse, Config, Payload, Stream};
 
 const DEFAULT_CONFIG: &'static str = r#"
     bridge_port = 5555
@@ -57,7 +58,8 @@ const DEFAULT_CONFIG: &'static str = r#"
 "#;
 
 pub struct Uplink {
-    stream: Stream<ActionResponse>,
+    action_stream: Stream<ActionResponse>,
+    streams: HashMap<String, Stream<Payload>>,
     bridge_rx: Receiver<Action>,
 }
 
@@ -70,21 +72,38 @@ impl Uplink {
         log_panics::init();
         info!("init log system - done");
 
-        let config: Config = Figment::new()
-            .merge(Data::<Toml>::string(&DEFAULT_CONFIG))
-            .merge(Data::<Json>::string(&auth_config))
-            .extract()
-            .unwrap();
+        let config: Arc<Config> = Arc::new(
+            Figment::new()
+                .merge(Data::<Toml>::string(&DEFAULT_CONFIG))
+                .merge(Data::<Json>::string(&auth_config))
+                .extract()
+                .unwrap(),
+        );
 
-        let (bridge_rx, _, stream) = spawn_uplink(Arc::new(config)).unwrap();
-        Uplink { stream, bridge_rx }
+        let (bridge_rx, tx, action_stream) = spawn_uplink(config.clone()).unwrap();
+
+        let mut streams = HashMap::new();
+        for (stream, cfg) in config.streams.iter() {
+            streams.insert(
+                stream.to_owned(),
+                Stream::new(stream.to_owned(), cfg.topic.to_owned(), cfg.buf_size, tx.clone()),
+            );
+        }
+
+        Uplink { action_stream, streams, bridge_rx }
     }
 
-    pub fn send(&mut self, response: String) {
-        let data: ActionResponse = serde_json::from_str(&response).unwrap();
-        self.stream.push(data).unwrap()
+    pub fn send(&mut self, data: String, stream: String) {
+        let data: Payload = serde_json::from_str(&data).unwrap();
+        self.streams.get_mut(&stream).unwrap().push(data).unwrap()
     }
 
+    pub fn respond(&mut self, response: String) {
+        let response: ActionResponse = serde_json::from_str(&response).unwrap();
+        self.action_stream.push(response).unwrap()
+    }
+
+    // TODO: this shold become a callback
     pub fn recv(&mut self) -> String {
         let action = self.bridge_rx.recv().unwrap();
         serde_json::to_string(&action).unwrap()
