@@ -28,7 +28,7 @@ dependencies {
     testImplementation 'junit:junit:4.12'
 }
 
-def rustBasePath = "../.."
+def rustBasePath = "./"
 
 // execute cargo metadata and get path to target directory
 tasks.create(name: "cargo-output-dir", description: "Get cargo metadata") {
@@ -68,7 +68,7 @@ tasks.withType(JavaCompile) {
 sourceSets {
     main {
         java {
-            srcDir 'src/main/java'
+            srcDir 'lib/src/main/java'
         }
         resources {
             srcDir 'rust-lib'
