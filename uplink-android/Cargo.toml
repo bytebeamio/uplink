@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 android_logger = "0.10"
 figment = { version = "0.10.6", features = ["toml", "json"] }
 flume = "0.10.9"
+fragile = "1"
 log = "0.4"
 log-panics = "2.0"
 serde_json = "1.0"

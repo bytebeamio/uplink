@@ -20,6 +20,7 @@ use figment::providers::{Data, Json, Toml};
 use figment::Figment;
 use flume::Receiver;
 use log::info;
+use tokio::runtime;
 
 use uplink::{spawn_uplink, Action, ActionResponse, Config, Payload, Stream};
 
@@ -56,6 +57,10 @@ const DEFAULT_CONFIG: &'static str = r#"
     process_names = ["uplink"]
     update_period = 5
 "#;
+
+pub trait ActionCallback {
+    fn recvd_action(&self, action: String);
+}
 
 pub struct Uplink {
     action_stream: Stream<ActionResponse>,
@@ -103,10 +108,18 @@ impl Uplink {
         self.action_stream.push(response).unwrap()
     }
 
-    // TODO: this shold become a callback
-    pub fn recv(&mut self) -> String {
-        let action = self.bridge_rx.recv().unwrap();
-        serde_json::to_string(&action).unwrap()
+    pub fn subscribe(&mut self, cb: Box<dyn ActionCallback>) {
+        let cb = fragile::Fragile::new(cb);
+        let bridge_rx = self.bridge_rx.clone();
+        std::thread::spawn(|| {
+            runtime::Builder::new_current_thread().build().unwrap().block_on(async move {
+                loop {
+                    let recv = bridge_rx.recv_async().await.unwrap();
+                    let action = serde_json::to_string(&recv).unwrap();
+                    cb.get().recvd_action(action);
+                }
+            });
+        });
     }
 }
 
