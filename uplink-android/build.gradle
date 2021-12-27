@@ -46,7 +46,7 @@ tasks.create(name: "cargo-output-dir", description: "Get cargo metadata") {
     }
 }
 
-def target = "i686-linux-android" // also "armv7-linux-androideabi" or "aarch64-linux-android"
+def target = "i686-linux-android" // also "x86_64-linux-android", "armv7-linux-androideabi" or "aarch64-linux-android"
 
 // Build with cargo
 tasks.create(name: "cargo-build", type: Exec, description: "Running Cargo build", dependsOn: "cargo-output-dir") {
