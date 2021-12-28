@@ -19,7 +19,8 @@ use std::sync::Arc;
 use figment::providers::{Data, Json, Toml};
 use figment::Figment;
 use flume::Receiver;
-use log::info;
+use fragile::Fragile;
+use log::{error, info};
 use tokio::runtime;
 
 use uplink::{spawn_uplink, Action, ActionResponse, Config, Payload, Stream};
@@ -69,7 +70,7 @@ pub struct Uplink {
 }
 
 impl Uplink {
-    pub fn new(auth_config: String) -> Uplink {
+    pub fn new(auth_config: String) -> Result<Uplink, String> {
         #[cfg(target_os = "android")]
         android_logger::init_once(
             android_logger::Config::default().with_min_level(log::Level::Debug).with_tag("Hello"),
@@ -82,10 +83,10 @@ impl Uplink {
                 .merge(Data::<Toml>::string(&DEFAULT_CONFIG))
                 .merge(Data::<Json>::string(&auth_config))
                 .extract()
-                .unwrap(),
+                .map_err(|e| e.to_string())?,
         );
 
-        let (bridge_rx, tx, action_stream) = spawn_uplink(config.clone()).unwrap();
+        let (bridge_rx, tx, action_stream) = spawn_uplink(config.clone()).map_err(|e| e.to_string())?;
 
         let mut streams = HashMap::new();
         for (stream, cfg) in config.streams.iter() {
@@ -95,32 +96,44 @@ impl Uplink {
             );
         }
 
-        Uplink { action_stream, streams, bridge_rx }
+        Ok(Uplink { action_stream, streams, bridge_rx })
     }
 
-    pub fn send(&mut self, data: String, stream: String) {
-        let data: Payload = serde_json::from_str(&data).unwrap();
-        self.streams.get_mut(&stream).unwrap().push(data).unwrap()
+    pub fn send(&mut self, data: String, stream: String) -> Result<(), String> {
+        let data: Payload = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+        match self.streams.get_mut(&stream) {
+            Some(x) => x.push(data).map_err(|e| e.to_string()),
+            _ => Err("Couldn't get stream".to_owned()),
+        }
     }
 
-    pub fn respond(&mut self, response: String) {
-        let response: ActionResponse = serde_json::from_str(&response).unwrap();
-        self.action_stream.push(response).unwrap()
+    pub fn respond(&mut self, response: String) -> Result<(), String> {
+        let response: ActionResponse = serde_json::from_str(&response).map_err(|e| e.to_string())?;
+        self.action_stream.push(response).map_err(|e| e.to_string())
     }
 
-    pub fn subscribe(&mut self, cb: Box<dyn ActionCallback>) {
-        let cb = fragile::Fragile::new(cb);
+    pub fn subscribe(&mut self, cb: Box<dyn ActionCallback>) -> Result<(), String> {
+        let cb = Fragile::new(cb);
         let bridge_rx = self.bridge_rx.clone();
         std::thread::spawn(|| {
-            runtime::Builder::new_current_thread().build().unwrap().block_on(async move {
-                loop {
-                    let recv = bridge_rx.recv_async().await.unwrap();
-                    let action = serde_json::to_string(&recv).unwrap();
-                    cb.get().recvd_action(action);
-                }
-            });
+            if let Err(e) = run_subscriber(bridge_rx, cb) {
+                error!("Error while handling callback: {}", e);
+            }
         });
+
+        Ok(())
     }
+}
+
+fn run_subscriber(bridge_rx: Receiver<Action>, cb: Fragile<Box<dyn ActionCallback>>) -> Result<(), String> {
+    runtime::Builder::new_current_thread()
+        .build().map_err(|e| e.to_string())?.block_on(async move {
+                    loop {
+                        let recv = bridge_rx.recv_async().await.map_err(|e| e.to_string())?;
+                        let action = serde_json::to_string(&recv).map_err(|e| e.to_string())?;
+                        cb.get().recvd_action(action);
+                    }
+                })
 }
 
 include!(concat!(env!("OUT_DIR"), "/java_glue.rs"));

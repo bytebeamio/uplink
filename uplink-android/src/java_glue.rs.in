@@ -5,10 +5,10 @@ foreign_callback!(callback ActionCallback {
 
 foreign_class!(class Uplink {
     self_type Uplink;
-    constructor Uplink::new(_: String) -> Uplink;
-    fn Uplink::send(&mut self, _: String, _: String);
-    fn Uplink::respond(&mut self, _: String);
-    fn Uplink::subscribe(&mut self, cb: Box<dyn ActionCallback>);
+    constructor Uplink::new(_: String) -> Result<Uplink, String>;
+    fn Uplink::send(&mut self, _: String, _: String) -> Result<(), String>;
+    fn Uplink::respond(&mut self, _: String) -> Result<(), String>;
+    fn Uplink::subscribe(&mut self, cb: Box<dyn ActionCallback>) -> Result<(), String>;
     
     foreign_code r#"
     static {
