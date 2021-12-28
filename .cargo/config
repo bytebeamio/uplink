@@ -3,13 +3,13 @@ linker = "../NDK/x86/bin/i686-linux-android-clang"
 ar = "../NDK/x86/i686-linux-android/bin/ar"
 
 [target.x86_64-linux-android]
-linker = "../NDK/x86_64/x86_64-linux-android/bin/ld"
+linker = "../NDK/x86_64/bin/x86_64-linux-android-clang"
 ar = "../NDK/x86_64/x86_64-linux-android/bin/ar"
 
 [target.aarch64-linux-android]
-linker = "../NDK/aarch64/aarch64-linux-android/bin/ld"
+linker = "../NDK/aarch64/bin/aarch64-linux-android-clang"
 ar = "../NDK/aarch64/aarch64-linux-android/bin/ar"
 
 [target.armv7-linux-androideabi]
-linker = "../NDK/arm/arm-linux-androideabi/bin/ld"
+linker = "../NDK/arm/bin/arm-linux-androideabi-clang"
 ar = "../NDK/arm/arm-linux-androideabi/bin/ar"
