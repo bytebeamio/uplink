@@ -2,7 +2,6 @@
 members = [
     "uplink",
     "disk",
-    "uplink-android",
 ]
 
 exclude = ["tools/tunshell"]
