@@ -135,8 +135,9 @@ fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
         .extract()
         .with_context(|| format!("Config error"))?;
 
-    fs::create_dir_all(&config.persistence.path)?;
-
+    if let Some(persistence) = &config.persistence {
+        fs::create_dir_all(&persistence.path)?;
+    }
     let tenant_id = config.project_id.trim();
     let device_id = config.device_id.trim();
     for config in config.streams.values_mut() {
@@ -195,9 +196,11 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    secure_transport: {}", config.authentication.is_some());
     println!("    max_packet_size: {}", config.max_packet_size);
     println!("    max_inflight_messages: {}", config.max_inflight);
-    println!("    persistence_dir: {}", config.persistence.path);
-    println!("    persistence_max_segment_size: {}", config.persistence.max_file_size);
-    println!("    persistence_max_segment_count: {}", config.persistence.max_file_count);
+    if let Some(persistence) = &config.persistence {
+        println!("    persistence_dir: {}", persistence.path);
+        println!("    persistence_max_segment_size: {}", persistence.max_file_size);
+        println!("    persistence_max_segment_count: {}", persistence.max_file_count);
+    }
     if config.ota.enabled {
         println!("    ota_path: {}", config.ota.path);
     }

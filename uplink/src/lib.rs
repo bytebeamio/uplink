@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 
-use anyhow::{Context, Error};
+use anyhow::Error;
 
 use flume::{bounded, Receiver, Sender};
 use log::error;
@@ -37,15 +37,8 @@ pub fn spawn_uplink(
     let action_status_topic = &config.streams.get("action_status").unwrap().topic;
     let action_status = Stream::new("action_status", action_status_topic, 1, collector_tx.clone());
 
-    let storage = Storage::new(
-        &config.persistence.path,
-        config.persistence.max_file_size,
-        config.persistence.max_file_count,
-    );
-    let storage = storage.with_context(|| format!("Storage = {:?}", config.persistence))?;
-
     let mut mqtt = Mqtt::new(config.clone(), native_actions_tx);
-    let mut serializer = Serializer::new(config.clone(), collector_rx, mqtt.client(), storage)?;
+    let mut serializer = Serializer::new(config.clone(), collector_rx, mqtt.client())?;
     let bridge_rx = bridge_actions_rx.clone();
     let c_tx = collector_tx.clone();
     let status_stream = action_status.clone();

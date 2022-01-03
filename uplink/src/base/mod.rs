@@ -62,7 +62,7 @@ pub struct Config {
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub actions: Vec<String>,
-    pub persistence: Persistence,
+    pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub ota: Ota,
     pub stats: Stats,

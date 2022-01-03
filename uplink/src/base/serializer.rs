@@ -22,6 +22,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
     Client(#[from] ClientError),
+    #[error("Storage is disabled/missing")]
+    MissingPersistence,
 }
 
 enum Status {
@@ -65,7 +67,7 @@ pub struct Serializer {
     config: Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
     client: AsyncClient,
-    storage: Storage,
+    storage: Option<Storage>,
     metrics: Metrics,
 }
 
@@ -74,16 +76,31 @@ impl Serializer {
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
         client: AsyncClient,
-        storage: Storage,
     ) -> Result<Serializer, Error> {
         let metrics_config = config.streams.get("metrics").unwrap();
         let metrics = Metrics::new(&metrics_config.topic);
+
+        let storage = match &config.persistence {
+            Some(persistence) => {
+                let storage = Storage::new(
+                    &persistence.path,
+                    persistence.max_file_size,
+                    persistence.max_file_count,
+                )?;
+                Some(storage)
+            }
+            None => None,
+        };
 
         Ok(Serializer { config, collector_rx, client, storage, metrics })
     }
 
     /// Write all data received, from here-on, to disk only.
     async fn crash(&mut self, mut publish: Publish) -> Result<Status, Error> {
+        let storage = match &mut self.storage {
+            Some(s) => s,
+            None => return Err(Error::MissingPersistence),
+        };
         // Write failed publish to disk first
         publish.pkid = 1;
 
@@ -95,12 +112,12 @@ impl Serializer {
             let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
             publish.pkid = 1;
 
-            if let Err(e) = publish.write(&mut self.storage.writer()) {
+            if let Err(e) = publish.write(&mut storage.writer()) {
                 error!("Failed to fill write buffer during bad network. Error = {:?}", e);
                 continue;
             }
 
-            match self.storage.flush_on_overflow() {
+            match storage.flush_on_overflow() {
                 Ok(_) => {}
                 Err(e) => {
                     error!(
@@ -115,6 +132,10 @@ impl Serializer {
 
     /// Write new data to disk until back pressure due to slow n/w is resolved
     async fn disk(&mut self, publish: Publish) -> Result<Status, Error> {
+        let storage = match &mut self.storage {
+            Some(s) => s,
+            None => return Err(Error::MissingPersistence),
+        };
         info!("Switching to slow eventloop mode!!");
 
         // Note: self.client.publish() is executing code before await point
@@ -137,7 +158,7 @@ impl Serializer {
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
-                      match publish.write(&mut self.storage.writer()) {
+                      match publish.write(&mut storage.writer()) {
                            Ok(_) => self.metrics.add_total_disk_size(payload_size),
                            Err(e) => {
                                error!("Failed to fill disk buffer. Error = {:?}", e);
@@ -145,7 +166,7 @@ impl Serializer {
                            }
                       }
 
-                      match self.storage.flush_on_overflow() {
+                      match storage.flush_on_overflow() {
                             Ok(deleted) => if deleted.is_some() {
                                 self.metrics.increment_lost_segments();
                             },
@@ -169,10 +190,13 @@ impl Serializer {
     /// pressure due to a lot of data on disk doesn't switch state to
     /// `Status::SlowEventLoop`
     async fn catchup(&mut self) -> Result<Status, Error> {
+        let storage = match &mut self.storage {
+            Some(s) => s,
+            None => return Err(Error::MissingPersistence),
+        };
         info!("Switching to catchup mode!!");
 
         let max_packet_size = self.config.max_packet_size;
-        let storage = &mut self.storage;
         let client = self.client.clone();
 
         // Done reading all the pending files
@@ -315,6 +339,12 @@ impl Serializer {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
+        if self.storage.is_none() {
+            loop {
+                self.normal().await?;
+            }
+        }
+
         let mut status = Status::EventLoopReady;
 
         loop {
