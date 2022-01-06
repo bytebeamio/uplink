@@ -187,11 +187,11 @@ impl Bridge {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
     #[serde(skip_serializing)]
-    pub(crate) stream: String,
-    pub(crate) sequence: u32,
-    pub(crate) timestamp: u64,
+    pub stream: String,
+    pub sequence: u32,
+    pub timestamp: u64,
     #[serde(flatten)]
-    pub(crate) payload: Value,
+    pub payload: Value,
 }
 
 impl<T: Into<String>> From<T> for Payload {
