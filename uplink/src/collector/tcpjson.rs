@@ -194,6 +194,12 @@ pub struct Payload {
     pub(crate) payload: Value,
 }
 
+impl<T: Into<String>> From<T> for Payload {
+    fn from(input: T) -> Self {
+        serde_json::from_str(&input.into()).unwrap()
+    }
+}
+
 impl Point for Payload {
     fn sequence(&self) -> u32 {
         self.sequence
