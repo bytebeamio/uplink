@@ -194,9 +194,9 @@ pub struct Payload {
     pub payload: Value,
 }
 
-impl<T: Into<String>> From<T> for Payload {
-    fn from(input: T) -> Self {
-        serde_json::from_str(&input.into()).unwrap()
+impl Payload {
+    pub fn from_string<S: Into<String>>(input: S) -> Result<Self, Error> {
+        Ok(serde_json::from_str(&input.into())?)
     }
 }
 
