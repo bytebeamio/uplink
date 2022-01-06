@@ -306,7 +306,7 @@ impl Serializer {
 
                     let topic = data.topic();
                     let payload = data.serialize();
-                    info!("{:?}", &data);
+                    info!("{:?}", &data.serialize());
                     let payload_size = payload.len();
                     match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
