@@ -222,20 +222,15 @@ async fn main() -> Result<(), Error> {
 
     let (bridge_actions_rx, collector_tx, action_status) = spawn_uplink(config.clone())?;
 
-    let mut bridge =
-        Bridge::new(config.clone(), collector_tx.clone(), bridge_actions_rx, action_status.clone());
-    task::spawn(async move {
-        if let Err(e) = bridge.start().await {
-            error!("Bridge stopped!! Error = {:?}", e);
-        }
-    });
-
     if enable_simulator {
-        let data_tx = collector_tx.clone();
-        task::spawn(async {
-            let mut simulator = Simulator::new(config, data_tx);
+        let mut simulator = Simulator::new(config.clone(), collector_tx.clone());
+        task::spawn(async move {
             simulator.start().await;
         });
+    }
+
+    if let Err(e) = Bridge::new(config, collector_tx, bridge_actions_rx, action_status).start().await {
+        error!("Bridge stopped!! Error = {:?}", e);
     }
 
     Ok(())
