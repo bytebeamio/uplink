@@ -82,15 +82,22 @@ impl Serializer {
         Ok(Serializer { config, collector_rx, client, storage, metrics })
     }
 
+    async fn get_data(&self) -> Result<(Arc<String>, Vec<u8>, Option<(String, usize)>), Error> {
+        let data = self.collector_rx.recv_async().await?;
+        let topic = data.topic();
+        let payload = data.serialize();
+        let anomalies = data.anomalies();
+
+        Ok((topic, payload, anomalies))
+    }
+
     /// Write all data received, from here-on, to disk only.
     async fn crash(&mut self, mut publish: Publish) -> Result<Status, Error> {
         // Write failed publish to disk first
         publish.pkid = 1;
 
         loop {
-            let data = self.collector_rx.recv_async().await?;
-            let topic = data.topic();
-            let payload = data.serialize();
+            let (topic, payload, _) = self.get_data().await?;
 
             let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
             publish.pkid = 1;
@@ -125,14 +132,12 @@ impl Serializer {
 
         loop {
             select! {
-                data = self.collector_rx.recv_async() => {
-                      let data = data?;
-                      if let Some((errors, count)) = data.anomalies() {
-                        self.metrics.add_errors(errors, count);
+                data = self.get_data() => {
+                      let (topic, payload, anomalies) = data?;
+                      if let Some((errors, count)) = anomalies {
+                          self.metrics.add_errors(errors, count);
                       }
 
-                      let topic = data.topic();
-                      let payload = data.serialize();
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
@@ -172,15 +177,14 @@ impl Serializer {
         info!("Switching to catchup mode!!");
 
         let max_packet_size = self.config.max_packet_size;
-        let storage = &mut self.storage;
         let client = self.client.clone();
 
         // Done reading all the pending files
-        if storage.reload_on_eof().unwrap() {
+        if self.storage.reload_on_eof().unwrap() {
             return Ok(Status::Normal);
         }
 
-        let publish = match read(storage.reader(), max_packet_size) {
+        let publish = match read(&mut self.storage.reader(), max_packet_size) {
             Ok(Packet::Publish(publish)) => publish,
             Ok(packet) => unreachable!("{:?}", packet),
             Err(e) => {
@@ -194,19 +198,17 @@ impl Serializer {
 
         loop {
             select! {
-                data = self.collector_rx.recv_async() => {
-                      let data = data?;
-                      if let Some((errors, count)) = data.anomalies() {
+                data = self.get_data() => {
+                      let (topic, payload, anomalies) = data?;
+                      if let Some((errors, count)) = anomalies {
                         self.metrics.add_errors(errors, count);
                       }
 
-                      let topic = data.topic();
-                      let payload = data.serialize();
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
-                      match publish.write(&mut storage.writer()) {
+                      match publish.write(&mut self.storage.writer()) {
                            Ok(_) => self.metrics.add_total_disk_size(payload_size),
                            Err(e) => {
                                error!("Failed to fill disk buffer. Error = {:?}", e);
@@ -214,7 +216,7 @@ impl Serializer {
                            }
                       }
 
-                      match storage.flush_on_overflow() {
+                      match self.storage.flush_on_overflow() {
                             Ok(deleted) => if deleted.is_some() {
                                 self.metrics.increment_lost_segments();
                             },
@@ -236,7 +238,7 @@ impl Serializer {
                         Err(e) => return Err(e.into()),
                     };
 
-                    match storage.reload_on_eof() {
+                    match self.storage.reload_on_eof() {
                         // Done reading all pending files
                         Ok(true) => return Ok(Status::Normal),
                         Ok(false) => {},
@@ -246,7 +248,7 @@ impl Serializer {
                         }
                     }
 
-                    let publish = match read(storage.reader(), max_packet_size) {
+                    let publish = match read(&mut self.storage.reader(), max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
                         Ok(packet) => unreachable!("{:?}", packet),
                         Err(e) => {
@@ -272,16 +274,14 @@ impl Serializer {
 
         loop {
             let failed = select! {
-                data = self.collector_rx.recv_async() => {
-                    let data = data?;
+                data = self.get_data() => {
+                    let (topic, payload, anomalies) = data?;
 
                     // Extract anomalies detected by package during collection
-                    if let Some((errors, count)) = data.anomalies() {
+                    if let Some((errors, count)) = anomalies {
                         self.metrics.add_errors(errors, count);
                     }
 
-                    let topic = data.topic();
-                    let payload = data.serialize();
                     let payload_size = payload.len();
                     match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
