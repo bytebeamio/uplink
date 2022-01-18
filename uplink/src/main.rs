@@ -103,6 +103,9 @@ pub struct CommandLine {
     /// list of modules to log
     #[structopt(short = "m", long = "modules")]
     modules: Vec<String>,
+    /// compressing payloads
+    #[structopt(short = "z", long = "Enable compression of data payloads")]
+    compression: bool,
 }
 
 const DEFAULT_CONFIG: &'static str = r#"
@@ -149,6 +152,7 @@ fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
     }
 
     let mut config: Config = config
+        .join(Data::<Json>::string(&format!("{{\"compression\": {} }}", commandline.compression)))
         .join(Data::<Json>::file(&commandline.auth))
         .extract()
         .with_context(|| format!("Config error"))?;

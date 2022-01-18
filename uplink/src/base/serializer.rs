@@ -2,15 +2,17 @@ use crate::base::{Config, Package};
 
 use bytes::Bytes;
 use disk::Storage;
+use flate2::{write::ZlibEncoder, Compression};
 use flume::{Receiver, RecvError};
 use log::{error, info};
 use rumqttc::*;
 use serde::Serialize;
-use std::io;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::{select, time};
+
+use std::io::{self, Write};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -22,6 +24,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
     Client(#[from] ClientError),
+    #[error("Wrongly formatted topic: {0}")]
+    Topic(String),
 }
 
 enum Status {
@@ -82,11 +86,27 @@ impl Serializer {
         Ok(Serializer { config, collector_rx, client, storage, metrics })
     }
 
-    async fn get_data(&self) -> Result<(Arc<String>, Vec<u8>, Option<(String, usize)>), Error> {
+    /// Get data from collector streams, compress if enabled
+    async fn get_data(&self) -> Result<(String, Vec<u8>, Option<(String, usize)>), Error> {
         let data = self.collector_rx.recv_async().await?;
-        let topic = data.topic();
-        let payload = data.serialize();
+        let mut topic = data.topic().as_ref().to_owned();
+        let mut payload = data.serialize();
         let anomalies = data.anomalies();
+
+        let mut tokens: Vec<&str> = topic.split("/").collect();
+        let last = match tokens.last() {
+            Some(x) => x,
+            None => return Err(Error::Topic(topic)),
+        };
+
+        // NOTE: Considers all non "action_status" streams as compressible
+        if self.config.compression && last != &"action_status" {
+            let mut compressor = ZlibEncoder::new(Vec::new(), Compression::default());
+            compressor.write_all(&payload)?;
+            payload = compressor.finish()?;
+            tokens.push("zip");
+            topic = tokens.join("/");
+        }
 
         Ok((topic, payload, anomalies))
     }
@@ -99,7 +119,7 @@ impl Serializer {
         loop {
             let (topic, payload, _) = self.get_data().await?;
 
-            let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+            let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
             publish.pkid = 1;
 
             if let Err(e) = publish.write(&mut self.storage.writer()) {
@@ -139,7 +159,7 @@ impl Serializer {
                       }
 
                       let payload_size = payload.len();
-                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                      let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
                       match publish.write(&mut self.storage.writer()) {
@@ -205,7 +225,7 @@ impl Serializer {
                       }
 
                       let payload_size = payload.len();
-                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                      let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
                       match publish.write(&mut self.storage.writer()) {
@@ -283,7 +303,7 @@ impl Serializer {
                     }
 
                     let payload_size = payload.len();
-                    match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
+                    match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
                             self.metrics.add_total_sent_size(payload_size);
                             continue;

@@ -66,6 +66,7 @@ pub struct Config {
     pub streams: HashMap<String, StreamConfig>,
     pub ota: Ota,
     pub stats: Stats,
+    pub compression: bool,
 }
 
 pub trait Point: Send + Debug {
