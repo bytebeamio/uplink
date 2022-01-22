@@ -30,7 +30,3 @@ sysinfo = "0.21"
 
 [build-dependencies]
 vergen = { version = "5.1", features = ["git", "build", "chrono"] }
-
-[[bin]]
-name = "uplink"
-path = "bin/main.rs"
