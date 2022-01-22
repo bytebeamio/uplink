@@ -38,14 +38,12 @@ pub struct System {
 
 impl System {
     fn init(sys: &sysinfo::System) -> System {
-        let total_memory = sys.total_memory();
-
         System {
             kernel_version: match sys.kernel_version() {
                 Some(kv) => kv,
                 None => String::default(),
             },
-            total_memory,
+            total_memory: sys.total_memory(),
             ..Default::default()
         }
     }
@@ -193,7 +191,6 @@ impl Disk {
         Disk {
             name,
             total: disk.total_space(),
-            available: disk.available_space(),
             ..Default::default()
         }
     }
@@ -417,6 +414,7 @@ impl StatCollector {
         let mut sys = sysinfo::System::new();
         sys.refresh_disks_list();
         sys.refresh_networks_list();
+        sys.refresh_memory();
 
         let max_buf_size = match config.stats.stream_size {
             Some(stream_size) => stream_size,
