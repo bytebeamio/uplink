@@ -12,16 +12,20 @@ use tokio::task;
 mod base;
 mod collector;
 
-use crate::base::actions::tunshell::{Relay, TunshellSession};
-use crate::base::actions::Actions;
-use crate::base::mqtt::Mqtt;
-use crate::base::serializer::Serializer;
-pub use crate::base::Stream;
-pub use crate::collector::simulator::Simulator;
-use crate::collector::systemstats::StatCollector;
-pub use crate::collector::tcpjson::{Bridge, Payload};
+pub mod config {
+    pub use crate::base::{Config, Ota, Persistence, Stats};
+}
+
+use base::actions::tunshell::{Relay, TunshellSession};
+use base::actions::Actions;
 pub use base::actions::{Action, ActionResponse};
-pub use base::{Config, Package, Point};
+use base::mqtt::Mqtt;
+use base::serializer::Serializer;
+pub use base::{Config, Stream};
+pub use base::{Package, Point};
+pub use collector::simulator::Simulator;
+use collector::systemstats::StatCollector;
+pub use collector::tcpjson::{Bridge, Payload};
 pub use disk::Storage;
 
 pub fn spawn_uplink(

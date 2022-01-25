@@ -229,7 +229,9 @@ async fn main() -> Result<(), Error> {
         });
     }
 
-    if let Err(e) = Bridge::new(config, collector_tx, bridge_actions_rx, action_status).start().await {
+    if let Err(e) =
+        Bridge::new(config, collector_tx, bridge_actions_rx, action_status).start().await
+    {
         error!("Bridge stopped!! Error = {:?}", e);
     }
 
