@@ -67,60 +67,30 @@ pub struct ActionResponse {
 }
 
 impl ActionResponse {
-    pub fn new(id: &str) -> Self {
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+    fn new(id: String, state: String, progress: u8, errors: Vec<String>) -> Self {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_millis() as u64;
 
-        ActionResponse {
-            id: id.to_owned(),
-            sequence: 0,
-            timestamp: timestamp.as_millis() as u64,
-            state: "Running".to_owned(),
-            progress: 0,
-            errors: vec![],
-        }
+        ActionResponse { id: id.to_owned(), sequence: 0, timestamp, state, progress, errors }
     }
 
-    pub fn progress(id: &str, progress: u8) -> Self {
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
-
-        ActionResponse {
-            id: id.to_owned(),
-            sequence: 0,
-            timestamp: timestamp.as_millis() as u64,
-            state: "Downloading".to_owned(),
-            progress,
-            errors: vec![],
-        }
+    pub fn progress(id: &str, state: &str, progress: u8) -> Self {
+        ActionResponse::new(id.to_owned(), state.to_owned(), progress, vec![])
     }
 
     pub fn success(id: &str) -> ActionResponse {
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+        ActionResponse::progress(id, "Completed", 100)
+    }
 
-        ActionResponse {
-            id: id.to_owned(),
-            sequence: 0,
-            timestamp: timestamp.as_millis() as u64,
-            state: "Completed".to_owned(),
-            progress: 100,
-            errors: vec![],
-        }
+    pub fn add_error<E: Into<String>>(mut self, error: E) -> ActionResponse {
+        self.errors.push(error.into());
+        self
     }
 
     pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
-
-        ActionResponse {
-            id: id.to_owned(),
-            sequence: 0,
-            timestamp: timestamp.as_millis() as u64,
-            state: "Failed".to_owned(),
-            progress: 100,
-            errors: vec![error.into()],
-        }
+        ActionResponse::progress(id, "Failed", 100).add_error(error)
     }
 }
 

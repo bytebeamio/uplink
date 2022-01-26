@@ -76,6 +76,7 @@ impl OtaDownloader {
 
             self.send_status(ActionResponse::progress(
                 &self.action_id,
+                "Downloading",
                 (downloaded / content_length) as u8 * 100,
             ))
             .await;
