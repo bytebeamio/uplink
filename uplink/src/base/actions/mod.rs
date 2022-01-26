@@ -67,21 +67,26 @@ pub struct ActionResponse {
 }
 
 impl ActionResponse {
-    fn new(id: String, state: String, progress: u8, errors: Vec<String>) -> Self {
+    fn new(id: &str, state: &str, progress: u8, errors: Vec<String>) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_millis() as u64;
 
-        ActionResponse { id: id.to_owned(), sequence: 0, timestamp, state, progress, errors }
+        match progress {
+            0..=100 => (),
+            _ => panic!("Progress can't be beyond 0-100"),
+        }
+
+        ActionResponse { id: id.to_owned(), sequence: 0, timestamp, state: state.to_owned(), progress, errors }
     }
 
     pub fn progress(id: &str, state: &str, progress: u8) -> Self {
-        ActionResponse::new(id.to_owned(), state.to_owned(), progress, vec![])
+        ActionResponse::new(id, state, progress, vec![])
     }
 
     pub fn success(id: &str) -> ActionResponse {
-        ActionResponse::progress(id, "Completed", 100)
+        ActionResponse::new(id, "Completed", 100, vec![])
     }
 
     pub fn add_error<E: Into<String>>(mut self, error: E) -> ActionResponse {
@@ -90,7 +95,7 @@ impl ActionResponse {
     }
 
     pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
-        ActionResponse::progress(id, "Failed", 100).add_error(error)
+        ActionResponse::new(id, "Failed", 100, vec![]).add_error(error)
     }
 }
 
