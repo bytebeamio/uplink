@@ -1,6 +1,6 @@
 use super::{Config, Control, Package};
 use flume::{Receiver, Sender};
-use log::{debug, error};
+use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::time::Duration;
@@ -67,7 +67,7 @@ pub struct ActionResponse {
 }
 
 impl ActionResponse {
-    fn new(id: &str, state: &str, progress: u8, errors: Vec<String>) -> Self {
+    fn new(id: &str, state: &str, mut progress: u8, errors: Vec<String>) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
@@ -75,7 +75,10 @@ impl ActionResponse {
 
         match progress {
             0..=100 => (),
-            _ => panic!("Progress can't be beyond 0-100"),
+            _ => {
+                progress = 100;
+                warn!("Progress can't be beyond 0-100, reset to 100");
+            },
         }
 
         ActionResponse { id: id.to_owned(), sequence: 0, timestamp, state: state.to_owned(), progress, errors }
