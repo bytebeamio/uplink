@@ -112,6 +112,7 @@ const DEFAULT_CONFIG: &'static str = r#"
     bridge_port = 5555
     max_packet_size = 102400
     max_inflight = 100
+    compression = false
     
     # Whitelist of binaries which uplink can spawn as a process
     # This makes sure that user is protected against random actions
@@ -152,11 +153,11 @@ fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
     }
 
     let mut config: Config = config
-        .join(Data::<Json>::string(&format!("{{\"compression\": {} }}", commandline.compression)))
         .join(Data::<Json>::file(&commandline.auth))
         .extract()
         .with_context(|| format!("Config error"))?;
 
+    config.compression = commandline.compression;
     fs::create_dir_all(&config.persistence.path)?;
 
     let tenant_id = config.project_id.trim();
