@@ -1,16 +1,17 @@
 use crate::base::{Config, Package};
 
+use async_compression::tokio::write::ZstdEncoder;
 use bytes::Bytes;
 use disk::Storage;
-use flate2::{write::ZlibEncoder, Compression};
 use flume::{Receiver, RecvError};
 use log::{error, info};
 use rumqttc::*;
 use serde::Serialize;
 use thiserror::Error;
+use tokio::io::AsyncWriteExt;
 use tokio::{select, time};
 
-use std::io::{self, Write};
+use std::io::{self};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -101,9 +102,9 @@ impl Serializer {
 
         // NOTE: Considers all non "action_status" streams as compressible
         if self.config.compression && last != &"action_status" {
-            let mut compressor = ZlibEncoder::new(Vec::new(), Compression::default());
-            compressor.write_all(&payload)?;
-            payload = compressor.finish()?;
+            let mut compressor = ZstdEncoder::new(vec![]);
+            compressor.write_all(&payload).await?;
+            payload = compressor.into_inner();
             tokens.push("zip");
             topic = tokens.join("/");
         }
