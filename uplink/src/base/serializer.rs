@@ -104,6 +104,7 @@ impl Serializer {
         if self.config.compression && last != &"action_status" {
             let mut compressor = ZstdEncoder::new(vec![]);
             compressor.write_all(&payload).await?;
+            compressor.shutdown().await?;
             payload = compressor.into_inner();
             tokens.push("zip");
             topic = tokens.join("/");
