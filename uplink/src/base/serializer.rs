@@ -11,7 +11,7 @@ use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::{select, time};
 
-use std::io::{self};
+use std::io;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -88,7 +88,9 @@ impl Serializer {
     }
 
     /// Get data from collector streams, compress if enabled
-    async fn get_data(&self) -> Result<(String, Vec<u8>, Option<(String, usize)>), Error> {
+    async fn get_data(
+        &self,
+    ) -> Result<(String, Vec<u8>, Option<(String, usize)>, Option<PayloadSize>), Error> {
         let data = self.collector_rx.recv_async().await?;
         let mut topic = data.topic().as_ref().to_owned();
         let mut payload = data.serialize();
@@ -100,17 +102,21 @@ impl Serializer {
             None => return Err(Error::Topic(topic)),
         };
 
+        let mut payload_size = None;
         // NOTE: Considers all non "action_status" streams as compressible
         if self.config.compression && last != &"action_status" {
+            let before_compression = payload.len();
             let mut compressor = ZstdEncoder::new(vec![]);
             compressor.write_all(&payload).await?;
             compressor.shutdown().await?;
             payload = compressor.into_inner();
             tokens.push("zip");
             topic = tokens.join("/");
+            payload_size =
+                Some(PayloadSize { before_compression, after_compression: payload.len() });
         }
 
-        Ok((topic, payload, anomalies))
+        Ok((topic, payload, anomalies, payload_size))
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -119,7 +125,9 @@ impl Serializer {
         publish.pkid = 1;
 
         loop {
-            let (topic, payload, _) = self.get_data().await?;
+            let (topic, payload, _, payload_size) = self.get_data().await?;
+
+            self.metrics.update(None, payload_size);
 
             let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
             publish.pkid = 1;
@@ -155,10 +163,9 @@ impl Serializer {
         loop {
             select! {
                 data = self.get_data() => {
-                      let (topic, payload, anomalies) = data?;
-                      if let Some((errors, count)) = anomalies {
-                          self.metrics.add_errors(errors, count);
-                      }
+                      let (topic, payload, anomalies, payload_size) = data?;
+
+                      self.metrics.update(anomalies, payload_size);
 
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
@@ -221,33 +228,33 @@ impl Serializer {
         loop {
             select! {
                 data = self.get_data() => {
-                      let (topic, payload, anomalies) = data?;
-                      if let Some((errors, count)) = anomalies {
-                        self.metrics.add_errors(errors, count);
-                      }
+                    let (topic, payload, anomalies, payload_size) = data?;
 
-                      let payload_size = payload.len();
-                      let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
-                      publish.pkid = 1;
+                    self.metrics.update(anomalies, payload_size);
 
-                      match publish.write(&mut self.storage.writer()) {
-                           Ok(_) => self.metrics.add_total_disk_size(payload_size),
-                           Err(e) => {
-                               error!("Failed to fill disk buffer. Error = {:?}", e);
-                               continue
-                           }
-                      }
+                    let payload_size = payload.len();
+                    let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
+                    publish.pkid = 1;
 
-                      match self.storage.flush_on_overflow() {
-                            Ok(deleted) => if deleted.is_some() {
-                                self.metrics.increment_lost_segments();
-                            },
-                            Err(e) => {
-                                error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
-                                continue
-                            }
-                      }
+                    match publish.write(&mut self.storage.writer()) {
+                        Ok(_) => self.metrics.add_total_disk_size(payload_size),
+                        Err(e) => {
+                            error!("Failed to fill disk buffer. Error = {:?}", e);
+                            continue
+                        }
+                    }
+
+                    match self.storage.flush_on_overflow() {
+                        Ok(deleted) => if deleted.is_some() {
+                            self.metrics.increment_lost_segments();
+                        },
+                        Err(e) => {
+                            error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
+                            continue
+                        }
+                    }
                 }
+
                 o = &mut send => {
                     // Send failure implies eventloop crash. Switch state to
                     // indefinitely write to disk to not loose data
@@ -297,12 +304,9 @@ impl Serializer {
         loop {
             let failed = select! {
                 data = self.get_data() => {
-                    let (topic, payload, anomalies) = data?;
+                    let (topic, payload, anomalies, payload_size) = data?;
 
-                    // Extract anomalies detected by package during collection
-                    if let Some((errors, count)) = anomalies {
-                        self.metrics.add_errors(errors, count);
-                    }
+                    self.metrics.update(anomalies, payload_size);
 
                     let payload_size = payload.len();
                     match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
@@ -362,6 +366,12 @@ async fn send_publish(
 }
 
 #[derive(Debug, Default, Serialize)]
+struct PayloadSize {
+    before_compression: usize,
+    after_compression: usize,
+}
+
+#[derive(Debug, Default, Serialize)]
 struct Metrics {
     #[serde(skip_serializing)]
     topic: String,
@@ -372,6 +382,8 @@ struct Metrics {
     lost_segments: usize,
     errors: String,
     error_count: usize,
+    #[serde(flatten)]
+    payload_size: PayloadSize,
 }
 
 impl Metrics {
@@ -425,5 +437,21 @@ impl Metrics {
         self.errors.clear();
         self.lost_segments = 0;
         (&self.topic, payload)
+    }
+
+    // Update metrics with anomalies detected and payload sizes before and after compression
+    pub fn update(
+        &mut self,
+        anomalies: Option<(String, usize)>,
+        payload_size: Option<PayloadSize>,
+    ) {
+        if let Some(payload_size) = payload_size {
+            self.payload_size.before_compression += payload_size.before_compression;
+            self.payload_size.after_compression += payload_size.after_compression;
+        }
+
+        if let Some((errors, count)) = anomalies {
+            self.add_errors(errors, count);
+        }
     }
 }
