@@ -25,8 +25,6 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
     Client(#[from] ClientError),
-    #[error("Wrongly formatted topic: {0}")]
-    Topic(String),
 }
 
 enum Status {
@@ -95,23 +93,20 @@ impl Serializer {
         let mut topic = data.topic().as_ref().to_owned();
         let mut payload = data.serialize();
         let anomalies = data.anomalies();
-
-        let mut tokens: Vec<&str> = topic.split("/").collect();
-        let last = match tokens.last() {
-            Some(x) => x,
-            None => return Err(Error::Topic(topic)),
-        };
-
         let mut payload_size = None;
-        // NOTE: Considers all non "action_status" streams as compressible
-        if self.config.compression && last != &"action_status" {
+
+        if self.config.compression && data.is_compressible() {
             let before_compression = payload.len();
+
             let mut compressor = ZstdEncoder::new(vec![]);
             compressor.write_all(&payload).await?;
             compressor.shutdown().await?;
             payload = compressor.into_inner();
+
+            let mut tokens = topic.split("/").collect::<Vec<&str>>();
             tokens.push("zip");
             topic = tokens.join("/");
+
             payload_size =
                 Some(PayloadSize { before_compression, after_compression: payload.len() });
         }

@@ -78,6 +78,10 @@ pub trait Package: Send + Debug {
     fn topic(&self) -> Arc<String>;
     fn serialize(&self) -> Vec<u8>;
     fn anomalies(&self) -> Option<(String, usize)>;
+
+    fn is_compressible(&self) -> bool {
+        true
+    }
 }
 
 /// Signal to modify the behaviour of collector
