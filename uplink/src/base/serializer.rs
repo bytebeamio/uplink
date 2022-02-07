@@ -85,8 +85,10 @@ impl Serializer {
         Ok(Serializer { config, collector_rx, client, storage, metrics })
     }
 
-    /// Get data from collector streams, compress if enabled
-    async fn get_data(
+    /// Collect data package from the various data streams, compress payload if necessary and the feature is enabled.
+    /// Extract topic and anomaly information associated with package as well.
+    /// If payload is compressed, Append `/zip` to topic string.
+    async fn collect_data(
         &self,
     ) -> Result<(String, Vec<u8>, Option<(String, usize)>, Option<PayloadSize>), Error> {
         let data = self.collector_rx.recv_async().await?;
@@ -120,7 +122,7 @@ impl Serializer {
         publish.pkid = 1;
 
         loop {
-            let (topic, payload, _, payload_size) = self.get_data().await?;
+            let (topic, payload, _, payload_size) = self.collect_data().await?;
 
             self.metrics.update(None, payload_size);
 
@@ -157,7 +159,7 @@ impl Serializer {
 
         loop {
             select! {
-                data = self.get_data() => {
+                data = self.collect_data() => {
                       let (topic, payload, anomalies, payload_size) = data?;
 
                       self.metrics.update(anomalies, payload_size);
@@ -222,7 +224,7 @@ impl Serializer {
 
         loop {
             select! {
-                data = self.get_data() => {
+                data = self.collect_data() => {
                     let (topic, payload, anomalies, payload_size) = data?;
 
                     self.metrics.update(anomalies, payload_size);
@@ -292,13 +294,15 @@ impl Serializer {
         }
     }
 
+    /// Try publishing data received to broker. If it fails, return status SlowEventLoop with failed publish.
+    /// Meanwhile on a timely basis, update and publish uplink metrics information as well.
     async fn normal(&mut self) -> Result<Status, Error> {
         info!("Switching to normal mode!!");
         let mut interval = time::interval(time::Duration::from_secs(10));
 
         loop {
             let failed = select! {
-                data = self.get_data() => {
+                data = self.collect_data() => {
                     let (topic, payload, anomalies, payload_size) = data?;
 
                     self.metrics.update(anomalies, payload_size);
@@ -430,11 +434,12 @@ impl Metrics {
 
         let payload = serde_json::to_vec(&vec![&self]).unwrap();
         self.errors.clear();
+        // NOTE: We could reset payload size information here.
         self.lost_segments = 0;
         (&self.topic, payload)
     }
 
-    // Update metrics with anomalies detected and payload sizes before and after compression
+    /// Update metrics with anomalies detected and payload size from before and after compression
     pub fn update(
         &mut self,
         anomalies: Option<(String, usize)>,
