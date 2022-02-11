@@ -51,6 +51,8 @@ pub struct Action {
     pub payload: String,
 }
 
+const MAX_PROGRESS: u8 = 100;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
     id: String,
@@ -73,15 +75,23 @@ impl ActionResponse {
             .unwrap_or(Duration::from_secs(0))
             .as_millis() as u64;
 
-        match progress {
-            0..=100 => (),
-            _ => {
-                progress = 100;
-                warn!("Progress can't be beyond 0-100, reset to 100");
-            },
+        if progress > MAX_PROGRESS {
+            warn!(
+                "Progress = {} is beyond 0..={MAX}, reseting to {MAX}",
+                progress,
+                MAX = MAX_PROGRESS
+            );
+            progress = MAX_PROGRESS;
         }
 
-        ActionResponse { id: id.to_owned(), sequence: 0, timestamp, state: state.to_owned(), progress, errors }
+        ActionResponse {
+            id: id.to_owned(),
+            sequence: 0,
+            timestamp,
+            state: state.to_owned(),
+            progress,
+            errors,
+        }
     }
 
     pub fn progress(id: &str, state: &str, progress: u8) -> Self {
