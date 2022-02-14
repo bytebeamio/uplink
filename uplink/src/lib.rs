@@ -28,66 +28,105 @@ use collector::systemstats::StatCollector;
 pub use collector::tcpjson::{Bridge, Payload};
 pub use disk::Storage;
 
-pub fn spawn_uplink(
+struct RxTx<T> {
+    rx: Receiver<T>,
+    tx: Sender<T>,
+}
+
+impl<T> RxTx<T> {
+    fn bounded(cap: usize) -> RxTx<T> {
+        let (tx, rx) = bounded(cap);
+
+        RxTx { rx, tx }
+    }
+}
+
+pub struct Uplink {
     config: Arc<Config>,
-) -> Result<(Receiver<Action>, Sender<Box<dyn Package>>, Stream<ActionResponse>), Error> {
-    let enable_stats = config.stats.enabled;
+    action_channel: RxTx<Action>,
+    data_channel: RxTx<Box<dyn Package>>,
+    action_status: Stream<ActionResponse>,
+}
 
-    let (native_actions_tx, native_actions_rx) = bounded(10);
-    let (tunshell_keys_tx, tunshell_keys_rx) = bounded(10);
-    let (collector_tx, collector_rx) = bounded(10);
-    let (bridge_actions_tx, bridge_actions_rx) = bounded(10);
+impl Uplink {
+    pub fn new(config: Arc<Config>) -> Result<Uplink, Error> {
+        let action_channel = RxTx::bounded(10);
+        let data_channel = RxTx::bounded(10);
 
-    let action_status_topic = &config.streams.get("action_status").unwrap().topic;
-    let action_status = Stream::new("action_status", action_status_topic, 1, collector_tx.clone());
+        let action_status_topic = &config
+            .streams
+            .get("action_status")
+            .ok_or(Error::msg("Action status topic missing from config"))?
+            .topic;
+        let action_status =
+            Stream::new("action_status", action_status_topic, 1, data_channel.tx.clone());
 
-    let mut mqtt = Mqtt::new(config.clone(), native_actions_tx);
-    let mut serializer = Serializer::new(config.clone(), collector_rx, mqtt.client())?;
-    let bridge_rx = bridge_actions_rx.clone();
-    let c_tx = collector_tx.clone();
-    let status_stream = action_status.clone();
+        Ok(Uplink { config, action_channel, data_channel, action_status })
+    }
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    thread::spawn(move || {
-        rt.block_on(async {
-            task::spawn(async move {
-                if let Err(e) = serializer.start().await {
-                    error!("Serializer stopped!! Error = {:?}", e);
+    pub fn spawn(&mut self) -> Result<(), Error> {
+        let raw_action_channel = RxTx::bounded(10);
+        let mut mqtt = Mqtt::new(self.config.clone(), raw_action_channel.tx);
+        let mut serializer =
+            Serializer::new(self.config.clone(), self.data_channel.rx.clone(), mqtt.client())?;
+
+        let tunshell_keys = RxTx::bounded(10);
+        let tunshell_config = self.config.clone();
+        let tunshell_session = TunshellSession::new(
+            tunshell_config,
+            Relay::default(),
+            false,
+            tunshell_keys.rx,
+            self.action_status.clone(),
+        );
+
+        let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
+        let mut actions = Actions::new(
+            self.config.clone(),
+            controllers,
+            raw_action_channel.rx,
+            tunshell_keys.tx,
+            self.action_status.clone(),
+            self.action_channel.tx.clone(),
+        );
+
+        let enable_stats = self.config.stats.enabled;
+        let stat_collector = StatCollector::new(self.config.clone(), self.data_channel.tx.clone());
+
+        let rt = tokio::runtime::Runtime::new()?;
+        thread::spawn(move || {
+            rt.block_on(async {
+                task::spawn(async move {
+                    if let Err(e) = serializer.start().await {
+                        error!("Serializer stopped!! Error = {:?}", e);
+                    }
+                });
+
+                task::spawn(async move {
+                    mqtt.start().await;
+                });
+
+                if enable_stats {
+                    thread::spawn(move || stat_collector.start());
                 }
-            });
 
-            task::spawn(async move {
-                mqtt.start().await;
-            });
+                thread::spawn(move || tunshell_session.start());
+                actions.start().await;
+            })
+        });
 
-            if enable_stats {
-                let stat_collector = StatCollector::new(config.clone(), collector_tx.clone());
-                thread::spawn(move || stat_collector.start());
-            }
+        Ok(())
+    }
 
-            let tunshell_config = config.clone();
-            let tunshell_session = TunshellSession::new(
-                tunshell_config,
-                Relay::default(),
-                false,
-                tunshell_keys_rx,
-                action_status.clone(),
-            );
-            thread::spawn(move || tunshell_session.start());
+    pub fn bridge_action_rx(&self) -> Receiver<Action> {
+        self.action_channel.rx.clone()
+    }
 
-            let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-            let mut actions = Actions::new(
-                config.clone(),
-                controllers,
-                native_actions_rx,
-                tunshell_keys_tx,
-                action_status,
-                bridge_actions_tx,
-            )
-            .await;
-            actions.start().await;
-        })
-    });
+    pub fn bridge_data_tx(&self) -> Sender<Box<dyn Package>> {
+        self.data_channel.tx.clone()
+    }
 
-    Ok((bridge_rx, c_tx, status_stream))
+    pub fn action_status(&self) -> Stream<ActionResponse> {
+        self.action_status.clone()
+    }
 }

@@ -1,6 +1,6 @@
 use super::{Config, Control, Package};
 use flume::{Receiver, Sender};
-use log::{debug, error, warn};
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::time::Duration;
@@ -51,8 +51,6 @@ pub struct Action {
     pub payload: String,
 }
 
-const MAX_PROGRESS: u8 = 100;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
     id: String,
@@ -69,20 +67,11 @@ pub struct ActionResponse {
 }
 
 impl ActionResponse {
-    fn new(id: &str, state: &str, mut progress: u8, errors: Vec<String>) -> Self {
+    fn new(id: &str, state: &str, progress: u8, errors: Vec<String>) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_millis() as u64;
-
-        if progress > MAX_PROGRESS {
-            warn!(
-                "Progress = {} is beyond 0..={MAX}, reseting to {MAX}",
-                progress,
-                MAX = MAX_PROGRESS
-            );
-            progress = MAX_PROGRESS;
-        }
 
         ActionResponse {
             id: id.to_owned(),
@@ -133,7 +122,7 @@ pub struct Actions {
 }
 
 impl Actions {
-    pub async fn new(
+    pub fn new(
         config: Arc<Config>,
         controllers: HashMap<String, Sender<Control>>,
         actions_rx: Receiver<Action>,

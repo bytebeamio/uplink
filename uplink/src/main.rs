@@ -53,7 +53,7 @@ use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalM
 use structopt::StructOpt;
 use tokio::task;
 
-use uplink::{spawn_uplink, Bridge, Config, Simulator};
+use uplink::{Bridge, Config, Simulator, Uplink};
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
@@ -220,18 +220,23 @@ async fn main() -> Result<(), Error> {
 
     banner(&commandline, &config);
 
-    let (bridge_actions_rx, collector_tx, action_status) = spawn_uplink(config.clone())?;
+    let mut uplink = Uplink::new(config.clone())?;
+    uplink.spawn()?;
 
     if enable_simulator {
-        let mut simulator = Simulator::new(config.clone(), collector_tx.clone());
+        let mut simulator = Simulator::new(config.clone(), uplink.bridge_data_tx());
         task::spawn(async move {
             simulator.start().await;
         });
     }
 
-    if let Err(e) =
-        Bridge::new(config, collector_tx, bridge_actions_rx, action_status).start().await
-    {
+    let mut bridge = Bridge::new(
+        config,
+        uplink.bridge_data_tx(),
+        uplink.bridge_action_rx(),
+        uplink.action_status(),
+    );
+    if let Err(e) = bridge.start().await {
         error!("Bridge stopped!! Error = {:?}", e);
     }
 
