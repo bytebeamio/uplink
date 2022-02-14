@@ -13,10 +13,12 @@ struct Config {
     relay: String,
     #[clap(short, long, default_value = "0.0.0.0")]
     host: String,
-    #[clap(short, long, default_value = "1883")]
+    #[clap(long, default_value = "1883")]
     port: u16,
     #[clap(short, long)]
-    target: String,
+    device_id: String,
+    #[clap(short, long)]
+    project_id: String,
 }
 
 #[derive(Serialize)]
@@ -45,7 +47,7 @@ fn main() {
     // parsing arguments
     let config: Config = Config::parse();
     let relay = "https://".to_string() +  &config.relay + "/api/sessions";
-    let publish_topic: String = "/devices/".to_string() + &config.target + "/actions";
+    let publish_topic: String = "/tenants/".to_string() + &config.project_id + "/devices/" + &config.device_id + "/actions";
     let subscribe_topic: String = publish_topic.clone() + "/status";
 
     // get session keys from relay server
