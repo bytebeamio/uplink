@@ -338,11 +338,42 @@ impl Serializer {
         }
     }
 
+    /// Direct mode is used in case uplink is used with persistence disabled.
+    /// It is operated differently from all other modes. Failure is terminal.
+    async fn direct(&mut self) -> Result<(), Error> {
+        let mut interval = time::interval(time::Duration::from_secs(10));
+
+        loop {
+            let payload_size = select! {
+                data = self.collector_rx.recv_async() => {
+                    let data = data?;
+
+                    // Extract anomalies detected by package during collection
+                    if let Some((errors, count)) = data.anomalies() {
+                        self.metrics.add_errors(errors, count);
+                    }
+
+                    let topic = data.topic();
+                    let payload = data.serialize();
+                    let payload_size = payload.len();
+                    self.client.publish(topic.as_ref(), QoS::AtLeastOnce, false, payload).await?;
+                    payload_size
+                }
+                _ = interval.tick() => {
+                    let (topic, payload) = self.metrics.next();
+                    let payload_size = payload.len();
+                    self.client.publish(topic, QoS::AtLeastOnce, false, payload).await?;
+                    payload_size
+                }
+            };
+
+            self.metrics.add_total_sent_size(payload_size);
+        }
+    }
+
     pub async fn start(&mut self) -> Result<(), Error> {
         if self.storage.is_none() {
-            loop {
-                self.normal().await?;
-            }
+            return self.direct().await;
         }
 
         let mut status = Status::EventLoopReady;
