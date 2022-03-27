@@ -66,9 +66,21 @@ impl Uplink {
 
     pub fn spawn(&mut self) -> Result<(), Error> {
         let raw_action_channel = RxTx::bounded(10);
+
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_channel.tx);
+
+        #[cfg(not(test))]
+        let client = mqtt.client();
+
+        #[cfg(test)]
+        // NOTE: This is for the sake of compilation
+        let client = {
+            let (net_tx, net_rx) = flume::bounded(10);
+            base::serializer::MqttClient { net_tx }
+        };
+
         let mut serializer =
-            Serializer::new(self.config.clone(), self.data_channel.rx.clone(), mqtt.client())?;
+            Serializer::new(self.config.clone(), self.data_channel.rx.clone(), client)?;
 
         let tunshell_keys = RxTx::bounded(10);
         let tunshell_config = self.config.clone();
