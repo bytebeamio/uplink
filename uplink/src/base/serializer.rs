@@ -552,13 +552,24 @@ impl Metrics {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::{
+        base::{Stream, StreamConfig},
+        Payload,
+    };
+    use std::collections::HashMap;
 
     #[test]
-    fn normal_to_slow_network() {
+    fn normal_working() {
+        let mut streams = HashMap::new();
+        streams.insert(
+            "metrics".to_owned(),
+            StreamConfig { topic: Default::default(), buf_size: 100 },
+        );
         let config = Arc::new(Config {
             broker: "localhost".to_owned(),
             port: 1883,
             device_id: "123".to_owned(),
+            streams,
             ..Default::default()
         });
         let (data_tx, data_rx) = flume::bounded(10);
@@ -569,5 +580,22 @@ mod test {
         std::thread::spawn(move || {
             tokio::runtime::Runtime::new().unwrap().block_on(serializer.start())
         });
+
+        std::thread::spawn(move || {
+            let mut stream = Stream::new("hello", "hello/world", 1, data_tx);
+            let payload = serde_json::from_str("{\"msg\": \"Hello, World!\"}").unwrap();
+            stream
+                .push(Payload { stream: "hello".to_owned(), sequence: 0, timestamp: 0, payload })
+                .unwrap();
+        });
+
+        match net_rx.recv().unwrap() {
+            Request::Publish(Publish { qos: QoS::AtLeastOnce, payload, topic, .. }) => {
+                assert_eq!(topic, "hello/world");
+                let recvd = std::str::from_utf8(&payload).unwrap();
+                assert_eq!(recvd, "[{\"sequence\":0,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+            }
+            r => panic!("Unexpected value returned: {:?}", r),
+        }
     }
 }

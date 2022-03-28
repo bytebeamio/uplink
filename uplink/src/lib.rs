@@ -75,7 +75,7 @@ impl Uplink {
         #[cfg(test)]
         // NOTE: This is for the sake of compilation
         let client = {
-            let (net_tx, net_rx) = flume::bounded(10);
+            let (net_tx, _) = flume::bounded(10);
             base::serializer::MqttClient { net_tx }
         };
 
