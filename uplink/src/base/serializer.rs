@@ -26,77 +26,12 @@ pub enum Error {
     MissingPersistence,
 }
 
+#[derive(Debug)]
 enum Status {
     Normal,
     SlowEventloop(Publish),
     EventLoopReady,
     EventLoopCrash(Publish),
-}
-
-#[cfg(test)]
-mod mock {
-    use super::*;
-
-    #[derive(Clone)]
-    pub struct MockClient {
-        pub net_tx: flume::Sender<Request>,
-    }
-
-    #[async_trait::async_trait]
-    impl MqttClient for MockClient {
-        async fn publish<S, V>(
-            &self,
-            topic: S,
-            qos: QoS,
-            retain: bool,
-            payload: V,
-        ) -> Result<(), MqttError>
-        where
-            S: Into<String> + Send,
-            V: Into<Vec<u8>> + Send,
-        {
-            let mut publish = Publish::new(topic, qos, payload);
-            publish.retain = retain;
-            let publish = Request::Publish(publish);
-            self.net_tx.send_async(publish).await?;
-            Ok(())
-        }
-
-        fn try_publish<S, V>(
-            &self,
-            topic: S,
-            qos: QoS,
-            retain: bool,
-            payload: V,
-        ) -> Result<(), MqttError>
-        where
-            S: Into<String>,
-            V: Into<Vec<u8>>,
-        {
-            let mut publish = Publish::new(topic, qos, payload);
-            publish.retain = retain;
-            let publish = Request::Publish(publish);
-            self.net_tx.try_send(publish)?;
-            Ok(())
-        }
-
-        async fn publish_bytes<S>(
-            &self,
-            topic: S,
-            qos: QoS,
-            retain: bool,
-            payload: Bytes,
-        ) -> Result<(), MqttError>
-        where
-            S: Into<String> + Send,
-        {
-            let mut publish = Publish::from_bytes(topic, qos, payload);
-            publish.retain = retain;
-            let publish = Request::Publish(publish);
-            self.net_tx.send_async(publish).await?;
-            Ok(())
-        }
-    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -455,7 +390,7 @@ impl<C: MqttClient> Serializer<C> {
         let mut interval = time::interval(time::Duration::from_secs(10));
 
         loop {
-            let failed = select! {
+            let (payload_size, result) = select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
 
@@ -466,31 +401,23 @@ impl<C: MqttClient> Serializer<C> {
 
                     let topic = data.topic();
                     let payload = data.serialize();
-                    let payload_size = payload.len();
-                    match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
-                        Ok(_) => {
-                            self.metrics.add_total_sent_size(payload_size);
-                            continue;
-                        }
-                        Err(MqttError::TrySend(request)) => request.into_inner(),
-                        Err(MqttError::Client(ClientError::TryRequest(request)))=> request.into_inner(),
-                        Err(e) => return Err(e.into()),
-                    }
+                     (payload.len(), self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload))
 
                 }
                 _ = interval.tick() => {
                     let (topic, payload) = self.metrics.next();
-                    let payload_size = payload.len();
-                    match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
-                        Ok(_) => {
-                            self.metrics.add_total_sent_size(payload_size);
-                            continue;
-                        }
-                        Err(MqttError::TrySend(request)) => request.into_inner(),
-                        Err(MqttError::Client(ClientError::TryRequest(request)))=> request.into_inner(),
-                        Err(e) => return Err(e.into()),
-                    }
+                    (payload.len(), self.client.try_publish(topic, QoS::AtLeastOnce, false, payload))
                 }
+            };
+
+            let failed = match result {
+                Ok(_) => {
+                    self.metrics.add_total_sent_size(payload_size);
+                    continue;
+                }
+                Err(MqttError::TrySend(request)) => request.into_inner(),
+                Err(MqttError::Client(ClientError::TryRequest(request))) => request.into_inner(),
+                Err(e) => return Err(e.into()),
             };
 
             match failed {
@@ -638,8 +565,68 @@ mod test {
     };
     use std::collections::HashMap;
 
-    #[test]
-    fn normal_working() {
+    #[derive(Clone)]
+    pub struct MockClient {
+        pub net_tx: flume::Sender<Request>,
+    }
+
+    #[async_trait::async_trait]
+    impl MqttClient for MockClient {
+        async fn publish<S, V>(
+            &self,
+            topic: S,
+            qos: QoS,
+            retain: bool,
+            payload: V,
+        ) -> Result<(), MqttError>
+        where
+            S: Into<String> + Send,
+            V: Into<Vec<u8>> + Send,
+        {
+            let mut publish = Publish::new(topic, qos, payload);
+            publish.retain = retain;
+            let publish = Request::Publish(publish);
+            self.net_tx.send_async(publish).await?;
+            Ok(())
+        }
+
+        fn try_publish<S, V>(
+            &self,
+            topic: S,
+            qos: QoS,
+            retain: bool,
+            payload: V,
+        ) -> Result<(), MqttError>
+        where
+            S: Into<String>,
+            V: Into<Vec<u8>>,
+        {
+            let mut publish = Publish::new(topic, qos, payload);
+            publish.retain = retain;
+            let publish = Request::Publish(publish);
+            self.net_tx.try_send(publish)?;
+            Ok(())
+        }
+
+        async fn publish_bytes<S>(
+            &self,
+            topic: S,
+            qos: QoS,
+            retain: bool,
+            payload: Bytes,
+        ) -> Result<(), MqttError>
+        where
+            S: Into<String> + Send,
+        {
+            let mut publish = Publish::from_bytes(topic, qos, payload);
+            publish.retain = retain;
+            let publish = Request::Publish(publish);
+            self.net_tx.send_async(publish).await?;
+            Ok(())
+        }
+    }
+
+    fn defaults() -> (Serializer<MockClient>, flume::Sender<Box<dyn Package>>, Receiver<Request>) {
         let mut streams = HashMap::new();
         streams.insert(
             "metrics".to_owned(),
@@ -652,11 +639,17 @@ mod test {
             streams,
             ..Default::default()
         });
-        let (data_tx, data_rx) = flume::bounded(10);
-        let (net_tx, net_rx) = flume::bounded(10);
-        let client = mock::MockClient { net_tx };
 
-        let mut serializer = Serializer::new(config, data_rx, client).unwrap();
+        let (data_tx, data_rx) = flume::bounded(1);
+        let (net_tx, net_rx) = flume::bounded(1);
+        let client = MockClient { net_tx };
+
+        (Serializer::new(config, data_rx, client).unwrap(), data_tx, net_rx)
+    }
+
+    #[test]
+    fn normal_working() {
+        let (mut serializer, data_tx, net_rx) = defaults();
         std::thread::spawn(move || {
             tokio::runtime::Runtime::new().unwrap().block_on(serializer.start())
         });
