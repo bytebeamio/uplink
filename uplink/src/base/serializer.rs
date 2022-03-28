@@ -42,25 +42,18 @@ mod mock {
         pub net_tx: flume::Sender<Request>,
     }
 
-    #[derive(thiserror::Error, Debug)]
-    pub enum Error {
-        #[error("Net Send error {0}")]
-        Request(#[from] flume::SendError<Request>),
-        #[error("Net TrySend error {0}")]
-        TryRequest(#[from] flume::TrySendError<Request>),
-    }
-
-    impl MockClient {
-        pub async fn publish<S, V>(
+    #[async_trait::async_trait]
+    impl MqttClient for MockClient {
+        async fn publish<S, V>(
             &self,
             topic: S,
             qos: QoS,
             retain: bool,
             payload: V,
-        ) -> Result<(), Error>
+        ) -> Result<(), MqttError>
         where
-            S: Into<String>,
-            V: Into<Vec<u8>>,
+            S: Into<String> + Send,
+            V: Into<Vec<u8>> + Send,
         {
             let mut publish = Publish::new(topic, qos, payload);
             publish.retain = retain;
@@ -69,16 +62,16 @@ mod mock {
             Ok(())
         }
 
-        pub fn try_publish<S, V>(
+        fn try_publish<S, V>(
             &self,
             topic: S,
             qos: QoS,
             retain: bool,
             payload: V,
-        ) -> Result<(), Error>
+        ) -> Result<(), MqttError>
         where
-            S: Into<String>,
-            V: Into<Vec<u8>>,
+            S: Into<String> + Send,
+            V: Into<Vec<u8>> + Send,
         {
             let mut publish = Publish::new(topic, qos, payload);
             publish.retain = retain;
@@ -87,15 +80,15 @@ mod mock {
             Ok(())
         }
 
-        pub async fn publish_bytes<S>(
+        async fn publish_bytes<S>(
             &self,
             topic: S,
             qos: QoS,
             retain: bool,
             payload: Bytes,
-        ) -> Result<(), Error>
+        ) -> Result<(), MqttError>
         where
-            S: Into<String>,
+            S: Into<String> + Send,
         {
             let mut publish = Publish::from_bytes(topic, qos, payload);
             publish.retain = retain;
@@ -106,14 +99,95 @@ mod mock {
     }
 }
 
-#[cfg(not(test))]
-pub type MqttClient = AsyncClient;
-#[cfg(test)]
-pub type MqttClient = mock::MockClient;
-#[cfg(not(test))]
-pub type MqttError = ClientError;
-#[cfg(test)]
-pub type MqttError = mock::Error;
+#[derive(thiserror::Error, Debug)]
+pub enum MqttError {
+    #[error("Client error {0}")]
+    Client(#[from] ClientError),
+    #[error("Net Send error {0}")]
+    Send(#[from] flume::SendError<Request>),
+    #[error("Net TrySend error {0}")]
+    TrySend(#[from] flume::TrySendError<Request>),
+}
+
+#[async_trait::async_trait]
+pub trait MqttClient: Sync {
+    async fn publish<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String> + Send,
+        V: Into<Vec<u8>> + Send;
+
+    fn try_publish<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String> + Send,
+        V: Into<Vec<u8>> + Send;
+    async fn publish_bytes<S>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: Bytes,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String> + Send;
+}
+
+#[async_trait::async_trait]
+impl MqttClient for AsyncClient {
+    async fn publish<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String> + Send,
+        V: Into<Vec<u8>> + Send,
+    {
+        self.publish(topic, qos, retain, payload).await?;
+        Ok(())
+    }
+
+    fn try_publish<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String> + Send,
+        V: Into<Vec<u8>> + Send,
+    {
+        self.try_publish(topic, qos, retain, payload)?;
+        Ok(())
+    }
+    async fn publish_bytes<S>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: Bytes,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String> + Send,
+    {
+        self.publish_bytes(topic, qos, retain, payload).await?;
+        Ok(())
+    }
+}
 
 /// The uplink Serializer is the component that deals with sending data to the Bytebeam platform.
 /// In case of network issues, the Serializer enters various states depending on severeness, managed by `Serializer::start()`.                                                                                       
@@ -145,20 +219,20 @@ pub type MqttError = mock::Error;
 ///       save to Storage before forwarding         through AsyncClient
 ///
 ///```
-pub struct Serializer {
+pub struct Serializer<C: MqttClient> {
     config: Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
-    client: MqttClient,
+    client: C,
     storage: Option<Storage>,
     metrics: Metrics,
 }
 
-impl Serializer {
+impl<C: MqttClient + Clone> Serializer<C> {
     pub fn new(
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
-        client: MqttClient,
-    ) -> Result<Serializer, Error> {
+        client: C,
+    ) -> Result<Serializer<C>, Error> {
         let metrics_config = config.streams.get("metrics").unwrap();
         let metrics = Metrics::new(&metrics_config.topic);
 
@@ -335,7 +409,11 @@ impl Serializer {
                     // indefinitely write to disk to not loose data
                     let client = match o {
                         Ok(c) => c,
-                        Err(MqttError::Request(request)) => match request.into_inner() {
+                        Err(MqttError::Send(request)) => match request.into_inner() {
+                            Request::Publish(publish) => return Ok(Status::EventLoopCrash(publish)),
+                            request => unreachable!("{:?}", request),
+                        },
+                        Err(MqttError::Client(ClientError::Request(request)))=> match request.into_inner() {
                             Request::Publish(publish) => return Ok(Status::EventLoopCrash(publish)),
                             request => unreachable!("{:?}", request),
                         },
@@ -394,7 +472,8 @@ impl Serializer {
                             self.metrics.add_total_sent_size(payload_size);
                             continue;
                         }
-                        Err(MqttError::TryRequest(request)) => request,
+                        Err(MqttError::TrySend(request)) => request.into_inner(),
+                        Err(MqttError::Client(ClientError::TryRequest(request)))=> request.into_inner(),
                         Err(e) => return Err(e.into()),
                     }
 
@@ -407,13 +486,14 @@ impl Serializer {
                             self.metrics.add_total_sent_size(payload_size);
                             continue;
                         }
-                        Err(MqttError::TryRequest(request)) => request,
+                        Err(MqttError::TrySend(request)) => request.into_inner(),
+                        Err(MqttError::Client(ClientError::TryRequest(request)))=> request.into_inner(),
                         Err(e) => return Err(e.into()),
                     }
                 }
             };
 
-            match failed.into_inner() {
+            match failed {
                 Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
                 request => unreachable!("{:?}", request),
             };
@@ -473,11 +553,11 @@ impl Serializer {
     }
 }
 
-async fn send_publish(
-    client: MqttClient,
+async fn send_publish<C: MqttClient>(
+    client: C,
     topic: String,
     payload: Bytes,
-) -> Result<MqttClient, MqttError> {
+) -> Result<C, MqttError> {
     client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
 }
@@ -574,7 +654,7 @@ mod test {
         });
         let (data_tx, data_rx) = flume::bounded(10);
         let (net_tx, net_rx) = flume::bounded(10);
-        let client = MqttClient { net_tx };
+        let client = mock::MockClient { net_tx };
 
         let mut serializer = Serializer::new(config, data_rx, client).unwrap();
         std::thread::spawn(move || {

@@ -2564,6 +2564,7 @@ name = "uplink"
 version = "1.2.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytes 1.0.0",
  "disk",
  "figment",

@@ -27,6 +27,7 @@ tunshell-client = { git = "https://github.com/TimeToogo/tunshell.git" }
 reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
 futures-util = "0.3.14"
 sysinfo = "0.21"
+async-trait = "0.1"
 
 [build-dependencies]
 vergen = { version = "5.1", features = ["git", "build", "chrono"] }

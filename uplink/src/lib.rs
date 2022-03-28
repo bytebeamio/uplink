@@ -69,16 +69,7 @@ impl Uplink {
 
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_channel.tx);
 
-        #[cfg(not(test))]
         let client = mqtt.client();
-
-        #[cfg(test)]
-        // NOTE: This is for the sake of compilation
-        let client = {
-            let (net_tx, _) = flume::bounded(10);
-            base::serializer::MqttClient { net_tx }
-        };
-
         let mut serializer =
             Serializer::new(self.config.clone(), self.data_channel.rx.clone(), client)?;
 
