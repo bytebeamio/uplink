@@ -671,4 +671,45 @@ mod test {
             r => panic!("Unexpected value returned: {:?}", r),
         }
     }
+
+    #[test]
+    fn normal_to_slow() {
+        let (mut serializer, data_tx, net_rx) = defaults();
+
+        std::thread::spawn(move || {
+            let mut stream = Stream::new("hello", "hello/world", 1, data_tx);
+            for i in 0..3 {
+                let payload = serde_json::from_str("{\"msg\": \"Hello, World!\"}").unwrap();
+                stream
+                    .push(Payload {
+                        stream: "hello".to_owned(),
+                        sequence: i,
+                        timestamp: 0,
+                        payload,
+                    })
+                    .unwrap();
+            }
+        });
+
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(time::Duration::from_secs(10));
+                net_rx.recv().unwrap();
+            }
+        });
+
+        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.normal()).unwrap() {
+            Status::SlowEventloop(Publish {
+                qos: QoS::AtLeastOnce, topic, payload, ..
+            }) => {
+                assert_eq!(topic, "hello/world");
+                let recvd = std::str::from_utf8(&payload).unwrap();
+                assert_eq!(
+                    recvd,
+                    "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]"
+                );
+            }
+            s => panic!("Unexpected status: {:?}", s),
+        }
+    }
 }
