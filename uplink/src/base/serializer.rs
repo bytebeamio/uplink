@@ -70,8 +70,8 @@ mod mock {
             payload: V,
         ) -> Result<(), MqttError>
         where
-            S: Into<String> + Send,
-            V: Into<Vec<u8>> + Send,
+            S: Into<String>,
+            V: Into<Vec<u8>>,
         {
             let mut publish = Publish::new(topic, qos, payload);
             publish.retain = retain;
@@ -110,7 +110,7 @@ pub enum MqttError {
 }
 
 #[async_trait::async_trait]
-pub trait MqttClient: Sync {
+pub trait MqttClient: Clone {
     async fn publish<S, V>(
         &self,
         topic: S,
@@ -130,8 +130,8 @@ pub trait MqttClient: Sync {
         payload: V,
     ) -> Result<(), MqttError>
     where
-        S: Into<String> + Send,
-        V: Into<Vec<u8>> + Send;
+        S: Into<String>,
+        V: Into<Vec<u8>>;
     async fn publish_bytes<S>(
         &self,
         topic: S,
@@ -168,8 +168,8 @@ impl MqttClient for AsyncClient {
         payload: V,
     ) -> Result<(), MqttError>
     where
-        S: Into<String> + Send,
-        V: Into<Vec<u8>> + Send,
+        S: Into<String>,
+        V: Into<Vec<u8>>,
     {
         self.try_publish(topic, qos, retain, payload)?;
         Ok(())
@@ -227,7 +227,7 @@ pub struct Serializer<C: MqttClient> {
     metrics: Metrics,
 }
 
-impl<C: MqttClient + Clone> Serializer<C> {
+impl<C: MqttClient> Serializer<C> {
     pub fn new(
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
