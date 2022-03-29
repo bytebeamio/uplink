@@ -26,7 +26,7 @@ pub enum Error {
     MissingPersistence,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Status {
     Normal,
     SlowEventloop(Publish),
@@ -561,6 +561,7 @@ mod test {
     use super::*;
     use crate::{
         base::{Stream, StreamConfig},
+        config::Persistence,
         Payload,
     };
     use std::collections::HashMap;
@@ -569,6 +570,8 @@ mod test {
     pub struct MockClient {
         pub net_tx: flume::Sender<Request>,
     }
+
+    const PERSIST_FOLDER: &str = "/tmp/uplink_test";
 
     #[async_trait::async_trait]
     impl MqttClient for MockClient {
@@ -626,20 +629,33 @@ mod test {
         }
     }
 
-    fn defaults() -> (Serializer<MockClient>, flume::Sender<Box<dyn Package>>, Receiver<Request>) {
+    fn default_config() -> Config {
         let mut streams = HashMap::new();
         streams.insert(
             "metrics".to_owned(),
             StreamConfig { topic: Default::default(), buf_size: 100 },
         );
-        let config = Arc::new(Config {
+        Config {
             broker: "localhost".to_owned(),
             port: 1883,
             device_id: "123".to_owned(),
             streams,
             ..Default::default()
-        });
+        }
+    }
 
+    fn config_with_persistence(path: String) -> Config {
+        std::fs::create_dir_all(&path).unwrap();
+        let mut config = default_config();
+        config.persistence =
+            Some(Persistence { path: path.clone(), max_file_size: 2048, max_file_count: 1024 });
+
+        config
+    }
+
+    fn defaults(
+        config: Arc<Config>,
+    ) -> (Serializer<MockClient>, flume::Sender<Box<dyn Package>>, Receiver<Request>) {
         let (data_tx, data_rx) = flume::bounded(1);
         let (net_tx, net_rx) = flume::bounded(1);
         let client = MockClient { net_tx };
@@ -647,67 +663,185 @@ mod test {
         (Serializer::new(config, data_rx, client).unwrap(), data_tx, net_rx)
     }
 
+    #[derive(Error, Debug)]
+    pub enum Error {
+        #[error("Serde error {0}")]
+        Serde(#[from] serde_json::Error),
+        #[error("Stream error {0}")]
+        Base(#[from] crate::base::Error),
+    }
+
+    struct MockCollector {
+        stream: Stream<Payload>,
+    }
+
+    impl MockCollector {
+        fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
+            MockCollector { stream: Stream::new("hello", "hello/world", 1, data_tx) }
+        }
+
+        fn send(&mut self, i: u32) -> Result<(), Error> {
+            let payload = Payload {
+                stream: "hello".to_owned(),
+                sequence: i,
+                timestamp: 0,
+                payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,
+            };
+            self.stream.push(payload)?;
+
+            Ok(())
+        }
+    }
+
     #[test]
+    // Runs serializer in direct mode, without persistence
     fn normal_working() {
-        let (mut serializer, data_tx, net_rx) = defaults();
+        let config = default_config();
+        let (mut serializer, data_tx, net_rx) = defaults(Arc::new(config));
+
         std::thread::spawn(move || {
             tokio::runtime::Runtime::new().unwrap().block_on(serializer.start())
         });
 
+        let mut collector = MockCollector::new(data_tx);
         std::thread::spawn(move || {
-            let mut stream = Stream::new("hello", "hello/world", 1, data_tx);
-            let payload = serde_json::from_str("{\"msg\": \"Hello, World!\"}").unwrap();
-            stream
-                .push(Payload { stream: "hello".to_owned(), sequence: 0, timestamp: 0, payload })
-                .unwrap();
+            collector.send(1).unwrap();
         });
 
         match net_rx.recv().unwrap() {
             Request::Publish(Publish { qos: QoS::AtLeastOnce, payload, topic, .. }) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
-                assert_eq!(recvd, "[{\"sequence\":0,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+                assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
             }
             r => panic!("Unexpected value returned: {:?}", r),
         }
     }
 
     #[test]
+    // Force runs serializer in normal mode, without persistence
     fn normal_to_slow() {
-        let (mut serializer, data_tx, net_rx) = defaults();
+        let config = default_config();
+        let (mut serializer, data_tx, net_rx) = defaults(Arc::new(config));
 
-        std::thread::spawn(move || {
-            let mut stream = Stream::new("hello", "hello/world", 1, data_tx);
-            for i in 0..3 {
-                let payload = serde_json::from_str("{\"msg\": \"Hello, World!\"}").unwrap();
-                stream
-                    .push(Payload {
-                        stream: "hello".to_owned(),
-                        sequence: i,
-                        timestamp: 0,
-                        payload,
-                    })
-                    .unwrap();
-            }
+        std::thread::spawn(move || loop {
+            std::thread::sleep(time::Duration::from_secs(10));
+            net_rx.recv().unwrap();
         });
 
+        let mut collector = MockCollector::new(data_tx);
         std::thread::spawn(move || {
-            loop {
-                std::thread::sleep(time::Duration::from_secs(10));
-                net_rx.recv().unwrap();
+            for i in 1..3 {
+                collector.send(i).unwrap();
             }
         });
 
         match tokio::runtime::Runtime::new().unwrap().block_on(serializer.normal()).unwrap() {
-            Status::SlowEventloop(Publish {
-                qos: QoS::AtLeastOnce, topic, payload, ..
-            }) => {
+            Status::SlowEventloop(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
-                assert_eq!(
-                    recvd,
-                    "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]"
-                );
+                assert_eq!(recvd, "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+            }
+            s => panic!("Unexpected status: {:?}", s),
+        }
+    }
+
+    #[test]
+    // Force runs serializer in disk mode, with persistence
+    fn write_to_disk() {
+        let config = Arc::new(config_with_persistence(format!("{}/disk", PERSIST_FOLDER)));
+
+        let (mut serializer, data_tx, net_rx) = defaults(config);
+
+        std::thread::spawn(move || loop {
+            std::thread::sleep(time::Duration::from_secs(10));
+            net_rx.recv().unwrap();
+        });
+
+        let mut collector = MockCollector::new(data_tx);
+        std::thread::spawn(move || {
+            for i in 1..6 {
+                collector.send(i).unwrap();
+                std::thread::sleep(time::Duration::from_secs(10));
+            }
+        });
+
+        let status = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async {
+                match serializer.normal().await.unwrap() {
+                    Status::SlowEventloop(publish) => serializer.disk(publish).await,
+                    s => panic!("Unexpected status: {:?}", s),
+                }
+            })
+            .unwrap();
+        assert_eq!(status, Status::EventLoopReady);
+
+        // Verify the contents of persistence
+        match read(serializer.storage.unwrap().reader(), 1024).unwrap() {
+            Packet::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "hello/world");
+                let recvd = std::str::from_utf8(&payload).unwrap();
+                assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    // Force runs serializer in catchup mode, with empty persistence
+    fn catchup_to_normal_empty_persistence() {
+        let config = Arc::new(config_with_persistence(format!("{}/catchup", PERSIST_FOLDER)));
+
+        let (mut serializer, _, _) = defaults(config);
+
+        let status =
+            tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap();
+        assert_eq!(status, Status::Normal);
+    }
+
+    #[test]
+    // Force runs serializer in catchup mode, with persistence and crashed network
+    fn catchup_to_crash_persistence() {
+        let config = Arc::new(config_with_persistence(format!("{}/catchup_crash", PERSIST_FOLDER)));
+
+        std::fs::create_dir_all(&config.persistence.as_ref().unwrap().path).unwrap();
+
+        let (mut serializer, data_tx, net_rx) = defaults(config);
+
+        if let Some(storage) = &mut serializer.storage {
+            for i in 1..3 {
+                Publish {
+                    dup: false,
+                    qos: QoS::AtLeastOnce,
+                    retain: false,
+                    topic: "hello/world".to_owned(),
+                    pkid: i,
+                    payload: Bytes::from("{\"msg\": \"Hello, World!\"}"),
+                }
+                .write(storage.writer())
+                .unwrap();
+            }
+        }
+
+        std::thread::spawn(move || loop {
+            std::thread::sleep(time::Duration::from_secs(100));
+            net_rx.recv().unwrap();
+        });
+
+        let mut collector = MockCollector::new(data_tx);
+        std::thread::spawn(move || {
+            for i in 1..6 {
+                collector.send(i).unwrap();
+                std::thread::sleep(time::Duration::from_secs(10));
+            }
+        });
+
+        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
+            Status::EventLoopCrash(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "hello/world");
+                let recvd = std::str::from_utf8(&payload).unwrap();
+                assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
             }
             s => panic!("Unexpected status: {:?}", s),
         }
