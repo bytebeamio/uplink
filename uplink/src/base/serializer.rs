@@ -22,8 +22,12 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
     Client(#[from] MqttError),
+    #[error("Mqtt error {0}")]
+    Mqtt(rumqttc::Error),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
+    #[error("Storage is empty")]
+    EmptyPersistence,
 }
 
 #[derive(Debug, PartialEq)]
@@ -290,16 +294,11 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.max_packet_size;
         let client = self.client.clone();
 
-        // Done reading all the pending files
-        if storage.reload_on_eof().unwrap() {
-            return Ok(Status::Normal);
-        }
-
-        let publish = match read(storage.reader(), max_packet_size) {
-            Ok(Packet::Publish(publish)) => publish,
-            Ok(packet) => unreachable!("{:?}", packet),
+        let publish = match read_publish(storage, max_packet_size) {
+            Ok(p) => p,
+            Err(Error::EmptyPersistence) => return Ok(Status::Normal),
             Err(e) => {
-                error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+                error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
                 return Ok(Status::Normal);
             }
         };
@@ -355,25 +354,14 @@ impl<C: MqttClient> Serializer<C> {
                         Err(e) => return Err(e.into()),
                     };
 
-                    match storage.reload_on_eof() {
-                        // Done reading all pending files
-                        Ok(true) => return Ok(Status::Normal),
-                        Ok(false) => {},
+                    let publish = match read_publish(storage, max_packet_size) {
+                        Ok(p) => p,
+                        Err(Error::EmptyPersistence) => return Ok(Status::Normal),
                         Err(e) => {
                             error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
                             return Ok(Status::Normal)
                         }
-                    }
-
-                    let publish = match read(storage.reader(), max_packet_size) {
-                        Ok(Packet::Publish(publish)) => publish,
-                        Ok(packet) => unreachable!("{:?}", packet),
-                        Err(e) => {
-                            error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
-                            return Ok(Status::Normal)
-                        }
                     };
-
 
                     let payload = publish.payload;
                     let payload_size = payload.len();
@@ -487,6 +475,18 @@ async fn send_publish<C: MqttClient>(
 ) -> Result<C, MqttError> {
     client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
+}
+
+fn read_publish(storage: &mut Storage, max_packet_size: usize) -> Result<Publish, Error> {
+    if storage.reload_on_eof()? {
+        // Done reading all pending files
+        return Err(Error::EmptyPersistence);
+    }
+
+    match read(storage.reader(), max_packet_size).map_err(|e| Error::Mqtt(e))? {
+        Packet::Publish(publish) => Ok(publish),
+        packet => unreachable!("{:?}", packet),
+    }
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -648,7 +648,7 @@ mod test {
         std::fs::create_dir_all(&path).unwrap();
         let mut config = default_config();
         config.persistence =
-            Some(Persistence { path: path.clone(), max_file_size: 2048, max_file_count: 1024 });
+            Some(Persistence { path: path.clone(), max_file_size: 104857600, max_file_count: 3 });
 
         config
     }
@@ -724,6 +724,7 @@ mod test {
         let config = default_config();
         let (mut serializer, data_tx, net_rx) = defaults(Arc::new(config));
 
+        // Slow Network, takes packets only once in 10s
         std::thread::spawn(move || loop {
             std::thread::sleep(time::Duration::from_secs(10));
             net_rx.recv().unwrap();
@@ -753,16 +754,18 @@ mod test {
 
         let (mut serializer, data_tx, net_rx) = defaults(config);
 
+        // Slow Network, takes packets only once in 10s
         std::thread::spawn(move || loop {
-            std::thread::sleep(time::Duration::from_secs(10));
+            std::thread::sleep(time::Duration::from_secs(5));
             net_rx.recv().unwrap();
         });
 
         let mut collector = MockCollector::new(data_tx);
+        // Faster collector, send data every 5s
         std::thread::spawn(move || {
-            for i in 1..6 {
+            for i in 1..10 {
                 collector.send(i).unwrap();
-                std::thread::sleep(time::Duration::from_secs(10));
+                std::thread::sleep(time::Duration::from_secs(2));
             }
         });
 
@@ -778,13 +781,13 @@ mod test {
         assert_eq!(status, Status::EventLoopReady);
 
         // Verify the contents of persistence
-        match read(serializer.storage.unwrap().reader(), 1024).unwrap() {
-            Packet::Publish(Publish { topic, payload, .. }) => {
+        match read_publish(&mut serializer.storage.unwrap(), 1024 * 1024) {
+            Ok(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
-                assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+                assert_eq!(recvd, "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
             }
-            _ => unreachable!(),
+            p => panic!("Unexpected packet: {:?}", p),
         }
     }
 
@@ -807,8 +810,9 @@ mod test {
 
         std::fs::create_dir_all(&config.persistence.as_ref().unwrap().path).unwrap();
 
-        let (mut serializer, data_tx, net_rx) = defaults(config);
+        let (mut serializer, data_tx, _) = defaults(config);
 
+        // Write fake data into persistence
         if let Some(storage) = &mut serializer.storage {
             for i in 1..3 {
                 Publish {
@@ -817,21 +821,33 @@ mod test {
                     retain: false,
                     topic: "hello/world".to_owned(),
                     pkid: i,
-                    payload: Bytes::from("{\"msg\": \"Hello, World!\"}"),
+                    payload: Bytes::from(format!(
+                        "[{{\"sequence\":{},\"timestamp\":0,\"msg\":\"Hello, World!\"}}]",
+                        i
+                    )),
                 }
                 .write(storage.writer())
                 .unwrap();
             }
+
+            // Verify the contents of persistence
+            match read_publish(storage, 1024 * 1024) {
+                Ok(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
+                    assert_eq!(topic, "hello/world");
+                    let recvd = std::str::from_utf8(&payload).unwrap();
+                    assert_eq!(
+                        recvd,
+                        "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]"
+                    );
+                }
+                p => panic!("Unexpected packet: {:?}", p),
+            }
         }
 
-        std::thread::spawn(move || loop {
-            std::thread::sleep(time::Duration::from_secs(100));
-            net_rx.recv().unwrap();
-        });
-
         let mut collector = MockCollector::new(data_tx);
+        // Run a collector
         std::thread::spawn(move || {
-            for i in 1..6 {
+            for i in 2..6 {
                 collector.send(i).unwrap();
                 std::thread::sleep(time::Duration::from_secs(10));
             }
