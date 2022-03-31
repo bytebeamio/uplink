@@ -212,32 +212,26 @@ impl<C: MqttClient> Serializer<C> {
             Some(s) => s,
             None => return Err(Error::MissingPersistence),
         };
-        // Write failed publish to disk first
-        publish.pkid = 1;
 
         loop {
+            // Write failed publish to disk first
+            publish.pkid = 1;
+            match write_publish(storage, publish) {
+                Ok(_) => {}
+                Err(Error::Io(e)) => {
+                    error!("Failed to flush disk buffer. Error = {:?}", e);
+                }
+                Err(Error::Mqtt(e)) => {
+                    error!("Failed to fill disk buffer. Error = {:?}", e);
+                }
+                Err(e) => unreachable!("Unexpected error: {}", e),
+            }
+
+            // Collect next data packet to write to disk
             let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
             let payload = data.serialize();
-
-            let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
-            publish.pkid = 1;
-
-            if let Err(e) = publish.write(&mut storage.writer()) {
-                error!("Failed to fill write buffer during bad network. Error = {:?}", e);
-                continue;
-            }
-
-            match storage.flush_on_overflow() {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(
-                        "Failed to flush write buffer to disk during bad network. Error = {:?}",
-                        e
-                    );
-                    continue;
-                }
-            }
+            publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
         }
     }
 
@@ -258,34 +252,31 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             select! {
                 data = self.collector_rx.recv_async() => {
-                      let data = data?;
-                      if let Some((errors, count)) = data.anomalies() {
+                    let data = data?;
+                    if let Some((errors, count)) = data.anomalies() {
                         self.metrics.add_errors(errors, count);
-                      }
+                    }
 
-                      let topic = data.topic();
-                      let payload = data.serialize();
-                      let payload_size = payload.len();
-                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
-                      publish.pkid = 1;
+                    let topic = data.topic();
+                    let payload = data.serialize();
+                    let payload_size = payload.len();
+                    let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                    publish.pkid = 1;
 
-                      match publish.write(&mut storage.writer()) {
-                           Ok(_) => self.metrics.add_total_disk_size(payload_size),
-                           Err(e) => {
-                               error!("Failed to fill disk buffer. Error = {:?}", e);
-                               continue
-                           }
-                      }
-
-                      match storage.flush_on_overflow() {
-                            Ok(deleted) => if deleted.is_some() {
+                    match write_publish(storage, publish) {
+                        Ok(deleted) => {
+                            self.metrics.add_total_disk_size(payload_size);
+                            if deleted {
                                 self.metrics.increment_lost_segments();
-                            },
-                            Err(e) => {
-                                error!("Failed to flush disk buffer. Error = {:?}", e);
-                                continue
                             }
-                      }
+                        },
+                        Err(Error::Mqtt(e)) => error!("Failed to fill disk buffer. Error = {:?}", e),
+                        Err(Error::Io(e)) => {
+                            self.metrics.add_total_disk_size(payload_size);
+                            error!("Failed to flush disk buffer. Error = {:?}", e);
+                        },
+                        Err(e) => unreachable!("Unexpected error: {}", e)
+                    }
                 }
                 o = &mut publish => {
                     let o = match o {
@@ -333,34 +324,31 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             select! {
                 data = self.collector_rx.recv_async() => {
-                      let data = data?;
-                      if let Some((errors, count)) = data.anomalies() {
+                    let data = data?;
+                    if let Some((errors, count)) = data.anomalies() {
                         self.metrics.add_errors(errors, count);
-                      }
+                    }
 
-                      let topic = data.topic();
-                      let payload = data.serialize();
-                      let payload_size = payload.len();
-                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
-                      publish.pkid = 1;
+                    let topic = data.topic();
+                    let payload = data.serialize();
+                    let payload_size = payload.len();
+                    let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                    publish.pkid = 1;
 
-                      match publish.write(&mut storage.writer()) {
-                           Ok(_) => self.metrics.add_total_disk_size(payload_size),
-                           Err(e) => {
-                               error!("Failed to fill disk buffer. Error = {:?}", e);
-                               continue
-                           }
-                      }
-
-                      match storage.flush_on_overflow() {
-                            Ok(deleted) => if deleted.is_some() {
+                    match write_publish(storage, publish) {
+                        Ok(deleted) => {
+                            self.metrics.add_total_disk_size(payload_size);
+                            if deleted {
                                 self.metrics.increment_lost_segments();
-                            },
-                            Err(e) => {
-                                error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
-                                continue
                             }
-                      }
+                        },
+                        Err(Error::Mqtt(e)) => error!("Failed to fill disk buffer. Error = {:?}", e),
+                        Err(Error::Io(e)) => {
+                            self.metrics.add_total_disk_size(payload_size);
+                            error!("Failed to flush disk buffer. Error = {:?}", e);
+                        },
+                        Err(e) => unreachable!("Unexpected error: {}", e)
+                    }
                 }
                 o = &mut send => {
                     // Send failure implies eventloop crash. Switch state to
@@ -507,6 +495,13 @@ fn read_publish(storage: &mut Storage, max_packet_size: usize) -> Result<Publish
         Packet::Publish(publish) => Ok(publish),
         packet => unreachable!("{:?}", packet),
     }
+}
+
+fn write_publish(storage: &mut Storage, publish: Publish) -> Result<bool, Error> {
+    publish.write(storage.writer())?;
+    let deleted = storage.flush_on_overflow()?.is_some();
+
+    Ok(deleted)
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -789,23 +784,24 @@ mod test {
             }
         });
 
-        let status = tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async {
-                match serializer.normal().await.unwrap() {
-                    Status::SlowEventloop(publish) => serializer.disk(publish).await,
-                    s => panic!("Unexpected status: {:?}", s),
-                }
-            })
-            .unwrap();
+        let publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}}]".as_bytes(),
+        );
+
+        let status =
+            tokio::runtime::Runtime::new().unwrap().block_on(serializer.disk(publish)).unwrap();
         assert_eq!(status, Status::EventLoopReady);
 
         // Verify the contents of persistence
-        match read_publish(&mut serializer.storage.unwrap(), 1024 * 1024) {
+        let storage = &mut serializer.storage.unwrap();
+
+        match read_publish(storage, 1024 * 1024) {
             Ok(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
-                assert_eq!(recvd, "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+                assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
             }
             p => panic!("Unexpected packet: {:?}", p),
         }
@@ -841,30 +837,18 @@ mod test {
             }
         });
 
-        match tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async {
-                match serializer
-                    .disk(Publish {
-                        dup: false,
-                        qos: QoS::AtLeastOnce,
-                        retain: false,
-                        topic: "hello/world".to_owned(),
-                        pkid: 2,
-                        payload: Bytes::from(format!(
-                            "[{{\"sequence\":{},\"timestamp\":0,\"msg\":\"Hello, World!\"}}]",
-                            2
-                        )),
-                    })
-                    .await
-                    .unwrap()
-                {
-                    Status::EventLoopReady => serializer.catchup().await,
-                    s => panic!("Unexpected status: {:?}", s),
-                }
-            })
-            .unwrap()
-        {
+        let mut publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}}]".as_bytes(),
+        );
+        publish.pkid = 1;
+
+        if let Some(storage) = &mut serializer.storage {
+            write_publish(storage, publish).unwrap();
+        }
+
+        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
             Status::EventLoopCrash(Publish { topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
