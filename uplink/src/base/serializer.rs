@@ -279,13 +279,13 @@ impl<C: MqttClient> Serializer<C> {
                     }
                 }
                 o = &mut publish => {
-                    let o = match o {
+                    let failed = match o {
                         Ok(_) => return Ok(Status::EventLoopReady),
                         Err(MqttError::Send(request)) => request,
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
-                    match o {
+                    match failed {
                         Request::Publish(publish) => return Ok(Status::EventLoopCrash(publish)),
                         request => unreachable!("{:?}", request),
                     }
