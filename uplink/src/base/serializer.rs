@@ -30,6 +30,12 @@ pub enum Error {
     EmptyPersistence,
 }
 
+impl From<rumqttc::Error> for Error {
+    fn from(e: rumqttc::Error) -> Self {
+        Self::Mqtt(e)
+    }
+}
+
 #[derive(Debug, PartialEq)]
 enum Status {
     Normal,
@@ -41,11 +47,21 @@ enum Status {
 #[derive(thiserror::Error, Debug)]
 pub enum MqttError {
     #[error("Client error {0}")]
-    Client(#[from] ClientError),
+    Client(ClientError),
     #[error("SendError(..)")]
     Send(Request),
     #[error("TrySendError(..)")]
     TrySend(Request),
+}
+
+impl From<ClientError> for MqttError {
+    fn from(e: ClientError) -> Self {
+        match e {
+            ClientError::Request(e) => MqttError::Send(e.into_inner()),
+            ClientError::TryRequest(e) => MqttError::TrySend(e.into_inner()),
+            e => MqttError::Client(e.into()),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -82,14 +98,6 @@ pub trait MqttClient: Clone {
         S: Into<String> + Send;
 }
 
-fn map_err(e: ClientError) -> MqttError {
-    match e {
-        ClientError::Request(e) => MqttError::Send(e.into_inner()),
-        ClientError::TryRequest(e) => MqttError::TrySend(e.into_inner()),
-        e => MqttError::Client(e.into()),
-    }
-}
-
 #[async_trait::async_trait]
 impl MqttClient for AsyncClient {
     async fn publish<S, V>(
@@ -103,7 +111,7 @@ impl MqttClient for AsyncClient {
         S: Into<String> + Send,
         V: Into<Vec<u8>> + Send,
     {
-        self.publish(topic, qos, retain, payload).await.map_err(|e| map_err(e))?;
+        self.publish(topic, qos, retain, payload).await?;
         Ok(())
     }
 
@@ -118,7 +126,7 @@ impl MqttClient for AsyncClient {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        self.try_publish(topic, qos, retain, payload).map_err(|e| map_err(e))?;
+        self.try_publish(topic, qos, retain, payload)?;
         Ok(())
     }
     async fn publish_bytes<S>(
@@ -131,7 +139,7 @@ impl MqttClient for AsyncClient {
     where
         S: Into<String> + Send,
     {
-        self.publish_bytes(topic, qos, retain, payload).await.map_err(|e| map_err(e))?;
+        self.publish_bytes(topic, qos, retain, payload).await?;
         Ok(())
     }
 }
@@ -495,7 +503,7 @@ fn read_publish(storage: &mut Storage, max_packet_size: usize) -> Result<Publish
         return Err(Error::EmptyPersistence);
     }
 
-    match read(storage.reader(), max_packet_size).map_err(|e| Error::Mqtt(e))? {
+    match read(storage.reader(), max_packet_size)? {
         Packet::Publish(publish) => Ok(publish),
         packet => unreachable!("{:?}", packet),
     }
