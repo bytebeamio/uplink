@@ -42,10 +42,10 @@ enum Status {
 pub enum MqttError {
     #[error("Client error {0}")]
     Client(#[from] ClientError),
-    #[error("Net Send error {0}")]
-    Send(#[from] flume::SendError<Request>),
-    #[error("Net TrySend error {0}")]
-    TrySend(#[from] flume::TrySendError<Request>),
+    #[error("SendError(..)")]
+    Send(Request),
+    #[error("TrySendError(..)")]
+    TrySend(Request),
 }
 
 #[async_trait::async_trait]
@@ -82,6 +82,14 @@ pub trait MqttClient: Clone {
         S: Into<String> + Send;
 }
 
+fn map_err(e: ClientError) -> MqttError {
+    match e {
+        ClientError::Request(e) => MqttError::Send(e.into_inner()),
+        ClientError::TryRequest(e) => MqttError::TrySend(e.into_inner()),
+        e => MqttError::Client(e.into()),
+    }
+}
+
 #[async_trait::async_trait]
 impl MqttClient for AsyncClient {
     async fn publish<S, V>(
@@ -95,7 +103,7 @@ impl MqttClient for AsyncClient {
         S: Into<String> + Send,
         V: Into<Vec<u8>> + Send,
     {
-        self.publish(topic, qos, retain, payload).await?;
+        self.publish(topic, qos, retain, payload).await.map_err(|e| map_err(e))?;
         Ok(())
     }
 
@@ -110,7 +118,7 @@ impl MqttClient for AsyncClient {
         S: Into<String>,
         V: Into<Vec<u8>>,
     {
-        self.try_publish(topic, qos, retain, payload)?;
+        self.try_publish(topic, qos, retain, payload).map_err(|e| map_err(e))?;
         Ok(())
     }
     async fn publish_bytes<S>(
@@ -123,7 +131,7 @@ impl MqttClient for AsyncClient {
     where
         S: Into<String> + Send,
     {
-        self.publish_bytes(topic, qos, retain, payload).await?;
+        self.publish_bytes(topic, qos, retain, payload).await.map_err(|e| map_err(e))?;
         Ok(())
     }
 }
@@ -272,8 +280,16 @@ impl<C: MqttClient> Serializer<C> {
                       }
                 }
                 o = &mut publish => {
-                    o?;
-                    return Ok(Status::EventLoopReady)
+                    let o = match o {
+                        Ok(_) => return Ok(Status::EventLoopReady),
+                        Err(MqttError::Send(request)) => request,
+                        Err(e) => unreachable!("Unexpected error: {}", e),
+                    };
+
+                    match o {
+                        Request::Publish(publish) => return Ok(Status::EventLoopCrash(publish)),
+                        request => unreachable!("{:?}", request),
+                    }
                 }
             }
         }
@@ -343,15 +359,8 @@ impl<C: MqttClient> Serializer<C> {
                     // indefinitely write to disk to not loose data
                     let client = match o {
                         Ok(c) => c,
-                        Err(MqttError::Send(request)) => match request.into_inner() {
-                            Request::Publish(publish) => return Ok(Status::EventLoopCrash(publish)),
-                            request => unreachable!("{:?}", request),
-                        },
-                        Err(MqttError::Client(ClientError::Request(request)))=> match request.into_inner() {
-                            Request::Publish(publish) => return Ok(Status::EventLoopCrash(publish)),
-                            request => unreachable!("{:?}", request),
-                        },
-                        Err(e) => return Err(e.into()),
+                        Err(MqttError::Send(Request::Publish(publish))) => return Ok(Status::EventLoopCrash(publish)),
+                        Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
                     let publish = match read_publish(storage, max_packet_size) {
@@ -389,12 +398,16 @@ impl<C: MqttClient> Serializer<C> {
 
                     let topic = data.topic();
                     let payload = data.serialize();
-                     (payload.len(), self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload))
+                    let payload_size = payload.len();
+                    let request = self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload);
+                    (payload_size, request)
 
                 }
                 _ = interval.tick() => {
                     let (topic, payload) = self.metrics.next();
-                    (payload.len(), self.client.try_publish(topic, QoS::AtLeastOnce, false, payload))
+                    let payload_size = payload.len();
+                    let request = self.client.try_publish(topic, QoS::AtLeastOnce, false, payload);
+                    (payload_size, request)
                 }
             };
 
@@ -403,15 +416,14 @@ impl<C: MqttClient> Serializer<C> {
                     self.metrics.add_total_sent_size(payload_size);
                     continue;
                 }
-                Err(MqttError::TrySend(request)) => request.into_inner(),
-                Err(MqttError::Client(ClientError::TryRequest(request))) => request.into_inner(),
-                Err(e) => return Err(e.into()),
+                Err(MqttError::TrySend(request)) => request,
+                Err(e) => unreachable!("Unexpected error: {}", e),
             };
 
             match failed {
                 Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
                 request => unreachable!("{:?}", request),
-            };
+            }
         }
     }
 
@@ -589,7 +601,7 @@ mod test {
             let mut publish = Publish::new(topic, qos, payload);
             publish.retain = retain;
             let publish = Request::Publish(publish);
-            self.net_tx.send_async(publish).await?;
+            self.net_tx.send_async(publish).await.map_err(|e| MqttError::Send(e.into_inner()))?;
             Ok(())
         }
 
@@ -607,7 +619,7 @@ mod test {
             let mut publish = Publish::new(topic, qos, payload);
             publish.retain = retain;
             let publish = Request::Publish(publish);
-            self.net_tx.try_send(publish)?;
+            self.net_tx.try_send(publish).map_err(|e| MqttError::TrySend(e.into_inner()))?;
             Ok(())
         }
 
@@ -624,7 +636,7 @@ mod test {
             let mut publish = Publish::from_bytes(topic, qos, payload);
             publish.retain = retain;
             let publish = Request::Publish(publish);
-            self.net_tx.send_async(publish).await?;
+            self.net_tx.send_async(publish).await.map_err(|e| MqttError::Send(e.into_inner()))?;
             Ok(())
         }
     }
@@ -812,38 +824,6 @@ mod test {
 
         let (mut serializer, data_tx, _) = defaults(config);
 
-        // Write fake data into persistence
-        if let Some(storage) = &mut serializer.storage {
-            for i in 1..3 {
-                Publish {
-                    dup: false,
-                    qos: QoS::AtLeastOnce,
-                    retain: false,
-                    topic: "hello/world".to_owned(),
-                    pkid: i,
-                    payload: Bytes::from(format!(
-                        "[{{\"sequence\":{},\"timestamp\":0,\"msg\":\"Hello, World!\"}}]",
-                        i
-                    )),
-                }
-                .write(storage.writer())
-                .unwrap();
-            }
-
-            // Verify the contents of persistence
-            match read_publish(storage, 1024 * 1024) {
-                Ok(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
-                    assert_eq!(topic, "hello/world");
-                    let recvd = std::str::from_utf8(&payload).unwrap();
-                    assert_eq!(
-                        recvd,
-                        "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]"
-                    );
-                }
-                p => panic!("Unexpected packet: {:?}", p),
-            }
-        }
-
         let mut collector = MockCollector::new(data_tx);
         // Run a collector
         std::thread::spawn(move || {
@@ -853,7 +833,30 @@ mod test {
             }
         });
 
-        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
+        match tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async {
+                match serializer
+                    .disk(Publish {
+                        dup: false,
+                        qos: QoS::AtLeastOnce,
+                        retain: false,
+                        topic: "hello/world".to_owned(),
+                        pkid: 2,
+                        payload: Bytes::from(format!(
+                            "[{{\"sequence\":{},\"timestamp\":0,\"msg\":\"Hello, World!\"}}]",
+                            2
+                        )),
+                    })
+                    .await
+                    .unwrap()
+                {
+                    Status::EventLoopReady => serializer.catchup().await,
+                    s => panic!("Unexpected status: {:?}", s),
+                }
+            })
+            .unwrap()
+        {
             Status::EventLoopCrash(Publish { topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
