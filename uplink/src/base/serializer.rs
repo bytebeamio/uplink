@@ -763,8 +763,8 @@ mod test {
     }
 
     #[test]
-    // Force runs serializer in disk mode, with persistence
-    fn write_to_disk() {
+    // Force runs serializer in disk mode, with network returning
+    fn disk_to_catchup() {
         let config = Arc::new(config_with_persistence(format!("{}/disk", PERSIST_FOLDER)));
 
         let (mut serializer, data_tx, net_rx) = defaults(config);
@@ -793,17 +793,39 @@ mod test {
         let status =
             tokio::runtime::Runtime::new().unwrap().block_on(serializer.disk(publish)).unwrap();
         assert_eq!(status, Status::EventLoopReady);
+    }
 
-        // Verify the contents of persistence
-        let storage = &mut serializer.storage.unwrap();
 
-        match read_publish(storage, 1024 * 1024) {
-            Ok(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
+    #[test]
+    // Force runs serializer in disk mode, with crashed network
+    fn disk_to_crash() {
+        let config = Arc::new(config_with_persistence(format!("{}/disk", PERSIST_FOLDER)));
+
+        let (mut serializer, data_tx, _) = defaults(config);
+
+        let mut collector = MockCollector::new(data_tx);
+        // Faster collector, send data every 5s
+        std::thread::spawn(move || {
+            for i in 1..10 {
+                collector.send(i).unwrap();
+                std::thread::sleep(time::Duration::from_secs(2));
+            }
+        });
+
+        let publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+        );
+
+        match
+            tokio::runtime::Runtime::new().unwrap().block_on(serializer.disk(publish)).unwrap() {
+            Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
             }
-            p => panic!("Unexpected packet: {:?}", p),
+            s => panic!("Unexpected status: {:?}", s),
         }
     }
 
