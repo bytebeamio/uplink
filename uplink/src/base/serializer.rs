@@ -148,31 +148,29 @@ impl MqttClient for AsyncClient {
 /// In case of network issues, the Serializer enters various states depending on severeness, managed by `Serializer::start()`.                                                                                       
 ///
 /// ```text
-///        ┌───────────────────┐
-///        │Serializer::start()│
-///        └─────────┬─────────┘
-///                  │
-///                  │ State transitions happen
-///                  │ within the loop{}             Load data in Storage from
-///                  │                               previouse sessions/iterations                  AsyncClient has crashed
-///          ┌───────▼──────┐                       ┌─────────────────────┐                      ┌───────────────────────┐
-///          │EventLoopReady├───────────────────────►Serializer::catchup()├──────────────────────►EventLoopCrash(publish)│
-///          └───────▲──────┘                       └──────────┬──────────┘                      └───────────┬───────────┘
-///                  │                                         │                                             │
-///                  │                                         │ No more data left in Storage                │
-///                  │                                         │                                             │
-///     ┌────────────┴────────────┐                        ┌───▼──┐                             ┌────────────▼─────────────┐
-///     │Serializer::disk(publish)│                        │Normal│                             │Serializer::crash(publish)├──┐
-///     └────────────▲────────────┘                        └───┬──┘                             └─────────────────────────▲┘  │
-///                  │                                         │                                 Write all data to Storage└───┘
-///                  │                                         │
-///                  │                                         │
-///      ┌───────────┴──────────┐                   ┌──────────▼─────────┐
-///      │SlowEventloop(publish)◄───────────────────┤Serializer::normal()│
-///      └──────────────────────┘                   └────────────────────┘
-///       Slow Network,                             Forward all data to Bytebeam,
-///       save to Storage before forwarding         through AsyncClient
-///
+/// 
+///                         Load publishes in Storage from        No more publishes
+///                         previouse sessions/iterations         left in Storage
+///                         ┌─────────────────────┐               ┌──────┐                  ┌────────────────────┐
+///                         │Serializer::catchup()├───────────────►Normal├──────────────────►Serializer::normal()│ Forward all data to Network
+///                         └─────────▲───────────┘               └──────┘                  └───────┬───┬────────┘
+///                                   │                                                             │   │
+///                                   │                               ┌─────────────────────────────┘   │
+///                                   │                               │                                 │
+///                                   │                               │ Slow network encountered        │
+/// ┌───────────────────┐      ┌──────┴───────┐           ┌───────────▼──────────┐         ┌────────────▼──────────┐
+/// │Serializer::start()├──────►EventloopReady│           │SlowEventloop(publish)│    ┌────►EventloopCrash(publish)│ Network has crashed
+/// └───────────────────┘      └──────▲───────┘           └───────────┬──────────┘    │    └───────────┬───────────┘
+///                                   │                               │               │                │
+///                                   │  ┌────────────────────────────┘               │                │
+///                                   │  │                                            │                │
+///                                   │  │                                            │                │
+///                       ┌───────────┴──▼──────────┐                                 │   ┌────────────▼─────────────┐
+///                       │Serializer::disk(publish)├─────────────────────────────────┘   │Serializer::crash(publish)├─┐
+///                       └─────────────────────────┘                                     └─────────────────────────▲┘ │
+///                        Write to storage, but                                           Write all data to Storage└──┘
+///                        continue trying to publish
+/// 
 ///```
 pub struct Serializer<C: MqttClient> {
     config: Arc<Config>,
