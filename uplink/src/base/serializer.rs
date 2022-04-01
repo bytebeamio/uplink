@@ -215,8 +215,7 @@ impl<C: MqttClient> Serializer<C> {
 
         loop {
             // Write failed publish to disk first
-            publish.pkid = 1;
-            match write_publish(storage, publish) {
+            match write_publish(storage, &mut publish) {
                 Ok(_) => {}
                 Err(Error::Io(e)) => {
                     error!("Failed to flush disk buffer. Error = {:?}", e);
@@ -261,9 +260,8 @@ impl<C: MqttClient> Serializer<C> {
                     let payload = data.serialize();
                     let payload_size = payload.len();
                     let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
-                    publish.pkid = 1;
 
-                    match write_publish(storage, publish) {
+                    match write_publish(storage, &mut publish) {
                         Ok(deleted) => {
                             self.metrics.add_total_disk_size(payload_size);
                             if deleted {
@@ -333,9 +331,8 @@ impl<C: MqttClient> Serializer<C> {
                     let payload = data.serialize();
                     let payload_size = payload.len();
                     let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
-                    publish.pkid = 1;
 
-                    match write_publish(storage, publish) {
+                    match write_publish(storage, &mut publish) {
                         Ok(deleted) => {
                             self.metrics.add_total_disk_size(payload_size);
                             if deleted {
@@ -497,7 +494,8 @@ fn read_publish(storage: &mut Storage, max_packet_size: usize) -> Result<Publish
     }
 }
 
-fn write_publish(storage: &mut Storage, publish: Publish) -> Result<bool, Error> {
+fn write_publish(storage: &mut Storage, publish: &mut Publish) -> Result<bool, Error> {
+    publish.pkid = 1;
     publish.write(storage.writer())?;
     let deleted = storage.flush_on_overflow()?.is_some();
 
@@ -655,6 +653,7 @@ mod test {
             port: 1883,
             device_id: "123".to_owned(),
             streams,
+            max_packet_size: 1024 * 1024,
             ..Default::default()
         }
     }
@@ -662,8 +661,11 @@ mod test {
     fn config_with_persistence(path: String) -> Config {
         std::fs::create_dir_all(&path).unwrap();
         let mut config = default_config();
-        config.persistence =
-            Some(Persistence { path: path.clone(), max_file_size: 104857600, max_file_count: 3 });
+        config.persistence = Some(Persistence {
+            path: path.clone(),
+            max_file_size: 10 * 1024 * 1024,
+            max_file_count: 3,
+        });
 
         config
     }
@@ -763,9 +765,28 @@ mod test {
     }
 
     #[test]
+    // Force write publish to storage and verify by reading back
+    fn read_write_storage() {
+        let config = Arc::new(config_with_persistence(format!("{}/disk", PERSIST_FOLDER)));
+        std::fs::create_dir_all(&config.persistence.as_ref().unwrap().path).unwrap();
+
+        let (mut serializer, _, _) = defaults(config);
+        let mut storage = serializer.storage.take().unwrap();
+
+        let mut publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+        );
+        write_publish(&mut storage, &mut publish).unwrap();
+
+        assert_eq!(publish, read_publish(&mut storage, serializer.config.max_packet_size).unwrap());
+    }
+
+    #[test]
     // Force runs serializer in disk mode, with network returning
     fn disk_to_catchup() {
-        let config = Arc::new(config_with_persistence(format!("{}/disk", PERSIST_FOLDER)));
+        let config = Arc::new(config_with_persistence(format!("{}/disk_catchup", PERSIST_FOLDER)));
 
         let (mut serializer, data_tx, net_rx) = defaults(config);
 
@@ -789,17 +810,16 @@ mod test {
             QoS::AtLeastOnce,
             "[{{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}}]".as_bytes(),
         );
-
         let status =
             tokio::runtime::Runtime::new().unwrap().block_on(serializer.disk(publish)).unwrap();
+
         assert_eq!(status, Status::EventLoopReady);
     }
-
 
     #[test]
     // Force runs serializer in disk mode, with crashed network
     fn disk_to_crash() {
-        let config = Arc::new(config_with_persistence(format!("{}/disk", PERSIST_FOLDER)));
+        let config = Arc::new(config_with_persistence(format!("{}/disk_crash", PERSIST_FOLDER)));
 
         let (mut serializer, data_tx, _) = defaults(config);
 
@@ -818,8 +838,7 @@ mod test {
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
 
-        match
-            tokio::runtime::Runtime::new().unwrap().block_on(serializer.disk(publish)).unwrap() {
+        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.disk(publish)).unwrap() {
             Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
@@ -843,12 +862,13 @@ mod test {
 
     #[test]
     // Force runs serializer in catchup mode, with persistence and crashed network
-    fn catchup_to_crash_persistence() {
+    fn catchup_to_crash_with_persistence() {
         let config = Arc::new(config_with_persistence(format!("{}/catchup_crash", PERSIST_FOLDER)));
 
         std::fs::create_dir_all(&config.persistence.as_ref().unwrap().path).unwrap();
 
         let (mut serializer, data_tx, _) = defaults(config);
+        let mut storage = serializer.storage.take().unwrap();
 
         let mut collector = MockCollector::new(data_tx);
         // Run a collector
@@ -859,17 +879,16 @@ mod test {
             }
         });
 
+        // Force rite a publish into storage
         let mut publish = Publish::new(
             "hello/world",
             QoS::AtLeastOnce,
-            "[{{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}}]".as_bytes(),
+            "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        publish.pkid = 1;
+        write_publish(&mut storage, &mut publish).unwrap();
 
-        if let Some(storage) = &mut serializer.storage {
-            write_publish(storage, publish).unwrap();
-        }
-
+        // Replace storage into serializer
+        serializer.storage = Some(storage);
         match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
             Status::EventLoopCrash(Publish { topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
