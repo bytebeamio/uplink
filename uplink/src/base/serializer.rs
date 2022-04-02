@@ -148,7 +148,7 @@ impl MqttClient for AsyncClient {
 /// In case of network issues, the Serializer enters various states depending on severeness, managed by `Serializer::start()`.                                                                                       
 ///
 /// ```text
-/// 
+///
 ///                         Load publishes in Storage from        No more publishes
 ///                         previouse sessions/iterations         left in Storage
 ///                         ┌─────────────────────┐               ┌──────┐                  ┌────────────────────┐
@@ -170,7 +170,7 @@ impl MqttClient for AsyncClient {
 ///                       └─────────────────────────┘                                     └─────────────────────────▲┘ │
 ///                        Write to storage, but                                           Write all data to Storage└──┘
 ///                        continue trying to publish
-/// 
+///
 ///```
 pub struct Serializer<C: MqttClient> {
     config: Arc<Config>,
@@ -451,6 +451,20 @@ impl<C: MqttClient> Serializer<C> {
         }
     }
 
+    /// The Serializer writes data directly to network in [normal mode] using the [`try_publish()`] of the MQTT client
+    /// being used. In case of the network being slow, this fails and we are forced into [disk mode], where in new data
+    /// is written into ['Storage'] while consequently we await on a [`publish()`]. If the [`publish()`] succeeds, we
+    /// move into [catchup mode] or other wise, if it fails we move to [crash mode]. In [catchup mode], we continuously
+    /// write to ['Storage'] while also pushing data onto network by [`publish()`]. If a [`publish()`] succeds, we load
+    /// the next [`Publish`] packet from [`storage`], whereas if it fails, we transition into [crash mode] where we merely
+    /// write all data received, directly into disk.
+    ///
+    /// [`try_publish()`]: MqttClient::try_publish
+    /// [`publish()`]: MqttClient::publish
+    /// [normal mode]: Serializer::normal
+    /// [catchup mode]: Serializer::catchup
+    /// [disk mode]: Serializer::disk
+    /// [crash mode]: Serializer::crash
     pub async fn start(&mut self) -> Result<(), Error> {
         if self.storage.is_none() {
             return self.direct().await;
@@ -799,7 +813,7 @@ mod test {
         std::thread::spawn(move || {
             for i in 1..10 {
                 collector.send(i).unwrap();
-                std::thread::sleep(time::Duration::from_secs(2));
+                std::thread::sleep(time::Duration::from_secs(3));
             }
         });
 
@@ -826,7 +840,7 @@ mod test {
         std::thread::spawn(move || {
             for i in 1..10 {
                 collector.send(i).unwrap();
-                std::thread::sleep(time::Duration::from_secs(2));
+                std::thread::sleep(time::Duration::from_secs(3));
             }
         });
 
@@ -849,10 +863,60 @@ mod test {
     #[test]
     // Force runs serializer in catchup mode, with empty persistence
     fn catchup_to_normal_empty_persistence() {
-        let config = Arc::new(config_with_persistence(format!("{}/catchup", PERSIST_FOLDER)));
+        let config = Arc::new(config_with_persistence(format!("{}/catchup_empty", PERSIST_FOLDER)));
 
         let (mut serializer, _, _) = defaults(config);
 
+        let status =
+            tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap();
+        assert_eq!(status, Status::Normal);
+    }
+
+    #[test]
+    // Force runs serializer in catchup mode, with data already in persistence
+    fn catchup_to_normal_with_persistence() {
+        let config =
+            Arc::new(config_with_persistence(format!("{}/catchup_normal", PERSIST_FOLDER)));
+
+        let (mut serializer, data_tx, net_rx) = defaults(config);
+        let mut storage = serializer.storage.take().unwrap();
+
+        let mut collector = MockCollector::new(data_tx);
+        // Run a collector practically once
+        std::thread::spawn(move || {
+            for i in 2..6 {
+                collector.send(i).unwrap();
+                std::thread::sleep(time::Duration::from_secs(100));
+            }
+        });
+
+        // Decent network that lets collector push data once into storage
+        std::thread::spawn(move || {
+            std::thread::sleep(time::Duration::from_secs(5));
+            for i in 1..6 {
+                match net_rx.recv().unwrap() {
+                    Request::Publish(Publish { payload, .. }) => {
+                        let recvd = String::from_utf8(payload.to_vec()).unwrap();
+                        let expected = format!(
+                            "[{{\"sequence\":{i},\"timestamp\":0,\"msg\":\"Hello, World!\"}}]",
+                        );
+                        assert_eq!(recvd, expected)
+                    }
+                    r => unreachable!("Unexpected request: {:?}", r),
+                }
+            }
+        });
+
+        // Force write a publish into storage
+        let mut publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+        );
+        write_publish(&mut storage, &mut publish).unwrap();
+
+        // Replace storage into serializer
+        serializer.storage = Some(storage);
         let status =
             tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap();
         assert_eq!(status, Status::Normal);
@@ -877,7 +941,7 @@ mod test {
             }
         });
 
-        // Force rite a publish into storage
+        // Force write a publish into storage
         let mut publish = Publish::new(
             "hello/world",
             QoS::AtLeastOnce,
@@ -893,7 +957,7 @@ mod test {
                 let recvd = std::str::from_utf8(&payload).unwrap();
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
             }
-            s => panic!("Unexpected status: {:?}", s),
+            s => unreachable!("Unexpected status: {:?}", s),
         }
     }
 }
