@@ -27,11 +27,13 @@ Connected application can send data to the broker as Streamed Payload. Streams e
 Connected user applications can send back progress updates for an Action by publishing an `ActionResponse` message to the "action_status" stream, where uplink immediately forwards the update, given their low frequency.
 ```js
 {
-    "action_id": "...", // The same as the executing Action
-    "timestamp": ...,   // Timestamp at response generation, unsigned 64bit integer value
-    "state": "...",     // "Running", "Completed", "Progress" or "Failed", depending on status of Action in execution
-    "progress": ...,    // Denote progress towards Expected Completion, out of 0..100
-    "errors": [...]     // Contains a list of errors or a backtrace
+    "stream": "action_status",  // Action Responses are to be sent to the "action_status" stream
+    "action_id": "...",         // The same as the executing Action
+    "sequence": "...",          // Incremented for each new response to an action
+    "timestamp": ...,           // Timestamp at response generation, unsigned 64bit integer value
+    "state": "...",             // "Running", "Completed", "Progress" or "Failed", depending on status of Action in execution
+    "progress": ...,            // Denote progress towards Expected Completion, out of 0..100
+    "errors": [...]             // Contains a list of errors or a backtrace
 }
 ```
 
