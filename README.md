@@ -94,20 +94,47 @@ Data from the connected application is handled as payload within a stream. uplin
     "stream": "...",
     "sequence": ...,
     "timestamp": ...,
-    "payload": {...}
+    // ...payload: more JSON data
 }
 ```
+
+An example data packet on the stream `"location"`, with the fields `"city"` being a string and `"altitude"` being a number would look like:
+```js
+{
+    "stream": "location",
+    "sequence": 10000000,
+    "timestamp": 1987654,
+    "city": "Bengaluru",
+    "altitude": 123456,
+}
+```
+
 > **NOTE**: uplink expects values for the `stream`, `sequence` and `timestamp` field to be properly set, the payload maybe as per the requirements of the IoT platform/application.
 
 **Responding with Action Responses**:
-Applications can use Action Response messages to update uplink on the progress of an executing Action. They usually contain information such as a progress counter and error backtrace. Action Responses are handled as Streamed Payloads in the "action_status" stream and thus have to be enclosed as such. uplink expects Action Responses to have the following JSON format:
+Applications can use Action Response messages to update uplink on the progress of an executing Action. They usually contain information such as a progress counter and error backtrace. Action Responses are handled as Streamed data payloads in the "action_status" stream and thus have to be enclosed as such. uplink expects Action Responses to have the following JSON format:
 ```js
 {
-    "action_id": "...",
+    "stream": "action_status",
+    "sequence": ...,
     "timestamp": ...,
+    "action_id": "...",
     "state": "...",
     "progress": ...,
     "errors": [...]
+}
+```
+
+An example success response to an action with the id `"123"`, would look like:
+```js
+{
+    "stream": "action_status",
+    "sequence": 234,
+    "timestamp": 192323,
+    "action_id": "123",
+    "state": "Completed",
+    "progress": 100,
+    "errors": []
 }
 ```
 
