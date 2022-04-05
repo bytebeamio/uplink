@@ -21,8 +21,10 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("Error forwarding to Bridge {0}")]
     TrySendError(#[from] flume::TrySendError<Action>),
-    #[error("Download failed, couldn't figure out content_len")]
-    FaultyDownload,
+    #[error("Download failed, couldn't figure out content length")]
+    NoContentLen,
+    #[error("Download failed, content length zero")]
+    ContentLenZero,
 }
 
 pub struct OtaDownloader {
@@ -66,7 +68,11 @@ impl OtaDownloader {
     /// Downloads from server and stores into file
     async fn download(&mut self, resp: Response, mut file: File) -> Result<(), Error> {
         // Supposing content length is defined in bytes
-        let content_length = resp.content_length().ok_or(Error::FaultyDownload)? as usize;
+        let content_length = match resp.content_length() {
+            None => return Err(Error::NoContentLen),
+            Some(0) => return Err(Error::ContentLenZero),
+            Some(l) => l as usize,
+        };
         let mut downloaded = 0;
         let mut stream = resp.bytes_stream();
 
@@ -76,12 +82,9 @@ impl OtaDownloader {
             downloaded += chunk.len();
             file.write_all(&chunk)?;
 
-            self.send_status(ActionResponse::progress(
-                &self.action_id,
-                "Downloading",
-                (downloaded / content_length) as u8 * 100,
-            ))
-            .await;
+            let percentage = (downloaded / content_length) as u8 * 100;
+            self.send_status(ActionResponse::progress(&self.action_id, "Downloading", percentage))
+                .await;
         }
 
         info!("Firmware dowloaded sucessfully");
