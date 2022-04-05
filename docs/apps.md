@@ -17,23 +17,47 @@ Connected application can send data to the broker as Streamed Payload. Streams e
 ```js
 {
     "stream": "...",  // Name of stream to which data is being sent
-    "sequence": ...,  // Sequence number
+    "sequence": ...,  // Sequence number of data packet
     "timestamp": ..., // Timestamp at message generation
-    "payload": {...}  // JSON data
+    //...payload: more JSON data
+}
+```
+
+An example data packet on the stream `"location"`, with the fields `"city"` being a string and `"altitude"` being a number would look like:
+```js
+{
+    "stream": "location",
+    "sequence": 10000000,
+    "timestamp": 1987654,
+    "city": "Bengaluru",
+    "altitude": 123456,
 }
 ```
 
 ## Action Response
-Connected user applications can send back progress updates for an Action by publishing an `ActionResponse` message to the "action_status" stream, where uplink immediately forwards the update, given their low frequency.
+Connected user applications can send back progress updates for an Action by publishing an `ActionResponse` message to the `"action_status"` stream, where uplink immediately forwards the update, given their low frequency.
 ```js
 {
     "stream": "action_status",  // Action Responses are to be sent to the "action_status" stream
-    "action_id": "...",         // The same as the executing Action
-    "sequence": "...",          // Incremented for each new response to an action
+    "sequence": ...,            // Sequence number, incremented for each new response to an action, starting from 1
     "timestamp": ...,           // Timestamp at response generation, unsigned 64bit integer value
+    "action_id": "...",         // The same as the executing Action
     "state": "...",             // "Running", "Completed", "Progress" or "Failed", depending on status of Action in execution
     "progress": ...,            // Denote progress towards Expected Completion, out of 0..100
     "errors": [...]             // Contains a list of errors or a backtrace
+}
+```
+
+An example success response to an action with the id `"123"`, would look like:
+```js
+{
+    "stream": "action_status",
+    "sequence": 234,
+    "timestamp": 192323,
+    "action_id": "123",
+    "state": "Completed",
+    "progress": 100,
+    "errors": []
 }
 ```
 
