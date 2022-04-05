@@ -21,6 +21,8 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("Error forwarding to Bridge {0}")]
     TrySendError(#[from] flume::TrySendError<Action>),
+    #[error("Download failed, couldn't figure out content_len")]
+    FaultyDownload,
 }
 
 pub struct OtaDownloader {
@@ -64,7 +66,7 @@ impl OtaDownloader {
     /// Downloads from server and stores into file
     async fn download(&mut self, resp: Response, mut file: File) -> Result<(), Error> {
         // Supposing content length is defined in bytes
-        let content_length = resp.content_length().unwrap_or(0) as usize;
+        let content_length = resp.content_length().ok_or(Error::FaultyDownload)? as usize;
         let mut downloaded = 0;
         let mut stream = resp.bytes_stream();
 
