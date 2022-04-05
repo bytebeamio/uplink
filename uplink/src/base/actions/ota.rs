@@ -82,7 +82,7 @@ impl OtaDownloader {
             downloaded += chunk.len();
             file.write_all(&chunk)?;
 
-            let percentage = (downloaded / content_length) as u8 * 100;
+            let percentage = (100 * downloaded / content_length) as u8;
             self.send_status(ActionResponse::progress(&self.action_id, "Downloading", percentage))
                 .await;
         }
