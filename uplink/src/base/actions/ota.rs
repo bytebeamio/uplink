@@ -21,7 +21,7 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("Error forwarding to Bridge {0}")]
     TrySendError(#[from] flume::TrySendError<Action>),
-    #[error("Download failed, couldn't figure out content length")]
+    #[error("Download failed, content length none")]
     NoContentLen,
     #[error("Download failed, content length zero")]
     ContentLenZero,
