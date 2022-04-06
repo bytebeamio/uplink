@@ -116,9 +116,9 @@ const DEFAULT_CONFIG: &'static str = r#"
     path = "/var/tmp/ota-file"
 
     [stats]
-    enabled = true
+    enabled = false
     process_names = ["uplink"]
-    update_period = 5
+    update_period = 30
 "#;
 
 /// Reads config file to generate config struct and replaces places holders

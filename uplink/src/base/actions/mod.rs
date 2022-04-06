@@ -99,6 +99,11 @@ impl ActionResponse {
     pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
         ActionResponse::new(id, "Failed", 100, vec![]).add_error(error)
     }
+
+    pub fn set_sequence(mut self, seq: u32) -> ActionResponse {
+        self.sequence = seq;
+        self
+    }
 }
 
 impl Point for ActionResponse {

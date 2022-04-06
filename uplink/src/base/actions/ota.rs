@@ -21,15 +21,28 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("Error forwarding to Bridge {0}")]
     TrySendError(#[from] flume::TrySendError<Action>),
+    #[error("Download failed, content length none")]
+    NoContentLen,
+    #[error("Download failed, content length zero")]
+    ContentLenZero,
 }
 
 pub struct OtaDownloader {
     action_id: String,
     status_bucket: Stream<ActionResponse>,
     bridge_tx: Sender<Action>,
+    sequence: u32,
 }
 
 impl OtaDownloader {
+    fn new(
+        action_id: String,
+        status_bucket: Stream<ActionResponse>,
+        bridge_tx: Sender<Action>,
+    ) -> Self {
+        Self { action_id, status_bucket, bridge_tx, sequence: 0 }
+    }
+
     async fn run(
         &mut self,
         ota_path: &PathBuf,
@@ -37,6 +50,11 @@ impl OtaDownloader {
         action: Action,
         url: String,
     ) -> Result<(), Error> {
+        // Update action status for process initiated
+        let status = ActionResponse::progress(&self.action_id, "Downloading", 0)
+            .set_sequence(self.sequence());
+        self.send_status(status).await;
+
         // Create file to download files into
         let file = self.create_file(ota_path).await?;
 
@@ -64,7 +82,11 @@ impl OtaDownloader {
     /// Downloads from server and stores into file
     async fn download(&mut self, resp: Response, mut file: File) -> Result<(), Error> {
         // Supposing content length is defined in bytes
-        let content_length = resp.content_length().unwrap_or(0) as usize;
+        let content_length = match resp.content_length() {
+            None => return Err(Error::NoContentLen),
+            Some(0) => return Err(Error::ContentLenZero),
+            Some(l) => l as usize,
+        };
         let mut downloaded = 0;
         let mut stream = resp.bytes_stream();
 
@@ -74,12 +96,10 @@ impl OtaDownloader {
             downloaded += chunk.len();
             file.write_all(&chunk)?;
 
-            self.send_status(ActionResponse::progress(
-                &self.action_id,
-                "Downloading",
-                (downloaded / content_length) as u8 * 100,
-            ))
-            .await;
+            let percentage = (100 * downloaded / content_length) as u8;
+            let status = ActionResponse::progress(&self.action_id, "Downloading", percentage)
+                .set_sequence(self.sequence());
+            self.send_status(status).await;
         }
 
         info!("Firmware dowloaded sucessfully");
@@ -92,6 +112,11 @@ impl OtaDownloader {
         if let Err(e) = self.status_bucket.fill(status).await {
             error!("Failed to send downloader status. Error = {:?}", e);
         }
+    }
+
+    fn sequence(&mut self) -> u32 {
+        self.sequence += 1;
+        self.sequence
     }
 }
 
@@ -118,7 +143,7 @@ pub async fn spawn_firmware_downloader(
     let ota_path = config.ota.path.clone();
     update.ota_path = Some(ota_path.clone());
     let payload = serde_json::to_string(&update)?;
-    let mut downloader = OtaDownloader { status_bucket, action_id: action_id.clone(), bridge_tx };
+    let mut downloader = OtaDownloader::new(action_id.clone(), status_bucket, bridge_tx);
     let action = Action { action_id, kind, name, payload };
     let ota_path = PathBuf::from(ota_path);
 
@@ -141,11 +166,15 @@ pub async fn spawn_firmware_downloader(
     // TODO: Spawned task may fail to execute as expected and status may not be forwarded to cloud
     tokio::task::spawn(async move {
         match downloader.run(&ota_path, client, action, url).await {
-            Ok(_) => downloader.send_status(ActionResponse::success(&downloader.action_id)).await,
+            Ok(_) => {
+                let status = ActionResponse::success(&downloader.action_id)
+                    .set_sequence(downloader.sequence());
+                downloader.send_status(status).await;
+            }
             Err(e) => {
-                downloader
-                    .send_status(ActionResponse::failure(&downloader.action_id, e.to_string()))
-                    .await
+                let status = ActionResponse::failure(&downloader.action_id, e.to_string())
+                    .set_sequence(downloader.sequence());
+                downloader.send_status(status).await;
             }
         }
     });
