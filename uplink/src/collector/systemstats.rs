@@ -171,7 +171,7 @@ impl NetworkStats {
         timestamp: u64,
     ) -> Result<(), base::Error> {
         self.sequence += 1;
-        let net = self.map.entry(net_name.clone()).or_insert(Network::init(net_name));
+        let net = self.map.entry(net_name.clone()).or_insert_with(|| Network::init(net_name));
         net.update(net_data, timestamp, self.sequence);
 
         self.stream.push(net.clone())
@@ -235,7 +235,8 @@ impl DiskStats {
     fn push(&mut self, disk_data: &sysinfo::Disk, timestamp: u64) -> Result<(), base::Error> {
         self.sequence += 1;
         let disk_name = disk_data.name().to_string_lossy().to_string();
-        let disk = self.map.entry(disk_name.clone()).or_insert(Disk::init(disk_name, disk_data));
+        let disk =
+            self.map.entry(disk_name.clone()).or_insert_with(|| Disk::init(disk_name, disk_data));
         disk.update(disk_data, timestamp, self.sequence);
 
         self.stream.push(disk.clone())
@@ -298,7 +299,7 @@ impl ProcessorStats {
     fn push(&mut self, proc_data: &sysinfo::Processor, timestamp: u64) -> Result<(), base::Error> {
         let proc_name = proc_data.name().to_string();
         self.sequence += 1;
-        let proc = self.map.entry(proc_name.clone()).or_insert(Processor::init(proc_name));
+        let proc = self.map.entry(proc_name.clone()).or_insert_with(|| Processor::init(proc_name));
         proc.update(proc_data, timestamp, self.sequence);
 
         self.stream.push(proc.clone())
@@ -378,7 +379,8 @@ impl ProcessStats {
         timestamp: u64,
     ) -> Result<(), base::Error> {
         self.sequence += 1;
-        let proc = self.map.entry(id).or_insert(Process::init(id, name, proc_data.start_time()));
+        let proc =
+            self.map.entry(id).or_insert_with(|| Process::init(id, name, proc_data.start_time()));
         proc.update(proc_data, timestamp, self.sequence);
 
         self.stream.push(proc.clone())
@@ -414,10 +416,7 @@ impl StatCollector {
         sys.refresh_networks_list();
         sys.refresh_memory();
 
-        let max_buf_size = match config.stats.stream_size {
-            Some(stream_size) => stream_size,
-            None => 10,
-        };
+        let max_buf_size = config.stats.stream_size.unwrap_or(10);
 
         let mut map = HashMap::new();
         let stream = Stream::dynamic_with_size(

@@ -87,7 +87,7 @@ pub struct CommandLine {
     modules: Vec<String>,
 }
 
-const DEFAULT_CONFIG: &'static str = r#"
+const DEFAULT_CONFIG: &str = r#"
     bridge_port = 5555
     max_packet_size = 102400
     max_inflight = 100
@@ -133,7 +133,7 @@ fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
     let mut config: Config = config
         .join(Data::<Json>::file(&commandline.auth))
         .extract()
-        .with_context(|| format!("Config error"))?;
+        .with_context(|| "Config error".to_string())?;
 
     if let Some(persistence) = &config.persistence {
         fs::create_dir_all(&persistence.path)?;
@@ -170,7 +170,7 @@ fn initialize_logging(commandline: &CommandLine) {
         config.add_filter_allow_str("uplink").add_filter_allow_str("disk");
     } else {
         for module in commandline.modules.iter() {
-            config.add_filter_allow(format!("{}", module));
+            config.add_filter_allow(module.to_string());
         }
     }
 

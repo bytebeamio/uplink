@@ -112,7 +112,7 @@ impl Serializer {
             let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
             publish.pkid = 1;
 
-            if let Err(e) = publish.write(&mut storage.writer()) {
+            if let Err(e) = publish.write(storage.writer()) {
                 error!("Failed to fill write buffer during bad network. Error = {:?}", e);
                 continue;
             }
@@ -158,7 +158,7 @@ impl Serializer {
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
-                      match publish.write(&mut storage.writer()) {
+                      match publish.write(storage.writer()) {
                            Ok(_) => self.metrics.add_total_disk_size(payload_size),
                            Err(e) => {
                                error!("Failed to fill disk buffer. Error = {:?}", e);
@@ -230,7 +230,7 @@ impl Serializer {
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
-                      match publish.write(&mut storage.writer()) {
+                      match publish.write(storage.writer()) {
                            Ok(_) => self.metrics.add_total_disk_size(payload_size),
                            Err(e) => {
                                error!("Failed to fill disk buffer. Error = {:?}", e);

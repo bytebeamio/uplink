@@ -6,7 +6,8 @@ use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
 use std::fs::{create_dir_all, File};
-use std::{io::Write, path::PathBuf, sync::Arc};
+use std::path::{Path, PathBuf};
+use std::{io::Write, sync::Arc};
 
 use super::{Action, ActionResponse};
 use crate::base::{Config, Stream};
@@ -16,11 +17,11 @@ pub enum Error {
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Error from reqwest {0}")]
-    ReqwestError(#[from] reqwest::Error),
+    Reqwest(#[from] reqwest::Error),
     #[error("File io Error {0}")]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
     #[error("Error forwarding to Bridge {0}")]
-    TrySendError(#[from] flume::TrySendError<Action>),
+    TrySend(#[from] flume::TrySendError<Action>),
     #[error("Download failed, content length none")]
     NoContentLen,
     #[error("Download failed, content length zero")]
@@ -45,7 +46,7 @@ impl OtaDownloader {
 
     async fn run(
         &mut self,
-        ota_path: &PathBuf,
+        ota_path: &Path,
         client: Client,
         action: Action,
         url: String,
@@ -70,7 +71,7 @@ impl OtaDownloader {
     }
 
     /// Ensure that directory for downloading file into, exists
-    async fn create_file(&mut self, ota_path: &PathBuf) -> Result<File, Error> {
+    async fn create_file(&mut self, ota_path: &Path) -> Result<File, Error> {
         let curr_dir = PathBuf::from("./");
         let ota_dir = ota_path.parent().unwrap_or(curr_dir.as_path());
         create_dir_all(ota_dir)?;
