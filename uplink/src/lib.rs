@@ -66,11 +66,7 @@ impl Uplink {
     }
 
     pub fn spawn(&mut self) -> Result<(), Error> {
-        let raw_action_channel = RxTx::bounded(10);
-        let mut mqtt = Mqtt::new(self.config.clone(), raw_action_channel.tx);
-        let mut serializer =
-            Serializer::new(self.config.clone(), self.data_channel.rx.clone(), mqtt.client())?;
-
+        // Launch a thread to handle tunshell access
         let tunshell_keys = RxTx::bounded(10);
         let tunshell_config = self.config.clone();
         let tunshell_session = TunshellSession::new(
@@ -80,55 +76,62 @@ impl Uplink {
             tunshell_keys.rx,
             self.action_status.clone(),
         );
+        thread::spawn(move || tunshell_session.start());
 
-        let ota_channel = RxTx::bounded(10);
+        // Launch a thread to handle downloads for OTA updates
+        let ota_actions = RxTx::bounded(10);
         let ota_downloader = OtaDownloader::new(
             self.config.clone(),
-            ota_channel.rx,
+            ota_actions.rx,
             self.action_status.clone(),
             self.action_channel.tx.clone(),
         )?;
+        if self.config.ota.enabled {
+            thread::spawn(move || ota_downloader.start());
+        }
+
+        // Launch a thread to collect system statistics
+        let stat_collector = StatCollector::new(self.config.clone(), self.data_channel.tx.clone());
+        if self.config.stats.enabled {
+            thread::spawn(move || stat_collector.start());
+        }
+
+        let raw_action_channel = RxTx::bounded(10);
+        let mut mqtt = Mqtt::new(self.config.clone(), raw_action_channel.tx);
+        let serializer =
+            Serializer::new(self.config.clone(), self.data_channel.rx.clone(), mqtt.client())?;
 
         let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
-        let mut actions = Actions::new(
+        let actions = Actions::new(
             self.config.clone(),
             controllers,
             raw_action_channel.rx,
             tunshell_keys.tx,
-            ota_channel.tx,
+            ota_actions.tx,
             self.action_status.clone(),
             self.action_channel.tx.clone(),
         );
 
-        let enable_stats = self.config.stats.enabled;
-        let stat_collector = StatCollector::new(self.config.clone(), self.data_channel.tx.clone());
-
+        // Launch a thread to handle incoming and outgoing MQTT packets
         let rt = tokio::runtime::Runtime::new()?;
         thread::spawn(move || {
             rt.block_on(async {
+                // Collect and forward data from connected applications as MQTT packets
                 task::spawn(async move {
                     if let Err(e) = serializer.start().await {
                         error!("Serializer stopped!! Error = {:?}", e);
                     }
                 });
 
+                // Receive [Action]s
                 task::spawn(async move {
                     mqtt.start().await;
                 });
 
+                // Process and forward received [Action]s to connected applications
                 actions.start().await;
             })
         });
-
-        if enable_stats {
-            thread::spawn(move || stat_collector.start());
-        }
-
-        thread::spawn(move || tunshell_session.start());
-
-        if self.config.ota.enabled {
-            thread::spawn(move || ota_downloader.start());
-        }
 
         Ok(())
     }

@@ -121,7 +121,7 @@ pub struct Actions {
     action_status: Stream<ActionResponse>,
     process: process::Process,
     controller: controller::Controller,
-    actions_rx: Option<Receiver<Action>>,
+    actions_rx: Receiver<Action>,
     tunshell_tx: Sender<String>,
     ota_tx: Sender<Action>,
     bridge_tx: Sender<Action>,
@@ -144,19 +144,17 @@ impl Actions {
             action_status,
             process,
             controller,
-            actions_rx: Some(actions_rx),
+            actions_rx,
             tunshell_tx,
             ota_tx,
             bridge_tx,
         }
     }
 
-    pub async fn start(&mut self) {
-        let action_stream = self.actions_rx.take().unwrap();
-
-        // start receiving and processing actions
+    /// Start receiving and processing [Action]s
+    pub async fn start(mut self) {
         loop {
-            let action = match action_stream.recv_async().await {
+            let action = match self.actions_rx.recv_async().await {
                 Ok(v) => v,
                 Err(e) => {
                     error!("Action stream receiver error = {:?}", e);
