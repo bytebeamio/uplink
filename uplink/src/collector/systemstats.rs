@@ -1,7 +1,7 @@
 use flume::Sender;
 use log::error;
 use serde::Serialize;
-use sysinfo::{DiskExt, NetworkData, NetworkExt, ProcessExt, ProcessorExt, SystemExt};
+use sysinfo::{DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, ProcessorExt, SystemExt};
 use tokio::time::Instant;
 
 use std::{
@@ -17,6 +17,8 @@ pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] std::io::Error),
 }
+
+type Pid = u32;
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct System {
@@ -188,11 +190,7 @@ struct Disk {
 
 impl Disk {
     fn init(name: String, disk: &sysinfo::Disk) -> Self {
-        Disk {
-            name,
-            total: disk.total_space(),
-            ..Default::default()
-        }
+        Disk { name, total: disk.total_space(), ..Default::default() }
     }
 
     fn update(&mut self, disk: &sysinfo::Disk, timestamp: u64, sequence: u32) {
@@ -311,7 +309,7 @@ impl ProcessorStats {
 struct Process {
     sequence: u32,
     timestamp: u64,
-    pid: i32,
+    pid: Pid,
     name: String,
     cpu_usage: f32,
     mem_usage: u64,
@@ -323,7 +321,7 @@ struct Process {
 }
 
 impl Process {
-    fn init(pid: i32, name: String, start_time: u64) -> Self {
+    fn init(pid: Pid, name: String, start_time: u64) -> Self {
         Process { pid, name, start_time, ..Default::default() }
     }
 
@@ -367,14 +365,14 @@ impl Package for Buffer<Process> {
 
 struct ProcessStats {
     sequence: u32,
-    map: HashMap<i32, Process>,
+    map: HashMap<Pid, Process>,
     stream: Stream<Process>,
 }
 
 impl ProcessStats {
     fn push(
         &mut self,
-        id: i32,
+        id: Pid,
         proc_data: &sysinfo::Process,
         name: String,
         timestamp: u64,
@@ -537,7 +535,7 @@ impl StatCollector {
             let name = p.name().to_owned();
 
             if self.config.stats.process_names.contains(&name) {
-                if let Err(e) = self.processes.push(id, p, name, self.timestamp) {
+                if let Err(e) = self.processes.push(id.as_u32(), p, name, self.timestamp) {
                     error!("Couldn't send process stats: {}", e);
                 }
             }

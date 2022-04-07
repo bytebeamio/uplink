@@ -49,7 +49,7 @@ use figment::{
     Figment,
 };
 use log::error;
-use simplelog::{CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
+use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
 
@@ -174,7 +174,7 @@ fn initialize_logging(commandline: &CommandLine) {
         }
     }
 
-    let loggers = TermLogger::new(level, config.build(), TerminalMode::Mixed);
+    let loggers = TermLogger::new(level, config.build(), TerminalMode::Mixed, ColorChoice::Auto);
     CombinedLogger::init(vec![loggers]).unwrap();
 }
 
