@@ -81,25 +81,31 @@ impl OtaDownloader {
 
     /// Downloads from server and stores into file
     async fn download(&mut self, resp: Response, mut file: File) -> Result<(), Error> {
+        // NOTE: Commented code for download's content length and completion estimation
         // Supposing content length is defined in bytes
-        let content_length = match resp.content_length() {
-            None => return Err(Error::NoContentLen),
-            Some(0) => return Err(Error::ContentLenZero),
-            Some(l) => l as usize,
-        };
-        let mut downloaded = 0;
+        // let content_length = match resp.content_length() {
+        //     None => return Err(Error::NoContentLen),
+        //     Some(0) => return Err(Error::ContentLenZero),
+        //     Some(l) => l as usize,
+        // };
+        // let mut downloaded = 0;
+        let mut percentage = 0;
         let mut stream = resp.bytes_stream();
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
             let chunk = item?;
-            downloaded += chunk.len();
+            // downloaded += chunk.len();
             file.write_all(&chunk)?;
 
-            let percentage = (100 * downloaded / content_length) as u8;
-            let status = ActionResponse::progress(&self.action_id, "Downloading", percentage)
-                .set_sequence(self.sequence());
-            self.send_status(status).await;
+            // NOTE: ensure lesser frequency of action responses
+            if file.metadata()?.len() % 1024 * 1024 == 0 {
+                // let percentage = (100 * downloaded / content_length) as u8;
+                percentage += 1;
+                let status = ActionResponse::progress(&self.action_id, "Downloading", percentage)
+                    .set_sequence(self.sequence());
+                self.send_status(status).await;
+            }
         }
 
         info!("Firmware dowloaded sucessfully");
