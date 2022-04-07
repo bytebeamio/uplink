@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod controller;
-mod ota;
+pub mod ota;
 mod process;
 pub mod tunshell;
 
@@ -31,8 +31,8 @@ pub enum Error {
     BridgeSendError(#[from] flume::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
-    #[error("Error from firmware downloader {0}")]
-    OtaError(#[from] ota::Error),
+    #[error("Error sending update_firmware action {0}")]
+    OtaSend(#[from] flume::SendError<Action>),
 }
 
 /// On the Bytebeam platform, an Action is how beamd and through it,
@@ -123,6 +123,7 @@ pub struct Actions {
     controller: controller::Controller,
     actions_rx: Option<Receiver<Action>>,
     tunshell_tx: Sender<String>,
+    ota_tx: Sender<Action>,
     bridge_tx: Sender<Action>,
 }
 
@@ -132,6 +133,7 @@ impl Actions {
         controllers: HashMap<String, Sender<Control>>,
         actions_rx: Receiver<Action>,
         tunshell_tx: Sender<String>,
+        ota_tx: Sender<Action>,
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
     ) -> Actions {
@@ -144,6 +146,7 @@ impl Actions {
             controller,
             actions_rx: Some(actions_rx),
             tunshell_tx,
+            ota_tx,
             bridge_tx,
         }
     }
@@ -182,14 +185,7 @@ impl Actions {
                 return Ok(());
             }
             "update_firmware" if self.config.ota.enabled => {
-                // Download the OTA update if action is named "update_firmware" and feature is enabled
-                ota::spawn_firmware_downloader(
-                    self.action_status.clone(),
-                    action,
-                    self.config.clone(),
-                    self.bridge_tx.clone(),
-                )
-                .await?;
+                self.ota_tx.send_async(action).await?;
                 return Ok(());
             }
             _ => (),

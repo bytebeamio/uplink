@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use flume::Sender;
+use flume::{Receiver, Sender};
 use futures_util::StreamExt;
 use log::{debug, error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
@@ -21,35 +21,92 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("Error forwarding to Bridge {0}")]
     TrySendError(#[from] flume::TrySendError<Action>),
-    #[error("Download failed, content length none")]
-    NoContentLen,
-    #[error("Download failed, content length zero")]
-    ContentLenZero,
+    #[error("Error receiving action {0}")]
+    Recv(#[from] flume::RecvError),
+    // #[error("Download failed, content length none")]
+    // NoContentLen,
+    // #[error("Download failed, content length zero")]
+    // ContentLenZero,
 }
 
 pub struct OtaDownloader {
+    config: Arc<Config>,
+    ota_rx: Receiver<Action>,
     action_id: String,
     status_bucket: Stream<ActionResponse>,
     bridge_tx: Sender<Action>,
+    client: Client,
     sequence: u32,
 }
 
 impl OtaDownloader {
-    fn new(
-        action_id: String,
+    pub fn new(
+        config: Arc<Config>,
+        ota_rx: Receiver<Action>,
         status_bucket: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
-    ) -> Self {
-        Self { action_id, status_bucket, bridge_tx, sequence: 0 }
+    ) -> Result<Self, Error> {
+        // Authenticate with TLS certs from config
+        let client_builder = ClientBuilder::new();
+        let client = match &config.authentication {
+            Some(certs) => {
+                let ca = Certificate::from_pem(certs.ca_certificate.as_bytes())?;
+                let mut buf = BytesMut::from(certs.device_private_key.as_bytes());
+                buf.extend_from_slice(certs.device_certificate.as_bytes());
+                // buf contains the private key and certificate of device
+                let device = Identity::from_pem(&buf)?;
+                client_builder.add_root_certificate(ca).identity(device)
+            }
+            None => client_builder,
+        }
+        .build()?;
+
+        Ok(Self {
+            config,
+            client,
+            ota_rx,
+            status_bucket,
+            bridge_tx,
+            sequence: 0,
+            action_id: String::default(),
+        })
     }
 
-    async fn run(
-        &mut self,
-        ota_path: &PathBuf,
-        client: Client,
-        action: Action,
-        url: String,
-    ) -> Result<(), Error> {
+    /// Spawn a thread to handle downloading OTA updates as per "update_firmware" actions and for
+    /// forwarding updated actions to bridge for further processing, i.e. update installation.
+    #[tokio::main(flavor = "current_thread")]
+    pub async fn start(mut self) -> Result<(), Error> {
+        loop {
+            info!("Dowloading firmware");
+            self.sequence = 0;
+            let Action { action_id, kind, name, payload } = self.ota_rx.recv_async().await?;
+            self.action_id = action_id.clone();
+            // Extract url and add ota_path in payload before recreating action to be sent to bridge
+            let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;
+            let url = update.url.clone();
+            let ota_path = self.config.ota.path.clone();
+            update.ota_path = Some(ota_path.clone());
+            let payload = serde_json::to_string(&update)?;
+            let action = Action { action_id, kind, name, payload };
+            let ota_path = PathBuf::from(ota_path);
+
+            info!("Dowloading from {}", url);
+            match self.run(&ota_path, action, url).await {
+                Ok(_) => {
+                    let status =
+                        ActionResponse::success(&self.action_id).set_sequence(self.sequence());
+                    self.send_status(status).await;
+                }
+                Err(e) => {
+                    let status = ActionResponse::failure(&self.action_id, e.to_string())
+                        .set_sequence(self.sequence());
+                    self.send_status(status).await;
+                }
+            }
+        }
+    }
+
+    async fn run(&mut self, ota_path: &PathBuf, action: Action, url: String) -> Result<(), Error> {
         // Update action status for process initiated
         let status = ActionResponse::progress(&self.action_id, "Downloading", 0)
             .set_sequence(self.sequence());
@@ -59,7 +116,7 @@ impl OtaDownloader {
         let file = self.create_file(ota_path).await?;
 
         // Create handler to perform download from URL
-        let resp = client.get(url).send().await?;
+        let resp = self.client.get(url).send().await?;
 
         self.download(resp, file).await?;
 
@@ -71,8 +128,8 @@ impl OtaDownloader {
 
     /// Ensure that directory for downloading file into, exists
     async fn create_file(&mut self, ota_path: &PathBuf) -> Result<File, Error> {
-        let curr_dir = PathBuf::from("./");
-        let ota_dir = ota_path.parent().unwrap_or(curr_dir.as_path());
+        let dir = PathBuf::from("./");
+        let ota_dir = ota_path.parent().unwrap_or(dir.as_path());
         create_dir_all(ota_dir)?;
         let file = File::create(ota_path)?;
 
@@ -132,58 +189,4 @@ struct FirmwareUpdate {
     version: String,
     /// Path to location in fs where download will be stored
     ota_path: Option<String>,
-}
-
-/// Spawn a task to download and forward "update_firmware" actions
-pub async fn spawn_firmware_downloader(
-    status_bucket: Stream<ActionResponse>,
-    action: Action,
-    config: Arc<Config>,
-    bridge_tx: Sender<Action>,
-) -> Result<(), Error> {
-    info!("Dowloading firmware");
-    let Action { action_id, kind, name, payload } = action;
-    // Extract url and add ota_path in payload before recreating action to be sent to bridge
-    let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;
-    let url = update.url.clone();
-    let ota_path = config.ota.path.clone();
-    update.ota_path = Some(ota_path.clone());
-    let payload = serde_json::to_string(&update)?;
-    let mut downloader = OtaDownloader::new(action_id.clone(), status_bucket, bridge_tx);
-    let action = Action { action_id, kind, name, payload };
-    let ota_path = PathBuf::from(ota_path);
-
-    // Authenticate with TLS certs from config
-    let client_builder = ClientBuilder::new();
-    let client = match &config.authentication {
-        Some(certs) => {
-            let ca = Certificate::from_pem(certs.ca_certificate.as_bytes())?;
-            let mut buf = BytesMut::from(certs.device_private_key.as_bytes());
-            buf.extend_from_slice(certs.device_certificate.as_bytes());
-            // buf contains the private key and certificate of device
-            let device = Identity::from_pem(&buf)?;
-            client_builder.add_root_certificate(ca).identity(device)
-        }
-        None => client_builder,
-    }
-    .build()?;
-
-    info!("Dowloading from {}", url);
-    // TODO: Spawned task may fail to execute as expected and status may not be forwarded to cloud
-    tokio::task::spawn(async move {
-        match downloader.run(&ota_path, client, action, url).await {
-            Ok(_) => {
-                let status = ActionResponse::success(&downloader.action_id)
-                    .set_sequence(downloader.sequence());
-                downloader.send_status(status).await;
-            }
-            Err(e) => {
-                let status = ActionResponse::failure(&downloader.action_id, e.to_string())
-                    .set_sequence(downloader.sequence());
-                downloader.send_status(status).await;
-            }
-        }
-    });
-
-    Ok(())
 }

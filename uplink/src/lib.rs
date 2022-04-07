@@ -16,6 +16,7 @@ pub mod config {
     pub use crate::base::{Config, Ota, Persistence, Stats};
 }
 
+use base::actions::ota::OtaDownloader;
 use base::actions::tunshell::{Relay, TunshellSession};
 use base::actions::Actions;
 pub use base::actions::{Action, ActionResponse};
@@ -80,12 +81,21 @@ impl Uplink {
             self.action_status.clone(),
         );
 
+        let ota_channel = RxTx::bounded(10);
+        let ota_downloader = OtaDownloader::new(
+            self.config.clone(),
+            ota_channel.rx,
+            self.action_status.clone(),
+            self.action_channel.tx.clone(),
+        )?;
+
         let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
         let mut actions = Actions::new(
             self.config.clone(),
             controllers,
             raw_action_channel.rx,
             tunshell_keys.tx,
+            ota_channel.tx,
             self.action_status.clone(),
             self.action_channel.tx.clone(),
         );
@@ -106,14 +116,19 @@ impl Uplink {
                     mqtt.start().await;
                 });
 
-                if enable_stats {
-                    thread::spawn(move || stat_collector.start());
-                }
-
-                thread::spawn(move || tunshell_session.start());
                 actions.start().await;
             })
         });
+
+        if enable_stats {
+            thread::spawn(move || stat_collector.start());
+        }
+
+        thread::spawn(move || tunshell_session.start());
+
+        if self.config.ota.enabled {
+            thread::spawn(move || ota_downloader.start());
+        }
 
         Ok(())
     }
