@@ -1,3 +1,5 @@
+use self::ota::OtaTx;
+
 use super::{Config, Control, Package};
 use flume::{Receiver, Sender};
 use log::{debug, error};
@@ -123,7 +125,7 @@ pub struct Actions {
     controller: controller::Controller,
     actions_rx: Receiver<Action>,
     tunshell_tx: Sender<String>,
-    ota_tx: Sender<Action>,
+    ota_tx: OtaTx,
     bridge_tx: Sender<Action>,
 }
 
@@ -133,7 +135,7 @@ impl Actions {
         controllers: HashMap<String, Sender<Control>>,
         actions_rx: Receiver<Action>,
         tunshell_tx: Sender<String>,
-        ota_tx: Sender<Action>,
+        ota_tx: OtaTx,
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
     ) -> Actions {
@@ -183,7 +185,7 @@ impl Actions {
                 return Ok(());
             }
             "update_firmware" if self.config.ota.enabled => {
-                self.ota_tx.send_async(action).await?;
+                self.ota_tx.send(action).await?;
                 return Ok(());
             }
             _ => (),

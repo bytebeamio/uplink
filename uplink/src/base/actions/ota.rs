@@ -10,6 +10,7 @@ use std::{io::Write, path::PathBuf, sync::Arc};
 
 use super::{Action, ActionResponse};
 use crate::base::{Config, Stream};
+use crate::RxTx;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -29,9 +30,33 @@ pub enum Error {
     // ContentLenZero,
 }
 
+pub struct OtaTx {
+    tx: Sender<Action>,
+}
+
+impl OtaTx {
+    pub async fn send(&self, ota_action: Action) -> Result<(), flume::SendError<Action>> {
+        self.tx.send_async(ota_action).await?;
+
+        Ok(())
+    }
+}
+
+struct OtaRx {
+    rx: Receiver<Action>,
+}
+
+impl OtaRx {
+    async fn recv(&self) -> Result<Action, flume::RecvError> {
+        let ota_action = self.rx.recv_async().await?;
+
+        Ok(ota_action)
+    }
+}
+
 pub struct OtaDownloader {
     config: Arc<Config>,
-    ota_rx: Receiver<Action>,
+    ota_rx: OtaRx,
     action_id: String,
     status_bucket: Stream<ActionResponse>,
     bridge_tx: Sender<Action>,
@@ -42,10 +67,14 @@ pub struct OtaDownloader {
 impl OtaDownloader {
     pub fn new(
         config: Arc<Config>,
-        ota_rx: Receiver<Action>,
         status_bucket: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
-    ) -> Result<Self, Error> {
+    ) -> Result<(OtaTx, Self), Error> {
+        let RxTx { rx, tx } = RxTx::bounded(1);
+
+        let ota_tx = OtaTx { tx };
+        let ota_rx = OtaRx { rx };
+
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
         let client = match &config.authentication {
@@ -61,15 +90,18 @@ impl OtaDownloader {
         }
         .build()?;
 
-        Ok(Self {
-            config,
-            client,
-            ota_rx,
-            status_bucket,
-            bridge_tx,
-            sequence: 0,
-            action_id: String::default(),
-        })
+        Ok((
+            ota_tx,
+            Self {
+                config,
+                client,
+                ota_rx,
+                status_bucket,
+                bridge_tx,
+                sequence: 0,
+                action_id: String::default(),
+            },
+        ))
     }
 
     /// Spawn a thread to handle downloading OTA updates as per "update_firmware" actions and for
@@ -79,7 +111,7 @@ impl OtaDownloader {
         loop {
             info!("Dowloading firmware");
             self.sequence = 0;
-            let Action { action_id, kind, name, payload } = self.ota_rx.recv_async().await?;
+            let Action { action_id, kind, name, payload } = self.ota_rx.recv().await?;
             self.action_id = action_id.clone();
             // Extract url and add ota_path in payload before recreating action to be sent to bridge
             let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;

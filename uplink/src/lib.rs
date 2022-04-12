@@ -79,10 +79,8 @@ impl Uplink {
         thread::spawn(move || tunshell_session.start());
 
         // Launch a thread to handle downloads for OTA updates
-        let ota_actions = RxTx::bounded(10);
-        let ota_downloader = OtaDownloader::new(
+        let (ota_tx, ota_downloader) = OtaDownloader::new(
             self.config.clone(),
-            ota_actions.rx,
             self.action_status.clone(),
             self.action_channel.tx.clone(),
         )?;
@@ -107,7 +105,7 @@ impl Uplink {
             controllers,
             raw_action_channel.rx,
             tunshell_keys.tx,
-            ota_actions.tx,
+            ota_tx,
             self.action_status.clone(),
             self.action_channel.tx.clone(),
         );
