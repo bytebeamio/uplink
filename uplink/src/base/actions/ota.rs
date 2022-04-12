@@ -1,16 +1,16 @@
 use bytes::BytesMut;
-use flume::{Receiver, Sender};
+use flume::Sender;
 use futures_util::StreamExt;
 use log::{debug, error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 
 use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf, sync::Arc};
 
 use super::{Action, ActionResponse};
 use crate::base::{Config, Stream};
-use crate::RxTx;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -24,6 +24,10 @@ pub enum Error {
     TrySendError(#[from] flume::TrySendError<Action>),
     #[error("Error receiving action {0}")]
     Recv(#[from] flume::RecvError),
+    #[error("Error sending action {0}")]
+    Send(#[from] flume::SendError<Action>),
+    #[error("OTA downloading {0}")]
+    Downloading(String),
     // #[error("Download failed, content length none")]
     // NoContentLen,
     // #[error("Download failed, content length zero")]
@@ -31,26 +35,37 @@ pub enum Error {
 }
 
 pub struct OtaTx {
-    tx: Sender<Action>,
+    slot: Arc<Mutex<Option<Action>>>,
 }
 
 impl OtaTx {
-    pub async fn send(&self, ota_action: Action) -> Result<(), flume::SendError<Action>> {
-        self.tx.send_async(ota_action).await?;
+    pub async fn send(&self, ota_action: Action) -> Result<(), Error> {
+        let mut action = self.slot.lock().await;
+        match &*action {
+            None => *action = Some(ota_action),
+            Some(action) => return Err(Error::Downloading(action.action_id.to_owned())),
+        }
 
         Ok(())
     }
 }
 
 struct OtaRx {
-    rx: Receiver<Action>,
+    slot: Arc<Mutex<Option<Action>>>,
 }
 
 impl OtaRx {
-    async fn recv(&self) -> Result<Action, flume::RecvError> {
-        let ota_action = self.rx.recv_async().await?;
+    async fn recv(&self) -> Result<Action, Error> {
+        loop {
+            let action = self.slot.lock().await;
+            if let Some(ota_action) = &*action {
+                return Ok(ota_action.clone());
+            }
+        }
+    }
 
-        Ok(ota_action)
+    async fn release(&self) {
+        *self.slot.lock().await = None;
     }
 }
 
@@ -70,10 +85,9 @@ impl OtaDownloader {
         status_bucket: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
     ) -> Result<(OtaTx, Self), Error> {
-        let RxTx { rx, tx } = RxTx::bounded(1);
-
-        let ota_tx = OtaTx { tx };
-        let ota_rx = OtaRx { rx };
+        let slot = Arc::new(Mutex::new(None));
+        let ota_tx = OtaTx { slot: slot.clone() };
+        let ota_rx = OtaRx { slot };
 
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
@@ -135,6 +149,8 @@ impl OtaDownloader {
                     self.send_status(status).await;
                 }
             }
+
+            self.ota_rx.release().await;
         }
     }
 

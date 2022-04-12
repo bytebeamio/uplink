@@ -34,13 +34,13 @@ pub enum Error {
     #[error("Invalid action")]
     InvalidActionKind(String),
     #[error("Error sending update_firmware action {0}")]
-    OtaSend(#[from] flume::SendError<Action>),
+    Ota(#[from] ota::Error),
 }
 
 /// On the Bytebeam platform, an Action is how beamd and through it,
 /// the end-user, can communicate the tasks they want to perform on
 /// said device, in this case, uplink.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
     // action id
     #[serde(alias = "id")]
