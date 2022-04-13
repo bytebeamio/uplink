@@ -203,7 +203,7 @@ impl OtaDownloader {
 
             // NOTE: ensure lesser frequency of action responses
             if downloaded % 1024 * 1024 * 1024 == 0 {
-                let percentage = (100 * downloaded / content_length) as u8;
+                let percentage = (100 * downloaded / content_length) as u8 % 101;
                 let status = ActionResponse::progress(&self.action_id, "Downloading", percentage)
                     .set_sequence(self.sequence());
                 self.send_status(status).await;
