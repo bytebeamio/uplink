@@ -193,6 +193,7 @@ impl OtaDownloader {
             Some(l) => l as usize,
         };
         let mut downloaded = 0;
+        let mut next = 1;
         let mut stream = resp.bytes_stream();
 
         // Download and store to disk by streaming as chunks
@@ -201,8 +202,9 @@ impl OtaDownloader {
             downloaded += chunk.len();
             file.write_all(&chunk)?;
 
-            // NOTE: ensure lesser frequency of action responses
-            if downloaded % 1024 * 1024 * 1024 == 0 {
+            // NOTE: ensure lesser frequency of action responses, once every 100KB
+            if downloaded / 102400 > next {
+                next += 1;
                 let percentage = (100 * downloaded / content_length) as u8 % 101;
                 let status = ActionResponse::progress(&self.action_id, "Downloading", percentage)
                     .set_sequence(self.sequence());
