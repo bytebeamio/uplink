@@ -31,7 +31,7 @@ pub enum Error {
     #[error("Download failed, content length none")]
     NoContentLen,
     #[error("Download failed, content length zero")]
-    ContentLenZero,
+    EmptyFile,
 }
 
 pub struct OtaTx {
@@ -186,11 +186,12 @@ impl OtaDownloader {
 
     /// Downloads from server and stores into file
     async fn download(&mut self, resp: Response, mut file: File) -> Result<(), Error> {
-        // Supposing content length is defined in bytes
+        // Error out in case of 0 sized files, but handle situation where file size is not
+        // reported by the webserver in response by incrementing count 0..100 over and over.
         let content_length = match resp.content_length() {
-            None => return Err(Error::NoContentLen),
-            Some(0) => return Err(Error::ContentLenZero),
-            Some(l) => l as usize,
+            None => None,
+            Some(0) => return Err(Error::EmptyFile),
+            Some(l) => Some(l as usize),
         };
         let mut downloaded = 0;
         let mut next = 1;
@@ -205,9 +206,18 @@ impl OtaDownloader {
             // NOTE: ensure lesser frequency of action responses, once every 100KB
             if downloaded / 102400 > next {
                 next += 1;
-                let percentage = (100 * downloaded / content_length) as u8 % 101;
-                let status = ActionResponse::progress(&self.action_id, "Downloading", percentage)
-                    .set_sequence(self.sequence());
+                // Calculate percentage on the basis of content_length if available,
+                // else increment 0..100 till task is completed.
+                let percentage = match content_length {
+                    Some(content_length) => (100 * downloaded / content_length) % 101,
+                    None => {
+                        downloaded = (downloaded + 1) % 100;
+                        downloaded
+                    }
+                };
+                let status =
+                    ActionResponse::progress(&self.action_id, "Downloading", percentage as u8)
+                        .set_sequence(self.sequence());
                 self.send_status(status).await;
             }
         }
