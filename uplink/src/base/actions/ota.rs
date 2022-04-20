@@ -240,10 +240,67 @@ impl OtaDownloader {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct FirmwareUpdate {
     url: String,
     version: String,
     /// Path to location in fs where download will be stored
     ota_path: Option<String>,
+}
+
+#[cfg(test)]
+mod test {
+    use crate::config::Ota;
+
+    use super::*;
+
+    const OTA_DIR: &str = "/tmp/uplink_test";
+
+    #[test]
+    // Test file downloading capabilities of OtaDownloader by downloading the uplink logo from GitHub
+    fn download_file() {
+        // Ensure path exists
+        std::fs::create_dir_all(OTA_DIR).unwrap();
+        // Prepare config
+        let ota_path = format!("{}/ota", OTA_DIR);
+        let config = Arc::new(Config {
+            ota: Ota { enabled: true, path: ota_path.clone() },
+            ..Default::default()
+        });
+
+        // Create channels to forward and push action_status on
+        let (stx, srx) = flume::bounded(1);
+        let (btx, brx) = flume::bounded(1);
+        let action_status = Stream::dynamic("actions_status", "", "", stx);
+        let (otx, downloader) = OtaDownloader::new(config, action_status, btx).unwrap();
+
+        // Create a firmware update action
+        let ota_update = FirmwareUpdate {
+            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
+            version: "1.0".to_string(),
+            ota_path: None,
+        };
+        let mut expected_forward = ota_update.clone();
+        expected_forward.ota_path = Some(ota_path);
+        let ota_action = Action {
+            action_id: "1".to_string(),
+            kind: "firmware_update".to_string(),
+            name: "firmware_update".to_string(),
+            payload: serde_json::json!(ota_update).to_string(),
+        };
+
+        // Send action to OtaDownloader with OtaTx
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            otx.send(ota_action).await.unwrap();
+        });
+
+        // Run OtaDownloader in separate thread
+        std::thread::spawn(|| downloader.start().unwrap());
+        let status = srx.recv().unwrap();
+        let forward = brx.recv().unwrap();
+
+        // Ensure received action_status and forwarded action contains expected info
+        assert_eq!(String::from_utf8(status.serialize()).unwrap(), "");
+        assert_eq!(forward.payload, serde_json::json!(expected_forward).to_string());
+    }
 }

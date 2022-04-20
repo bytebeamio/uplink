@@ -37,13 +37,13 @@ pub struct Authentication {
     device_private_key: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Ota {
     pub enabled: bool,
     pub path: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Stats {
     pub enabled: bool,
     pub process_names: Vec<String>,
@@ -51,7 +51,7 @@ pub struct Stats {
     pub stream_size: Option<usize>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
