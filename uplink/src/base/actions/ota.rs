@@ -240,7 +240,7 @@ impl OtaDownloader {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 struct FirmwareUpdate {
     url: String,
     version: String,
@@ -250,9 +250,9 @@ struct FirmwareUpdate {
 
 #[cfg(test)]
 mod test {
-    use crate::config::Ota;
-
     use super::*;
+    use crate::config::Ota;
+    use serde_json::json;
 
     const OTA_DIR: &str = "/tmp/uplink_test";
 
@@ -271,7 +271,7 @@ mod test {
         // Create channels to forward and push action_status on
         let (stx, srx) = flume::bounded(1);
         let (btx, brx) = flume::bounded(1);
-        let action_status = Stream::dynamic("actions_status", "", "", stx);
+        let action_status = Stream::dynamic_with_size("actions_status", "", "", 1, stx);
         let (otx, downloader) = OtaDownloader::new(config, action_status, btx).unwrap();
 
         // Create a firmware update action
@@ -286,7 +286,7 @@ mod test {
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
-            payload: serde_json::json!(ota_update).to_string(),
+            payload: json!(ota_update).to_string(),
         };
 
         // Send action to OtaDownloader with OtaTx
@@ -296,11 +296,13 @@ mod test {
 
         // Run OtaDownloader in separate thread
         std::thread::spawn(|| downloader.start().unwrap());
-        let status = srx.recv().unwrap();
-        let forward = brx.recv().unwrap();
 
+        // Collect action_status and forwarded Action
+        let status: Vec<ActionResponse> =
+            serde_json::from_slice(&srx.recv().unwrap().serialize()).unwrap();
+        let forward: FirmwareUpdate = serde_json::from_str(&brx.recv().unwrap().payload).unwrap();
         // Ensure received action_status and forwarded action contains expected info
-        assert_eq!(String::from_utf8(status.serialize()).unwrap(), "");
-        assert_eq!(forward.payload, serde_json::json!(expected_forward).to_string());
+        assert_eq!(status[0].state, "Downloading");
+        assert_eq!(forward, expected_forward);
     }
 }
