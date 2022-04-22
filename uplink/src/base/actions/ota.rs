@@ -157,11 +157,12 @@ impl OtaDownloader {
         let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;
         let url = update.url.clone();
 
-        // Ensure that directory for downloading file into, exists
-        let ota_path = PathBuf::from(self.config.ota.path.clone());
+        // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
+        let mut ota_path = PathBuf::from(self.config.ota.path.clone());
+        ota_path.push(&update.version);
         create_dir_all(&ota_path)?;
 
-        // Create file to download files into
+        // Create file to actually download into
         let mut file_path = ota_path.to_owned();
         let file_name = url.split("/").last().ok_or(Error::FileNameMissing(url.to_owned()))?;
         file_path.push(file_name);
@@ -282,7 +283,7 @@ mod test {
             ota_path: None,
         };
         let mut expected_forward = ota_update.clone();
-        expected_forward.ota_path = Some(ota_path + "/logo.png");
+        expected_forward.ota_path = Some(ota_path + "/1.0/logo.png");
         let ota_action = Action {
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
