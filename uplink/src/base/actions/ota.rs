@@ -31,6 +31,8 @@ pub enum Error {
     Downloading,
     #[error("Missing file name: {0}")]
     FileNameMissing(String),
+    #[error("Missing file path")]
+    FilePathMissing,
     #[error("Download failed, content length zero")]
     EmptyFile,
 }
@@ -41,10 +43,11 @@ pub struct OtaTx {
 }
 
 impl OtaTx {
-    // Forward actions, but fail if lock is already held, i.e. while another Ota is still downloading.
+    // Forward actions, but fail if channel is filled or lock is already held,
+    // i.e. while another Ota is still downloading or waiting to be.
     pub async fn send(&self, ota_action: Action) -> Result<(), Error> {
         let _lock = self.slot.try_lock().map_err(|_| Error::Downloading)?;
-        self.tx.send_async(ota_action).await?;
+        self.tx.send_async(ota_action).await.map_err(|_| Error::Downloading)?;
 
         Ok(())
     }
@@ -75,7 +78,8 @@ pub struct OtaDownloader {
 }
 
 impl OtaDownloader {
-    /// Create a 
+    /// Create a channel to for OTA action only where sender fails if an action
+    /// is already being processed by the receiver, determined using a mutex lock.
     pub fn rxtx() -> (OtaTx, OtaRx) {
         let slot = Arc::new(Mutex::new(()));
         let RxTx { tx, rx } = RxTx::bounded(1);
@@ -124,19 +128,9 @@ impl OtaDownloader {
             self.sequence = 0;
             // `_lock` is held until current action completes, hence failing all sends till it's dropped
             let (action, _lock) = ota_rx.recv().await?;
-            let Action { action_id, kind, name, payload } = action;
-            self.action_id = action_id.clone();
-            // Extract url and add ota_path in payload before recreating action to be sent to bridge
-            let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;
-            let url = update.url.clone();
-            let ota_path = self.config.ota.path.clone();
-            update.ota_path = Some(ota_path.clone());
-            let payload = serde_json::to_string(&update)?;
-            let action = Action { action_id, kind, name, payload };
-            let ota_path = PathBuf::from(ota_path);
+            self.action_id = action.action_id.clone();
 
-            info!("Dowloading from {}", url);
-            match self.run(&ota_path, action, url).await {
+            match self.run(action).await {
                 Ok(_) => {
                     let status = ActionResponse::progress(&self.action_id, "Downloaded", 100)
                         .set_sequence(self.sequence());
@@ -148,38 +142,47 @@ impl OtaDownloader {
                     self.send_status(status).await;
                 }
             }
+            // _lock is dropped here so that next OTA Action can be received
         }
     }
 
-    async fn run(&mut self, ota_path: &PathBuf, action: Action, url: String) -> Result<(), Error> {
+    async fn run(&mut self, action: Action) -> Result<(), Error> {
         // Update action status for process initiated
         let status = ActionResponse::progress(&self.action_id, "Downloading", 0)
             .set_sequence(self.sequence());
         self.send_status(status).await;
 
+        // Extract url and add ota_path in payload before recreating action to be sent to bridge
+        let Action { action_id, kind, name, payload } = action;
+        let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;
+        let url = update.url.clone();
+
+        // Ensure that directory for downloading file into, exists
+        let ota_path = PathBuf::from(self.config.ota.path.clone());
+        create_dir_all(&ota_path)?;
+
         // Create file to download files into
+        let mut file_path = ota_path.to_owned();
         let file_name = url.split("/").last().ok_or(Error::FileNameMissing(url.to_owned()))?;
-        let file = self.create_file(ota_path, file_name).await?;
+        file_path.push(file_name);
+        let file_path = file_path.as_path();
+        let file = File::create(file_path)?;
 
         // Create handler to perform download from URL
-        let resp = self.client.get(url).send().await?;
-
+        let resp = self.client.get(&url).send().await?;
+        info!("Dowloading from {}", url);
         self.download(resp, file).await?;
+
+        // Update Action payload with `ota_path`, i.e. downloaded file's location in fs
+        let ota_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
+        update.ota_path = Some(ota_path);
+        let payload = serde_json::to_string(&update)?;
+        let action = Action { action_id, kind, name, payload };
 
         // Forward Action packet through bridge
         self.bridge_tx.try_send(action)?;
 
         Ok(())
-    }
-
-    /// Ensure that directory for downloading file into, exists
-    async fn create_file(&mut self, ota_path: &PathBuf, file_name: &str) -> Result<File, Error> {
-        create_dir_all(ota_path)?;
-        let mut file_path = ota_path.to_owned();
-        file_path.push(file_name);
-        let file = File::create(file_path)?;
-
-        Ok(file)
     }
 
     /// Downloads from server and stores into file
@@ -279,7 +282,7 @@ mod test {
             ota_path: None,
         };
         let mut expected_forward = ota_update.clone();
-        expected_forward.ota_path = Some(ota_path);
+        expected_forward.ota_path = Some(ota_path + "/logo.png");
         let ota_action = Action {
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
