@@ -29,8 +29,8 @@ pub enum Error {
     Send(#[from] flume::SendError<Action>),
     #[error("Another OTA downloading")]
     Downloading,
-    #[error("Download failed, content length none")]
-    NoContentLen,
+    #[error("Missing file name: {0}")]
+    FileNameMissing(String),
     #[error("Download failed, content length zero")]
     EmptyFile,
 }
@@ -41,6 +41,7 @@ pub struct OtaTx {
 }
 
 impl OtaTx {
+    // Forward actions, but fail if lock is already held, i.e. while another Ota is still downloading.
     pub async fn send(&self, ota_action: Action) -> Result<(), Error> {
         let _lock = self.slot.try_lock().map_err(|_| Error::Downloading)?;
         self.tx.send_async(ota_action).await?;
@@ -55,14 +56,12 @@ pub struct OtaRx {
 }
 
 impl OtaRx {
-    async fn lock(&self) -> MutexGuard<'_, ()> {
-        self.slot.lock().await
-    }
-
-    async fn recv(&self) -> Result<Action, Error> {
+    // Receive actions and return along with lock restricting OtaTx from
+    // forwarding actions till lock is dropped.
+    async fn recv(&self) -> Result<(Action, MutexGuard<'_, ()>), Error> {
         let action = self.rx.recv_async().await?;
-
-        Ok(action)
+        let lock = self.slot.lock().await;
+        Ok((action, lock))
     }
 }
 
@@ -76,6 +75,7 @@ pub struct OtaDownloader {
 }
 
 impl OtaDownloader {
+    /// Create a 
     pub fn rxtx() -> (OtaTx, OtaRx) {
         let slot = Arc::new(Mutex::new(()));
         let RxTx { tx, rx } = RxTx::bounded(1);
@@ -85,6 +85,7 @@ impl OtaDownloader {
         (ota_tx, ota_rx)
     }
 
+    /// Create a struct to manage OTA downloads, runs on a separate thread
     pub fn new(
         config: Arc<Config>,
         status_bucket: Stream<ActionResponse>,
@@ -120,10 +121,10 @@ impl OtaDownloader {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self, ota_rx: OtaRx) -> Result<(), Error> {
         loop {
-            // `_lock` is held until current action completes, hence failing all sends till it's dropped
-            let _lock = ota_rx.lock().await;
             self.sequence = 0;
-            let Action { action_id, kind, name, payload } = ota_rx.recv().await?;
+            // `_lock` is held until current action completes, hence failing all sends till it's dropped
+            let (action, _lock) = ota_rx.recv().await?;
+            let Action { action_id, kind, name, payload } = action;
             self.action_id = action_id.clone();
             // Extract url and add ota_path in payload before recreating action to be sent to bridge
             let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;
@@ -157,7 +158,8 @@ impl OtaDownloader {
         self.send_status(status).await;
 
         // Create file to download files into
-        let file = self.create_file(ota_path).await?;
+        let file_name = url.split("/").last().ok_or(Error::FileNameMissing(url.to_owned()))?;
+        let file = self.create_file(ota_path, file_name).await?;
 
         // Create handler to perform download from URL
         let resp = self.client.get(url).send().await?;
@@ -171,11 +173,11 @@ impl OtaDownloader {
     }
 
     /// Ensure that directory for downloading file into, exists
-    async fn create_file(&mut self, ota_path: &PathBuf) -> Result<File, Error> {
-        let dir = PathBuf::from("./");
-        let ota_dir = ota_path.parent().unwrap_or(dir.as_path());
-        create_dir_all(ota_dir)?;
-        let file = File::create(ota_path)?;
+    async fn create_file(&mut self, ota_path: &PathBuf, file_name: &str) -> Result<File, Error> {
+        create_dir_all(ota_path)?;
+        let mut file_path = ota_path.to_owned();
+        file_path.push(file_name);
+        let file = File::create(file_path)?;
 
         Ok(file)
     }
@@ -318,8 +320,7 @@ mod test {
         ota_tx.send(action).await.unwrap();
 
         // The lock will disallow further sends till drop
-        let _lock = ota_rx.lock().await;
-        let action = ota_rx.recv().await.unwrap();
+        let (action, _lock) = ota_rx.recv().await.unwrap();
 
         // The following send should fail
         match ota_tx.send(action).await.unwrap_err() {
