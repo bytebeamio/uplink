@@ -168,14 +168,14 @@ impl OtaDownloader {
         file_path.push(file_name);
         let file_path = file_path.as_path();
         let file = File::create(file_path)?;
+        let ota_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
 
         // Create handler to perform download from URL
         let resp = self.client.get(&url).send().await?;
-        info!("Dowloading from {}", url);
+        info!("Dowloading from {} into {}", url, ota_path);
         self.download(resp, file).await?;
 
         // Update Action payload with `ota_path`, i.e. downloaded file's location in fs
-        let ota_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
         update.ota_path = Some(ota_path);
         let payload = serde_json::to_string(&update)?;
         let action = Action { action_id, kind, name, payload };
