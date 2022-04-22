@@ -185,7 +185,7 @@ impl Actions {
                 return Ok(());
             }
             "update_firmware" if self.config.ota.enabled => {
-                self.ota_tx.send(action).await?;
+                self.ota_tx.send(action)?;
                 return Ok(());
             }
             _ => (),

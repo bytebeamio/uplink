@@ -15,18 +15,16 @@ use crate::RxTx;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Serde error {0}")]
+    #[error("Serde error: {0}")]
     Serde(#[from] serde_json::Error),
-    #[error("Error from reqwest {0}")]
+    #[error("Error from reqwest: {0}")]
     ReqwestError(#[from] reqwest::Error),
-    #[error("File io Error {0}")]
+    #[error("File io Error: {0}")]
     IoError(#[from] std::io::Error),
-    #[error("Error forwarding to Bridge {0}")]
+    #[error("Error forwarding OTA Action: {0}")]
     TrySendError(#[from] flume::TrySendError<Action>),
-    #[error("Error receiving action {0}")]
+    #[error("Error receiving action: {0}")]
     Recv(#[from] flume::RecvError),
-    #[error("Error sending action {0}")]
-    Send(#[from] flume::SendError<Action>),
     #[error("Another OTA downloading")]
     Downloading,
     #[error("Missing file name: {0}")]
@@ -45,9 +43,9 @@ pub struct OtaTx {
 impl OtaTx {
     // Forward actions, but fail if channel is filled or lock is already held,
     // i.e. while another Ota is still downloading or waiting to be.
-    pub async fn send(&self, ota_action: Action) -> Result<(), Error> {
+    pub fn send(&self, ota_action: Action) -> Result<(), Error> {
         let _lock = self.slot.try_lock().map_err(|_| Error::Downloading)?;
-        self.tx.send_async(ota_action).await.map_err(|_| Error::Downloading)?;
+        self.tx.try_send(ota_action)?;
 
         Ok(())
     }
@@ -275,6 +273,10 @@ mod test {
         let (btx, brx) = flume::bounded(1);
         let action_status = Stream::dynamic_with_size("actions_status", "", "", 1, stx);
         let downloader = OtaDownloader::new(config, action_status, btx).unwrap();
+        let (ota_tx, ota_rx) = OtaDownloader::rxtx();
+
+        // Start OtaDownloader in separate thread
+        std::thread::spawn(|| downloader.start(ota_rx).unwrap());
 
         // Create a firmware update action
         let ota_update = FirmwareUpdate {
@@ -291,15 +293,8 @@ mod test {
             payload: json!(ota_update).to_string(),
         };
 
-        let (ota_tx, ota_rx) = OtaDownloader::rxtx();
-
         // Send action to OtaDownloader with OtaTx
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            ota_tx.send(ota_action).await.unwrap();
-        });
-
-        // Run OtaDownloader in separate thread
-        std::thread::spawn(|| downloader.start(ota_rx).unwrap());
+        ota_tx.send(ota_action.clone()).unwrap();
 
         // Collect action_status and forwarded Action
         let status: Vec<ActionResponse> =
@@ -310,8 +305,8 @@ mod test {
         assert_eq!(forward, expected_forward);
     }
 
-    #[tokio::test]
-    async fn multiple_ota_at_once() {
+    #[test]
+    fn multiple_ota_at_once() {
         let (ota_tx, ota_rx) = OtaDownloader::rxtx();
 
         let action = Action {
@@ -321,13 +316,14 @@ mod test {
             payload: "".to_string(),
         };
         // The following send should succeed
-        ota_tx.send(action).await.unwrap();
+        ota_tx.send(action).unwrap();
 
         // The lock will disallow further sends till drop
-        let (action, _lock) = ota_rx.recv().await.unwrap();
+        let (action, _lock) =
+            tokio::runtime::Runtime::new().unwrap().block_on(ota_rx.recv()).unwrap();
 
         // The following send should fail
-        match ota_tx.send(action).await.unwrap_err() {
+        match ota_tx.send(action).unwrap_err() {
             Error::Downloading => {}
             e => unreachable!("This error should not have been thrown: {}", e),
         }
