@@ -79,13 +79,14 @@ impl Uplink {
         thread::spawn(move || tunshell_session.start());
 
         // Launch a thread to handle downloads for OTA updates
-        let (ota_tx, ota_downloader) = OtaDownloader::new(
+        let (ota_tx, ota_rx) = OtaDownloader::rxtx();
+        let ota_downloader = OtaDownloader::new(
             self.config.clone(),
             self.action_status.clone(),
             self.action_channel.tx.clone(),
         )?;
         if self.config.ota.enabled {
-            thread::spawn(move || ota_downloader.start());
+            thread::spawn(move || ota_downloader.start(ota_rx));
         }
 
         // Launch a thread to collect system statistics

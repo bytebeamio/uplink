@@ -1,16 +1,17 @@
 use bytes::BytesMut;
-use flume::Sender;
+use flume::{Receiver, Sender};
 use futures_util::StreamExt;
 use log::{debug, error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 
 use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf, sync::Arc};
 
 use super::{Action, ActionResponse};
 use crate::base::{Config, Stream};
+use crate::RxTx;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -26,8 +27,8 @@ pub enum Error {
     Recv(#[from] flume::RecvError),
     #[error("Error sending action {0}")]
     Send(#[from] flume::SendError<Action>),
-    #[error("OTA downloading {0}")]
-    Downloading(String),
+    #[error("Another OTA downloading")]
+    Downloading,
     #[error("Download failed, content length none")]
     NoContentLen,
     #[error("Download failed, content length zero")]
@@ -35,43 +36,38 @@ pub enum Error {
 }
 
 pub struct OtaTx {
-    slot: Arc<Mutex<Option<Action>>>,
+    tx: Sender<Action>,
+    slot: Arc<Mutex<()>>,
 }
 
 impl OtaTx {
     pub async fn send(&self, ota_action: Action) -> Result<(), Error> {
-        let mut action = self.slot.lock().await;
-        match &*action {
-            None => *action = Some(ota_action),
-            Some(action) => return Err(Error::Downloading(action.action_id.to_owned())),
-        }
+        let _lock = self.slot.try_lock().map_err(|_| Error::Downloading)?;
+        self.tx.send_async(ota_action).await?;
 
         Ok(())
     }
 }
 
-struct OtaRx {
-    slot: Arc<Mutex<Option<Action>>>,
+pub struct OtaRx {
+    rx: Receiver<Action>,
+    slot: Arc<Mutex<()>>,
 }
 
 impl OtaRx {
-    async fn recv(&self) -> Result<Action, Error> {
-        loop {
-            let action = self.slot.lock().await;
-            if let Some(ota_action) = &*action {
-                return Ok(ota_action.clone());
-            }
-        }
+    async fn lock(&self) -> MutexGuard<'_, ()> {
+        self.slot.lock().await
     }
 
-    async fn release(&self) {
-        *self.slot.lock().await = None;
+    async fn recv(&self) -> Result<Action, Error> {
+        let action = self.rx.recv_async().await?;
+
+        Ok(action)
     }
 }
 
 pub struct OtaDownloader {
     config: Arc<Config>,
-    ota_rx: OtaRx,
     action_id: String,
     status_bucket: Stream<ActionResponse>,
     bridge_tx: Sender<Action>,
@@ -80,15 +76,20 @@ pub struct OtaDownloader {
 }
 
 impl OtaDownloader {
+    pub fn rxtx() -> (OtaTx, OtaRx) {
+        let slot = Arc::new(Mutex::new(()));
+        let RxTx { tx, rx } = RxTx::bounded(1);
+        let ota_tx = OtaTx { tx, slot: slot.clone() };
+        let ota_rx = OtaRx { rx, slot };
+
+        (ota_tx, ota_rx)
+    }
+
     pub fn new(
         config: Arc<Config>,
         status_bucket: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
-    ) -> Result<(OtaTx, Self), Error> {
-        let slot = Arc::new(Mutex::new(None));
-        let ota_tx = OtaTx { slot: slot.clone() };
-        let ota_rx = OtaRx { slot };
-
+    ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
         let client = match &config.authentication {
@@ -104,28 +105,24 @@ impl OtaDownloader {
         }
         .build()?;
 
-        Ok((
-            ota_tx,
-            Self {
-                config,
-                client,
-                ota_rx,
-                status_bucket,
-                bridge_tx,
-                sequence: 0,
-                action_id: String::default(),
-            },
-        ))
+        Ok(Self {
+            config,
+            client,
+            status_bucket,
+            bridge_tx,
+            sequence: 0,
+            action_id: String::default(),
+        })
     }
 
     /// Spawn a thread to handle downloading OTA updates as per "update_firmware" actions and for
     /// forwarding updated actions to bridge for further processing, i.e. update installation.
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(mut self) -> Result<(), Error> {
+    pub async fn start(mut self, ota_rx: OtaRx) -> Result<(), Error> {
         loop {
-            info!("Dowloading firmware");
+            let _lock = ota_rx.lock().await;
             self.sequence = 0;
-            let Action { action_id, kind, name, payload } = self.ota_rx.recv().await?;
+            let Action { action_id, kind, name, payload } = ota_rx.recv().await?;
             self.action_id = action_id.clone();
             // Extract url and add ota_path in payload before recreating action to be sent to bridge
             let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;
@@ -149,8 +146,6 @@ impl OtaDownloader {
                     self.send_status(status).await;
                 }
             }
-
-            self.ota_rx.release().await;
         }
     }
 
@@ -272,7 +267,7 @@ mod test {
         let (stx, srx) = flume::bounded(1);
         let (btx, brx) = flume::bounded(1);
         let action_status = Stream::dynamic_with_size("actions_status", "", "", 1, stx);
-        let (otx, downloader) = OtaDownloader::new(config, action_status, btx).unwrap();
+        let downloader = OtaDownloader::new(config, action_status, btx).unwrap();
 
         // Create a firmware update action
         let ota_update = FirmwareUpdate {
@@ -289,13 +284,15 @@ mod test {
             payload: json!(ota_update).to_string(),
         };
 
+        let (ota_tx, ota_rx) = OtaDownloader::rxtx();
+
         // Send action to OtaDownloader with OtaTx
         tokio::runtime::Runtime::new().unwrap().block_on(async {
-            otx.send(ota_action).await.unwrap();
+            ota_tx.send(ota_action).await.unwrap();
         });
 
         // Run OtaDownloader in separate thread
-        std::thread::spawn(|| downloader.start().unwrap());
+        std::thread::spawn(|| downloader.start(ota_rx).unwrap());
 
         // Collect action_status and forwarded Action
         let status: Vec<ActionResponse> =
