@@ -120,6 +120,7 @@ impl OtaDownloader {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self, ota_rx: OtaRx) -> Result<(), Error> {
         loop {
+            // `_lock` is held until current action completes, hence failing all sends till it's dropped
             let _lock = ota_rx.lock().await;
             self.sequence = 0;
             let Action { action_id, kind, name, payload } = ota_rx.recv().await?;
@@ -301,5 +302,29 @@ mod test {
         // Ensure received action_status and forwarded action contains expected info
         assert_eq!(status[0].state, "Downloading");
         assert_eq!(forward, expected_forward);
+    }
+
+    #[tokio::test]
+    async fn multiple_ota_at_once() {
+        let (ota_tx, ota_rx) = OtaDownloader::rxtx();
+
+        let action = Action {
+            action_id: "".to_string(),
+            kind: "".to_string(),
+            name: "".to_string(),
+            payload: "".to_string(),
+        };
+        // The following send should succeed
+        ota_tx.send(action).await.unwrap();
+
+        // The lock will disallow further sends till drop
+        let _lock = ota_rx.lock().await;
+        let action = ota_rx.recv().await.unwrap();
+
+        // The following send should fail
+        match ota_tx.send(action).await.unwrap_err() {
+            Error::Downloading => {}
+            e => unreachable!("This error should not have been thrown: {}", e),
+        }
     }
 }
