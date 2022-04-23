@@ -5,7 +5,7 @@
 //! is also connected to [`OtaRx`], which then proceeds to [`lock`] the `Mutex` until the OTA is done downloading,
 //! in which case the lock is dropped and hence the `Mutex` is freed.
 //! 
-//! OTA `Action`s contain JSON formatted [`payload`] which can be deserialized into an object of type ['FirmwareUpdate'].
+//! OTA `Action`s contain JSON formatted [`payload`] which can be deserialized into an object of type [`FirmwareUpdate`].
 //! This object contains information such as the `url` where the OTA file is accessible from, the `version` number associated
 //! with the OTA file and a field which must be updated with the location in file-system where the OTA file is stored into.
 //! 
@@ -207,6 +207,7 @@ impl OtaDownloader {
         }
     }
 
+    // Accepts an OTA `Action` and performs necessary data extraction to actually download the OTA update
     async fn run(&mut self, action: Action) -> Result<(), Error> {
         // Update action status for process initiated
         let status = ActionResponse::progress(&self.action_id, "Downloading", 0)
@@ -303,7 +304,7 @@ impl OtaDownloader {
     }
 }
 
-/// The JSON format of data contained in the [`payload`] of an [`Action`] with `name: "update_firmware"`
+/// Expected JSON format of data contained in the [`payload`] of an OTA [`Action`]
 /// 
 /// [`payload`]: Action#structfield.payload
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
