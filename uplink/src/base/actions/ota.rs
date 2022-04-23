@@ -39,6 +39,12 @@
 //!     │                                                         │---------┘
 //!                                                                   3
 //! ```
+//! 
+//! **NOTE:** An OTA `Action` received between `OtaRx` receiveing the last `Action` and locking the `Mutex` will get sent onto
+//! the OTA channel, but will not be received till the prior `Action` completes downloading, by which time it may be deemed as
+//! having failed. The issue is that this `Action` will still be received from the channel and the OTA file will be downloaded
+//! by `OtaDownloader`, in which case the `Action` will have succeeded despite apparently having failed.
+//! 
 //! [`Actions`]: crate::Actions
 //! [`lock`]: Mutex::lock()
 //! [`payload`]: Action#structfield.payload
