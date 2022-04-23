@@ -16,6 +16,7 @@ pub mod config {
     pub use crate::base::{Config, Ota, Persistence, Stats};
 }
 
+pub use base::actions;
 use base::actions::ota::OtaDownloader;
 use base::actions::tunshell::{Relay, TunshellSession};
 use base::actions::Actions;

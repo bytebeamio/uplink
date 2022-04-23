@@ -1,3 +1,51 @@
+//! Contains definitions necessary to Download OTA updates as notified by an [`Action`] with `name: "update_firmware"`
+//! 
+//! The thread running [`Actions`] forwards an OTA `Action` to the [`OtaDownloader`] with an [`OtaTx`], which checks a
+//! [`Mutex`] to see if it is locked using a [`try_lock()`], if not, the `Action` is forwarded through a channel that
+//! is also connected to [`OtaRx`], which then proceeds to [`lock`] the `Mutex` until the OTA is done downloading,
+//! in which case the lock is dropped and hence the `Mutex` is freed.
+//! 
+//! OTA `Action`s contain JSON formatted [`payload`] which can be deserialized into an object of type ['FirmwareUpdate'].
+//! This object contains information such as the `url` where the OTA file is accessible from, the `version` number associated
+//! with the OTA file and a field which must be updated with the location in file-system where the OTA file is stored into.
+//! 
+//! Using a [`try_lock()`], [`OtaTx`] ensures that in case the Mutex can't be instantaneously locked, the lock must be
+//! held by the last caller of [`recv()`] and hence another OTA is currently being downloaded, thus leading to
+//! the [`send()`] erroring out ensuring multiple OTA's aren't waiting to be downloaded. This is illustrated in
+//! the following diagram by how `Action` 2 doesn't reach the `OtaDownloader` and is hence rejected.
+//! 
+//! The `OtaDownloader` also updates the state of a downloading `Action` using periodic [`ActionResponse`]s containing
+//! progress information. On completion of a download, the received `Action`'s `payload` is updated to contain information
+//! about where the OTA was downloaded into, within the file-system.
+//! 
+//! ```text
+//! ┌───────┐                                              ┌─────────────┐
+//! │Actions│                                              │OtaDownloader│
+//! └───┬───┘                                              └──────┬──────┘
+//!     │             .try_send()       .recv()                   │
+//!     │.send() ┌─────────────────X──────────────────┐    .recv()│
+//!     │  1  ┌──┴──┐              │               ┌──▼──┐  1     │
+//!     ├─────►OtaTx├────────────┐ │ ┌─────────────┤OtaRx├───────►│───────┐
+//!     │     └▲───▲┘.try_lock() │ │ │   .lock()   └──┬──┘        │       │          ┌─────────────┐
+//!     │  2   │   │             │ │ │                │           ├──ActionResponse──►action_status│
+//!     ├Action┘   │             │ │ │                │           │       │          └─────────────┘
+//!     │          │            ┌▼─┴─▼┐            ┌--┼-----------├───────┤
+//!     │  3       │            │Mutex│            '  │           │-------│-┐
+//!     ├──────────┘            └──▲──┘            '  │           │   1   │ '
+//!     │                          │               '  │     3     │       │ '          ┌─────────┐
+//!     │                          └─--------------┤  └──────────►│───────┤ ├--Action--►bridge_tx│
+//!     │                                          '              │       │ '          └─────────┘
+//!     │                                          └--------------├───────┘ '
+//!     │                                                         │---------┘
+//!                                                                   3
+//! ```
+//! [`Actions`]: crate::Actions
+//! [`lock`]: Mutex::lock()
+//! [`payload`]: Action#structfield.payload
+//! [`recv()`]: OtaRx::recv()
+//! [`send()`]: OtaTx::send()
+//! [`try_lock()`]: Mutex::try_lock()
+
 use bytes::BytesMut;
 use flume::{Receiver, Sender};
 use futures_util::StreamExt;
@@ -35,14 +83,17 @@ pub enum Error {
     EmptyFile,
 }
 
+/// The [`Sender`] end of an OTA channel. Enables the [`OtaDownloader`] to only send one [`Action`] at a time
+/// onto the channel. Contains a [`Mutex`] which can be locked to signal that an `Action` is in execution,
+/// in which case the `Action` that had to be forwarded should be reported as having failed.
 pub struct OtaTx {
     tx: Sender<Action>,
     slot: Arc<Mutex<()>>,
 }
 
 impl OtaTx {
-    // Forward actions, but fail if channel is filled or lock is already held,
-    // i.e. while another Ota is still downloading or waiting to be.
+    /// Forward actions, but fail if channel is filled or lock is already held,
+    /// i.e. while another Ota is still downloading or waiting to be.
     pub fn send(&self, ota_action: Action) -> Result<(), Error> {
         let _lock = self.slot.try_lock().map_err(|_| Error::Downloading)?;
         self.tx.try_send(ota_action)?;
@@ -51,21 +102,27 @@ impl OtaTx {
     }
 }
 
+/// The [`Receiver`] end of an OTA channel. Enables the [`OtaDownloader`] to only recieve one [`Action`] at a time
+/// from the channel. Contains a [`Mutex`] which can be locked to signal that an `Action` is in execution.
 pub struct OtaRx {
     rx: Receiver<Action>,
     slot: Arc<Mutex<()>>,
 }
 
 impl OtaRx {
-    // Receive actions and return along with lock restricting OtaTx from
-    // forwarding actions till lock is dropped.
-    async fn recv(&self) -> Result<(Action, MutexGuard<'_, ()>), Error> {
+    /// Receive actions and return along with lock restricting OtaTx from
+    /// forwarding actions till lock is dropped.
+    pub async fn recv(&self) -> Result<(Action, MutexGuard<'_, ()>), Error> {
         let action = self.rx.recv_async().await?;
         let lock = self.slot.lock().await;
         Ok((action, lock))
     }
 }
 
+/// This struct contains the necessary components to download and store an OTA update as notified
+/// by an [`Action`] with `name: "update_firmware"` while also sending periodic [`ActionResponse`]s
+/// to update progress and finally forwarding the OTA [`Action`], updated with information regarding
+/// where the OTA file is stored in the file-system.
 pub struct OtaDownloader {
     config: Arc<Config>,
     action_id: String,
@@ -240,8 +297,11 @@ impl OtaDownloader {
     }
 }
 
+/// The JSON format of data contained in the [`payload`] of an [`Action`] with `name: "update_firmware"`
+/// 
+/// [`payload`]: Action#structfield.payload
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-struct FirmwareUpdate {
+pub struct FirmwareUpdate {
     url: String,
     version: String,
     /// Path to location in fs where download will be stored
