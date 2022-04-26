@@ -76,7 +76,7 @@ One may configure certain features of uplink with the help of a `config.toml` fi
 uplink -a auth.json -c config.toml
 ```
 
-While providing a config file is optional, as uplink defaults to configuration values that are compiled into the binary, the user may also choose to omit parts of the configuration file, letting it default to the aforementioned values. uplink expects the `config.toml` to contain configuration details in the following format:
+It must be noted that parts of, or the entirety of the config file is optional and a user may choose to omit it, letting uplink default to configuration values that are compiled into the binary. uplink only expects the `config.toml` to contain configuration details in the following format:
 ```toml
 # TCP Port to connect your applications with uplink
 bridge_port = 5555
