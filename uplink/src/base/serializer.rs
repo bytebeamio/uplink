@@ -22,6 +22,10 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
     Client(#[from] ClientError),
+    #[error("Packet was not expected {0:?}")]
+    UnexpectedPacket(Packet),
+    #[error("Request was not expected {0:?}")]
+    UnexpectedRequest(Request),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
     #[error("Stream to push Serializer Metrics is missing")]
@@ -208,7 +212,7 @@ impl Serializer {
 
         let publish = match read(storage.reader(), max_packet_size) {
             Ok(Packet::Publish(publish)) => publish,
-            Ok(packet) => unreachable!("{:?}", packet),
+            Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
             Err(e) => {
                 error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
                 return Ok(Status::Normal);
@@ -257,7 +261,7 @@ impl Serializer {
                         Ok(c) => c,
                         Err(ClientError::Request(request)) => match request.into_inner() {
                             Request::Publish(publish) => return Ok(Status::EventLoopCrash(publish)),
-                            request => unreachable!("{:?}", request),
+                            request => return Err(Error::UnexpectedRequest(request)),
                         },
                         Err(e) => return Err(e.into()),
                     };
@@ -274,7 +278,7 @@ impl Serializer {
 
                     let publish = match read(storage.reader(), max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
-                        Ok(packet) => unreachable!("{:?}", packet),
+                        Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
                         Err(e) => {
                             error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
                             return Ok(Status::Normal)
@@ -335,7 +339,7 @@ impl Serializer {
 
             match failed.into_inner() {
                 Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
-                request => unreachable!("{:?}", request),
+                request => return Err(Error::UnexpectedRequest(request)),
             };
         }
     }
