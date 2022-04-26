@@ -71,7 +71,12 @@ The `auth.json` file might contain something similar to the following JSON, poin
 > **NOTE**: You could download this file [from the Bytebeam UI][platform]. If you are using your own broker instead, you could use uplink [without TLS][unsecure], but we recommend that you use TLS and [provision your own certificates][provision] to do it. You can read more about securing uplink in the [uplink Security document][security]
 
 #### Configuring `uplink`
-One may configure certain features of uplink with the help of a `config.toml` file by using the commandline arguments `-c` or `--config`. uplink expects the `config.toml` to contain the following details:
+One may configure certain features of uplink with the help of a `config.toml` file by using the commandline arguments `-c` or `--config`:
+```sh
+uplink -a auth.json -c config.toml
+```
+
+While providing a config file is optional, as uplink defaults to configuration values that are compiled into the binary, the user may also choose to omit parts of the configuration file, letting it default to the aforementioned values. uplink expects the `config.toml` to contain configuration details in the following format:
 ```toml
 # TCP Port to connect your applications with uplink
 bridge_port = 5555
