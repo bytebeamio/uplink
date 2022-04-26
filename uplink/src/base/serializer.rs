@@ -24,6 +24,8 @@ pub enum Error {
     Client(#[from] ClientError),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
+    #[error("Stream to push Serializer Metrics is missing")]
+    MissingMetricsStream,
 }
 
 enum Status {
@@ -77,7 +79,7 @@ impl Serializer {
         collector_rx: Receiver<Box<dyn Package>>,
         client: AsyncClient,
     ) -> Result<Serializer, Error> {
-        let metrics_config = config.streams.get("metrics").unwrap();
+        let metrics_config = config.streams.get("metrics").ok_or(Error::MissingMetricsStream)?;
         let metrics = Metrics::new(&metrics_config.topic);
 
         let storage = match &config.persistence {
@@ -107,7 +109,7 @@ impl Serializer {
         loop {
             let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
-            let payload = data.serialize();
+            let payload = data.serialize()?;
 
             let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
             publish.pkid = 1;
@@ -153,7 +155,7 @@ impl Serializer {
                       }
 
                       let topic = data.topic();
-                      let payload = data.serialize();
+                      let payload = data.serialize()?;
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
@@ -225,7 +227,7 @@ impl Serializer {
                       }
 
                       let topic = data.topic();
-                      let payload = data.serialize();
+                      let payload = data.serialize()?;
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
@@ -305,7 +307,7 @@ impl Serializer {
                     }
 
                     let topic = data.topic();
-                    let payload = data.serialize();
+                    let payload = data.serialize()?;
                     let payload_size = payload.len();
                     match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
@@ -318,7 +320,7 @@ impl Serializer {
 
                 }
                 _ = interval.tick() => {
-                    let (topic, payload) = self.metrics.next();
+                    let (topic, payload) = self.metrics.next()?;
                     let payload_size = payload.len();
                     match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
@@ -423,15 +425,15 @@ impl Metrics {
         self.errors.push_str(" | ");
     }
 
-    pub fn next(&mut self) -> (&str, Vec<u8>) {
+    pub fn next(&mut self) -> Result<(&str, Vec<u8>), Error> {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
         self.sequence += 1;
 
-        let payload = serde_json::to_vec(&vec![&self]).unwrap();
+        let payload = serde_json::to_vec(&vec![&self])?;
         self.errors.clear();
         self.lost_segments = 0;
-        (&self.topic, payload)
+        Ok((&self.topic, payload))
     }
 }

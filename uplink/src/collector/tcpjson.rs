@@ -71,7 +71,7 @@ impl Bridge {
                         }
                     }
                     action = self.actions_rx.recv_async() => {
-                        let action = action.unwrap();
+                        let action = action?;
                         error!("Bridge down!! Action ID = {}", action.action_id);
                         let status = ActionResponse::failure(&action.action_id, "Bridge down");
                         if let Err(e) = action_status.fill(status).await {
@@ -215,8 +215,8 @@ impl Package for Buffer<Payload> {
         return self.topic.clone();
     }
 
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {

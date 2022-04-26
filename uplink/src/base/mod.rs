@@ -15,6 +15,8 @@ pub mod serializer;
 pub enum Error {
     #[error("Send error {0}")]
     Send(#[from] SendError<Box<dyn Package>>),
+    #[error("Serde error {0}")]
+    Serde(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,7 +77,7 @@ pub trait Point: Send + Debug {
 
 pub trait Package: Send + Debug {
     fn topic(&self) -> Arc<String>;
-    fn serialize(&self) -> Vec<u8>;
+    fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
 }
 

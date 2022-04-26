@@ -123,7 +123,7 @@ impl Storage {
         let mut file = OpenOptions::new().read(true).open(&next_file_path)?;
 
         // Load file into memory and delete it
-        let metadata = fs::metadata(&next_file_path).expect("unable to read metadata");
+        let metadata = fs::metadata(&next_file_path)?;
         self.prepare_current_read_buffer(metadata.len() as usize);
         file.read_exact(&mut self.current_read_file[..])?;
         self.remove(id)?;
