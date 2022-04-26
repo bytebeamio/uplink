@@ -15,8 +15,6 @@ pub mod serializer;
 pub enum Error {
     #[error("Send error {0}")]
     Send(#[from] SendError<Box<dyn Package>>),
-    #[error("Serde error {0}")]
-    Serde(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Clone, Deserialize)]
