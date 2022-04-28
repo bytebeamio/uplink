@@ -24,8 +24,6 @@ pub enum Error {
     Client(#[from] ClientError),
     #[error("Packet was not expected {0:?}")]
     UnexpectedPacket(Packet),
-    #[error("Request was not expected {0:?}")]
-    UnexpectedRequest(Request),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
     #[error("Stream to push Serializer Metrics is missing")]
@@ -261,7 +259,7 @@ impl Serializer {
                         Ok(c) => c,
                         Err(ClientError::Request(request)) => match request.into_inner() {
                             Request::Publish(publish) => return Ok(Status::EventLoopCrash(publish)),
-                            request => return Err(Error::UnexpectedRequest(request)),
+                            request => unreachable!("{:?}", request),
                         },
                         Err(e) => return Err(e.into()),
                     };
@@ -339,7 +337,7 @@ impl Serializer {
 
             match failed.into_inner() {
                 Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
-                request => return Err(Error::UnexpectedRequest(request)),
+                request => unreachable!("{:?}", request),
             };
         }
     }
