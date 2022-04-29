@@ -1,4 +1,4 @@
-use self::ota::OtaTx;
+use super::{OneError, OneTx};
 
 use super::{Config, Control, Package};
 use flume::{Receiver, Sender};
@@ -33,8 +33,10 @@ pub enum Error {
     BridgeSendError(#[from] flume::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
-    #[error("Error sending update_firmware action {0}")]
-    Ota(#[from] ota::Error),
+    #[error("Error sending to One channel {0}")]
+    OneChannel(#[from] super::OneError<Action>),
+    #[error("Another OTA downloading")]
+    Downloading,
 }
 
 /// On the Bytebeam platform, an Action is how beamd and through it,
@@ -125,7 +127,7 @@ pub struct Actions {
     controller: controller::Controller,
     actions_rx: Receiver<Action>,
     tunshell_tx: Sender<String>,
-    ota_tx: OtaTx,
+    ota_tx: OneTx<Action>,
     bridge_tx: Sender<Action>,
 }
 
@@ -135,7 +137,7 @@ impl Actions {
         controllers: HashMap<String, Sender<Control>>,
         actions_rx: Receiver<Action>,
         tunshell_tx: Sender<String>,
-        ota_tx: OtaTx,
+        ota_tx: OneTx<Action>,
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
     ) -> Actions {
@@ -185,7 +187,12 @@ impl Actions {
                 return Ok(());
             }
             "update_firmware" if self.config.ota.enabled => {
-                self.ota_tx.send(action)?;
+                // if action can't be sent due to BlockedChannel Error out and
+                // notify that OTA already downloading
+                self.ota_tx.send(action).map_err(|e| match e {
+                    OneError::BlockedChannel => Error::Downloading,
+                    e => Error::OneChannel(e),
+                })?;
                 return Ok(());
             }
             _ => (),

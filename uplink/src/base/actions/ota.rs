@@ -1,71 +1,65 @@
 //! Contains definitions necessary to Download OTA updates as notified by an [`Action`] with `name: "update_firmware"`
-//! 
-//! The thread running [`Actions`] forwards an OTA `Action` to the [`OtaDownloader`] with an [`OtaTx`], which checks a
-//! [`Mutex`] to see if it is locked using a [`try_lock()`], if not, the `Action` is forwarded through a channel that
-//! is also connected to [`OtaRx`], which then proceeds to [`lock`] the `Mutex` until the OTA is done downloading,
-//! in which case the lock is dropped and hence the `Mutex` is freed.
-//! 
+//!
+//! The thread running [`Actions`] forwards an OTA `Action` to the [`OtaDownloader`] with an [`OneTx<Action>`], with a
+//! [`try_send()`] of a value with type `Option<Action>`. If the channel is filled, another OTA is deemed to be downloading
+//! and thus the `Action` can't be forwarded through the channel to [`OneRx<Action>`] and an [`Error::Downloading`] message
+//! is returned.
+//!
+//! If the channel is not filled, the `Action` is sent onto the channel with the value being `Some(..)` and a blocking
+//! [`send()`] with the value being `None` is sent to fill the channel and signal a running OTA download. This ensures that
+//! multiple OTAs aren't waiting to be downloaded and is illustrated in the following diagram by how `Action` 2 doesn't reach
+//! the `OtaDownloader` and is hence rejected.
+//!
 //! OTA `Action`s contain JSON formatted [`payload`] which can be deserialized into an object of type [`FirmwareUpdate`].
 //! This object contains information such as the `url` where the OTA file is accessible from, the `version` number associated
 //! with the OTA file and a field which must be updated with the location in file-system where the OTA file is stored into.
-//! 
-//! Using a [`try_lock()`], [`OtaTx`] ensures that in case the Mutex can't be instantaneously locked, the lock must be
-//! held by the last caller of [`recv()`] and hence another OTA is currently being downloaded, thus leading to
-//! the [`send()`] erroring out ensuring multiple OTA's aren't waiting to be downloaded. This is illustrated in
-//! the following diagram by how `Action` 2 doesn't reach the `OtaDownloader` and is hence rejected.
-//! 
+//!
 //! The `OtaDownloader` also updates the state of a downloading `Action` using periodic [`ActionResponse`]s containing
 //! progress information. On completion of a download, the received `Action`'s `payload` is updated to contain information
 //! about where the OTA was downloaded into, within the file-system.
-//! 
+//!
 //! ```text
 //! ┌───────┐                                              ┌─────────────┐
 //! │Actions│                                              │OtaDownloader│
 //! └───┬───┘                                              └──────┬──────┘
-//!     │             .try_send()       .recv()                   │
-//!     │.send() ┌─────────────────X──────────────────┐    .recv()│
-//!     │  1  ┌──┴──┐              │               ┌──▼──┐  1     │
-//!     ├─────►OtaTx├────────────┐ │ ┌─────────────┤OtaRx├───────►│───────┐
-//!     │     └▲───▲┘.try_lock() │ │ │   .lock()   └──┬──┘        │       │          ┌─────────────┐
-//!     │  2   │   │             │ │ │                │           ├──ActionResponse──►action_status│
-//!     ├Action┘   │             │ │ │                │           │       │          └─────────────┘
-//!     │          │            ┌▼─┴─▼┐            ┌--┼-----------├───────┤
-//!     │  3       │            │Mutex│            '  │           │-------│-┐
-//!     ├──────────┘            └──▲──┘            '  │           │   1   │ '
-//!     │                          │               '  │     3     │       │ '          ┌─────────┐
-//!     │                          └─--------------┤  └──────────►│───────┤ ├--Action--►bridge_tx│
-//!     │                                          '              │       │ '          └─────────┘
-//!     │                                          └--------------├───────┘ '
+//!     │          .try_send(Some(Action))   .recv()              │
+//!     │.send() ┌────────────────────────────────────┐    .recv()│
+//!     │  1  ┌──┴──┐                              ┌──▼──┐  1     │
+//!     ├─────►OneTx├───────────────x──────────────┤OneRx├───────►│───────┐
+//!     │     └▲───▲┘ .send(None)           .recv()└──┬──┘        │       │          ┌─────────────┐
+//!     │  2   │   │                                  │           ├──ActionResponse──►action_status│
+//!     ├Action┘   │                                  │           │       │          └─────────────┘
+//!     │          │                                  │           ├───────┤
+//!     │  3       │                                  │           │-------│-┐
+//!     ├──────────┘                                  │           │   1   │ '
+//!     │                                             │     3     │       │ '          ┌─────────┐
+//!     │                                             └──────────►│───────┤ ├--Action--►bridge_tx│
+//!     │                                                         │       │ '          └─────────┘
+//!     │                                                         ├───────┘ '
 //!     │                                                         │---------┘
 //!                                                                   3
 //! ```
-//! 
-//! **NOTE:** An OTA `Action` received between `OtaRx` receiveing the last `Action` and locking the `Mutex` will get sent onto
-//! the OTA channel, but will not be received till the prior `Action` completes downloading, by which time it may be deemed as
-//! having failed. The issue is that this `Action` will still be received from the channel and the OTA file will be downloaded
-//! by `OtaDownloader`, in which case the `Action` will have succeeded despite apparently having failed.
-//! 
+//!
+//! **NOTE:** The [`Actions`] thread will block between sending a `Some(..)` and a `None` onto the OTA channel.
+//!
 //! [`Actions`]: crate::Actions
-//! [`lock`]: Mutex::lock()
 //! [`payload`]: Action#structfield.payload
-//! [`recv()`]: OtaRx::recv()
-//! [`send()`]: OtaTx::send()
-//! [`try_lock()`]: Mutex::try_lock()
+//! [`send()`]: Sender::send()
+//! [`try_send()`]: Sender::try_send()
+//! [`Error::Downloading`]: crate::base::actions::Error::Downloading
 
 use bytes::BytesMut;
-use flume::{Receiver, Sender};
+use flume::Sender;
 use futures_util::StreamExt;
 use log::{debug, error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, MutexGuard};
 
 use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf, sync::Arc};
 
 use super::{Action, ActionResponse};
-use crate::base::{Config, Stream};
-use crate::RxTx;
+use crate::base::{Config, OneChannel, OneError, OneRx, OneTx, Stream};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -75,54 +69,16 @@ pub enum Error {
     ReqwestError(#[from] reqwest::Error),
     #[error("File io Error: {0}")]
     IoError(#[from] std::io::Error),
-    #[error("Error forwarding OTA Action: {0}")]
+    #[error("Error forwarding OTA Action to bridge: {0}")]
     TrySendError(#[from] flume::TrySendError<Action>),
     #[error("Error receiving action: {0}")]
-    Recv(#[from] flume::RecvError),
-    #[error("Another OTA downloading")]
-    Downloading,
+    Recv(#[from] OneError<Action>),
     #[error("Missing file name: {0}")]
     FileNameMissing(String),
     #[error("Missing file path")]
     FilePathMissing,
     #[error("Download failed, content length zero")]
     EmptyFile,
-}
-
-/// The [`Sender`] end of an OTA channel. Enables the [`OtaDownloader`] to only send one [`Action`] at a time
-/// onto the channel. Contains a [`Mutex`] which can be locked to signal that an `Action` is in execution,
-/// in which case the `Action` that had to be forwarded should be reported as having failed.
-pub struct OtaTx {
-    tx: Sender<Action>,
-    slot: Arc<Mutex<()>>,
-}
-
-impl OtaTx {
-    /// Forward actions, but fail if channel is filled or lock is already held,
-    /// i.e. while another Ota is still downloading or waiting to be.
-    pub fn send(&self, ota_action: Action) -> Result<(), Error> {
-        let _lock = self.slot.try_lock().map_err(|_| Error::Downloading)?;
-        self.tx.try_send(ota_action)?;
-
-        Ok(())
-    }
-}
-
-/// The [`Receiver`] end of an OTA channel. Enables the [`OtaDownloader`] to only recieve one [`Action`] at a time
-/// from the channel. Contains a [`Mutex`] which can be locked to signal that an `Action` is in execution.
-pub struct OtaRx {
-    rx: Receiver<Action>,
-    slot: Arc<Mutex<()>>,
-}
-
-impl OtaRx {
-    /// Receive actions and return along with lock restricting OtaTx from
-    /// forwarding actions till lock is dropped.
-    pub async fn recv(&self) -> Result<(Action, MutexGuard<'_, ()>), Error> {
-        let action = self.rx.recv_async().await?;
-        let lock = self.slot.lock().await;
-        Ok((action, lock))
-    }
 }
 
 /// This struct contains the necessary components to download and store an OTA update as notified
@@ -133,29 +89,20 @@ pub struct OtaDownloader {
     config: Arc<Config>,
     action_id: String,
     status_bucket: Stream<ActionResponse>,
+    ota_rx: OneRx<Action>,
     bridge_tx: Sender<Action>,
     client: Client,
     sequence: u32,
 }
 
 impl OtaDownloader {
-    /// Create a channel to for OTA action only where sender fails if an action
-    /// is already being processed by the receiver, determined using a mutex lock.
-    pub fn rxtx() -> (OtaTx, OtaRx) {
-        let slot = Arc::new(Mutex::new(()));
-        let RxTx { tx, rx } = RxTx::bounded(1);
-        let ota_tx = OtaTx { tx, slot: slot.clone() };
-        let ota_rx = OtaRx { rx, slot };
-
-        (ota_tx, ota_rx)
-    }
-
-    /// Create a struct to manage OTA downloads, runs on a separate thread
+    /// Create a struct to manage OTA downloads, runs on a separate thread. Also returns a [`Sender`]
+    /// end of a "One" channel to send OTA actions onto.
     pub fn new(
         config: Arc<Config>,
         status_bucket: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
-    ) -> Result<Self, Error> {
+    ) -> Result<(OneTx<Action>, Self), Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
         let client = match &config.authentication {
@@ -171,24 +118,30 @@ impl OtaDownloader {
         }
         .build()?;
 
-        Ok(Self {
-            config,
-            client,
-            status_bucket,
-            bridge_tx,
-            sequence: 0,
-            action_id: String::default(),
-        })
+        let (ota_tx, ota_rx) = OneChannel::new();
+
+        Ok((
+            ota_tx,
+            Self {
+                config,
+                client,
+                ota_rx,
+                status_bucket,
+                bridge_tx,
+                sequence: 0,
+                action_id: String::default(),
+            },
+        ))
     }
 
     /// Spawn a thread to handle downloading OTA updates as per "update_firmware" actions and for
     /// forwarding updated actions to bridge for further processing, i.e. update installation.
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(mut self, ota_rx: OtaRx) -> Result<(), Error> {
+    pub async fn start(mut self) -> Result<(), Error> {
         loop {
             self.sequence = 0;
             // `_lock` is held until current action completes, hence failing all sends till it's dropped
-            let (action, _lock) = ota_rx.recv().await?;
+            let action = self.ota_rx.recv()?;
             self.action_id = action.action_id.clone();
 
             match self.run(action).await {
@@ -305,7 +258,7 @@ impl OtaDownloader {
 }
 
 /// Expected JSON format of data contained in the [`payload`] of an OTA [`Action`]
-/// 
+///
 /// [`payload`]: Action#structfield.payload
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct FirmwareUpdate {
@@ -339,11 +292,10 @@ mod test {
         let (stx, srx) = flume::bounded(1);
         let (btx, brx) = flume::bounded(1);
         let action_status = Stream::dynamic_with_size("actions_status", "", "", 1, stx);
-        let downloader = OtaDownloader::new(config, action_status, btx).unwrap();
-        let (ota_tx, ota_rx) = OtaDownloader::rxtx();
+        let (ota_tx, downloader) = OtaDownloader::new(config, action_status, btx).unwrap();
 
         // Start OtaDownloader in separate thread
-        std::thread::spawn(|| downloader.start(ota_rx).unwrap());
+        std::thread::spawn(|| downloader.start().unwrap());
 
         // Create a firmware update action
         let ota_update = FirmwareUpdate {
@@ -360,7 +312,7 @@ mod test {
             payload: json!(ota_update).to_string(),
         };
 
-        // Send action to OtaDownloader with OtaTx
+        // Send action to OtaDownloader with OneTx<Action>
         ota_tx.send(ota_action.clone()).unwrap();
 
         // Collect action_status and forwarded Action
@@ -370,29 +322,5 @@ mod test {
         // Ensure received action_status and forwarded action contains expected info
         assert_eq!(status[0].state, "Downloading");
         assert_eq!(forward, expected_forward);
-    }
-
-    #[test]
-    fn multiple_ota_at_once() {
-        let (ota_tx, ota_rx) = OtaDownloader::rxtx();
-
-        let action = Action {
-            action_id: "".to_string(),
-            kind: "".to_string(),
-            name: "".to_string(),
-            payload: "".to_string(),
-        };
-        // The following send should succeed
-        ota_tx.send(action).unwrap();
-
-        // The lock will disallow further sends till drop
-        let (action, _lock) =
-            tokio::runtime::Runtime::new().unwrap().block_on(ota_rx.recv()).unwrap();
-
-        // The following send should fail
-        match ota_tx.send(action).unwrap_err() {
-            Error::Downloading => {}
-            e => unreachable!("This error should not have been thrown: {}", e),
-        }
     }
 }

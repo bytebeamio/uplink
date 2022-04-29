@@ -3,9 +3,11 @@ use std::fmt::Debug;
 use std::mem;
 use std::sync::Arc;
 
-use flume::{SendError, Sender};
+use flume::{Receiver, RecvError, SendError, Sender, TrySendError};
 use log::warn;
 use serde::Deserialize;
+
+use crate::RxTx;
 
 pub mod actions;
 pub mod mqtt;
@@ -265,6 +267,107 @@ impl<T> Clone for Stream<T> {
             max_buffer_size: self.max_buffer_size,
             buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
             tx: self.tx.clone(),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum OneError<T: 'static + Debug> {
+    #[error("Send error {0}")]
+    Send(#[from] SendError<Option<T>>),
+    #[error("TrySend error {0}")]
+    TrySend(#[from] TrySendError<Option<T>>),
+    #[error("Recv error {0}")]
+    Recv(#[from] RecvError),
+    #[error("Blocked Channel")]
+    BlockedChannel,
+    #[error("Expected Some(..) received None")]
+    MissingElement
+}
+
+pub struct OneChannel;
+
+impl OneChannel {
+    /// Create a `OneChannel` to accept a single object from one thread to another, waiting for the second thread
+    /// to request a second time before allowing the first thread to push the next value
+    ///
+    /// ```text
+    ///          .try_send(Some(Action))      .recv()
+    /// .send() ┌────────────────────────────────────┐   .recv()
+    ///   1  ┌──┴──┐                              ┌──▼──┐  1     
+    /// ─────►OneTx├───────────────x──────────────┤OneRx├──────►
+    ///      └─────┘ .send(None)           .recv()└─────┘
+    /// ```
+    pub fn new<T>() -> (OneTx<T>, OneRx<T>) {
+        let RxTx { tx, rx } = RxTx::bounded(1);
+
+        (OneTx { tx }, OneRx { rx })
+    }
+}
+
+/// The [`Sender`] end of an [`OneChannel`]. Enables the program to only send one object at a time onto the channel.
+/// Uses a [`try_send()`] to push a `Some(..)` and fails if filled, if not and is successful, blocks thread to push
+/// a None and thus fill the channel till currently execution action is completed.
+///
+/// [`try_send()`]: Sender::try_send()
+/// [`send()`]: Sender::send()
+pub struct OneTx<T> {
+    tx: Sender<Option<T>>,
+}
+
+impl<T: Debug> OneTx<T> {
+    /// Forward actions, but fail if channel is filled or lock is already held,
+    /// i.e. while another Ota is still downloading or waiting to be.
+    pub fn send(&self, t: T) -> Result<(), OneError<T>> {
+        self.tx.try_send(Some(t)).map_err(|e| match e {
+            TrySendError::Full(_) => OneError::BlockedChannel,
+            e => OneError::TrySend(e),
+        })?;
+        self.tx.send(None)?;
+
+        Ok(())
+    }
+}
+
+// The [`Receiver`] end of a [`OneChannel`]
+pub struct OneRx<T> {
+    rx: Receiver<Option<T>>,
+}
+
+impl<T: Debug> OneRx<T> {
+    /// Receive action in an `Option`, if None, repeated call to [`Receiver::recv()`]
+    /// Should succeed, else error should be passed. Blocks till channel has element.
+    pub fn recv(&self) -> Result<T, OneError<T>> {
+        let next = match self.rx.recv()? {
+            Some(x) => x,
+            None => self.rx.recv()?.ok_or(OneError::MissingElement)?,
+        };
+
+        Ok(next)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{OneChannel, OneError};
+
+    #[test]
+    fn multiple_objects_at_once() {
+        let (one_tx, one_rx) = OneChannel::new();
+
+        // OneTx<Action> will push a None value into the channel, disallowing further sends till next recv
+        std::thread::spawn(move || {
+            // Ensure received action
+            let _ = one_rx.recv().unwrap();
+        });
+
+        // The following send should succeed
+        one_tx.send(1).unwrap();
+
+        // The following send should fail
+        match one_tx.send(2).unwrap_err() {
+            OneError::TrySend(_) => {}
+            e => unreachable!("This error should not have been thrown: {}", e),
         }
     }
 }

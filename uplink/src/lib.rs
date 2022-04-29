@@ -23,8 +23,7 @@ use base::actions::Actions;
 pub use base::actions::{Action, ActionResponse};
 use base::mqtt::Mqtt;
 use base::serializer::Serializer;
-pub use base::{Config, Stream};
-pub use base::{Package, Point};
+pub use base::{Config, OneChannel, OneRx, OneTx, Package, Point, Stream};
 pub use collector::simulator::Simulator;
 use collector::systemstats::StatCollector;
 pub use collector::tcpjson::{Bridge, Payload};
@@ -80,14 +79,13 @@ impl Uplink {
         thread::spawn(move || tunshell_session.start());
 
         // Launch a thread to handle downloads for OTA updates
-        let (ota_tx, ota_rx) = OtaDownloader::rxtx();
-        let ota_downloader = OtaDownloader::new(
+        let (ota_tx, ota_downloader) = OtaDownloader::new(
             self.config.clone(),
             self.action_status.clone(),
             self.action_channel.tx.clone(),
         )?;
         if self.config.ota.enabled {
-            thread::spawn(move || ota_downloader.start(ota_rx));
+            thread::spawn(move || ota_downloader.start());
         }
 
         // Launch a thread to collect system statistics
