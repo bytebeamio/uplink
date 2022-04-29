@@ -44,9 +44,9 @@ pub struct Action {
     #[serde(alias = "id")]
     pub action_id: String,
     // control or process
-    kind: String,
+    pub kind: String,
     // action name
-    name: String,
+    pub name: String,
     // action payload. json. can be args/payload. depends on the invoked command
     pub payload: String,
 }
