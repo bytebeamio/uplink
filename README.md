@@ -53,22 +53,10 @@ You can start uplink with the following command, where you will need to provide 
 uplink -a auth.json
 ```
 
-The `auth.json` file might contain something similar to the following JSON, pointing uplink to a certain broker and providing any information necessary to initiate an authenticated connection over TLS:
-```js
-{
-    "project_id": "xxxx",
-    "device_id": "1234",
-    "broker": "example.com",
-    "port": 8883,
-    "authentication": {			// Optional, use only with TLS enabled brokers
-        "ca_certificate": "...",
-        "device_certificate": "...",
-        "device_private_key": "..."
-    }
-}
-```
+The `auth.json` file must contain information such as the device's ID, the broker's URL, the port to connect to and the TLS certificates to be used while connecting as can be seen inside [dummy.json][dummy]. When connecting over non-TLS connections, authentication information is unncessary as illustrated by [noauth.json][noauth].
 
-> **NOTE**: You could download this file [from the Bytebeam UI][platform]. If you are using your own broker instead, you could use uplink [without TLS][unsecure], but we recommend that you use TLS and [provision your own certificates][provision] to do it. You can read more about securing uplink in the [uplink Security document][security]
+
+> **NOTE**: If you are using [Bytebeam][bytebeam], you could download the file downloaded [from the Bytebeam UI][platform]. If you are using your own broker instead, you could use uplink [without TLS][unsecure], but we recommend that you use TLS and [provision your own certificates][provision] to do it. You can read more about securing uplink in the [uplink Security document][security]
 
 #### Configuring `uplink`
 One may configure certain features of uplink with the help of a `config.toml` file by using the commandline arguments `-c` or `--config`:
@@ -76,81 +64,7 @@ One may configure certain features of uplink with the help of a `config.toml` fi
 uplink -a auth.json -c config.toml
 ```
 
-It must be noted that parts of, or the entirety of the config file is optional and a user may choose to omit it, letting uplink default to configuration values that are compiled into the binary. uplink only expects the `config.toml` to contain configuration details in the following format:
-```toml
-# TCP Port to connect your applications with uplink
-bridge_port = 5555
-
-# MQTT client configuration
-# 
-# Required Parameters
-# - max_packet_size: Maximum packet size acceptable for MQTT messages
-# - max_inflight: Maximum number of outgoing QoS 1/2 messages that can be
-#                 handled by uplink, at a time, requiring acknowledgedment.
-max_packet_size = 102400
-max_inflight = 100
-
-# Whitelist of binaries which uplink can spawn as a process
-# This makes sure that user is protected against random actions
-# triggered from cloud.
-actions = ["tunshell"]
-
-# Configuration details associated with uplink's persistent storage module
-# which writes publish packets to disk in case of slow or crashed network.
-# 
-# Required Parameters
-# - path: Path to directory where storage writes backups into files.
-# - max_file_size: Maximum size upto which single persistence file can grow
-# - max_file_count: Maximum number of persistence files allowed
-#
-# NOTE: Persitence as a whole is an optional feature that is disabled by
-# default, i.e. if not inlcuded in configuration.
-[persistence]
-path = "/tmp/uplink"
-max_file_size = 104857600 # 100MB
-max_file_count = 3
-
-# Table of pre-configured data streams
-#
-# Required Parameters
-# - topic: Topic-filter to which data shall be published
-# - buf-size: Number of data points that shall be included in each Publish
-#
-# NOTE: The metrics stream is one to which the Serializer Metrics module
-# publishes associated data onto, to keep track of serializer performance.
-[streams.metrics]
-topic = "/tenants/{tenant_id}/devices/{device_id}/events/metrics/jsonarray"
-buf_size = 10
-
-# The action_status stream is used to push progress of Actions in execution
-[streams.action_status]
-topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
-buf_size = 1
-
-# Configurations associated with the OTA module of uplink, if enabled Actions
-# with `name: "update_firmware"` can trigger the OtaDownloader to download the
-# OTA package.
-#
-# Required Parameters
-# - enabled: A boolean to determine if the feature must be enabled
-# - path: The location in file system where uplink will download and store
-#         OTA update files into.
-[ota]
-enabled = true
-path = "/var/tmp/ota-file"
-
-# Configurations associated with the system stats module of uplink, if enabled
-# system stats such as memory in use and CPU usage will be published onto special.
-#
-# Required Parameters
-# - enabled: A boolean to determine if the feature must be enabled
-# - process_names: List of processes which are to be tracked in system stats
-# - update_period: Time in seconds between each collection/publish of system stats
-[stats]
-enabled = false
-process_names = ["uplink"]
-update_period = 30
-```
+It must be noted that parts of, or the entirety of the config file is optional and a user may choose to omit it, letting uplink default to configuration values that are compiled into the binary. uplink only expects the `config.toml` to contain configuration details as given in the [example config.toml][config] file in the configs folder.
 
 #### Writing Applications
 uplink acts as an intermediary between the user's applications and the Bytebeam platform/MQTT 3.1.1 broker of choice. One can accept [Action][action]s from the cloud and push data(from applications such as sensing) or [Action Response][action_response]s back.
@@ -306,3 +220,7 @@ Please follow the [code of conduct][coc] while opening issues to report bugs or 
 [docs.rs]: https://docs.rs/uplink
 [coc]: docs/CoC.md
 [contribute]: CONTRIBUTING.md
+[dummy]: configs/dummy.json
+[noauth]: configs/noauth.json
+[config]: configs/config.toml
+[bytebeam]: https://bytebeam.io
