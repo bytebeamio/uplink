@@ -23,7 +23,7 @@ use base::actions::Actions;
 pub use base::actions::{Action, ActionResponse};
 use base::mqtt::Mqtt;
 use base::serializer::Serializer;
-pub use base::{Config, OneChannel, OneRx, OneTx, Package, Point, Stream};
+pub use base::{Config, Package, Point, Stream};
 pub use collector::simulator::Simulator;
 use collector::systemstats::StatCollector;
 pub use collector::tcpjson::{Bridge, Payload};

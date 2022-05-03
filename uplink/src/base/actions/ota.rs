@@ -1,14 +1,8 @@
 //! Contains definitions necessary to Download OTA updates as notified by an [`Action`] with `name: "update_firmware"`
 //!
-//! The thread running [`Actions`] forwards an OTA `Action` to the [`OtaDownloader`] with an [`OneTx<Action>`], with a
-//! [`try_send()`] of a value with type `Option<Action>`. If the channel is filled, another OTA is deemed to be downloading
-//! and thus the `Action` can't be forwarded through the channel to [`OneRx<Action>`] and an [`Error::Downloading`] message
-//! is returned.
-//!
-//! If the channel is not filled, the `Action` is sent onto the channel with the value being `Some(..)` and a blocking
-//! [`send()`] with the value being `None` is sent to fill the channel and signal a running OTA download. This ensures that
-//! multiple OTAs aren't waiting to be downloaded and is illustrated in the following diagram by how `Action` 2 doesn't reach
-//! the `OtaDownloader` and is hence rejected.
+//! The thread running [`Actions`] forwards an OTA `Action` to the [`OtaDownloader`] with a _rendezvous channel_(A channel bounded to 0). The `Action`
+//! is sent only when a receiver is awaiting on the otherside and fails otherwise. This allows us to instantly recognize that
+//! an OTA is currently being downloaded.
 //!
 //! OTA `Action`s contain JSON formatted [`payload`] which can be deserialized into an object of type [`FirmwareUpdate`].
 //! This object contains information such as the `url` where the OTA file is accessible from, the `version` number associated
@@ -22,18 +16,18 @@
 //! ┌───────┐                                              ┌─────────────┐
 //! │Actions│                                              │OtaDownloader│
 //! └───┬───┘                                              └──────┬──────┘
-//!     │          .try_send(Some(Action))   .recv()              │
-//!     │.send() ┌────────────────────────────────────┐    .recv()│
-//!     │  1  ┌──┴──┐                              ┌──▼──┐  1     │
-//!     ├─────►OneTx├───────────────x──────────────┤OneRx├───────►│───────┐
-//!     │     └▲───▲┘ .send(None)           .recv()└──┬──┘        │       │          ┌─────────────┐
-//!     │  2   │   │                                  │           ├──ActionResponse──►action_status│
-//!     ├Action┘   │                                  │           │       │          └─────────────┘
-//!     │          │                                  │           ├───────┤
-//!     │  3       │                                  │           │-------│-┐
-//!     ├──────────┘                                  │           │   1   │ '
-//!     │                                             │     3     │       │ '          ┌─────────┐
-//!     │                                             └──────────►│───────┤ ├--Action--►bridge_tx│
+//!     │                                                         │
+//!     │ .try_send()                                     .recv() │
+//!     │  1  ┌──────────────┐             ┌────────────────┐  1  │
+//!     ├─────►Sender<Action>├──────x──────►Receiver<Action>├────►│───────┐
+//!     │     └───▲─────▲────┘             └───────┬────────┘     │       │          ┌─────────────┐
+//!     │  2      │     │                          │              ├──ActionResponse──►action_status│
+//!     ├─Action──┘     │                          │              │       │          └─────────────┘
+//!     │               │                          │              ├───────┤
+//!     │  3            │                          │              │-------│-┐
+//!     ├───────────────┘                          │              │   1   │ '
+//!     │                                          │     3        │       │ '          ┌─────────┐
+//!     │                                          └─────────────►│───────┤ ├--Action--►bridge_tx│
 //!     │                                                         │       │ '          └─────────┘
 //!     │                                                         ├───────┘ '
 //!     │                                                         │---------┘
@@ -49,7 +43,7 @@
 //! [`Error::Downloading`]: crate::base::actions::Error::Downloading
 
 use bytes::BytesMut;
-use flume::Sender;
+use flume::{Sender, Receiver, RecvError};
 use futures_util::StreamExt;
 use log::{debug, error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
@@ -59,20 +53,20 @@ use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf, sync::Arc};
 
 use super::{Action, ActionResponse};
-use crate::base::{Config, OneChannel, OneError, OneRx, OneTx, Stream};
+use crate::base::{Config, Stream};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Serde error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Error from reqwest: {0}")]
-    ReqwestError(#[from] reqwest::Error),
+    Reqwest(#[from] reqwest::Error),
     #[error("File io Error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Error forwarding OTA Action to bridge: {0}")]
-    TrySendError(#[from] flume::TrySendError<Action>),
+    TrySend(#[from] flume::TrySendError<Action>),
     #[error("Error receiving action: {0}")]
-    Recv(#[from] OneError<Action>),
+    Recv(#[from] RecvError),
     #[error("Missing file name: {0}")]
     FileNameMissing(String),
     #[error("Missing file path")]
@@ -89,7 +83,7 @@ pub struct OtaDownloader {
     config: Arc<Config>,
     action_id: String,
     status_bucket: Stream<ActionResponse>,
-    ota_rx: OneRx<Action>,
+    ota_rx: Receiver<Action>,
     bridge_tx: Sender<Action>,
     client: Client,
     sequence: u32,
@@ -102,7 +96,7 @@ impl OtaDownloader {
         config: Arc<Config>,
         status_bucket: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
-    ) -> Result<(OneTx<Action>, Self), Error> {
+    ) -> Result<(Sender<Action>, Self), Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
         let client = match &config.authentication {
@@ -118,7 +112,8 @@ impl OtaDownloader {
         }
         .build()?;
 
-        let (ota_tx, ota_rx) = OneChannel::new();
+        // Create rendezvous channel with flume
+        let (ota_tx, ota_rx) = flume::bounded(0);
 
         Ok((
             ota_tx,
@@ -312,8 +307,8 @@ mod test {
             payload: json!(ota_update).to_string(),
         };
 
-        // Send action to OtaDownloader with OneTx<Action>
-        ota_tx.send(ota_action.clone()).unwrap();
+        // Send action to OtaDownloader with Sender<Action>
+        ota_tx.try_send(ota_action).unwrap();
 
         // Collect action_status and forwarded Action
         let status: Vec<ActionResponse> =

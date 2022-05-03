@@ -1,7 +1,5 @@
-use super::{OneError, OneTx};
-
 use super::{Config, Control, Package};
-use flume::{Receiver, Sender};
+use flume::{Receiver, Sender, TrySendError};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -28,13 +26,11 @@ pub enum Error {
     #[error("Controller error {0}")]
     Controller(#[from] controller::Error),
     #[error("Error sending keys to tunshell thread {0}")]
-    TunshellSendError(#[from] flume::SendError<String>),
-    #[error("Error sending Action through bridge {0}")]
-    BridgeSendError(#[from] flume::TrySendError<Action>),
+    TunshellSend(#[from] flume::SendError<String>),
+    #[error("Error forwarding Action {0}")]
+    TrySend(#[from] flume::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
-    #[error("Error sending to One channel {0}")]
-    OneChannel(#[from] super::OneError<Action>),
     #[error("Another OTA downloading")]
     Downloading,
 }
@@ -127,7 +123,7 @@ pub struct Actions {
     controller: controller::Controller,
     actions_rx: Receiver<Action>,
     tunshell_tx: Sender<String>,
-    ota_tx: OneTx<Action>,
+    ota_tx: Sender<Action>,
     bridge_tx: Sender<Action>,
 }
 
@@ -137,7 +133,7 @@ impl Actions {
         controllers: HashMap<String, Sender<Control>>,
         actions_rx: Receiver<Action>,
         tunshell_tx: Sender<String>,
-        ota_tx: OneTx<Action>,
+        ota_tx: Sender<Action>,
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
     ) -> Actions {
@@ -189,9 +185,9 @@ impl Actions {
             "update_firmware" if self.config.ota.enabled => {
                 // if action can't be sent due to BlockedChannel Error out and
                 // notify that OTA already downloading
-                self.ota_tx.send(action).map_err(|e| match e {
-                    OneError::BlockedChannel => Error::Downloading,
-                    e => Error::OneChannel(e),
+                self.ota_tx.try_send(action).map_err(|e| match e {
+                    TrySendError::Full(_) => Error::Downloading,
+                    e => Error::TrySend(e),
                 })?;
                 return Ok(());
             }
