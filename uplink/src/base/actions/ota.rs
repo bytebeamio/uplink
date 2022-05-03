@@ -265,8 +265,11 @@ pub struct FirmwareUpdate {
 
 #[cfg(test)]
 mod test {
+    use std::time::Duration;
+
     use super::*;
     use crate::config::Ota;
+    use flume::TrySendError;
     use serde_json::json;
 
     const OTA_DIR: &str = "/tmp/uplink_test";
@@ -307,6 +310,8 @@ mod test {
             payload: json!(ota_update).to_string(),
         };
 
+        std::thread::sleep(Duration::from_millis(1));
+
         // Send action to OtaDownloader with Sender<Action>
         ota_tx.try_send(ota_action).unwrap();
 
@@ -317,5 +322,31 @@ mod test {
         // Ensure received action_status and forwarded action contains expected info
         assert_eq!(status[0].state, "Downloading");
         assert_eq!(forward, expected_forward);
+    }
+
+    #[test]
+    fn multiple_actions_at_once() {
+        let config = Arc::new(Config::default());
+
+        // Create channels to forward and push action_status on
+        let (stx, _) = flume::bounded(1);
+        let (btx, _) = flume::bounded(1);
+        let action_status = Stream::dynamic_with_size("actions_status", "", "", 1, stx);
+        let (ota_tx, ota_downloader) = OtaDownloader::new(config, action_status, btx).unwrap();
+
+        // The following try_send() should fail since receiver is not awaiting
+        let ota_action = Action {
+            action_id: "1".to_string(),
+            kind: "firmware_update".to_string(),
+            name: "firmware_update".to_string(),
+            payload: "path/to/file".to_string(),
+        };
+
+        match ota_tx.try_send(ota_action).unwrap_err() {
+            TrySendError::Full(_) => {}
+            e => unreachable!("This error should not have been thrown: {}", e),
+        }
+
+        let _ = ota_downloader.ota_rx.try_recv().unwrap_err();
     }
 }
