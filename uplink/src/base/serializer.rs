@@ -26,8 +26,6 @@ pub enum Error {
     UnexpectedPacket(Packet),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
-    #[error("Stream to push Serializer Metrics is missing")]
-    MissingMetricsStream,
 }
 
 enum Status {
@@ -81,7 +79,7 @@ impl Serializer {
         collector_rx: Receiver<Box<dyn Package>>,
         client: AsyncClient,
     ) -> Result<Serializer, Error> {
-        let metrics_config = config.streams.get("metrics").ok_or(Error::MissingMetricsStream)?;
+        let metrics_config = config.streams.get("metrics").expect("Missing metrics Stream in config");
         let metrics = Metrics::new(&metrics_config.topic);
 
         let storage = match &config.persistence {
