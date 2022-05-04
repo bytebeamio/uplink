@@ -43,7 +43,7 @@
 //! [`Error::Downloading`]: crate::base::actions::Error::Downloading
 
 use bytes::BytesMut;
-use flume::{Sender, Receiver, RecvError};
+use flume::{Receiver, RecvError, Sender};
 use futures_util::StreamExt;
 use log::{debug, error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
@@ -315,38 +315,60 @@ mod test {
         // Send action to OtaDownloader with Sender<Action>
         ota_tx.try_send(ota_action).unwrap();
 
-        // Collect action_status and forwarded Action
+        // Collect action_status and ensure it is as expected
         let status: Vec<ActionResponse> =
             serde_json::from_slice(&srx.recv().unwrap().serialize()).unwrap();
-        let forward: FirmwareUpdate = serde_json::from_str(&brx.recv().unwrap().payload).unwrap();
-        // Ensure received action_status and forwarded action contains expected info
         assert_eq!(status[0].state, "Downloading");
+
+        // Collect and ensure forwarded action contains expected info
+        let forward: FirmwareUpdate = serde_json::from_str(&brx.recv().unwrap().payload).unwrap();
         assert_eq!(forward, expected_forward);
     }
 
     #[test]
     fn multiple_actions_at_once() {
-        let config = Arc::new(Config::default());
+        // Ensure path exists
+        std::fs::create_dir_all(OTA_DIR).unwrap();
+        // Prepare config
+        let ota_path = format!("{}/ota", OTA_DIR);
+        let config = Arc::new(Config {
+            ota: Ota { enabled: true, path: ota_path.clone() },
+            ..Default::default()
+        });
 
         // Create channels to forward and push action_status on
         let (stx, _) = flume::bounded(1);
         let (btx, _) = flume::bounded(1);
         let action_status = Stream::dynamic_with_size("actions_status", "", "", 1, stx);
-        let (ota_tx, ota_downloader) = OtaDownloader::new(config, action_status, btx).unwrap();
+        let (ota_tx, downloader) = OtaDownloader::new(config, action_status, btx).unwrap();
 
-        // The following try_send() should fail since receiver is not awaiting
+        // Start OtaDownloader in separate thread
+        std::thread::spawn(|| downloader.start().unwrap());
+
+        // Create a firmware update action
+        let ota_update = FirmwareUpdate {
+            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
+            version: "1.0".to_string(),
+            ota_path: None,
+        };
+        let mut expected_forward = ota_update.clone();
+        expected_forward.ota_path = Some(ota_path + "/1.0/logo.png");
         let ota_action = Action {
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
-            payload: "path/to/file".to_string(),
+            payload: json!(ota_update).to_string(),
         };
 
+        std::thread::sleep(Duration::from_millis(1));
+
+        // Send action to OtaDownloader with Sender<Action>
+        ota_tx.try_send(ota_action.clone()).unwrap();
+
+        // Send action to OtaDownloader immediately after, this must fail
         match ota_tx.try_send(ota_action).unwrap_err() {
             TrySendError::Full(_) => {}
-            e => unreachable!("This error should not have been thrown: {}", e),
+            TrySendError::Disconnected(_) => panic!("Unexpected disconnect"),
         }
-
-        let _ = ota_downloader.ota_rx.try_recv().unwrap_err();
     }
 }
