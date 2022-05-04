@@ -75,7 +75,9 @@ pub trait Point: Send + Debug {
 
 pub trait Package: Send + Debug {
     fn topic(&self) -> Arc<String>;
-    fn serialize(&self) -> Vec<u8>;
+    // TODO: Implement a generic Return type that can wrap
+    // around custom serialization error types.
+    fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
 }
 
