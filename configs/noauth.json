@@ -1,0 +1,6 @@
+{
+  "project_id": "demo",
+  "device_id":"3",
+  "broker": "localhost",
+  "port": 1883
+}
