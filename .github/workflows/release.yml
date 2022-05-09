@@ -8,31 +8,24 @@ jobs:
   create-release:
     name: Build release for ${{ matrix.target }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64-pc-windows-gnu, x86_64-unknown-linux-musl, x86_64-apple-darwin, armv7-unknown-linux-muslabihf]
+    container:
+      image: 'devduttshenoi/cross'
+      volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     steps:
-      - uses: actions/checkout@master
-      - uses: taiki-e/create-gh-release-action@v1
-        with:
-          target: ${{ matrix.target }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  
-  upload-release:
-    name: Publish release for ${{ matrix.target }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64-pc-windows-gnu, x86_64-unknown-linux-musl, x86_64-apple-darwin, armv7-unknown-linux-muslabihf]
-    steps:
-      - uses: actions/checkout@master
-      - uses: taiki-e/upload-release-binary-action@v1
-        with:
-          bin: uplink
-          archive: $bin-$tag-$target
-          target: ${{ matrix.target }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build binaries
+      run: ./release.sh x86_64-unknown-linux-gnu armv7-unknown-linux-gnueabihf
+    - name: Upload x86_64 binary to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: build/uplink-x86_64-unknown-linux-gnu
+        asset_name: uplink-x86_64-unknown-linux-gnu
+        tag: ${{ github.ref }}
+    - name: Upload arm binary to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: build/uplink-armv7-unknown-linux-gnueabihf
+        asset_name: uplink-armv7-unknown-linux-gnueabihf
+        tag: ${{ github.ref }}

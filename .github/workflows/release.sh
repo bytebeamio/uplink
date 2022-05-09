@@ -1,5 +1,5 @@
 #!/bin/sh
-TARGETS="x86_64-unknown-linux-gnu armv7-unknown-linux-gnueabihf"
+TARGETS=$@
 BUILD_DIR="build/"
 
 for TARGET in ${TARGETS}
