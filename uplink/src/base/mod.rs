@@ -64,6 +64,7 @@ pub struct Config {
     pub actions: Vec<String>,
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
+    pub flush_period: Option<u64>,
     pub ota: Ota,
     pub stats: Stats,
 }
@@ -181,13 +182,30 @@ where
         }
     }
 
-    /// Fill buffer with data and trigger async channel send on max_buf_size
-    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
-        if let Some(buf) = self.add(data)? {
-            self.tx.send_async(Box::new(buf)).await?;
-        }
+    pub async fn flush(&mut self) -> Result<(), Error> {
+        let name = self.name.clone();
+        let topic = self.topic.clone();
+        let buf = mem::replace(&mut self.buffer, Buffer::new(name, topic));
+        self.tx.send_async(Box::new(buf)).await?;
 
         Ok(())
+    }
+
+    pub fn is_empty(&mut self) -> bool {
+        self.buffer.buffer.is_empty()
+    }
+
+    /// Fill buffer with data, usually returning false. Trigger async channel
+    /// send on reaching max_buf_size, returning true.
+    pub async fn fill(&mut self, data: T) -> Result<bool, Error> {
+        let mut flushed = false;
+        
+        if let Some(buf) = self.add(data)? {
+            self.tx.send_async(Box::new(buf)).await?;
+            flushed = true;
+        }
+
+        Ok(flushed)
     }
 
     /// Push data into buffer and trigger sync channel send on max_buf_size
