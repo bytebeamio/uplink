@@ -228,7 +228,7 @@ impl Point for Payload {
 
 impl Package for Buffer<Payload> {
     fn topic(&self) -> Arc<String> {
-        return self.topic.clone();
+        self.topic.clone()
     }
 
     fn serialize(&self) -> serde_json::Result<Vec<u8>> {

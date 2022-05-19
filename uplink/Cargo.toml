@@ -8,25 +8,24 @@ edition = "2018"
 structopt = "0.3"
 figment = { version = "0.10.6", features = ["toml", "json"] }
 log = "0.4"
-simplelog = "0.9"
+simplelog = "0.11"
 disk = { path = "../disk" }
 tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.6", features = ["codec"] }
+tokio-util = { version = "0.7", features = ["codec"] }
 tokio-stream = "0.1"
 tokio-compat-02 = "0.2.0"
-flume = "0.10.9"
-rumqttc = "0.7"
-# rumqttc = { path = "../../rumqtt/rumqttc" }
+flume = "0.10"
+rumqttc = "0.11"
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 anyhow = "1"
 serde_json = "1.0"
-rand = "0.7"
+rand = "0.8"
 tunshell-client = { git = "https://github.com/TimeToogo/tunshell.git" }
 reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
-futures-util = "0.3.14"
-sysinfo = "0.21"
+futures-util = "0.3"
+sysinfo = "0.23"
 
 [build-dependencies]
-vergen = { version = "5.1", features = ["git", "build", "chrono"] }
+vergen = { version = "7", features = ["git", "build", "time"] }

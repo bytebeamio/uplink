@@ -26,13 +26,13 @@ pub enum Error {
     #[error("Controller error {0}")]
     Controller(#[from] controller::Error),
     #[error("Error sending keys to tunshell thread {0}")]
-    TunshellSendError(#[from] flume::SendError<String>),
+    TunshellSend(#[from] flume::SendError<String>),
     #[error("Error sending Action through bridge {0}")]
-    BridgeSendError(#[from] flume::TrySendError<Action>),
+    BridgeSend(#[from] flume::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
     #[error("Error from firmware downloader {0}")]
-    OtaError(#[from] ota::Error),
+    Ota(#[from] ota::Error),
 }
 
 /// On the Bytebeam platform, an Action is how beamd and through it,
@@ -233,7 +233,7 @@ impl Actions {
 
 impl Package for Buffer<ActionResponse> {
     fn topic(&self) -> Arc<String> {
-        return self.topic.clone();
+        self.topic.clone()
     }
 
     fn serialize(&self) -> serde_json::Result<Vec<u8>> {
