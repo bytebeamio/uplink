@@ -249,7 +249,7 @@ impl<T> Buffer<T> {
     }
 
     pub fn anomalies(&self) -> Option<(String, usize)> {
-        if self.anomalies.len() == 0 {
+        if self.anomalies.is_empty() {
             return None;
         }
 

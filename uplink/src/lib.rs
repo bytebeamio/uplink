@@ -56,7 +56,7 @@ impl Uplink {
         let action_status_topic = &config
             .streams
             .get("action_status")
-            .ok_or(Error::msg("Action status topic missing from config"))?
+            .ok_or_else(|| Error::msg("Action status topic missing from config"))?
             .topic;
         let action_status =
             Stream::new("action_status", action_status_topic, 1, data_channel.tx.clone());
