@@ -59,7 +59,7 @@ impl Process {
             Ok(child) => Ok(child),
             Err(e) => {
                 *self.last_process_done.lock().unwrap() = true;
-                return Err(e.into());
+                Err(e.into())
             }
         }
     }
@@ -109,7 +109,7 @@ impl Process {
         let command = String::from("tools/") + &command.into();
 
         // Check if last process is in progress
-        if *self.last_process_done.lock().unwrap() == false {
+        if !(*self.last_process_done.lock().unwrap()) {
             return Err(Error::Busy);
         }
 
