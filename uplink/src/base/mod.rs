@@ -182,6 +182,7 @@ where
         }
     }
 
+    /// Method to force flush a Stream, triggers async channel send when called
     pub async fn flush(&mut self) -> Result<(), Error> {
         let name = self.name.clone();
         let topic = self.topic.clone();
@@ -191,6 +192,7 @@ where
         Ok(())
     }
 
+    /// Method to check if a Stream buffer is empty
     pub fn is_empty(&mut self) -> bool {
         self.buffer.buffer.is_empty()
     }
