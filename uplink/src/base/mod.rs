@@ -184,10 +184,12 @@ where
 
     /// Method to force flush a Stream, triggers async channel send when called
     pub async fn flush(&mut self) -> Result<(), Error> {
-        let name = self.name.clone();
-        let topic = self.topic.clone();
-        let buf = mem::replace(&mut self.buffer, Buffer::new(name, topic));
-        self.tx.send_async(Box::new(buf)).await?;
+        if !self.is_empty() {
+            let name = self.name.clone();
+            let topic = self.topic.clone();
+            let buf = mem::replace(&mut self.buffer, Buffer::new(name, topic));
+            self.tx.send_async(Box::new(buf)).await?;
+        }
 
         Ok(())
     }
@@ -201,7 +203,7 @@ where
     /// send on reaching max_buf_size, returning true.
     pub async fn fill(&mut self, data: T) -> Result<bool, Error> {
         let mut flushed = false;
-        
+
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
             flushed = true;
