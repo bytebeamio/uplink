@@ -190,7 +190,7 @@ impl Bridge {
                 // Manually flush all partitions on timeout
                 _ = &mut flush_timeout => {
                     for (_, partition) in bridge_partitions.iter_mut() {
-                        partition.flush().await?;
+                        if !partition.is_empty() { partition.flush().await?; }
                     }
                 }
             }
