@@ -139,6 +139,7 @@ where
         device_id: S,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
+        flush_period: Duration,
     ) -> Stream<T> {
         let stream = stream.into();
         let project_id = project_id.into();
@@ -152,8 +153,6 @@ where
             + &stream
             + "/jsonarray";
 
-        let flush_period = Duration::from_secs(10);
-
         Stream::new(stream, topic, max_buffer_size, tx, flush_period)
     }
 
@@ -162,8 +161,9 @@ where
         project_id: S,
         device_id: S,
         tx: Sender<Box<dyn Package>>,
+        flush_period: Duration,
     ) -> Stream<T> {
-        Stream::dynamic_with_size(stream, project_id, device_id, 100, tx)
+        Stream::dynamic_with_size(stream, project_id, device_id, 100, tx, flush_period)
     }
 
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {

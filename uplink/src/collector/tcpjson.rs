@@ -152,7 +152,7 @@ impl Bridge {
                                 continue
                             }
 
-                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
+                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone(), flush_period);
                             bridge_partitions.entry(data.stream.clone()).or_insert(stream)
                         }
                     };
