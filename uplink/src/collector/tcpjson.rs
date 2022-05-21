@@ -95,11 +95,19 @@ impl Bridge {
         &mut self,
         mut framed: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
+        let flush_period = Duration::from_secs(self.config.flush_period.unwrap_or(10));
+
         let mut bridge_partitions = HashMap::new();
         for (stream, config) in self.config.streams.clone() {
             bridge_partitions.insert(
                 stream.clone(),
-                Stream::new(stream, config.topic, config.buf_size, self.data_tx.clone()),
+                Stream::new(
+                    stream,
+                    config.topic,
+                    config.buf_size,
+                    self.data_tx.clone(),
+                    flush_period,
+                ),
             );
         }
 
@@ -107,8 +115,7 @@ impl Bridge {
         let action_timeout = time::sleep(Duration::from_secs(100));
         tokio::pin!(action_timeout);
 
-        let flush_period = self.config.flush_period.unwrap_or(10);
-        let flush_timeout = time::sleep(Duration::from_secs(flush_period));
+        let flush_timeout = time::sleep(flush_period);
         tokio::pin!(flush_timeout);
 
         loop {
@@ -151,11 +158,8 @@ impl Bridge {
                     };
 
                     // If fill causes a flush, reset flush_timeout
-                    match partition.fill(data).await {
-                        Ok(flushed) => if flushed {
-                            flush_timeout.as_mut().reset(Instant::now() + Duration::from_secs(flush_period));
-                        }
-                        Err(e) => error!("Failed to send data. Error = {:?}", e.to_string());
+                    if let Err(e) = partition.fill(data).await {
+                        error!("Failed to send data. Error = {:?}", e.to_string());
                     }
                 }
 
@@ -187,7 +191,7 @@ impl Bridge {
                     }
                 }
 
-                // Manually flush all partitions on timeout
+                // Ask partitions to flush themselves if timedout
                 _ = &mut flush_timeout => {
                     for (_, partition) in bridge_partitions.iter_mut() {
                         partition.flush().await?;

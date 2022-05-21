@@ -26,7 +26,13 @@ impl Simulator {
         for (stream, config) in config.streams.clone() {
             partitions.insert(
                 stream.clone(),
-                Stream::new(stream, config.topic, config.buf_size, data_tx.clone()),
+                Stream::new(
+                    stream,
+                    config.topic,
+                    config.buf_size,
+                    data_tx.clone(),
+                    Duration::from_secs(10),
+                ),
             );
         }
 

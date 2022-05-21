@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use anyhow::Error;
 
@@ -58,8 +59,13 @@ impl Uplink {
             .get("action_status")
             .ok_or_else(|| Error::msg("Action status topic missing from config"))?
             .topic;
-        let action_status =
-            Stream::new("action_status", action_status_topic, 1, data_channel.tx.clone());
+        let action_status = Stream::new(
+            "action_status",
+            action_status_topic,
+            1,
+            data_channel.tx.clone(),
+            Duration::from_secs(0),
+        );
 
         Ok(Uplink { config, action_channel, data_channel, action_status })
     }

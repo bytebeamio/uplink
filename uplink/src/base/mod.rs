@@ -1,7 +1,8 @@
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::mem;
 use std::sync::Arc;
+use std::time::Instant;
+use std::{collections::HashMap, time::Duration};
 
 use flume::{SendError, Sender};
 use log::warn;
@@ -99,6 +100,8 @@ pub struct Stream<T> {
     max_buffer_size: usize,
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
+    flush_period: Duration,
+    last_flushed: Instant,
 }
 
 impl<T> Stream<T>
@@ -111,12 +114,23 @@ where
         topic: S,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
+        flush_period: Duration,
     ) -> Stream<T> {
         let name = Arc::new(stream.into());
         let topic = Arc::new(topic.into());
         let buffer = Buffer::new(name.clone(), topic.clone());
 
-        Stream { name, topic, last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
+        Stream {
+            name,
+            topic,
+            last_sequence: 0,
+            last_timestamp: 0,
+            max_buffer_size,
+            buffer,
+            tx,
+            flush_period,
+            last_flushed: Instant::now(),
+        }
     }
 
     pub fn dynamic_with_size<S: Into<String>>(
@@ -138,7 +152,9 @@ where
             + &stream
             + "/jsonarray";
 
-        Stream::new(stream, topic, max_buffer_size, tx)
+        let flush_period = Duration::from_secs(10);
+
+        Stream::new(stream, topic, max_buffer_size, tx, flush_period)
     }
 
     pub fn dynamic<S: Into<String>>(
@@ -182,13 +198,17 @@ where
         }
     }
 
-    /// Method to force flush a Stream, triggers async channel send when called
+    /// Check if timedout and not empty, if yes, triggers async channel send and reset last_flushed
     pub async fn flush(&mut self) -> Result<(), Error> {
-        if !self.is_empty() {
+        let now = Instant::now();
+
+        if !self.is_empty() && now.duration_since(self.last_flushed) > self.flush_period {
             let name = self.name.clone();
             let topic = self.topic.clone();
             let buf = mem::replace(&mut self.buffer, Buffer::new(name, topic));
             self.tx.send_async(Box::new(buf)).await?;
+
+            self.last_flushed = now;
         }
 
         Ok(())
@@ -199,23 +219,21 @@ where
         self.buffer.buffer.is_empty()
     }
 
-    /// Fill buffer with data, usually returning false. Trigger async channel
-    /// send on reaching max_buf_size, returning true.
-    pub async fn fill(&mut self, data: T) -> Result<bool, Error> {
-        let mut flushed = false;
-
+    /// Fill buffer with data and trigger async channel send on max_buf_size.
+    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
-            flushed = true;
+            self.last_flushed = Instant::now();
         }
 
-        Ok(flushed)
+        Ok(())
     }
 
     /// Push data into buffer and trigger sync channel send on max_buf_size
     pub fn push(&mut self, data: T) -> Result<(), Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send(Box::new(buf))?;
+            self.last_flushed = Instant::now();
         }
 
         Ok(())
@@ -289,6 +307,8 @@ impl<T> Clone for Stream<T> {
             max_buffer_size: self.max_buffer_size,
             buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
             tx: self.tx.clone(),
+            flush_period: self.flush_period.clone(),
+            last_flushed: self.last_flushed.clone(),
         }
     }
 }
