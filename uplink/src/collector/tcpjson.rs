@@ -196,6 +196,8 @@ impl Bridge {
                     for (_, partition) in bridge_partitions.iter_mut() {
                         partition.flush().await?;
                     }
+
+                    flush_timeout.as_mut().reset(Instant::now() + flush_period);
                 }
             }
         }
