@@ -306,8 +306,8 @@ impl<T> Clone for Stream<T> {
             max_buffer_size: self.max_buffer_size,
             buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
             tx: self.tx.clone(),
-            flush_period: self.flush_period.clone(),
-            last_flushed: self.last_flushed.clone(),
+            flush_period: self.flush_period,
+            last_flushed: self.last_flushed,
         }
     }
 }
