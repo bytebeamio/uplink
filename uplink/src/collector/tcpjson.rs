@@ -157,7 +157,6 @@ impl Bridge {
                         }
                     };
 
-                    // If fill causes a flush, reset flush_timeout
                     if let Err(e) = partition.fill(data).await {
                         error!("Failed to send data. Error = {:?}", e.to_string());
                     }
@@ -191,8 +190,9 @@ impl Bridge {
                     }
                 }
 
-                // Ask partitions to flush themselves if timedout
+                // Ask partitions to flush themselves on interval timeout
                 _ = &mut flush_timeout => {
+                    info!("Manually flushing streams");
                     for (_, partition) in bridge_partitions.iter_mut() {
                         partition.flush().await?;
                     }

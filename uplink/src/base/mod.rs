@@ -5,7 +5,7 @@ use std::time::Instant;
 use std::{collections::HashMap, time::Duration};
 
 use flume::{SendError, Sender};
-use log::warn;
+use log::{warn, info};
 use serde::Deserialize;
 
 pub mod actions;
@@ -198,6 +198,8 @@ where
         {
             let name = self.name.clone();
             let topic = self.topic.clone();
+            info!("Flushing stream name: {}, topic: {}", name, topic);
+
             let buffer = mem::replace(&mut self.buffer, Buffer::new(name, topic));
             self.last_flushed = Instant::now();
             return Some(buffer);
