@@ -194,7 +194,7 @@ where
     // Pops buffer content if max_buffer_size is reached or timedout and not empty
     fn flush_buffer(&mut self) -> Option<Buffer<T>> {
         if self.buffer.buffer.len() >= self.max_buffer_size
-            || !self.is_empty() && self.last_flushed.elapsed() > self.flush_period
+            || (!self.is_empty() && self.last_flushed.elapsed() > self.flush_period)
         {
             let name = self.name.clone();
             let topic = self.topic.clone();
