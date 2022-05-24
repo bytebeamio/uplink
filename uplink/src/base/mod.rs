@@ -187,28 +187,29 @@ where
         self.last_sequence = current_sequence;
         self.last_timestamp = current_timestamp;
 
-        // Send buffer to serializer
-        if self.buffer.buffer.len() >= self.max_buffer_size {
+        let buf = self.flush_buffer();
+        Ok(buf)
+    }
+
+    // Pops buffer content if max_buffer_size is reached or timedout and not empty
+    fn flush_buffer(&mut self) -> Option<Buffer<T>> {
+        if self.buffer.buffer.len() >= self.max_buffer_size
+            || !self.is_empty() && self.last_flushed.elapsed() > self.flush_period
+        {
             let name = self.name.clone();
             let topic = self.topic.clone();
             let buffer = mem::replace(&mut self.buffer, Buffer::new(name, topic));
-            Ok(Some(buffer))
-        } else {
-            Ok(None)
+            self.last_flushed = Instant::now();
+            return Some(buffer);
         }
+
+        None
     }
 
-    /// Check if timedout and not empty, if yes, triggers async channel send and reset last_flushed
+    /// Check if timedout and not empty, if yes, triggers async channel send
     pub async fn flush(&mut self) -> Result<(), Error> {
-        let now = Instant::now();
-
-        if !self.is_empty() && now.duration_since(self.last_flushed) > self.flush_period {
-            let name = self.name.clone();
-            let topic = self.topic.clone();
-            let buf = mem::replace(&mut self.buffer, Buffer::new(name, topic));
+        if let Some(buf) = self.flush_buffer() {
             self.tx.send_async(Box::new(buf)).await?;
-
-            self.last_flushed = now;
         }
 
         Ok(())
@@ -223,7 +224,6 @@ where
     pub async fn fill(&mut self, data: T) -> Result<(), Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
-            self.last_flushed = Instant::now();
         }
 
         Ok(())
@@ -233,7 +233,6 @@ where
     pub fn push(&mut self, data: T) -> Result<(), Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send(Box::new(buf))?;
-            self.last_flushed = Instant::now();
         }
 
         Ok(())
