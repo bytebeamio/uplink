@@ -135,7 +135,8 @@ impl OtaDownloader {
     pub async fn start(mut self) -> Result<(), Error> {
         loop {
             self.sequence = 0;
-            // `_lock` is held until current action completes, hence failing all sends till it's dropped
+            // The 0 sized channel only allows one action to be in execution at a time. Only one action is accepted below,
+            // all OTA actions before and after, till the next recv() won't get executed and will be reported to cloud.
             let action = self.ota_rx.recv()?;
             self.action_id = action.action_id.clone();
 
@@ -151,7 +152,6 @@ impl OtaDownloader {
                     self.send_status(status).await;
                 }
             }
-            // _lock is dropped here so that next OTA Action can be received
         }
     }
 

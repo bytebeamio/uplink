@@ -183,8 +183,7 @@ impl Actions {
                 return Ok(());
             }
             "update_firmware" if self.config.ota.enabled => {
-                // if action can't be sent due to BlockedChannel Error out and
-                // notify that OTA already downloading
+                // if action can't be sent, Error out and notify cloud
                 self.ota_tx.try_send(action).map_err(|e| match e {
                     TrySendError::Full(_) => Error::Downloading,
                     e => Error::TrySend(e),
