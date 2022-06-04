@@ -204,12 +204,15 @@ where
     }
 
     /// Fill buffer with data and trigger async channel send on max_buf_size.
-    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
+    pub async fn fill(&mut self, data: T) -> Result<bool, Error> {
+        let mut flushed = false;
+
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
+            flushed = true;
         }
 
-        Ok(())
+        Ok(flushed)
     }
 
     /// Push data into buffer and trigger sync channel send on max_buf_size

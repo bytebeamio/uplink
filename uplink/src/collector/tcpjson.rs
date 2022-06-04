@@ -8,6 +8,7 @@ use tokio::{select, time};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 use tokio_util::codec::{LinesCodec, LinesCodecError};
+use tokio_util::time::DelayQueue;
 
 use std::io;
 
@@ -109,8 +110,8 @@ impl Bridge {
         let action_timeout = time::sleep(Duration::from_secs(100));
         tokio::pin!(action_timeout);
 
-        let flush_timeout = time::sleep(flush_period);
-        tokio::pin!(flush_timeout);
+        let mut flush_queue = DelayQueue::new();
+        let mut flush_map = HashMap::new();
 
         loop {
             select! {
@@ -138,21 +139,42 @@ impl Bridge {
                         }
                     }
 
-                    let partition = match bridge_partitions.get_mut(&data.stream) {
+                    let data_stream = data.stream.clone();
+
+                    let partition = match bridge_partitions.get_mut(&data_stream) {
                         Some(partition) => partition,
                         None => {
                             if bridge_partitions.keys().len() > 20 {
-                                error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
+                                error!("Failed to create {:?} stream. More than max 20 streams", data_stream);
                                 continue
                             }
 
-                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
-                            bridge_partitions.entry(data.stream.clone()).or_insert(stream)
+                            let stream = Stream::dynamic(&data_stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
+                            bridge_partitions.entry(data_stream.clone()).or_insert(stream)
                         }
                     };
 
-                    if let Err(e) = partition.fill(data).await {
-                        error!("Failed to send data. Error = {:?}", e.to_string());
+                    let flushed = match partition.fill(data).await {
+                        Ok(flushed) => flushed,
+                        Err(e) => {
+                            error!("Failed to send data. Error = {:?}", e.to_string());
+                            continue
+                        }
+                    };
+
+                    let flush_key = match flush_map.get(&data_stream) {
+                        Some(key) => key,
+                        _ => {
+                            let key = flush_queue.insert(data_stream.clone(), flush_period);
+                            flush_map.insert(data_stream, key);
+                            continue
+                        }
+                    };
+
+                    if flushed {
+                        flush_queue.remove(flush_key);
+                    } else {
+                        flush_queue.reset(flush_key, flush_period);
                     }
                 }
 
@@ -184,14 +206,11 @@ impl Bridge {
                     }
                 }
 
-                // Ask partitions to flush themselves on interval timeout
-                _ = &mut flush_timeout => {
-                    info!("Manually flushing streams");
-                    for (_, partition) in bridge_partitions.iter_mut() {
-                        partition.flush().await?;
+                // flush the first stream to timeout
+                stream = flush_queue.next() => {
+                    if let Some(stream) = stream {
+                        bridge_partitions.get_mut(stream.get_ref()).unwrap().flush().await?;
                     }
-
-                    flush_timeout.as_mut().reset(Instant::now() + flush_period);
                 }
             }
         }
