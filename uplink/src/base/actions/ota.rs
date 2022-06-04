@@ -156,44 +156,49 @@ impl OtaDownloader {
     }
 
     // Accepts an OTA `Action` and performs necessary data extraction to actually download the OTA update
-    async fn run(&mut self, action: Action) -> Result<(), Error> {
+    async fn run(&mut self, mut action: Action) -> Result<(), Error> {
         // Update action status for process initiated
         let status = ActionResponse::progress(&self.action_id, "Downloading", 0)
             .set_sequence(self.sequence());
         self.send_status(status).await;
 
-        // Extract url and add ota_path in payload before recreating action to be sent to bridge
-        let Action { action_id, kind, name, payload } = action;
-        let mut update = serde_json::from_str::<FirmwareUpdate>(&payload)?;
+        // Extract url information from action payload
+        let mut update = serde_json::from_str::<FirmwareUpdate>(&action.payload)?;
         let url = update.url.clone();
 
-        // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
-        let mut ota_path = PathBuf::from(self.config.ota.path.clone());
-        ota_path.push(&update.version);
-        create_dir_all(&ota_path)?;
-
         // Create file to actually download into
-        let mut file_path = ota_path.to_owned();
-        let file_name = url.split("/").last().ok_or(Error::FileNameMissing(url.to_owned()))?;
-        file_path.push(file_name);
-        let file_path = file_path.as_path();
-        let file = File::create(file_path)?;
-        let ota_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
+        let (file, file_path) = self.create_file(&url, &update.version)?;
 
         // Create handler to perform download from URL
         let resp = self.client.get(&url).send().await?;
-        info!("Dowloading from {} into {}", url, ota_path);
+        info!("Dowloading from {} into {}", url, file_path);
         self.download(resp, file).await?;
 
         // Update Action payload with `ota_path`, i.e. downloaded file's location in fs
-        update.ota_path = Some(ota_path);
-        let payload = serde_json::to_string(&update)?;
-        let action = Action { action_id, kind, name, payload };
+        update.ota_path = Some(file_path);
+        action.payload = serde_json::to_string(&update)?;
 
         // Forward Action packet through bridge
         self.bridge_tx.try_send(action)?;
 
         Ok(())
+    }
+
+    /// Creates file to download into
+    fn create_file(&self, url: &str, version: &str) -> Result<(File, String), Error> {
+        // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
+        let mut ota_path = PathBuf::from(self.config.ota.path.clone());
+        ota_path.push(version);
+        create_dir_all(&ota_path)?;
+
+        let mut file_path = ota_path.to_owned();
+        let file_name = url.split("/").last().ok_or(Error::FileNameMissing(url.to_owned()))?;
+        file_path.push(file_name);
+        let file_path = file_path.as_path();
+        let file = File::create(file_path)?;
+        let file_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
+
+        Ok((file, file_path))
     }
 
     /// Downloads from server and stores into file
