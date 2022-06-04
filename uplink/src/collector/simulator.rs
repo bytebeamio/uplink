@@ -26,13 +26,7 @@ impl Simulator {
         for (stream, config) in config.streams.clone() {
             partitions.insert(
                 stream.clone(),
-                Stream::new(
-                    stream,
-                    config.topic,
-                    config.buf_size,
-                    data_tx.clone(),
-                    Duration::from_secs(10),
-                ),
+                Stream::new(stream, config.topic, config.buf_size, data_tx.clone()),
             );
         }
 
@@ -66,7 +60,6 @@ impl Simulator {
                         &self.config.project_id,
                         &self.config.device_id,
                         self.data_tx.clone(),
-                        Duration::from_secs(10),
                     );
                     self.partitions.entry(stream.to_owned()).or_insert(s)
                 }
@@ -83,7 +76,6 @@ impl Simulator {
                         &self.config.project_id,
                         &self.config.device_id,
                         self.data_tx.clone(),
-                        Duration::from_secs(10),
                     );
                     self.partitions.entry(stream.to_owned()).or_insert(s)
                 }

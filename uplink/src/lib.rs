@@ -2,7 +2,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 use anyhow::Error;
 
@@ -64,7 +63,6 @@ impl Uplink {
             action_status_topic,
             1,
             data_channel.tx.clone(),
-            Duration::from_secs(0),
         );
 
         Ok(Uplink { config, action_channel, data_channel, action_status })

@@ -417,7 +417,6 @@ impl StatCollector {
         sys.refresh_memory();
 
         let max_buf_size = config.stats.stream_size.unwrap_or(10);
-        let flush_period = Duration::from_secs(10);
 
         let mut map = HashMap::new();
         let stream = Stream::dynamic_with_size(
@@ -426,7 +425,6 @@ impl StatCollector {
             &config.device_id,
             max_buf_size,
             tx.clone(),
-            flush_period,
         );
         for disk_data in sys.disks() {
             let disk_name = disk_data.name().to_string_lossy().to_string();
@@ -441,7 +439,6 @@ impl StatCollector {
             &config.device_id,
             max_buf_size,
             tx.clone(),
-            flush_period,
         );
         for (net_name, _) in sys.networks() {
             map.insert(net_name.to_owned(), Network::init(net_name.to_owned()));
@@ -455,7 +452,6 @@ impl StatCollector {
             &config.device_id,
             max_buf_size,
             tx.clone(),
-            flush_period,
         );
         for proc in sys.processors().iter() {
             let proc_name = proc.name().to_owned();
@@ -469,7 +465,6 @@ impl StatCollector {
             &config.device_id,
             max_buf_size,
             tx.clone(),
-            flush_period,
         );
         let processes = ProcessStats { sequence: 0, map: HashMap::new(), stream };
 
@@ -479,7 +474,6 @@ impl StatCollector {
             &config.device_id,
             max_buf_size,
             tx.clone(),
-            flush_period,
         );
         let system = SystemStats { stat: System::init(&sys), stream };
 

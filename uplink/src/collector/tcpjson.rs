@@ -101,13 +101,7 @@ impl Bridge {
         for (stream, config) in self.config.streams.clone() {
             bridge_partitions.insert(
                 stream.clone(),
-                Stream::new(
-                    stream,
-                    config.topic,
-                    config.buf_size,
-                    self.data_tx.clone(),
-                    flush_period,
-                ),
+                Stream::new(stream, config.topic, config.buf_size, self.data_tx.clone()),
             );
         }
 
@@ -152,7 +146,7 @@ impl Bridge {
                                 continue
                             }
 
-                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone(), flush_period);
+                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
                             bridge_partitions.entry(data.stream.clone()).or_insert(stream)
                         }
                     };

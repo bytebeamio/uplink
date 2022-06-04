@@ -1,11 +1,10 @@
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::mem;
 use std::sync::Arc;
-use std::time::Instant;
-use std::{collections::HashMap, time::Duration};
 
 use flume::{SendError, Sender};
-use log::{warn, info};
+use log::{info, warn};
 use serde::Deserialize;
 
 pub mod actions;
@@ -100,8 +99,6 @@ pub struct Stream<T> {
     max_buffer_size: usize,
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
-    flush_period: Duration,
-    last_flushed: Instant,
 }
 
 impl<T> Stream<T>
@@ -114,23 +111,12 @@ where
         topic: S,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
-        flush_period: Duration,
     ) -> Stream<T> {
         let name = Arc::new(stream.into());
         let topic = Arc::new(topic.into());
         let buffer = Buffer::new(name.clone(), topic.clone());
 
-        Stream {
-            name,
-            topic,
-            last_sequence: 0,
-            last_timestamp: 0,
-            max_buffer_size,
-            buffer,
-            tx,
-            flush_period,
-            last_flushed: Instant::now(),
-        }
+        Stream { name, topic, last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
     }
 
     pub fn dynamic_with_size<S: Into<String>>(
@@ -139,7 +125,6 @@ where
         device_id: S,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
-        flush_period: Duration,
     ) -> Stream<T> {
         let stream = stream.into();
         let project_id = project_id.into();
@@ -153,7 +138,7 @@ where
             + &stream
             + "/jsonarray";
 
-        Stream::new(stream, topic, max_buffer_size, tx, flush_period)
+        Stream::new(stream, topic, max_buffer_size, tx)
     }
 
     pub fn dynamic<S: Into<String>>(
@@ -161,9 +146,8 @@ where
         project_id: S,
         device_id: S,
         tx: Sender<Box<dyn Package>>,
-        flush_period: Duration,
     ) -> Stream<T> {
-        Stream::dynamic_with_size(stream, project_id, device_id, 100, tx, flush_period)
+        Stream::dynamic_with_size(stream, project_id, device_id, 100, tx)
     }
 
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
@@ -193,15 +177,12 @@ where
 
     // Pops buffer content if max_buffer_size is reached or timedout and not empty
     fn flush_buffer(&mut self) -> Option<Buffer<T>> {
-        if self.buffer.buffer.len() >= self.max_buffer_size
-            || (!self.is_empty() && self.last_flushed.elapsed() > self.flush_period)
-        {
+        if self.buffer.buffer.len() >= self.max_buffer_size {
             let name = self.name.clone();
             let topic = self.topic.clone();
             info!("Flushing stream name: {}, topic: {}", name, topic);
-
             let buffer = mem::replace(&mut self.buffer, Buffer::new(name, topic));
-            self.last_flushed = Instant::now();
+
             return Some(buffer);
         }
 
@@ -308,8 +289,6 @@ impl<T> Clone for Stream<T> {
             max_buffer_size: self.max_buffer_size,
             buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
             tx: self.tx.clone(),
-            flush_period: self.flush_period,
-            last_flushed: self.last_flushed,
         }
     }
 }
