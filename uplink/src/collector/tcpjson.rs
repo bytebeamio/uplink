@@ -162,19 +162,17 @@ impl Bridge {
                         }
                     };
 
-                    let flush_key = match flush_map.get(&data_stream) {
-                        Some(key) => key,
-                        _ => {
-                            let key = flush_queue.insert(data_stream.clone(), flush_period);
-                            flush_map.insert(data_stream, key);
-                            continue
-                        }
-                    };
+                    // if not flushed and flush_map doesn't contain flush_handle, insert new flush_handle
+                    if !flushed && flush_map.get(&data_stream).is_none() {
+                        let key = flush_queue.insert(data_stream.clone(), flush_period);
+                        flush_map.insert(data_stream, key);
+                        continue
+                    }
 
-                    if flushed {
-                        flush_queue.remove(flush_key);
-                    } else {
-                        flush_queue.reset(flush_key, flush_period);
+                    // Remove flush_handle from map and cancel it if flushed, else do nothing
+                    match flush_map.remove(&data_stream) {
+                        Some(flush_key) if flushed => _ = flush_queue.remove(&flush_key),
+                        _ => {}
                     }
                 }
 
@@ -206,11 +204,16 @@ impl Bridge {
                     }
                 }
 
-                // flush the first stream to timeout
-                stream = flush_queue.next() => {
-                    if let Some(stream) = stream {
-                        bridge_partitions.get_mut(stream.get_ref()).unwrap().flush().await?;
-                    }
+                // Flush stream/partitions that timeout
+                Some(stream) = flush_queue.next() => {
+                    let partition = match bridge_partitions.get_mut(stream.get_ref()) {
+                        Some(s) => s,
+                        _ => {
+                            error!("Failed to find stream. Stream = {}", stream.get_ref());
+                            continue
+                        }
+                    };
+                    partition.flush().await?;
                 }
             }
         }
