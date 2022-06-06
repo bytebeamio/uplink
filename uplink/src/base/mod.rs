@@ -171,27 +171,29 @@ where
         self.last_sequence = current_sequence;
         self.last_timestamp = current_timestamp;
 
-        let buf = self.flush_buffer();
+        // if max_buffer_size is reached or timedout and not empty
+        let buf = if self.buffer.buffer.len() >= self.max_buffer_size {
+            Some(self.flush_buffer())
+        } else {
+            None
+        };
+
         Ok(buf)
     }
 
-    // Pops buffer content if max_buffer_size is reached or timedout and not empty
-    fn flush_buffer(&mut self) -> Option<Buffer<T>> {
-        if self.buffer.buffer.len() >= self.max_buffer_size {
-            let name = self.name.clone();
-            let topic = self.topic.clone();
-            info!("Flushing stream name: {}, topic: {}", name, topic);
-            let buffer = mem::replace(&mut self.buffer, Buffer::new(name, topic));
+    // Returns buffer content, replacing with empty buffer in-place
+    fn flush_buffer(&mut self) -> Buffer<T> {
+        let name = self.name.clone();
+        let topic = self.topic.clone();
+        info!("Flushing stream name: {}, topic: {}", name, topic);
 
-            return Some(buffer);
-        }
-
-        None
+        mem::replace(&mut self.buffer, Buffer::new(name, topic))
     }
 
-    /// Check if timedout and not empty, if yes, triggers async channel send
+    /// Triggers flush and async channel send if not empty
     pub async fn flush(&mut self) -> Result<(), Error> {
-        if let Some(buf) = self.flush_buffer() {
+        if !self.is_empty() {
+            let buf = self.flush_buffer();
             self.tx.send_async(Box::new(buf)).await?;
         }
 
@@ -204,15 +206,12 @@ where
     }
 
     /// Fill buffer with data and trigger async channel send on max_buf_size.
-    pub async fn fill(&mut self, data: T) -> Result<bool, Error> {
-        let mut flushed = false;
-
+    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
-            flushed = true;
         }
 
-        Ok(flushed)
+        Ok(())
     }
 
     /// Push data into buffer and trigger sync channel send on max_buf_size

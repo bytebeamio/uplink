@@ -8,8 +8,10 @@ use tokio::{select, time};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 use tokio_util::codec::{LinesCodec, LinesCodecError};
+use tokio_util::time::delay_queue::Key;
 use tokio_util::time::DelayQueue;
 
+use std::collections::hash_map::Entry;
 use std::io;
 
 use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
@@ -110,8 +112,7 @@ impl Bridge {
         let action_timeout = time::sleep(Duration::from_secs(100));
         tokio::pin!(action_timeout);
 
-        let mut flush_queue = DelayQueue::new();
-        let mut flush_map = HashMap::new();
+        let mut flush_handler = DelayHandler::new(flush_period);
 
         loop {
             select! {
@@ -154,26 +155,12 @@ impl Bridge {
                         }
                     };
 
-                    let flushed = match partition.fill(data).await {
-                        Ok(flushed) => flushed,
-                        Err(e) => {
-                            error!("Failed to send data. Error = {:?}", e.to_string());
-                            continue
-                        }
-                    };
-
-                    // if not flushed and flush_map doesn't contain flush_handle, insert new flush_handle
-                    if !flushed && flush_map.get(&data_stream).is_none() {
-                        let key = flush_queue.insert(data_stream.clone(), flush_period);
-                        flush_map.insert(data_stream, key);
+                    if let Err(e) = partition.fill(data).await {
+                        error!("Failed to send data. Error = {:?}", e.to_string());
                         continue
                     }
 
-                    // Remove flush_handle from map and cancel it if flushed, else do nothing
-                    match flush_map.remove(&data_stream) {
-                        Some(flush_key) if flushed => _ = flush_queue.remove(&flush_key),
-                        _ => {}
-                    }
+                    flush_handler.reset(data_stream, partition.is_empty());
                 }
 
                 action = self.actions_rx.recv_async() => {
@@ -205,18 +192,56 @@ impl Bridge {
                 }
 
                 // Flush stream/partitions that timeout
-                Some(stream) = flush_queue.next() => {
-                    let partition = match bridge_partitions.get_mut(stream.get_ref()) {
-                        Some(s) => s,
-                        _ => {
-                            error!("Failed to find stream. Stream = {}", stream.get_ref());
-                            continue
-                        }
-                    };
-                    partition.flush().await?;
+                stream = flush_handler.next(), if !flush_handler.is_empty() => {
+                    let stream = stream.unwrap();
+                    bridge_partitions.get_mut(&stream).unwrap().flush().await?;
                 }
+
             }
         }
+    }
+}
+
+/// An internal structure to manage flushing Streams by setting timers
+struct DelayHandler {
+    queue: DelayQueue<String>,
+    map: HashMap<String, Key>,
+    period: Duration,
+}
+
+impl DelayHandler {
+    pub fn new(period: Duration) -> Self {
+        Self { queue: DelayQueue::new(), map: HashMap::new(), period }
+    }
+
+    // Remove key from map and cancel it if flushed, if not flushed and
+    // map doesn't contain key, insert new key, else do nothing.
+    pub fn reset(&mut self, stream: String, flushed: bool) {
+        match self.map.entry(stream.clone()) {
+            Entry::Occupied(o) if flushed => {
+                let flush_key = o.remove();
+                self.queue.remove(&flush_key);
+            }
+            Entry::Vacant(v) if !flushed => {
+                let key = self.queue.insert(stream, self.period);
+                v.insert(key);
+            }
+            _ => {}
+        }
+    }
+
+    // Remove a key from map if it has timedout
+    pub async fn next(&mut self) -> Option<String> {
+        if let Some(stream) = self.queue.next().await {
+            self.map.remove_entry(stream.get_ref());
+            return Some(stream.get_ref().to_owned());
+        }
+
+        None
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
     }
 }
 
