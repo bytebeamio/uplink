@@ -8,10 +8,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{Duration, Instant};
 use tokio::{select, time};
 use tokio_stream::StreamExt;
-use tokio_util::codec::Framed;
-use tokio_util::codec::{LinesCodec, LinesCodecError};
-use tokio_util::time::delay_queue::Key;
-use tokio_util::time::DelayQueue;
+use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
+use tokio_util::time::{delay_queue::Key, DelayQueue};
 
 use std::{collections::HashMap, io, sync::Arc};
 
