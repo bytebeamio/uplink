@@ -152,18 +152,19 @@ impl Bridge {
                         }
                     };
 
-                    let flushed = match partition.fill(data).await {
-                        Ok(f) => f,
+                    // Remove timeout from flush_handler for selected stream.
+                    flush_handler.remove(&data_stream);
+
+                    match partition.fill(data).await {
+                        Ok(f) => if !f {
+                            // Add new timeout to flush_handler if not flushed,
+                            // effectively reseting timeout.
+                            flush_handler.insert(data_stream)
+                        },
                         Err(e) => {
                             error!("Failed to send data. Error = {:?}", e.to_string());
                             continue
                         }
-                    };
-
-                    if flushed {
-                        flush_handler.reset(data_stream);
-                    } else {
-                        flush_handler.set(data_stream);
                     }
                 }
 
@@ -218,15 +219,15 @@ impl DelayHandler {
         Self { queue: DelayQueue::new(), map: HashMap::new(), period }
     }
 
-    // Remove key from map if it exists, else do nothing.
-    pub fn reset(&mut self, stream: String) {
-        if let Some(flush_key) = self.map.remove(&stream) {
+    // Removes timeout if it exists, else do nothing.
+    pub fn remove(&mut self, stream: &str) {
+        if let Some(flush_key) = self.map.remove(stream) {
             self.queue.remove(&flush_key);
         }
     }
 
-    // Insert new key if map doesn't contain key, else do nothing.
-    pub fn set(&mut self, stream: String) {
+    // Insert new timeout.
+    pub fn insert(&mut self, stream: String) {
         let key = self.queue.insert(stream.clone(), self.period);
         self.map.insert(stream, key);
     }
