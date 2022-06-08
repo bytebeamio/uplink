@@ -135,34 +135,38 @@ impl Bridge {
                         }
                     }
 
-                    let data_stream = data.stream.clone();
-
-                    let partition = match bridge_partitions.get_mut(&data_stream) {
+                    let partition = match bridge_partitions.get_mut(&data.stream) {
                         Some(partition) => partition,
                         None => {
                             if bridge_partitions.keys().len() > 20 {
-                                error!("Failed to create {:?} stream. More than max 20 streams", data_stream);
+                                error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
                                 continue
                             }
 
-                            let stream = Stream::dynamic(&data_stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
-                            bridge_partitions.entry(data_stream.clone()).or_insert(stream)
+                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
+                            bridge_partitions.entry(data.stream.clone()).or_insert(stream)
                         }
                     };
 
-                    // Remove timeout from flush_handler for selected stream.
-                    flush_handler.remove(&data_stream);
+                    let data_stream = data.stream.clone();
 
-                    match partition.fill(data).await {
-                        Ok(f) => if !f {
-                            // Add new timeout to flush_handler if not flushed,
-                            // effectively reseting timeout.
-                            flush_handler.insert(data_stream)
-                        },
+                    let flushed = match partition.fill(data).await {
+                        Ok(f) => f,
                         Err(e) => {
                             error!("Failed to send data. Error = {:?}", e.to_string());
                             continue
                         }
+                    };
+
+                    if flushed {
+                        // Remove timeout from flush_handler for selected stream if flushed.
+                        flush_handler.remove(&data_stream);
+                    } else if flush_handler.contains(&data_stream) {
+                        // Reset timeout from flush_handler for selected stream if not flushed.
+                        flush_handler.reset(&data_stream)
+                    } else {
+                        // Add new timeout to flush_handler if not flushed and it was not mapped.
+                        flush_handler.insert(data_stream);
                     }
                 }
 
@@ -222,6 +226,18 @@ impl DelayHandler {
         if let Some(flush_key) = self.map.remove(stream) {
             self.queue.remove(&flush_key);
         }
+    }
+
+    // Resets timeout if it exists, else do nothing.
+    pub fn reset(&mut self, stream: &str) {
+        if let Some(flush_key) = self.map.remove(stream) {
+            self.queue.reset(&flush_key, self.period);
+        }
+    }
+
+    // Check if map contains key for stream timeout.
+    pub fn contains(&self, stream: &str) -> bool {
+        self.map.contains_key(stream)
     }
 
     // Insert new timeout.
