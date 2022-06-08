@@ -1,9 +1,11 @@
 use flume::{Receiver, RecvError, Sender};
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::{Duration, Instant};
 use tokio::{select, time};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
@@ -11,15 +13,10 @@ use tokio_util::codec::{LinesCodec, LinesCodecError};
 use tokio_util::time::delay_queue::Key;
 use tokio_util::time::DelayQueue;
 
-use std::collections::hash_map::Entry;
-use std::io;
+use std::{collections::HashMap, io, sync::Arc};
 
 use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
 use crate::base::{Buffer, Config, Package, Point, Stream};
-use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::time::{Duration, Instant};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -155,12 +152,19 @@ impl Bridge {
                         }
                     };
 
-                    if let Err(e) = partition.fill(data).await {
-                        error!("Failed to send data. Error = {:?}", e.to_string());
-                        continue
-                    }
+                    let flushed = match partition.fill(data).await {
+                        Ok(f) => f,
+                        Err(e) => {
+                            error!("Failed to send data. Error = {:?}", e.to_string());
+                            continue
+                        }
+                    };
 
-                    flush_handler.reset(data_stream, partition.is_empty());
+                    if flushed {
+                        flush_handler.reset(data_stream);
+                    } else {
+                        flush_handler.set(data_stream);
+                    }
                 }
 
                 action = self.actions_rx.recv_async() => {
@@ -214,20 +218,17 @@ impl DelayHandler {
         Self { queue: DelayQueue::new(), map: HashMap::new(), period }
     }
 
-    // Remove key from map and cancel it if flushed, if not flushed and
-    // map doesn't contain key, insert new key, else do nothing.
-    pub fn reset(&mut self, stream: String, flushed: bool) {
-        match self.map.entry(stream.clone()) {
-            Entry::Occupied(o) if flushed => {
-                let flush_key = o.remove();
-                self.queue.remove(&flush_key);
-            }
-            Entry::Vacant(v) if !flushed => {
-                let key = self.queue.insert(stream, self.period);
-                v.insert(key);
-            }
-            _ => {}
+    // Remove key from map if it exists, else do nothing.
+    pub fn reset(&mut self, stream: String) {
+        if let Some(flush_key) = self.map.remove(&stream) {
+            self.queue.remove(&flush_key);
         }
+    }
+
+    // Insert new key if map doesn't contain key, else do nothing.
+    pub fn set(&mut self, stream: String) {
+        let key = self.queue.insert(stream.clone(), self.period);
+        self.map.insert(stream, key);
     }
 
     // Remove a key from map if it has timedout
