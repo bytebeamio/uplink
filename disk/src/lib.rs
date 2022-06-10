@@ -59,8 +59,8 @@ impl Storage {
     /// Initializes read buffer before reading data from the file
     fn prepare_current_read_buffer(&mut self, file_len: usize) {
         self.current_read_file.clear();
-        let mut init = vec![0u8; file_len];
-        self.current_read_file.put_slice(&mut init[..]);
+        let init = vec![0u8; file_len];
+        self.current_read_file.put_slice(&init);
     }
 
     /// Opens file to flush current inmemory write buffer to disk.
@@ -110,7 +110,7 @@ impl Storage {
     pub fn reload(&mut self) -> io::Result<bool> {
         // Swap read buffer with write buffer to read data in inmemory write
         // buffer when all the backlog disk files are done
-        if self.backlog_file_ids.len() == 0 {
+        if self.backlog_file_ids.is_empty() {
             mem::swap(&mut self.current_read_file, &mut self.current_write_file);
 
             // If read buffer is 0 after swapping, all the data is caught up
@@ -123,7 +123,7 @@ impl Storage {
         let mut file = OpenOptions::new().read(true).open(&next_file_path)?;
 
         // Load file into memory and delete it
-        let metadata = fs::metadata(&next_file_path).expect("unable to read metadata");
+        let metadata = fs::metadata(&next_file_path)?;
         self.prepare_current_read_buffer(metadata.len() as usize);
         file.read_exact(&mut self.current_read_file[..])?;
         self.remove(id)?;
@@ -155,7 +155,7 @@ fn id(path: &Path) -> io::Result<u64> {
         }
     }
 
-    let id: Vec<&str> = path.file_name().unwrap().to_str().unwrap().split("@").collect();
+    let id: Vec<&str> = path.file_name().unwrap().to_str().unwrap().split('@').collect();
     let id: u64 = id[1].parse().unwrap();
     Ok(id)
 }
@@ -165,7 +165,7 @@ fn id(path: &Path) -> io::Result<u64> {
 fn get_file_ids(path: &Path) -> io::Result<Vec<u64>> {
     let mut file_ids = Vec::new();
     let files = fs::read_dir(path)?;
-    for file in files.into_iter() {
+    for file in files {
         let path = file?.path();
 
         // ignore directories
@@ -179,7 +179,7 @@ fn get_file_ids(path: &Path) -> io::Result<Vec<u64>> {
         }
     }
 
-    file_ids.sort();
+    file_ids.sort_unstable();
     Ok(file_ids)
 }
 

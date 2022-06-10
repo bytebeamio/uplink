@@ -50,7 +50,8 @@ use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
 use std::fs::{create_dir_all, File};
-use std::{io::Write, path::PathBuf, sync::Arc};
+use std::path::{Path, PathBuf};
+use std::{io::Write, sync::Arc};
 
 use super::{Action, ActionResponse};
 use crate::base::{Config, Stream};
@@ -62,7 +63,7 @@ pub enum Error {
     #[error("Error from reqwest: {0}")]
     Reqwest(#[from] reqwest::Error),
     #[error("File io Error: {0}")]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
     #[error("Error forwarding OTA Action to bridge: {0}")]
     TrySend(#[from] flume::TrySendError<Action>),
     #[error("Error receiving action: {0}")]

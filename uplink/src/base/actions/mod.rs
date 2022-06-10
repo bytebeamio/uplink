@@ -44,9 +44,9 @@ pub struct Action {
     #[serde(alias = "id")]
     pub action_id: String,
     // control or process
-    kind: String,
+    pub kind: String,
     // action name
-    name: String,
+    pub name: String,
     // action payload. json. can be args/payload. depends on the invoked command
     pub payload: String,
 }
@@ -231,11 +231,11 @@ impl Actions {
 
 impl Package for Buffer<ActionResponse> {
     fn topic(&self) -> Arc<String> {
-        return self.topic.clone();
+        self.topic.clone()
     }
 
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {

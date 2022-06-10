@@ -22,6 +22,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
     Client(#[from] ClientError),
+    #[error("Packet was not expected {0:?}")]
+    UnexpectedPacket(Packet),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
 }
@@ -77,7 +79,7 @@ impl Serializer {
         collector_rx: Receiver<Box<dyn Package>>,
         client: AsyncClient,
     ) -> Result<Serializer, Error> {
-        let metrics_config = config.streams.get("metrics").unwrap();
+        let metrics_config = config.streams.get("metrics").expect("Missing metrics Stream in config");
         let metrics = Metrics::new(&metrics_config.topic);
 
         let storage = match &config.persistence {
@@ -107,12 +109,12 @@ impl Serializer {
         loop {
             let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
-            let payload = data.serialize();
+            let payload = data.serialize()?;
 
             let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
             publish.pkid = 1;
 
-            if let Err(e) = publish.write(&mut storage.writer()) {
+            if let Err(e) = publish.write(storage.writer()) {
                 error!("Failed to fill write buffer during bad network. Error = {:?}", e);
                 continue;
             }
@@ -153,12 +155,12 @@ impl Serializer {
                       }
 
                       let topic = data.topic();
-                      let payload = data.serialize();
+                      let payload = data.serialize()?;
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
-                      match publish.write(&mut storage.writer()) {
+                      match publish.write(storage.writer()) {
                            Ok(_) => self.metrics.add_total_disk_size(payload_size),
                            Err(e) => {
                                error!("Failed to fill disk buffer. Error = {:?}", e);
@@ -206,7 +208,7 @@ impl Serializer {
 
         let publish = match read(storage.reader(), max_packet_size) {
             Ok(Packet::Publish(publish)) => publish,
-            Ok(packet) => unreachable!("{:?}", packet),
+            Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
             Err(e) => {
                 error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
                 return Ok(Status::Normal);
@@ -225,12 +227,12 @@ impl Serializer {
                       }
 
                       let topic = data.topic();
-                      let payload = data.serialize();
+                      let payload = data.serialize()?;
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
-                      match publish.write(&mut storage.writer()) {
+                      match publish.write(storage.writer()) {
                            Ok(_) => self.metrics.add_total_disk_size(payload_size),
                            Err(e) => {
                                error!("Failed to fill disk buffer. Error = {:?}", e);
@@ -272,7 +274,7 @@ impl Serializer {
 
                     let publish = match read(storage.reader(), max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
-                        Ok(packet) => unreachable!("{:?}", packet),
+                        Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
                         Err(e) => {
                             error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
                             return Ok(Status::Normal)
@@ -305,7 +307,7 @@ impl Serializer {
                     }
 
                     let topic = data.topic();
-                    let payload = data.serialize();
+                    let payload = data.serialize()?;
                     let payload_size = payload.len();
                     match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
@@ -318,7 +320,7 @@ impl Serializer {
 
                 }
                 _ = interval.tick() => {
-                    let (topic, payload) = self.metrics.next();
+                    let (topic, payload) = self.metrics.next()?;
                     let payload_size = payload.len();
                     match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
@@ -423,15 +425,15 @@ impl Metrics {
         self.errors.push_str(" | ");
     }
 
-    pub fn next(&mut self) -> (&str, Vec<u8>) {
+    pub fn next(&mut self) -> Result<(&str, Vec<u8>), Error> {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
         self.sequence += 1;
 
-        let payload = serde_json::to_vec(&vec![&self]).unwrap();
+        let payload = serde_json::to_vec(&vec![&self])?;
         self.errors.clear();
         self.lost_segments = 0;
-        (&self.topic, payload)
+        Ok((&self.topic, payload))
     }
 }

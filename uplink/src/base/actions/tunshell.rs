@@ -63,7 +63,7 @@ impl TunshellSession {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) {
         while let Ok(keys) = self.keys_rx.recv_async().await {
-            if *self.last_process_done.lock().unwrap() == false {
+            if !(*self.last_process_done.lock().unwrap()) {
                 let status = ActionResponse::failure("tunshell", "busy".to_owned());
                 if let Err(e) = self.action_status.fill(status).await {
                     error!("Failed to send status, Error = {:?}", e);
