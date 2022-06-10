@@ -150,8 +150,6 @@ impl Bridge {
                         }
                     };
 
-                    let data_stream = data.stream.clone();
-
                     let flushed = match partition.fill(data).await {
                         Ok(f) => f,
                         Err(e) => {
@@ -162,13 +160,13 @@ impl Bridge {
 
                     if flushed {
                         // Remove timeout from flush_handler for selected stream if flushed.
-                        flush_handler.remove(&data_stream);
-                    } else if flush_handler.contains(&data_stream) {
+                        flush_handler.remove(partition.name.as_ref());
+                    } else if flush_handler.contains(partition.name.as_ref()) {
                         // Reset timeout from flush_handler for selected stream if not flushed.
-                        flush_handler.reset(&data_stream, flush_period)
+                        flush_handler.reset(partition.name.as_ref(), flush_period)
                     } else {
                         // Add new timeout to flush_handler if not flushed and it was not mapped.
-                        flush_handler.insert(data_stream, flush_period);
+                        flush_handler.insert(partition.name.to_string(), flush_period);
                     }
                 }
 
