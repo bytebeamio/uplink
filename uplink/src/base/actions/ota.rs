@@ -192,7 +192,8 @@ impl OtaDownloader {
         create_dir_all(&ota_path)?;
 
         let mut file_path = ota_path.to_owned();
-        let file_name = url.split("/").last().ok_or(Error::FileNameMissing(url.to_owned()))?;
+        let file_name =
+            url.split('/').last().ok_or_else(|| Error::FileNameMissing(url.to_owned()))?;
         file_path.push(file_name);
         let file_path = file_path.as_path();
         let file = File::create(file_path)?;
