@@ -50,8 +50,7 @@ use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
 use std::fs::{create_dir_all, File};
-use std::path::{Path, PathBuf};
-use std::{io::Write, sync::Arc};
+use std::{io::Write, path::PathBuf, sync::Arc};
 
 use super::{Action, ActionResponse};
 use crate::base::{Config, Stream};
@@ -322,8 +321,8 @@ mod test {
         ota_tx.try_send(ota_action).unwrap();
 
         // Collect action_status and ensure it is as expected
-        let status: Vec<ActionResponse> =
-            serde_json::from_slice(&srx.recv().unwrap().serialize()).unwrap();
+        let bytes = srx.recv().unwrap().serialize().unwrap();
+        let status: Vec<ActionResponse> = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(status[0].state, "Downloading");
 
         // Collect and ensure forwarded action contains expected info
