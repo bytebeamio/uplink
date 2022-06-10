@@ -9,12 +9,14 @@ use tokio::time::{Duration, Instant};
 use tokio::{select, time};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
-use tokio_util::time::{delay_queue::Key, DelayQueue};
 
 use std::{collections::HashMap, io, sync::Arc};
 
 use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
 use crate::base::{Buffer, Config, Package, Point, Stream};
+
+mod util;
+use util::DelayMap;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -107,7 +109,7 @@ impl Bridge {
         let action_timeout = time::sleep(Duration::from_secs(100));
         tokio::pin!(action_timeout);
 
-        let mut flush_handler = DelayHandler::new(flush_period);
+        let mut flush_handler = DelayMap::new();
 
         loop {
             select! {
@@ -163,10 +165,10 @@ impl Bridge {
                         flush_handler.remove(&data_stream);
                     } else if flush_handler.contains(&data_stream) {
                         // Reset timeout from flush_handler for selected stream if not flushed.
-                        flush_handler.reset(&data_stream)
+                        flush_handler.reset(&data_stream, flush_period)
                     } else {
                         // Add new timeout to flush_handler if not flushed and it was not mapped.
-                        flush_handler.insert(data_stream);
+                        flush_handler.insert(data_stream, flush_period);
                     }
                 }
 
@@ -206,58 +208,6 @@ impl Bridge {
 
             }
         }
-    }
-}
-
-/// An internal structure to manage flushing Streams by setting timers
-struct DelayHandler {
-    queue: DelayQueue<String>,
-    map: HashMap<String, Key>,
-    period: Duration,
-}
-
-impl DelayHandler {
-    pub fn new(period: Duration) -> Self {
-        Self { queue: DelayQueue::new(), map: HashMap::new(), period }
-    }
-
-    // Removes timeout if it exists, else do nothing.
-    pub fn remove(&mut self, stream: &str) {
-        if let Some(flush_key) = self.map.remove(stream) {
-            self.queue.remove(&flush_key);
-        }
-    }
-
-    // Resets timeout if it exists, else do nothing.
-    pub fn reset(&mut self, stream: &str) {
-        if let Some(flush_key) = self.map.remove(stream) {
-            self.queue.reset(&flush_key, self.period);
-        }
-    }
-
-    // Check if map contains key for stream timeout.
-    pub fn contains(&self, stream: &str) -> bool {
-        self.map.contains_key(stream)
-    }
-
-    // Insert new timeout.
-    pub fn insert(&mut self, stream: String) {
-        let key = self.queue.insert(stream.clone(), self.period);
-        self.map.insert(stream, key);
-    }
-
-    // Remove a key from map if it has timedout
-    pub async fn next(&mut self) -> Option<String> {
-        if let Some(stream) = self.queue.next().await {
-            self.map.remove_entry(stream.get_ref());
-            return Some(stream.get_ref().to_owned());
-        }
-
-        None
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.queue.is_empty()
     }
 }
 
