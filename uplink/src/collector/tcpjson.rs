@@ -1,5 +1,5 @@
 use flume::{Receiver, RecvError, Sender};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -160,13 +160,15 @@ impl Bridge {
 
                     if flushed {
                         // Remove timeout from flush_handler for selected stream if flushed.
-                        flush_handler.remove(partition.name.as_ref());
-                    } else if flush_handler.contains(partition.name.as_ref()) {
-                        // Reset timeout from flush_handler for selected stream if not flushed.
-                        flush_handler.reset(partition.name.as_ref(), flush_period)
+                        if flush_handler.remove(partition.name.as_ref()) {
+                            warn!("Stream flushed but couldn't be removed from DelayMap: {}", partition.name);
+                        }
                     } else {
-                        // Add new timeout to flush_handler if not flushed and it was not mapped.
-                        flush_handler.insert(partition.name.to_string(), flush_period);
+                        // Reset timeout from flush_handler for selected stream if not flushed.
+                        if !flush_handler.reset(partition.name.as_ref(), flush_period) {
+                            // if it couldn't be reset, insert new timeout in flush_handler.
+                            flush_handler.insert(partition.name.to_string(), flush_period);
+                        }
                     }
                 }
 

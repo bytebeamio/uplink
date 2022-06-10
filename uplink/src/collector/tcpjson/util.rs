@@ -1,5 +1,5 @@
-use std::{collections::HashMap, time::Duration};
 use std::hash::Hash;
+use std::{collections::HashMap, time::Duration};
 
 use tokio_stream::StreamExt;
 use tokio_util::time::{delay_queue::Key, DelayQueue};
@@ -15,23 +15,26 @@ impl<T: Eq + Hash + Clone> DelayMap<T> {
         Self { queue: DelayQueue::new(), map: HashMap::new() }
     }
 
-    // Removes timeout if it exists, else do nothing.
-    pub fn remove(&mut self, item: &T) {
-        if let Some(key) = self.map.remove(item) {
-            self.queue.remove(&key);
-        }
+    // Removes timeout if it exists, else returns false.
+    pub fn remove(&mut self, item: &T) -> bool {
+        let key = match self.map.remove(item) {
+            Some(k) => k,
+            None => return false,
+        };
+        self.queue.remove(&key);
+
+        true
     }
 
-    // Resets timeout if it exists, else do nothing.
-    pub fn reset(&mut self, item: &T, period: Duration) {
-        if let Some(key) = self.map.remove(item) {
-            self.queue.reset(&key, period);
-        }
-    }
+    // Resets timeout if it exists, else returns false.
+    pub fn reset(&mut self, item: &T, period: Duration) -> bool {
+        let key = match self.map.get(item) {
+            Some(k) => k,
+            None => return false,
+        };
+        self.queue.reset(key, period);
 
-    // Check if map contains key for stream timeout.
-    pub fn contains(&self, item: &T) -> bool {
-        self.map.contains_key(item)
+        true
     }
 
     // Insert new timeout.
