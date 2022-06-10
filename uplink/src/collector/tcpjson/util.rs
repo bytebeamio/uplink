@@ -17,24 +17,22 @@ impl<T: Eq + Hash + Clone> DelayMap<T> {
 
     // Removes timeout if it exists, else returns false.
     pub fn remove(&mut self, item: &T) -> bool {
-        let key = match self.map.remove(item) {
-            Some(k) => k,
-            None => return false,
+        if let Some(key) = self.map.remove(item) {
+            self.queue.remove(&key);
+            return true;
         };
-        self.queue.remove(&key);
 
-        true
+        false
     }
 
     // Resets timeout if it exists, else returns false.
     pub fn reset(&mut self, item: &T, period: Duration) -> bool {
-        let key = match self.map.get(item) {
-            Some(k) => k,
-            None => return false,
+        if let Some(key) = self.map.get(item) {
+            self.queue.reset(key, period);
+            return true;
         };
-        self.queue.reset(key, period);
 
-        true
+        false
     }
 
     // Insert new timeout.

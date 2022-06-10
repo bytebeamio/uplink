@@ -158,15 +158,14 @@ impl Bridge {
                         }
                     };
 
+                    // Remove timeout from flush_handler for selected stream if flushed, else reset if it
+                    // already exists or insert a new one. warn in case stream flushed was not in the queue.
                     if flushed {
-                        // Remove timeout from flush_handler for selected stream if flushed.
-                        if flush_handler.remove(partition.name.as_ref()) {
-                            warn!("Stream flushed but couldn't be removed from DelayMap: {}", partition.name);
+                        if !flush_handler.remove(partition.name.as_ref()) {
+                            warn!("Flushed stream's timeout couldn't be removed from DelayMap: {}", partition.name.as_ref());
                         }
                     } else {
-                        // Reset timeout from flush_handler for selected stream if not flushed.
                         if !flush_handler.reset(partition.name.as_ref(), flush_period) {
-                            // if it couldn't be reset, insert new timeout in flush_handler.
                             flush_handler.insert(partition.name.to_string(), flush_period);
                         }
                     }
