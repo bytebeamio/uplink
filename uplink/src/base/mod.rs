@@ -21,6 +21,7 @@ pub enum Error {
 pub struct StreamConfig {
     pub topic: String,
     pub buf_size: usize,
+    pub flush_period: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
