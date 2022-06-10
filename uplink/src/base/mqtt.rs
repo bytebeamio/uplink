@@ -52,7 +52,7 @@ impl Mqtt {
     }
 
     /// Poll eventloop to receive packets from broker
-    pub async fn start(&mut self) {
+    pub async fn start(mut self) {
         loop {
             match self.eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::ConnAck(_))) => {

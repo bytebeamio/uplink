@@ -340,7 +340,7 @@ impl Serializer {
         }
     }
 
-    pub async fn start(&mut self) -> Result<(), Error> {
+    pub async fn start(mut self) -> Result<(), Error> {
         if self.storage.is_none() {
             loop {
                 self.normal().await?;
