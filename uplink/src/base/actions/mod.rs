@@ -1,5 +1,5 @@
 use super::{Config, Control, Package};
-use flume::{Receiver, Sender};
+use flume::{Receiver, Sender, TrySendError};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod controller;
-mod ota;
+pub mod ota;
 mod process;
 pub mod tunshell;
 
@@ -26,27 +26,27 @@ pub enum Error {
     #[error("Controller error {0}")]
     Controller(#[from] controller::Error),
     #[error("Error sending keys to tunshell thread {0}")]
-    TunshellSendError(#[from] flume::SendError<String>),
-    #[error("Error sending Action through bridge {0}")]
-    BridgeSendError(#[from] flume::TrySendError<Action>),
+    TunshellSend(#[from] flume::SendError<String>),
+    #[error("Error forwarding Action {0}")]
+    TrySend(#[from] flume::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
-    #[error("Error from firmware downloader {0}")]
-    OtaError(#[from] ota::Error),
+    #[error("Another OTA downloading")]
+    Downloading,
 }
 
 /// On the Bytebeam platform, an Action is how beamd and through it,
 /// the end-user, can communicate the tasks they want to perform on
 /// said device, in this case, uplink.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
     // action id
     #[serde(alias = "id")]
     pub action_id: String,
     // control or process
-    kind: String,
+    pub kind: String,
     // action name
-    name: String,
+    pub name: String,
     // action payload. json. can be args/payload. depends on the invoked command
     pub payload: String,
 }
@@ -99,6 +99,11 @@ impl ActionResponse {
     pub fn failure<E: Into<String>>(id: &str, error: E) -> ActionResponse {
         ActionResponse::new(id, "Failed", 100, vec![]).add_error(error)
     }
+
+    pub fn set_sequence(mut self, seq: u32) -> ActionResponse {
+        self.sequence = seq;
+        self
+    }
 }
 
 impl Point for ActionResponse {
@@ -116,8 +121,9 @@ pub struct Actions {
     action_status: Stream<ActionResponse>,
     process: process::Process,
     controller: controller::Controller,
-    actions_rx: Option<Receiver<Action>>,
+    actions_rx: Receiver<Action>,
     tunshell_tx: Sender<String>,
+    ota_tx: Sender<Action>,
     bridge_tx: Sender<Action>,
 }
 
@@ -127,6 +133,7 @@ impl Actions {
         controllers: HashMap<String, Sender<Control>>,
         actions_rx: Receiver<Action>,
         tunshell_tx: Sender<String>,
+        ota_tx: Sender<Action>,
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
     ) -> Actions {
@@ -137,18 +144,17 @@ impl Actions {
             action_status,
             process,
             controller,
-            actions_rx: Some(actions_rx),
+            actions_rx,
             tunshell_tx,
+            ota_tx,
             bridge_tx,
         }
     }
 
-    pub async fn start(&mut self) {
-        let action_stream = self.actions_rx.take().unwrap();
-
-        // start receiving and processing actions
+    /// Start receiving and processing [Action]s
+    pub async fn start(mut self) {
         loop {
-            let action = match action_stream.recv_async().await {
+            let action = match self.actions_rx.recv_async().await {
                 Ok(v) => v,
                 Err(e) => {
                     error!("Action stream receiver error = {:?}", e);
@@ -177,14 +183,11 @@ impl Actions {
                 return Ok(());
             }
             "update_firmware" if self.config.ota.enabled => {
-                // Download the OTA update if action is named "update_firmware" and feature is enabled
-                ota::spawn_firmware_downloader(
-                    self.action_status.clone(),
-                    action,
-                    self.config.clone(),
-                    self.bridge_tx.clone(),
-                )
-                .await?;
+                // if action can't be sent, Error out and notify cloud
+                self.ota_tx.try_send(action).map_err(|e| match e {
+                    TrySendError::Full(_) => Error::Downloading,
+                    e => Error::TrySend(e),
+                })?;
                 return Ok(());
             }
             _ => (),
@@ -228,11 +231,11 @@ impl Actions {
 
 impl Package for Buffer<ActionResponse> {
     fn topic(&self) -> Arc<String> {
-        return self.topic.clone();
+        self.topic.clone()
     }
 
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {

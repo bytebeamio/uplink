@@ -52,7 +52,7 @@ impl Mqtt {
     }
 
     /// Poll eventloop to receive packets from broker
-    pub async fn start(&mut self) {
+    pub async fn start(mut self) {
         loop {
             match self.eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::ConnAck(_))) => {
@@ -102,7 +102,7 @@ fn mqttoptions(config: &Config) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
     let mut mqttoptions = MqttOptions::new(&config.device_id, &config.broker, config.port);
     mqttoptions.set_max_packet_size(config.max_packet_size, config.max_packet_size);
-    mqttoptions.set_keep_alive(60);
+    mqttoptions.set_keep_alive(Duration::from_secs(60));
     mqttoptions.set_inflight(config.max_inflight);
 
     if let Some(auth) = config.authentication.clone() {

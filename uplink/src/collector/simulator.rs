@@ -107,7 +107,7 @@ pub struct Gps {
 impl Gps {
     pub fn new() -> Gps {
         let mut rng = rand::thread_rng();
-        Gps { lat: rng.gen_range(40f64, 45f64), lon: rng.gen_range(95f64, 96f64) }
+        Gps { lat: rng.gen_range(40f64..45f64), lon: rng.gen_range(95f64..96f64) }
     }
 }
 

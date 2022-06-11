@@ -31,7 +31,7 @@ pub enum Error {
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
     #[error("Download OTA error")]
-    ActionsError(#[from] ActionsError),
+    Actions(#[from] ActionsError),
 }
 
 pub struct Bridge {
@@ -71,7 +71,7 @@ impl Bridge {
                         }
                     }
                     action = self.actions_rx.recv_async() => {
-                        let action = action.unwrap();
+                        let action = action?;
                         error!("Bridge down!! Action ID = {}", action.action_id);
                         let status = ActionResponse::failure(&action.action_id, "Bridge down");
                         if let Err(e) = action_status.fill(status).await {
@@ -212,11 +212,11 @@ impl Point for Payload {
 
 impl Package for Buffer<Payload> {
     fn topic(&self) -> Arc<String> {
-        return self.topic.clone();
+        self.topic.clone()
     }
 
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {

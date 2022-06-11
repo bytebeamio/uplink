@@ -37,13 +37,13 @@ pub struct Authentication {
     device_private_key: String,
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Ota {
     pub enabled: bool,
     pub path: String,
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Stats {
     pub enabled: bool,
     pub process_names: Vec<String>,
@@ -51,7 +51,7 @@ pub struct Stats {
     pub stream_size: Option<usize>,
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -75,7 +75,9 @@ pub trait Point: Send + Debug {
 
 pub trait Package: Send + Debug {
     fn topic(&self) -> Arc<String>;
-    fn serialize(&self) -> Vec<u8>;
+    // TODO: Implement a generic Return type that can wrap
+    // around custom serialization error types.
+    fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
 }
 
@@ -247,7 +249,7 @@ impl<T> Buffer<T> {
     }
 
     pub fn anomalies(&self) -> Option<(String, usize)> {
-        if self.anomalies.len() == 0 {
+        if self.anomalies.is_empty() {
             return None;
         }
 

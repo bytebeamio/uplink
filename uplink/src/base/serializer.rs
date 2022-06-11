@@ -21,9 +21,11 @@ pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
-    Client(#[from] MqttError),
+    Client(#[from] ClientError),
     #[error("Mqtt error {0}")]
     Mqtt(rumqttc::Error),
+    #[error("Packet was not expected {0:?}")]
+    UnexpectedPacket(Packet),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
     #[error("Storage is empty")]
@@ -186,7 +188,7 @@ impl<C: MqttClient> Serializer<C> {
         collector_rx: Receiver<Box<dyn Package>>,
         client: C,
     ) -> Result<Serializer<C>, Error> {
-        let metrics_config = config.streams.get("metrics").unwrap();
+        let metrics_config = config.streams.get("metrics").expect("Missing metrics Stream in config");
         let metrics = Metrics::new(&metrics_config.topic);
 
         let storage = match &config.persistence {
@@ -306,8 +308,8 @@ impl<C: MqttClient> Serializer<C> {
         let client = self.client.clone();
 
         let publish = match read_publish(storage, max_packet_size) {
-            Ok(p) => p,
-            Err(Error::EmptyPersistence) => return Ok(Status::Normal),
+            Ok(Packet::Publish(publish)) => publish,
+            Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
             Err(e) => {
                 error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
                 return Ok(Status::Normal);
@@ -355,7 +357,8 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     let publish = match read_publish(storage, max_packet_size) {
-                        Ok(p) => p,
+                        Ok(Packet::Publish(publish)) => publish,
+                        Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
                         Err(Error::EmptyPersistence) => return Ok(Status::Normal),
                         Err(e) => {
                             error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
@@ -388,14 +391,14 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                     let topic = data.topic();
-                    let payload = data.serialize();
+                    let payload = data.serialize()?;
                     let payload_size = payload.len();
                     let request = self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload);
                     (payload_size, request)
 
                 }
                 _ = interval.tick() => {
-                    let (topic, payload) = self.metrics.next();
+                    let (topic, payload) = self.metrics.next()?;
                     let payload_size = payload.len();
                     let request = self.client.try_publish(topic, QoS::AtLeastOnce, false, payload);
                     (payload_size, request)
@@ -568,16 +571,16 @@ impl Metrics {
         self.errors.push_str(" | ");
     }
 
-    pub fn next(&mut self) -> (&str, Vec<u8>) {
+    pub fn next(&mut self) -> Result<(&str, Vec<u8>), Error> {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
         self.sequence += 1;
 
-        let payload = serde_json::to_vec(&vec![&self]).unwrap();
+        let payload = serde_json::to_vec(&vec![&self])?;
         self.errors.clear();
         self.lost_segments = 0;
-        (&self.topic, payload)
+        Ok((&self.topic, payload))
     }
 }
 
