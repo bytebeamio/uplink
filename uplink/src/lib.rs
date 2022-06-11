@@ -66,14 +66,6 @@ impl Uplink {
     }
 
     pub fn spawn(&mut self) -> Result<(), Error> {
-        let raw_action_channel = RxTx::bounded(10);
-
-        let mut mqtt = Mqtt::new(self.config.clone(), raw_action_channel.tx);
-
-        let client = mqtt.client();
-        let mut serializer =
-            Serializer::new(self.config.clone(), self.data_channel.rx.clone(), client)?;
-
         // Launch a thread to handle tunshell access
         let tunshell_keys = RxTx::bounded(10);
         let tunshell_config = self.config.clone();
@@ -103,9 +95,12 @@ impl Uplink {
         }
 
         let raw_action_channel = RxTx::bounded(10);
+
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_channel.tx);
-        let serializer =
-            Serializer::new(self.config.clone(), self.data_channel.rx.clone(), mqtt.client())?;
+
+        let client = mqtt.client();
+        let mut serializer =
+            Serializer::new(self.config.clone(), self.data_channel.rx.clone(), client)?;
 
         let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
         let actions = Actions::new(

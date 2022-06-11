@@ -21,21 +21,13 @@ pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
-    Client(#[from] ClientError),
-    #[error("Mqtt error {0}")]
-    Mqtt(rumqttc::Error),
-    #[error("Packet was not expected {0:?}")]
-    UnexpectedPacket(Packet),
+    Client(#[from] MqttError),
+    #[error("Mqtt error {0:?}")]
+    Mqtt(#[from] rumqttc::mqttbytes::Error),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
     #[error("Storage is empty")]
     EmptyPersistence,
-}
-
-impl From<rumqttc::Error> for Error {
-    fn from(e: rumqttc::Error) -> Self {
-        Self::Mqtt(e)
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -61,7 +53,7 @@ impl From<ClientError> for MqttError {
         match e {
             ClientError::Request(e) => MqttError::Send(e.into_inner()),
             ClientError::TryRequest(e) => MqttError::TrySend(e.into_inner()),
-            e => MqttError::Client(e.into()),
+            e => MqttError::Client(e),
         }
     }
 }
@@ -188,7 +180,8 @@ impl<C: MqttClient> Serializer<C> {
         collector_rx: Receiver<Box<dyn Package>>,
         client: C,
     ) -> Result<Serializer<C>, Error> {
-        let metrics_config = config.streams.get("metrics").expect("Missing metrics Stream in config");
+        let metrics_config =
+            config.streams.get("metrics").expect("Missing metrics Stream in config");
         let metrics = Metrics::new(&metrics_config.topic);
 
         let storage = match &config.persistence {
@@ -229,7 +222,7 @@ impl<C: MqttClient> Serializer<C> {
             // Collect next data packet to write to disk
             let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
-            let payload = data.serialize();
+            let payload = data.serialize()?;
             publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
         }
     }
@@ -257,7 +250,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                     let topic = data.topic();
-                    let payload = data.serialize();
+                    let payload = data.serialize()?;
                     let payload_size = payload.len();
                     let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
 
@@ -308,8 +301,7 @@ impl<C: MqttClient> Serializer<C> {
         let client = self.client.clone();
 
         let publish = match read_publish(storage, max_packet_size) {
-            Ok(Packet::Publish(publish)) => publish,
-            Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
+            Ok(publish) => publish,
             Err(e) => {
                 error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
                 return Ok(Status::Normal);
@@ -328,7 +320,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                     let topic = data.topic();
-                    let payload = data.serialize();
+                    let payload = data.serialize()?;
                     let payload_size = payload.len();
                     let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
 
@@ -357,8 +349,7 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     let publish = match read_publish(storage, max_packet_size) {
-                        Ok(Packet::Publish(publish)) => publish,
-                        Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
+                        Ok(publish) => publish,
                         Err(Error::EmptyPersistence) => return Ok(Status::Normal),
                         Err(e) => {
                             error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
@@ -437,13 +428,13 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                     let topic = data.topic();
-                    let payload = data.serialize();
+                    let payload = data.serialize()?;
                     let payload_size = payload.len();
                     self.client.publish(topic.as_ref(), QoS::AtLeastOnce, false, payload).await?;
                     payload_size
                 }
                 _ = interval.tick() => {
-                    let (topic, payload) = self.metrics.next();
+                    let (topic, payload) = self.metrics.next()?;
                     let payload_size = payload.len();
                     self.client.publish(topic, QoS::AtLeastOnce, false, payload).await?;
                     payload_size

@@ -15,7 +15,7 @@ tokio-util = { version = "0.7", features = ["codec"] }
 tokio-stream = "0.1"
 tokio-compat-02 = "0.2.0"
 flume = "0.10"
-rumqttc = "0.11"
+rumqttc = "0.12"
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
@@ -25,7 +25,7 @@ rand = "0.8"
 tunshell-client = { git = "https://github.com/TimeToogo/tunshell.git" }
 reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
 futures-util = "0.3.14"
-sysinfo = "0.21"
+sysinfo = "0.23"
 async-trait = "0.1"
 
 [build-dependencies]
