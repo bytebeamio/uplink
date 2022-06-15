@@ -25,20 +25,10 @@ impl<T: Eq + Hash + Clone> DelayMap<T> {
         false
     }
 
-    // Resets timeout if it exists, else returns false.
-    pub fn reset(&mut self, item: &T, period: Duration) -> bool {
-        if let Some(key) = self.map.get(item) {
-            self.queue.reset(key, period);
-            return true;
-        };
-
-        false
-    }
-
     // Insert new timeout.
-    pub fn insert(&mut self, item: T, period: Duration) {
+    pub fn insert(&mut self, item: &T, period: Duration) {
         let key = self.queue.insert(item.clone(), period);
-        self.map.insert(item, key);
+        self.map.insert(item.to_owned(), key);
     }
 
     // Remove a key from map if it has timedout.

@@ -91,6 +91,14 @@ pub enum Control {
     StartStream(String),
 }
 
+/// Signals status of stream buffer
+#[derive(Debug)]
+pub enum StreamStatus<'a> {
+    Partial,
+    Flushed(&'a String),
+    Init(&'a String),
+}
+
 #[derive(Debug)]
 pub struct Stream<T> {
     pub name: Arc<String>,
@@ -207,13 +215,17 @@ where
     }
 
     /// Fill buffer with data and trigger async channel send on max_buf_size, returning true if flushed.
-    pub async fn fill(&mut self, data: T) -> Result<bool, Error> {
+    pub async fn fill<'a>(&'a mut self, data: T) -> Result<StreamStatus<'a>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
-            return Ok(true);
+            return Ok(StreamStatus::Flushed(&self.name));
         }
 
-        Ok(false)
+        if self.buffer.buffer.len() == 1 {
+            return Ok(StreamStatus::Init(&self.name));
+        }
+
+        Ok(StreamStatus::Partial)
     }
 
     /// Push data into buffer and trigger sync channel send on max_buf_size

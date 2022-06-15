@@ -13,7 +13,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use std::{collections::HashMap, io, sync::Arc};
 
 use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
-use crate::base::{Buffer, Config, Package, Point, Stream};
+use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus};
 
 mod util;
 use util::DelayMap;
@@ -151,24 +151,25 @@ impl Bridge {
                         }
                     };
 
-                    let flushed = match stream.fill(data).await {
-                        Ok(f) => f,
+                    let stream_state = match stream.fill(data).await {
+                        Ok(s) => s,
                         Err(e) => {
                             error!("Failed to send data. Error = {:?}", e.to_string());
                             continue
                         }
                     };
 
-                    // Remove timeout from flush_handler for selected stream if flushed, else reset if it
-                    // already exists or insert a new one. warn in case stream flushed was not in the queue.
-                    if flushed {
-                        if !flush_handler.remove(stream.name.as_ref()) {
-                            warn!("Flushed stream's timeout couldn't be removed from DelayMap: {}", stream.name.as_ref());
+                    // Remove timeout from flush_handler for selected stream if stream state is flushed,
+                    // do nothing if stream state is partial. Insert a new timeout if initial fill.
+                    // Warn in case stream flushed stream was not in the queue.
+                    match stream_state {
+                        StreamStatus::Flushed(stream_name) => {
+                            if !flush_handler.remove(stream_name) {
+                                warn!("Flushed stream's timeout couldn't be removed from DelayMap: {}", stream.name.as_ref());
+                            }
                         }
-                    } else {
-                        if !flush_handler.reset(stream.name.as_ref(), *flush_period) {
-                            flush_handler.insert(stream.name.to_string(), *flush_period);
-                        }
+                        StreamStatus::Init(stream_name) => flush_handler.insert(stream_name, *flush_period),
+                        StreamStatus::Partial => {}
                     }
                 }
 
