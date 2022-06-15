@@ -1,5 +1,5 @@
 use flume::{Receiver, RecvError, Sender};
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -163,11 +163,7 @@ impl Bridge {
                     // do nothing if stream state is partial. Insert a new timeout if initial fill.
                     // Warn in case stream flushed stream was not in the queue.
                     match stream_state {
-                        StreamStatus::Flushed(stream_name) => {
-                            if !flush_handler.remove(stream_name) {
-                                warn!("Flushed stream's timeout couldn't be removed from DelayMap: {}", stream.name.as_ref());
-                            }
-                        }
+                        StreamStatus::Flushed(stream_name) => flush_handler.remove(stream_name),
                         StreamStatus::Init(stream_name) => flush_handler.insert(stream_name, *flush_period),
                         StreamStatus::Partial => {}
                     }
