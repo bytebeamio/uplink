@@ -101,7 +101,8 @@ impl Bridge {
         for (stream_name, config) in &self.config.streams {
             let stream =
                 Stream::new(stream_name, &config.topic, config.buf_size, self.data_tx.clone());
-            let flush_period = Duration::from_secs(config.flush_period.unwrap_or(10));
+            let flush_period =
+                config.flush_period.map(|s| Duration::from_secs(s)).unwrap_or(flush_period);
 
             bridge_partitions.insert(stream_name.to_owned(), (stream, flush_period));
         }
