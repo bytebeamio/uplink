@@ -101,8 +101,7 @@ impl Bridge {
         for (stream_name, config) in &self.config.streams {
             let stream =
                 Stream::new(stream_name, &config.topic, config.buf_size, self.data_tx.clone());
-            let flush_period =
-                config.flush_period.map(|s| Duration::from_secs(s)).unwrap_or(flush_period);
+            let flush_period = config.flush_period.map(Duration::from_secs).unwrap_or(flush_period);
 
             bridge_partitions.insert(stream_name.to_owned(), (stream, flush_period));
         }
@@ -166,7 +165,9 @@ impl Bridge {
                     match stream_state {
                         StreamStatus::Flushed(stream_name) => flush_handler.remove(stream_name),
                         StreamStatus::Init(stream_name) => flush_handler.insert(stream_name, *flush_period),
-                        StreamStatus::Partial => {}
+                        StreamStatus::Partial(l) => {
+                            debug!("Stream contains {} elements", l);
+                        }
                     }
                 }
 

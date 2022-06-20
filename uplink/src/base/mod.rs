@@ -94,7 +94,7 @@ pub enum Control {
 /// Signals status of stream buffer
 #[derive(Debug)]
 pub enum StreamStatus<'a> {
-    Partial,
+    Partial(usize),
     Flushed(&'a String),
     Init(&'a String),
 }
@@ -209,23 +209,27 @@ where
         Ok(())
     }
 
-    /// Method to check if a Stream buffer is empty
-    pub fn is_empty(&mut self) -> bool {
-        self.buffer.buffer.is_empty()
+    /// Returns number of elements in Stream buffer
+    pub fn len(&self) -> usize {
+        self.buffer.buffer.len()
+    }
+
+    /// Check if Stream buffer is empty
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Fill buffer with data and trigger async channel send on max_buf_size, returning true if flushed.
-    pub async fn fill<'a>(&'a mut self, data: T) -> Result<StreamStatus<'a>, Error> {
+    pub async fn fill(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
             return Ok(StreamStatus::Flushed(&self.name));
         }
-
-        if self.buffer.buffer.len() == 1 {
+        if self.len() == 1 {
             return Ok(StreamStatus::Init(&self.name));
         }
 
-        Ok(StreamStatus::Partial)
+        Ok(StreamStatus::Partial(self.len()))
     }
 
     /// Push data into buffer and trigger sync channel send on max_buf_size
