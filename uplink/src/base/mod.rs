@@ -65,7 +65,7 @@ pub struct Config {
     pub actions: Vec<String>,
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
-    pub flush_period: Option<u64>,
+    pub flush_period: u64,
     pub ota: Ota,
     pub stats: Stats,
 }

@@ -95,7 +95,7 @@ impl Bridge {
         &mut self,
         mut framed: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
-        let flush_period = Duration::from_secs(self.config.flush_period.unwrap_or(10));
+        let flush_period = Duration::from_secs(self.config.flush_period);
 
         let mut bridge_partitions = HashMap::<String, (Stream<Payload>, Duration)>::new();
         for (stream_name, config) in &self.config.streams {
