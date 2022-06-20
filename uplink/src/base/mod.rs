@@ -180,7 +180,7 @@ where
         self.last_sequence = current_sequence;
         self.last_timestamp = current_timestamp;
 
-        // if max_buffer_size is reached or timedout and not empty
+        // if max_buffer_size is breached, flush
         let buf = if self.buffer.buffer.len() >= self.max_buffer_size {
             Some(self.flush_buffer())
         } else {
@@ -219,12 +219,14 @@ where
         self.len() == 0
     }
 
-    /// Fill buffer with data and trigger async channel send on max_buf_size, returning true if flushed.
+    /// Fill buffer with data and trigger async channel send on breaching max_buf_size.
+    /// Returns [`StreamStatus`].
     pub async fn fill(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
             return Ok(StreamStatus::Flushed(&self.name));
         }
+
         if self.len() == 1 {
             return Ok(StreamStatus::Init(&self.name));
         }
