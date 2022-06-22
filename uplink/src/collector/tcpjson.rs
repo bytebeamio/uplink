@@ -97,13 +97,13 @@ impl Bridge {
     ) -> Result<(), Error> {
         let flush_period = Duration::from_secs(self.config.flush_period);
 
-        let mut bridge_partitions = HashMap::<String, (Stream<Payload>, Duration)>::new();
-        for (stream_name, config) in &self.config.streams {
-            let stream =
-                Stream::new(stream_name, &config.topic, config.buf_size, self.data_tx.clone());
+        let mut bridge_partitions = HashMap::new();
+        for (name, config) in &self.config.streams {
+            let mut stream =
+                Stream::new(name, &config.topic, config.buf_size, self.data_tx.clone());
+            stream.flush_period = Duration::from_secs(config.flush_period);
 
-            let flush_period = Duration::from_secs(config.flush_period);
-            bridge_partitions.insert(stream_name.to_owned(), (stream, flush_period));
+            bridge_partitions.insert(name.to_owned(), stream);
         }
 
         let mut action_status = self.action_status.clone();
@@ -138,7 +138,7 @@ impl Bridge {
                         }
                     }
 
-                    let (stream, flush_period) = match bridge_partitions.get_mut(&data.stream) {
+                    let stream = match bridge_partitions.get_mut(&data.stream) {
                         Some(partition) => partition,
                         None => {
                             if bridge_partitions.keys().len() > 20 {
@@ -146,12 +146,14 @@ impl Bridge {
                                 continue
                             }
 
-                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
-                            bridge_partitions.entry(data.stream.clone()).or_insert((stream, flush_period))
+                            let mut stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
+                            stream.flush_period = flush_period;
+
+                            bridge_partitions.entry(data.stream.clone()).or_insert(stream)
                         }
                     };
 
-                    let stream_state = match stream.fill(data).await {
+                    let state = match stream.fill(data).await {
                         Ok(s) => s,
                         Err(e) => {
                             error!("Failed to send data. Error = {:?}", e.to_string());
@@ -162,9 +164,9 @@ impl Bridge {
                     // Remove timeout from flush_handler for selected stream if stream state is flushed,
                     // do nothing if stream state is partial. Insert a new timeout if initial fill.
                     // Warn in case stream flushed stream was not in the queue.
-                    match stream_state {
-                        StreamStatus::Flushed(stream_name) => flush_handler.remove(stream_name),
-                        StreamStatus::Init(stream_name) => flush_handler.insert(stream_name, *flush_period),
+                    match state {
+                        StreamStatus::Flushed(name) => flush_handler.remove(name),
+                        StreamStatus::Init(name, flush_period) => flush_handler.insert(name, flush_period),
                         StreamStatus::Partial(l) => {
                             debug!("Stream contains {} elements", l);
                         }
@@ -202,7 +204,7 @@ impl Bridge {
                 // Flush stream/partitions that timeout
                 stream = flush_handler.next(), if !flush_handler.is_empty() => {
                     let stream = stream.unwrap();
-                    let (stream, _) = bridge_partitions.get_mut(&stream).unwrap();
+                    let stream = bridge_partitions.get_mut(&stream).unwrap();
                     stream.flush().await?;
                 }
 

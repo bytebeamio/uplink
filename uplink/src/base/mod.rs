@@ -1,7 +1,4 @@
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::mem;
-use std::sync::Arc;
+use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
 
 use flume::{SendError, Sender};
 use log::{info, warn};
@@ -107,7 +104,7 @@ pub enum Control {
 pub enum StreamStatus<'a> {
     Partial(usize),
     Flushed(&'a String),
-    Init(&'a String),
+    Init(&'a String, Duration),
 }
 
 #[derive(Debug)]
@@ -119,6 +116,7 @@ pub struct Stream<T> {
     max_buffer_size: usize,
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
+    pub flush_period: Duration,
 }
 
 impl<T> Stream<T>
@@ -136,7 +134,16 @@ where
         let topic = Arc::new(topic.into());
         let buffer = Buffer::new(name.clone(), topic.clone());
 
-        Stream { name, topic, last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
+        Stream {
+            name,
+            topic,
+            last_sequence: 0,
+            last_timestamp: 0,
+            max_buffer_size,
+            buffer,
+            tx,
+            flush_period: Duration::from_secs(60),
+        }
     }
 
     pub fn dynamic_with_size<S: Into<String>>(
@@ -239,7 +246,7 @@ where
         }
 
         if self.len() == 1 {
-            return Ok(StreamStatus::Init(&self.name));
+            return Ok(StreamStatus::Init(&self.name, self.flush_period));
         }
 
         Ok(StreamStatus::Partial(self.len()))
@@ -322,6 +329,7 @@ impl<T> Clone for Stream<T> {
             max_buffer_size: self.max_buffer_size,
             buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
             tx: self.tx.clone(),
+            flush_period: self.flush_period,
         }
     }
 }
