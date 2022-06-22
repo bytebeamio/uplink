@@ -145,6 +145,17 @@ where
         }
     }
 
+    pub fn with_config(
+        name: &String,
+        config: &StreamConfig,
+        tx: Sender<Box<dyn Package>>,
+    ) -> Stream<T> {
+        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx);
+        stream.flush_period = Duration::from_secs(config.flush_period);
+
+        stream
+    }
+
     pub fn dynamic_with_size<S: Into<String>>(
         stream: S,
         project_id: S,

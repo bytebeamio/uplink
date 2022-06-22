@@ -13,7 +13,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use std::{collections::HashMap, io, sync::Arc};
 
 use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
-use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus, DEFAULT_TIMEOUT};
+use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus};
 
 mod util;
 use util::DelayMap;
@@ -95,14 +95,9 @@ impl Bridge {
         &mut self,
         mut framed: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
-        let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
-
         let mut bridge_partitions = HashMap::new();
         for (name, config) in &self.config.streams {
-            let mut stream =
-                Stream::new(name, &config.topic, config.buf_size, self.data_tx.clone());
-            stream.flush_period = Duration::from_secs(config.flush_period);
-
+            let stream = Stream::with_config(name, config, self.data_tx.clone());
             bridge_partitions.insert(name.to_owned(), stream);
         }
 
@@ -146,9 +141,7 @@ impl Bridge {
                                 continue
                             }
 
-                            let mut stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
-                            stream.flush_period = flush_period;
-
+                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
                             bridge_partitions.entry(data.stream.clone()).or_insert(stream)
                         }
                     };
