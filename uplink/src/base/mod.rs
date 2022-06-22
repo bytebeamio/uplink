@@ -237,6 +237,14 @@ where
         self.len() == 0
     }
 
+    fn stream_status(&self) -> StreamStatus<'_> {
+        if self.len() == 1 {
+            return StreamStatus::Init(&self.name, self.flush_period);
+        }
+
+        StreamStatus::Partial(self.len())
+    }
+
     /// Fill buffer with data and trigger async channel send on breaching max_buf_size.
     /// Returns [`StreamStatus`].
     pub async fn fill(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
@@ -245,20 +253,18 @@ where
             return Ok(StreamStatus::Flushed(&self.name));
         }
 
-        if self.len() == 1 {
-            return Ok(StreamStatus::Init(&self.name, self.flush_period));
-        }
-
-        Ok(StreamStatus::Partial(self.len()))
+        Ok(self.stream_status())
     }
 
-    /// Push data into buffer and trigger sync channel send on max_buf_size
-    pub fn push(&mut self, data: T) -> Result<(), Error> {
+    /// Push data into buffer and trigger sync channel send on max_buf_size.
+    /// Returns [`StreamStatus`].
+    pub fn push(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send(Box::new(buf))?;
+            return Ok(StreamStatus::Flushed(&self.name));
         }
 
-        Ok(())
+        Ok(self.stream_status())
     }
 }
 
