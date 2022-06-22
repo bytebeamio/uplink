@@ -96,10 +96,6 @@ const DEFAULT_CONFIG: &str = r#"
     # This makes sure that user is protected against random actions
     # triggered from cloud.
     actions = ["tunshell"]
-
-    # Default duration(in seconds) that bridge collector waits from
-    # receiving first element, before a stream gets flushed.
-    flush_period = 10
     
     [persistence]
     path = "/tmp/uplink"
@@ -151,6 +147,8 @@ fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
         let topic = str::replace(&config.topic, "{device_id}", device_id);
         config.topic = topic;
     }
+
+    println!("{}", serde_json::to_string(&config.streams).unwrap());
 
     Ok(config)
 }

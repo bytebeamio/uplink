@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use flume::{SendError, Sender};
 use log::{info, warn};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub mod actions;
 pub mod mqtt;
@@ -17,11 +17,18 @@ pub enum Error {
     Send(#[from] SendError<Box<dyn Package>>),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+fn default_timeout() -> u64 {
+    60
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StreamConfig {
     pub topic: String,
     pub buf_size: usize,
-    pub flush_period: Option<u64>,
+    #[serde(default = "default_timeout")]
+    /// Duration(in seconds) that bridge collector waits from
+    /// receiving first element, before the stream gets flushed.
+    pub flush_period: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -65,6 +72,10 @@ pub struct Config {
     pub actions: Vec<String>,
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
+    #[serde(default = "default_timeout")]
+    /// Default value(in secs) used to set flush_period for dynamically created streams.
+    /// NOTE: This value will not be used for streams configured by the user
+    /// without specifying flush_period, they will be set with default_timeout()
     pub flush_period: u64,
     pub ota: Ota,
     pub stats: Stats,
