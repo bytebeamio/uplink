@@ -148,8 +148,6 @@ fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
         config.topic = topic;
     }
 
-    println!("{}", serde_json::to_string(&config.streams).unwrap());
-
     Ok(config)
 }
 
