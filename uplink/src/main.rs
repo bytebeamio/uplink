@@ -54,102 +54,7 @@ use structopt::StructOpt;
 use tokio::task;
 
 use uplink::{Bridge, Config, Simulator, Uplink};
-
-#[derive(StructOpt, Debug)]
-#[structopt(name = "uplink", about = "collect, batch, compress, publish")]
-pub struct CommandLine {
-    /// Binary version
-    #[structopt(skip = env!("VERGEN_BUILD_SEMVER"))]
-    version: String,
-    /// Build profile
-    #[structopt(skip= env!("VERGEN_CARGO_PROFILE"))]
-    profile: String,
-    /// Commit SHA
-    #[structopt(skip= env!("VERGEN_GIT_SHA"))]
-    commit_sha: String,
-    /// Commit SHA
-    #[structopt(skip= env!("VERGEN_GIT_COMMIT_TIMESTAMP"))]
-    commit_date: String,
-    /// config file
-    #[structopt(short = "c", help = "Config file")]
-    config: Option<String>,
-    /// config file
-    #[structopt(short = "a", help = "Authentication file")]
-    auth: String,
-    /// list of modules to log
-    #[structopt(short = "s", long = "simulator")]
-    simulator: bool,
-    /// log level (v: info, vv: debug, vvv: trace)
-    #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
-    verbose: u8,
-    /// list of modules to log
-    #[structopt(short = "m", long = "modules")]
-    modules: Vec<String>,
-}
-
-const DEFAULT_CONFIG: &str = r#"
-    bridge_port = 5555
-    max_packet_size = 102400
-    max_inflight = 100
-    
-    # Whitelist of binaries which uplink can spawn as a process
-    # This makes sure that user is protected against random actions
-    # triggered from cloud.
-    actions = ["tunshell"]
-    
-    [persistence]
-    path = "/tmp/uplink"
-    max_file_size = 104857600 # 100MB
-    max_file_count = 3
-    
-    [streams.metrics]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/metrics/jsonarray"
-    buf_size = 10
-    
-    # Action status stream from status messages from bridge
-    [streams.action_status]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
-    buf_size = 1
-
-    [ota]
-    enabled = false
-    path = "/var/tmp/ota-file"
-
-    [stats]
-    enabled = false
-    process_names = ["uplink"]
-    update_period = 30
-"#;
-
-/// Reads config file to generate config struct and replaces places holders
-/// like bike id and data version
-fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
-    let mut config = Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG));
-
-    if let Some(c) = &commandline.config {
-        config = config.merge(Data::<Toml>::file(c));
-    }
-
-    let mut config: Config = config
-        .join(Data::<Json>::file(&commandline.auth))
-        .extract()
-        .with_context(|| "Config error".to_string())?;
-
-    if let Some(persistence) = &config.persistence {
-        fs::create_dir_all(&persistence.path)?;
-    }
-    let tenant_id = config.project_id.trim();
-    let device_id = config.device_id.trim();
-    for config in config.streams.values_mut() {
-        let topic = str::replace(&config.topic, "{tenant_id}", tenant_id);
-        config.topic = topic;
-
-        let topic = str::replace(&config.topic, "{device_id}", device_id);
-        config.topic = topic;
-    }
-
-    Ok(config)
-}
+use uplink::config::{CommandLine, initalize_config};
 
 fn initialize_logging(commandline: &CommandLine) {
     let level = match commandline.verbose {
@@ -216,12 +121,15 @@ async fn main() -> Result<(), Error> {
     let enable_simulator = commandline.simulator;
 
     initialize_logging(&commandline);
-    let config = Arc::new(initalize_config(&commandline)?);
+    let config = Arc::new(initalize_config(
+        fs::read_to_string(&commandline.auth)?.as_str(),
+        commandline.config.as_ref().map(|s| s.as_str()).unwrap_or("")
+    )?);
 
     banner(&commandline, &config);
 
     let mut uplink = Uplink::new(config.clone())?;
-    uplink.spawn()?;
+    uplink.spawn().await?;
 
     if enable_simulator {
         let mut simulator = Simulator::new(config.clone(), uplink.bridge_data_tx());
