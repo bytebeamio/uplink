@@ -131,6 +131,7 @@ where
         let name = Arc::new(stream.into());
         let topic = Arc::new(topic.into());
         let buffer = Buffer::new(name.clone(), topic.clone());
+        let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
 
         Stream {
             name,
@@ -140,7 +141,7 @@ where
             max_buffer_size,
             buffer,
             tx,
-            flush_period: Duration::from_secs(60),
+            flush_period,
         }
     }
 
