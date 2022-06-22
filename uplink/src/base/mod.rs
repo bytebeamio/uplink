@@ -200,7 +200,7 @@ where
 
         // if max_buffer_size is breached, flush
         let buf = if self.buffer.buffer.len() >= self.max_buffer_size {
-            Some(self.flush_buffer())
+            Some(self.take_buffer())
         } else {
             None
         };
@@ -209,7 +209,7 @@ where
     }
 
     // Returns buffer content, replacing with empty buffer in-place
-    fn flush_buffer(&mut self) -> Buffer<T> {
+    fn take_buffer(&mut self) -> Buffer<T> {
         let name = self.name.clone();
         let topic = self.topic.clone();
         info!("Flushing stream name: {}, topic: {}", name, topic);
@@ -220,7 +220,7 @@ where
     /// Triggers flush and async channel send if not empty
     pub async fn flush(&mut self) -> Result<(), Error> {
         if !self.is_empty() {
-            let buf = self.flush_buffer();
+            let buf = self.take_buffer();
             self.tx.send_async(Box::new(buf)).await?;
         }
 
