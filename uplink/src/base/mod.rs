@@ -14,8 +14,11 @@ pub enum Error {
     Send(#[from] SendError<Box<dyn Package>>),
 }
 
+pub const DEFAULT_TIMEOUT: u64 = 60;
+
+#[inline]
 fn default_timeout() -> u64 {
-    60
+    DEFAULT_TIMEOUT
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -69,11 +72,6 @@ pub struct Config {
     pub actions: Vec<String>,
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
-    #[serde(default = "default_timeout")]
-    /// Default value(in secs) used to set flush_period for dynamically created streams.
-    /// NOTE: This value will not be used for streams configured by the user
-    /// without specifying flush_period, they will be set with default_timeout()
-    pub flush_period: u64,
     pub ota: Ota,
     pub stats: Stats,
 }
@@ -237,23 +235,20 @@ where
         self.len() == 0
     }
 
-    // Returns Flushed if empty, Init if len == 1, otherwise returns Partial
-    fn status(&self) -> StreamStatus<'_> {
-        match self.len() {
-            0 => StreamStatus::Flushed(&self.name),
-            1 => StreamStatus::Init(&self.name, self.flush_period),
-            len => StreamStatus::Partial(len),
-        }
-    }
-
     /// Fill buffer with data and trigger async channel send on breaching max_buf_size.
     /// Returns [`StreamStatus`].
     pub async fn fill(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
+            return Ok(StreamStatus::Flushed(&self.name));
         }
 
-        Ok(self.status())
+        let status = match self.len() {
+            1 => StreamStatus::Init(&self.name, self.flush_period),
+            len => StreamStatus::Partial(len),
+        };
+
+        Ok(status)
     }
 
     /// Push data into buffer and trigger sync channel send on max_buf_size.
@@ -261,9 +256,15 @@ where
     pub fn push(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send(Box::new(buf))?;
+            return Ok(StreamStatus::Flushed(&self.name));
         }
 
-        Ok(self.status())
+        let status = match self.len() {
+            1 => StreamStatus::Init(&self.name, self.flush_period),
+            len => StreamStatus::Partial(len),
+        };
+
+        Ok(status)
     }
 }
 

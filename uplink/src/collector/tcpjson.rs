@@ -13,7 +13,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use std::{collections::HashMap, io, sync::Arc};
 
 use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
-use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus};
+use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus, DEFAULT_TIMEOUT};
 
 mod util;
 use util::DelayMap;
@@ -95,7 +95,7 @@ impl Bridge {
         &mut self,
         mut framed: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
-        let flush_period = Duration::from_secs(self.config.flush_period);
+        let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
 
         let mut bridge_partitions = HashMap::new();
         for (name, config) in &self.config.streams {
