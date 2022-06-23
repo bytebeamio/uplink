@@ -123,7 +123,10 @@ async fn main() -> Result<(), Error> {
     initialize_logging(&commandline);
     let config = Arc::new(initalize_config(
         fs::read_to_string(&commandline.auth)?.as_str(),
-        commandline.config.as_ref().map(|s| s.as_str()).unwrap_or("")
+        commandline.config.as_ref()
+            .and_then(|path| fs::read_to_string(path).ok())
+            .unwrap_or("".to_string())
+            .as_str(),
     )?);
 
     banner(&commandline, &config);
