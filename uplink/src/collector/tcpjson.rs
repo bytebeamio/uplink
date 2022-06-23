@@ -12,11 +12,9 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::{collections::HashMap, io, sync::Arc};
 
+use super::util::DelayMap;
 use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
 use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus};
-
-mod util;
-use util::DelayMap;
 
 #[derive(Error, Debug)]
 pub enum Error {
