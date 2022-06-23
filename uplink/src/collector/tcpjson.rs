@@ -20,13 +20,13 @@ pub enum Error {
     Recv(#[from] flume::RecvError),
 }
 
-struct TcpCollector {
+struct TcpJson {
     inner: Framed<TcpStream, LinesCodec>,
 }
 
 #[async_trait::async_trait]
-impl CollectorInterface for TcpCollector {
-    async fn write(&mut self, action: Action) -> Result<(), CollectorError> {
+impl CollectorInterface for TcpJson {
+    async fn send(&mut self, action: Action) -> Result<(), CollectorError> {
         let data = match serde_json::to_vec(&action) {
             Ok(d) => d,
             Err(e) => {
@@ -41,7 +41,7 @@ impl CollectorInterface for TcpCollector {
         Ok(())
     }
 
-    async fn read(&mut self) -> Result<Payload, CollectorError> {
+    async fn recv(&mut self) -> Result<Payload, CollectorError> {
         let frame = self.inner.next().await.ok_or(CollectorError::StreamDone)??;
         debug!("Received line = {:?}", frame);
 
@@ -106,7 +106,7 @@ impl Bridge {
             };
 
             info!("Accepted new connection from {:?}", addr);
-            let framed = TcpCollector { inner: Framed::new(stream, LinesCodec::new()) };
+            let framed = TcpJson { inner: Framed::new(stream, LinesCodec::new()) };
             if let Err(e) = self.collector.collect(framed).await {
                 error!("Bridge failed. Error = {:?}", e);
             }

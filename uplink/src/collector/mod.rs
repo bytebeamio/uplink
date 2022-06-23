@@ -69,7 +69,7 @@ impl Collector {
 
         loop {
             select! {
-                data = interface.read() => {
+                data = interface.recv() => {
                     let data = data?;
                     // If incoming data is a response for an action, drop it
                     // if timeout is already sent to cloud
@@ -122,7 +122,7 @@ impl Collector {
 
                     action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
 
-                    match interface.write(action).await {
+                    match interface.send(action).await {
                         Ok(d) => d,
                         Err(CollectorError::Json(e)) => {
                             error!("Deserialization error = {:?}", e);
@@ -157,8 +157,8 @@ impl Collector {
 
 #[async_trait::async_trait]
 pub trait CollectorInterface {
-    async fn write(&mut self, action: Action) -> Result<(), CollectorError>;
-    async fn read(&mut self) -> Result<Payload, CollectorError>;
+    async fn send(&mut self, action: Action) -> Result<(), CollectorError>;
+    async fn recv(&mut self) -> Result<Payload, CollectorError>;
 }
 
 // TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
