@@ -1,44 +1,60 @@
-use flume::{Receiver, RecvError, Sender};
+use flume::{Receiver, Sender};
 use log::{debug, error, info};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::time::{Duration, Instant};
-use tokio::{select, time};
+use tokio::select;
 use tokio_stream::StreamExt;
-use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
+use tokio_util::codec::{Framed, LinesCodec};
 
-use std::{collections::HashMap, io, sync::Arc};
+use std::sync::Arc;
 
-use super::util::DelayMap;
-use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
-use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus};
+use super::{Collector, CollectorError, CollectorInterface, Payload};
+use crate::base::actions::{Action, ActionResponse};
+use crate::base::{Config, Package, Stream};
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Io error {0}")]
-    Io(#[from] io::Error),
+    Io(#[from] std::io::Error),
     #[error("Receiver error {0}")]
-    Recv(#[from] RecvError),
-    #[error("Stream done")]
-    StreamDone,
-    #[error("Lines codec error {0}")]
-    Codec(#[from] LinesCodecError),
-    #[error("Serde error {0}")]
-    Json(#[from] serde_json::error::Error),
-    #[error("Download OTA error")]
-    Actions(#[from] ActionsError),
-    #[error("Couldn't fill stream")]
-    Stream(#[from] crate::base::Error),
+    Recv(#[from] flume::RecvError),
+}
+
+struct TcpCollector {
+    inner: Framed<TcpStream, LinesCodec>,
+}
+
+#[async_trait::async_trait]
+impl CollectorInterface for TcpCollector {
+    async fn write(&mut self, action: Action) -> Result<(), CollectorError> {
+        let data = match serde_json::to_vec(&action) {
+            Ok(d) => d,
+            Err(e) => {
+                error!("Serialization error = {:?}", e);
+                return Ok(());
+            }
+        };
+
+        self.inner.get_mut().write_all(&data).await?;
+        self.inner.get_mut().write_all(b"\n").await?;
+
+        Ok(())
+    }
+
+    async fn read(&mut self) -> Result<Payload, CollectorError> {
+        let frame = self.inner.next().await.ok_or(CollectorError::StreamDone)??;
+        debug!("Received line = {:?}", frame);
+
+        let data: Payload = serde_json::from_str(&frame)?;
+
+        Ok(data)
+    }
 }
 
 pub struct Bridge {
     config: Arc<Config>,
-    data_tx: Sender<Box<dyn Package>>,
+    collector: Collector,
     actions_rx: Receiver<Action>,
-    current_action: Option<String>,
     action_status: Stream<ActionResponse>,
 }
 
@@ -48,13 +64,21 @@ impl Bridge {
         data_tx: Sender<Box<dyn Package>>,
         actions_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
-    ) -> Bridge {
-        Bridge { config, data_tx, actions_rx, current_action: None, action_status }
+    ) -> Self {
+        Self {
+            collector: Collector::new(
+                config.clone(),
+                data_tx,
+                actions_rx.clone(),
+                action_status.clone(),
+            ),
+            config,
+            actions_rx,
+            action_status,
+        }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let mut action_status = self.action_status.clone();
-
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
             let listener = TcpListener::bind(&addr).await?;
@@ -74,7 +98,7 @@ impl Bridge {
                         let action = action?;
                         error!("Bridge down!! Action ID = {}", action.action_id);
                         let status = ActionResponse::failure(&action.action_id, "Bridge down");
-                        if let Err(e) = action_status.fill(status).await {
+                        if let Err(e) = self.action_status.fill(status).await {
                             error!("Failed to send busy status. Error = {:?}", e);
                         }
                     }
@@ -82,166 +106,10 @@ impl Bridge {
             };
 
             info!("Accepted new connection from {:?}", addr);
-            let framed = Framed::new(stream, LinesCodec::new());
-            if let Err(e) = self.collect(framed).await {
+            let framed = TcpCollector { inner: Framed::new(stream, LinesCodec::new()) };
+            if let Err(e) = self.collector.collect(framed).await {
                 error!("Bridge failed. Error = {:?}", e);
             }
         }
-    }
-
-    pub async fn collect(
-        &mut self,
-        mut framed: Framed<TcpStream, LinesCodec>,
-    ) -> Result<(), Error> {
-        let mut bridge_partitions = HashMap::new();
-        for (name, config) in &self.config.streams {
-            let stream = Stream::with_config(name, config, self.data_tx.clone());
-            bridge_partitions.insert(name.to_owned(), stream);
-        }
-
-        let mut action_status = self.action_status.clone();
-        let action_timeout = time::sleep(Duration::from_secs(100));
-        tokio::pin!(action_timeout);
-
-        let mut flush_handler = DelayMap::new();
-
-        loop {
-            select! {
-                frame = framed.next() => {
-                    let frame = frame.ok_or(Error::StreamDone)??;
-                    debug!("Received line = {:?}", frame);
-
-                    let data: Payload = match serde_json::from_str(&frame) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            error!("Deserialization error = {:?}", e);
-                            continue
-                        }
-                    };
-
-                    // If incoming data is a response for an action, drop it
-                    // if timeout is already sent to cloud
-                    if data.stream == "action_status" {
-                        match self.current_action.take() {
-                            Some(id) => debug!("Response for action = {:?}", id),
-                            None => {
-                                error!("Action timed out already");
-                                continue
-                            }
-                        }
-                    }
-
-                    let stream = match bridge_partitions.get_mut(&data.stream) {
-                        Some(partition) => partition,
-                        None => {
-                            if bridge_partitions.keys().len() > 20 {
-                                error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
-                                continue
-                            }
-
-                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
-                            bridge_partitions.entry(data.stream.clone()).or_insert(stream)
-                        }
-                    };
-
-                    let state = match stream.fill(data).await {
-                        Ok(s) => s,
-                        Err(e) => {
-                            error!("Failed to send data. Error = {:?}", e.to_string());
-                            continue
-                        }
-                    };
-
-                    // Remove timeout from flush_handler for selected stream if stream state is flushed,
-                    // do nothing if stream state is partial. Insert a new timeout if initial fill.
-                    // Warn in case stream flushed stream was not in the queue.
-                    match state {
-                        StreamStatus::Flushed(name) => flush_handler.remove(name),
-                        StreamStatus::Init(name, flush_period) => flush_handler.insert(name, flush_period),
-                        StreamStatus::Partial(l) => {
-                            debug!("Stream contains {} elements", l);
-                        }
-                    }
-                }
-
-                action = self.actions_rx.recv_async() => {
-                    let action = action?;
-                    self.current_action = Some(action.action_id.to_owned());
-
-                    action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
-                    let data = match serde_json::to_vec(&action) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            error!("Serialization error = {:?}", e);
-                            continue
-                        }
-                    };
-
-                    framed.get_mut().write_all(&data).await?;
-                    framed.get_mut().write_all(b"\n").await?;
-                }
-
-                _ = &mut action_timeout, if self.current_action.is_some() => {
-                    let action = self.current_action.take().unwrap();
-                    error!("Timeout waiting for action response. Action ID = {}", action);
-
-                    // Send failure response to cloud
-                    let status = ActionResponse::failure(&action, "Action timed out");
-                    if let Err(e) = action_status.fill(status).await {
-                        error!("Failed to fill. Error = {:?}", e);
-                    }
-                }
-
-                // Flush stream/partitions that timeout
-                stream = flush_handler.next(), if !flush_handler.is_empty() => {
-                    let stream = stream.unwrap();
-                    let stream = bridge_partitions.get_mut(&stream).unwrap();
-                    stream.flush().await?;
-                }
-
-            }
-        }
-    }
-}
-
-// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
-// TODO which cloud will double deserialize (Batch 1st and messages next)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Payload {
-    #[serde(skip_serializing)]
-    pub stream: String,
-    pub sequence: u32,
-    pub timestamp: u64,
-    #[serde(flatten)]
-    pub payload: Value,
-}
-
-impl Payload {
-    pub fn from_string<S: Into<String>>(input: S) -> Result<Self, Error> {
-        Ok(serde_json::from_str(&input.into())?)
-    }
-}
-
-impl Point for Payload {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-}
-
-impl Package for Buffer<Payload> {
-    fn topic(&self) -> Arc<String> {
-        self.topic.clone()
-    }
-
-    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
-        serde_json::to_vec(&self.buffer)
-    }
-
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
     }
 }

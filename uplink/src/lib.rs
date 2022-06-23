@@ -26,7 +26,8 @@ use base::serializer::Serializer;
 pub use base::{Config, Package, Point, Stream};
 pub use collector::simulator::Simulator;
 use collector::systemstats::StatCollector;
-pub use collector::tcpjson::{Bridge, Payload};
+pub use collector::tcpjson::Bridge;
+pub use collector::Payload;
 pub use disk::Storage;
 
 struct RxTx<T> {

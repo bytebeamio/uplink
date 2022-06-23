@@ -92,7 +92,7 @@ impl Simulator {
     }
 }
 
-use crate::collector::tcpjson::Payload;
+use super::Payload;
 use rand::Rng;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
