@@ -1,8 +1,8 @@
 use flume::{Receiver, RecvError, Sender};
+use futures_util::SinkExt;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::{select, time};
 use tokio_stream::StreamExt;
@@ -155,7 +155,7 @@ impl Bridge {
                     self.current_action = Some(action.action_id.to_owned());
 
                     action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
-                    let data = match serde_json::to_vec(&action) {
+                    let data = match serde_json::to_string(&action) {
                         Ok(d) => d,
                         Err(e) => {
                             error!("Serialization error = {:?}", e);
@@ -163,8 +163,7 @@ impl Bridge {
                         }
                     };
 
-                    framed.get_mut().write_all(&data).await?;
-                    framed.get_mut().write_all(b"\n").await?;
+                    framed.send(data).await?;
                 }
 
                 _ = &mut action_timeout, if self.current_action.is_some() => {
