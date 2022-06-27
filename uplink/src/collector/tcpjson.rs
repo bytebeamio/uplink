@@ -192,8 +192,7 @@ impl Bridge {
                 }
 
                 // Flush stream/partitions that timeout
-                stream = flush_handler.next(), if !flush_handler.is_empty() => {
-                    let stream = stream.unwrap();
+                Some(stream) = flush_handler.next(), if !flush_handler.is_empty() => {
                     let stream = bridge_partitions.get_mut(&stream).unwrap();
                     stream.flush().await?;
                 }
