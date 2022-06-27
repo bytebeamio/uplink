@@ -2399,6 +2399,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "pin-project-lite 0.2.9",
+ "slab",
  "tokio 1.19.2",
  "tracing",
 ]
