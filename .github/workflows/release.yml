@@ -1,38 +1,84 @@
 name: Releaser
-
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - 'v*.*.*'
 
 jobs:
-  create-release:
+  build-release:
     name: Build release for ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    needs: ['create-release']
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        target: [x86_64-pc-windows-gnu, x86_64-unknown-linux-musl, x86_64-apple-darwin, armv7-unknown-linux-muslabihf]
+        build: [linux, macos, linux-arm-gnu]
+        include:
+          - build: linux
+            os: ubuntu-latest
+            rust: stable
+            target: x86_64-unknown-linux-musl
+          - build: macos
+            os: macos-latest
+            rust: stable
+            target: x86_64-apple-darwin
+          - build: linux-arm-gnu
+            os: ubuntu-latest
+            rust: stable
+            target: armv7-unknown-linux-gnueabihf
     steps:
-      - uses: actions/checkout@master
-      - uses: taiki-e/create-gh-release-action@v1
+      - uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
         with:
+          toolchain: ${{ matrix.rust }}
+          profile: minimal
+          override: true
           target: ${{ matrix.target }}
+
+      - name: Use Cross
+        shell: bash
+        run: |
+          cargo install cross
+          echo "CARGO=cross" >> $GITHUB_ENV
+          echo "TARGET_FLAGS=--target ${{ matrix.target }}" >> $GITHUB_ENV
+          echo "TARGET_DIR=./target/${{ matrix.target }}" >> $GITHUB_ENV
+
+      - name: Build release binary
+        run: cross build --verbose --release ${{ env.TARGET_FLAGS }}
+
+      - name: Strip release binary (linux and macos)
+        if: matrix.build == 'linux' || matrix.build == 'macos'
+        run: strip "target/${{ matrix.target }}/release/uplink"
+
+      - name: Strip release binary (arm)
+        if: matrix.build == 'linux-arm-gnu'
+        run: |
+          docker run --rm -v \
+            "$PWD/target:/target:Z" \
+            rustembedded/cross:armv7-unknown-linux-gnueabihf \
+            arm-linux-gnueabihf-strip \
+            /target/armv7-unknown-linux-gnueabihf/release/uplink
+
+      - name: Upload release archive
+        uses: actions/upload-release-asset@v1.0.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  
-  upload-release:
-    name: Publish release for ${{ matrix.target }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./target/${{ matrix.target }}/release/uplink
+          asset_name: uplink-${{matrix.target}}
+          asset_content_type: application/octet-stream
+
+  create-release:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64-pc-windows-gnu, x86_64-unknown-linux-musl, x86_64-apple-darwin, armv7-unknown-linux-muslabihf]
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-      - uses: actions/checkout@master
-      - uses: taiki-e/upload-release-binary-action@v1
+      - name: create_release
+        id: create_release
+        uses: softprops/action-gh-release@v1
         with:
-          bin: uplink
-          archive: $bin-$tag-$target
-          target: ${{ matrix.target }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          prerelease: false
+
