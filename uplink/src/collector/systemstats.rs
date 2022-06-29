@@ -1,7 +1,7 @@
 use flume::Sender;
 use log::error;
 use serde::Serialize;
-use sysinfo::{DiskExt, NetworkData, NetworkExt, ProcessExt, ProcessorExt, SystemExt};
+use sysinfo::{DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, ProcessorExt, SystemExt};
 use tokio::time::Instant;
 
 use std::{
@@ -17,6 +17,8 @@ pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] std::io::Error),
 }
+
+type Pid = u32;
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct System {
@@ -38,14 +40,12 @@ pub struct System {
 
 impl System {
     fn init(sys: &sysinfo::System) -> System {
-        let total_memory = sys.total_memory();
-
         System {
             kernel_version: match sys.kernel_version() {
                 Some(kv) => kv,
                 None => String::default(),
             },
-            total_memory,
+            total_memory: sys.total_memory(),
             ..Default::default()
         }
     }
@@ -79,8 +79,8 @@ impl Package for Buffer<System> {
         self.topic.clone()
     }
 
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
@@ -96,7 +96,9 @@ struct SystemStats {
 impl SystemStats {
     fn push(&mut self, sys: &sysinfo::System, timestamp: u64) -> Result<(), base::Error> {
         self.stat.update(sys, timestamp);
-        self.stream.push(self.stat.clone())
+        self.stream.push(self.stat.clone())?;
+
+        Ok(())
     }
 }
 
@@ -148,8 +150,8 @@ impl Package for Buffer<Network> {
         self.topic.clone()
     }
 
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
@@ -171,10 +173,11 @@ impl NetworkStats {
         timestamp: u64,
     ) -> Result<(), base::Error> {
         self.sequence += 1;
-        let net = self.map.entry(net_name.clone()).or_insert(Network::init(net_name));
+        let net = self.map.entry(net_name.clone()).or_insert_with(|| Network::init(net_name));
         net.update(net_data, timestamp, self.sequence);
+        self.stream.push(net.clone())?;
 
-        self.stream.push(net.clone())
+        Ok(())
     }
 }
 
@@ -190,12 +193,7 @@ struct Disk {
 
 impl Disk {
     fn init(name: String, disk: &sysinfo::Disk) -> Self {
-        Disk {
-            name,
-            total: disk.total_space(),
-            available: disk.available_space(),
-            ..Default::default()
-        }
+        Disk { name, total: disk.total_space(), ..Default::default() }
     }
 
     fn update(&mut self, disk: &sysinfo::Disk, timestamp: u64, sequence: u32) {
@@ -221,8 +219,8 @@ impl Package for Buffer<Disk> {
         self.topic.clone()
     }
 
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
@@ -240,10 +238,12 @@ impl DiskStats {
     fn push(&mut self, disk_data: &sysinfo::Disk, timestamp: u64) -> Result<(), base::Error> {
         self.sequence += 1;
         let disk_name = disk_data.name().to_string_lossy().to_string();
-        let disk = self.map.entry(disk_name.clone()).or_insert(Disk::init(disk_name, disk_data));
+        let disk =
+            self.map.entry(disk_name.clone()).or_insert_with(|| Disk::init(disk_name, disk_data));
         disk.update(disk_data, timestamp, self.sequence);
+        self.stream.push(disk.clone())?;
 
-        self.stream.push(disk.clone())
+        Ok(())
     }
 }
 
@@ -284,8 +284,8 @@ impl Package for Buffer<Processor> {
         self.topic.clone()
     }
 
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
@@ -303,10 +303,11 @@ impl ProcessorStats {
     fn push(&mut self, proc_data: &sysinfo::Processor, timestamp: u64) -> Result<(), base::Error> {
         let proc_name = proc_data.name().to_string();
         self.sequence += 1;
-        let proc = self.map.entry(proc_name.clone()).or_insert(Processor::init(proc_name));
+        let proc = self.map.entry(proc_name.clone()).or_insert_with(|| Processor::init(proc_name));
         proc.update(proc_data, timestamp, self.sequence);
+        self.stream.push(proc.clone())?;
 
-        self.stream.push(proc.clone())
+        Ok(())
     }
 }
 
@@ -314,7 +315,7 @@ impl ProcessorStats {
 struct Process {
     sequence: u32,
     timestamp: u64,
-    pid: i32,
+    pid: Pid,
     name: String,
     cpu_usage: f32,
     mem_usage: u64,
@@ -326,7 +327,7 @@ struct Process {
 }
 
 impl Process {
-    fn init(pid: i32, name: String, start_time: u64) -> Self {
+    fn init(pid: Pid, name: String, start_time: u64) -> Self {
         Process { pid, name, start_time, ..Default::default() }
     }
 
@@ -359,8 +360,8 @@ impl Package for Buffer<Process> {
         self.topic.clone()
     }
 
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
@@ -370,23 +371,25 @@ impl Package for Buffer<Process> {
 
 struct ProcessStats {
     sequence: u32,
-    map: HashMap<i32, Process>,
+    map: HashMap<Pid, Process>,
     stream: Stream<Process>,
 }
 
 impl ProcessStats {
     fn push(
         &mut self,
-        id: i32,
+        id: Pid,
         proc_data: &sysinfo::Process,
         name: String,
         timestamp: u64,
     ) -> Result<(), base::Error> {
         self.sequence += 1;
-        let proc = self.map.entry(id).or_insert(Process::init(id, name, proc_data.start_time()));
+        let proc =
+            self.map.entry(id).or_insert_with(|| Process::init(id, name, proc_data.start_time()));
         proc.update(proc_data, timestamp, self.sequence);
+        self.stream.push(proc.clone())?;
 
-        self.stream.push(proc.clone())
+        Ok(())
     }
 }
 
@@ -417,11 +420,9 @@ impl StatCollector {
         let mut sys = sysinfo::System::new();
         sys.refresh_disks_list();
         sys.refresh_networks_list();
+        sys.refresh_memory();
 
-        let max_buf_size = match config.stats.stream_size {
-            Some(stream_size) => stream_size,
-            None => 10,
-        };
+        let max_buf_size = config.stats.stream_size.unwrap_or(10);
 
         let mut map = HashMap::new();
         let stream = Stream::dynamic_with_size(
@@ -482,7 +483,8 @@ impl StatCollector {
         );
         let system = SystemStats { stat: System::init(&sys), stream };
 
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
 
         StatCollector { sys, system, config, processes, disks, networks, processors, timestamp }
     }
@@ -539,7 +541,7 @@ impl StatCollector {
             let name = p.name().to_owned();
 
             if self.config.stats.process_names.contains(&name) {
-                if let Err(e) = self.processes.push(id, p, name, self.timestamp) {
+                if let Err(e) = self.processes.push(id.as_u32(), p, name, self.timestamp) {
                     error!("Couldn't send process stats: {}", e);
                 }
             }

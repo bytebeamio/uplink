@@ -53,22 +53,18 @@ You can start uplink with the following command, where you will need to provide 
 uplink -a auth.json
 ```
 
-The `auth.json` file might contain something similar to the following JSON, pointing uplink to a certain broker and providing any information necessary to initiate an authenticated connection over TLS:
-```js
-{
-    "project_id": "xxxx",
-    "device_id": "1234",
-    "broker": "example.com",
-    "port": 8883,
-    "authentication": {			// Optional, use only with TLS enabled brokers
-        "ca_certificate": "...",
-        "device_certificate": "...",
-        "device_private_key": "..."
-    }
-}
+The `auth.json` file must contain information such as the device's ID, the broker's URL, the port to connect to and the TLS certificates to be used while connecting as can be seen inside [dummy.json][dummy]. When connecting over non-TLS connections, authentication information is unncessary as illustrated by [noauth.json][noauth].
+
+
+> **NOTE**: If you are using [Bytebeam][bytebeam], you could download the file downloaded [from the Bytebeam UI][platform]. If you are using your own broker instead, you could use uplink [without TLS][unsecure], but we recommend that you use TLS and [provision your own certificates][provision] to do it. You can read more about securing uplink in the [uplink Security document][security]
+
+#### Configuring `uplink`
+One may configure certain features of uplink with the help of a `config.toml` file by using the commandline arguments `-c` or `--config`:
+```sh
+uplink -a auth.json -c config.toml
 ```
 
-> **NOTE**: You could download this file [from the Bytebeam UI][platform]. If you are using your own broker instead, you could use uplink [without TLS][unsecure], but we recommend that you use TLS and [provision your own certificates][provision] to do it. You can read more about securing uplink in the [uplink Security document][security]
+It must be noted that parts of, or the entirety of the config file is optional and a user may choose to omit it, letting uplink default to configuration values that are compiled into the binary. uplink only expects the `config.toml` to contain configuration details as given in the [example config.toml][config] file in the configs folder.
 
 #### Writing Applications
 uplink acts as an intermediary between the user's applications and the Bytebeam platform/MQTT 3.1.1 broker of choice. One can accept [Action][action]s from the cloud and push data(from applications such as sensing) or [Action Response][action_response]s back.
@@ -94,20 +90,47 @@ Data from the connected application is handled as payload within a stream. uplin
     "stream": "...",
     "sequence": ...,
     "timestamp": ...,
-    "payload": {...}
+    // ...payload: more JSON data
 }
 ```
+
+An example data packet on the stream `"location"`, with the fields `"city"` being a string and `"altitude"` being a number would look like:
+```js
+{
+    "stream": "location",
+    "sequence": 10000000,
+    "timestamp": 1987654,
+    "city": "Bengaluru",
+    "altitude": 123456,
+}
+```
+
 > **NOTE**: uplink expects values for the `stream`, `sequence` and `timestamp` field to be properly set, the payload maybe as per the requirements of the IoT platform/application.
 
 **Responding with Action Responses**:
-Applications can use Action Response messages to update uplink on the progress of an executing Action. They usually contain information such as a progress counter and error backtrace. Action Responses are handled as Streamed Payloads in the "action_status" stream and thus have to be enclosed as such. uplink expects Action Responses to have the following JSON format:
+Applications can use Action Response messages to update uplink on the progress of an executing Action. They usually contain information such as a progress counter and error backtrace. Action Responses are handled as Streamed data payloads in the "action_status" stream and thus have to be enclosed as such. uplink expects Action Responses to have the following JSON format:
 ```js
 {
-    "action_id": "...",
+    "stream": "action_status",
+    "sequence": ...,
     "timestamp": ...,
+    "action_id": "...",
     "state": "...",
     "progress": ...,
     "errors": [...]
+}
+```
+
+An example success response to an action with the id `"123"`, would look like:
+```js
+{
+    "stream": "action_status",
+    "sequence": 234,
+    "timestamp": 192323,
+    "action_id": "123",
+    "state": "Completed",
+    "progress": 100,
+    "errors": []
 }
 ```
 
@@ -197,3 +220,7 @@ Please follow the [code of conduct][coc] while opening issues to report bugs or 
 [docs.rs]: https://docs.rs/uplink
 [coc]: docs/CoC.md
 [contribute]: CONTRIBUTING.md
+[dummy]: configs/dummy.json
+[noauth]: configs/noauth.json
+[config]: configs/config.toml
+[bytebeam]: https://bytebeam.io

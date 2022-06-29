@@ -62,12 +62,11 @@ impl Controller {
         controllers: HashMap<String, Sender<Control>>,
         action_status: Stream<ActionResponse>,
     ) -> Self {
-        let controller = Controller {
+        Controller {
             collector_controllers: controllers,
             collector_run_status: HashMap::new(),
             action_status,
-        };
-        controller
+        }
     }
 
     pub async fn execute(&mut self, id: &str, command: String) -> Result<(), Error> {
@@ -81,7 +80,7 @@ impl Controller {
                     controller_tx.try_send(Control::StopStream(channel)).unwrap();
                 }
 
-                let status = ActionResponse::new(id);
+                let status = ActionResponse::progress(id, "Running", 0);
                 self.action_status.fill(status).await?;
             }
             "start_collector_channel" => {
@@ -91,7 +90,7 @@ impl Controller {
                     controller_tx.try_send(Control::StartStream(channel)).unwrap();
                 }
 
-                let status = ActionResponse::new(id);
+                let status = ActionResponse::progress(id, "Running", 0);
                 self.action_status.fill(status).await?;
             }
             "stop_collector" => {
@@ -105,7 +104,7 @@ impl Controller {
                         // tihs flag is an optimistic assignment. But UI should only enable next
                         // control action based on action status from the controller
                         *running = false;
-                        let status = ActionResponse::new(id);
+                        let status = ActionResponse::progress(id, "Running", 0);
                         self.action_status.fill(status).await?;
                     }
                 }

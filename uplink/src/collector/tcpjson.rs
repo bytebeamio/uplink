@@ -1,22 +1,20 @@
 use flume::{Receiver, RecvError, Sender};
+use futures_util::SinkExt;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::{Duration, Instant};
 use tokio::{select, time};
 use tokio_stream::StreamExt;
-use tokio_util::codec::Framed;
-use tokio_util::codec::{LinesCodec, LinesCodecError};
+use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
-use std::io;
+use std::{collections::HashMap, io, sync::Arc};
 
+use super::util::DelayMap;
 use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
-use crate::base::{Buffer, Config, Package, Point, Stream};
-use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::time::{Duration, Instant};
+use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -31,7 +29,9 @@ pub enum Error {
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
     #[error("Download OTA error")]
-    ActionsError(#[from] ActionsError),
+    Actions(#[from] ActionsError),
+    #[error("Couldn't fill stream")]
+    Stream(#[from] crate::base::Error),
 }
 
 pub struct Bridge {
@@ -71,7 +71,7 @@ impl Bridge {
                         }
                     }
                     action = self.actions_rx.recv_async() => {
-                        let action = action.unwrap();
+                        let action = action?;
                         error!("Bridge down!! Action ID = {}", action.action_id);
                         let status = ActionResponse::failure(&action.action_id, "Bridge down");
                         if let Err(e) = action_status.fill(status).await {
@@ -94,17 +94,17 @@ impl Bridge {
         mut framed: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
         let mut bridge_partitions = HashMap::new();
-        for (stream, config) in self.config.streams.clone() {
-            bridge_partitions.insert(
-                stream.clone(),
-                Stream::new(stream, config.topic, config.buf_size, self.data_tx.clone()),
-            );
+        for (name, config) in &self.config.streams {
+            let stream = Stream::with_config(name, config, self.data_tx.clone());
+            bridge_partitions.insert(name.to_owned(), stream);
         }
 
         let mut action_status = self.action_status.clone();
         let action_timeout = time::sleep(Duration::from_secs(100));
-
         tokio::pin!(action_timeout);
+
+        let mut flush_handler = DelayMap::new();
+
         loop {
             select! {
                 frame = framed.next() => {
@@ -131,7 +131,7 @@ impl Bridge {
                         }
                     }
 
-                    let partition = match bridge_partitions.get_mut(&data.stream) {
+                    let stream = match bridge_partitions.get_mut(&data.stream) {
                         Some(partition) => partition,
                         None => {
                             if bridge_partitions.keys().len() > 20 {
@@ -144,10 +144,24 @@ impl Bridge {
                         }
                     };
 
-                    if let Err(e) = partition.fill(data).await {
-                        error!("Failed to send data. Error = {:?}", e.to_string());
-                    }
+                    let state = match stream.fill(data).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Failed to send data. Error = {:?}", e.to_string());
+                            continue
+                        }
+                    };
 
+                    // Remove timeout from flush_handler for selected stream if stream state is flushed,
+                    // do nothing if stream state is partial. Insert a new timeout if initial fill.
+                    // Warn in case stream flushed stream was not in the queue.
+                    match state {
+                        StreamStatus::Flushed(name) => flush_handler.remove(name),
+                        StreamStatus::Init(name, flush_period) => flush_handler.insert(name, flush_period),
+                        StreamStatus::Partial(l) => {
+                            debug!("Stream contains {} elements", l);
+                        }
+                    }
                 }
 
                 action = self.actions_rx.recv_async() => {
@@ -155,7 +169,7 @@ impl Bridge {
                     self.current_action = Some(action.action_id.to_owned());
 
                     action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
-                    let data = match serde_json::to_vec(&action) {
+                    let data = match serde_json::to_string(&action) {
                         Ok(d) => d,
                         Err(e) => {
                             error!("Serialization error = {:?}", e);
@@ -163,8 +177,7 @@ impl Bridge {
                         }
                     };
 
-                    framed.get_mut().write_all(&data).await?;
-                    framed.get_mut().write_all(b"\n").await?;
+                    framed.send(data).await?;
                 }
 
                 _ = &mut action_timeout, if self.current_action.is_some() => {
@@ -177,6 +190,13 @@ impl Bridge {
                         error!("Failed to fill. Error = {:?}", e);
                     }
                 }
+
+                // Flush stream/partitions that timeout
+                Some(stream) = flush_handler.next(), if !flush_handler.is_empty() => {
+                    let stream = bridge_partitions.get_mut(&stream).unwrap();
+                    stream.flush().await?;
+                }
+
             }
         }
     }
@@ -187,11 +207,17 @@ impl Bridge {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
     #[serde(skip_serializing)]
-    pub(crate) stream: String,
-    pub(crate) sequence: u32,
-    pub(crate) timestamp: u64,
+    pub stream: String,
+    pub sequence: u32,
+    pub timestamp: u64,
     #[serde(flatten)]
-    pub(crate) payload: Value,
+    pub payload: Value,
+}
+
+impl Payload {
+    pub fn from_string<S: Into<String>>(input: S) -> Result<Self, Error> {
+        Ok(serde_json::from_str(&input.into())?)
+    }
 }
 
 impl Point for Payload {
@@ -206,11 +232,11 @@ impl Point for Payload {
 
 impl Package for Buffer<Payload> {
     fn topic(&self) -> Arc<String> {
-        return self.topic.clone();
+        self.topic.clone()
     }
 
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(&self.buffer).unwrap()
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {

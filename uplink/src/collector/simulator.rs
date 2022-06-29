@@ -33,7 +33,7 @@ impl Simulator {
         Simulator { config, partitions, data_tx }
     }
 
-    pub(crate) async fn start(&mut self) {
+    pub async fn start(&mut self) {
         let mut gps_timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
         let mut can_timestamp =
@@ -107,7 +107,7 @@ pub struct Gps {
 impl Gps {
     pub fn new() -> Gps {
         let mut rng = rand::thread_rng();
-        Gps { lat: rng.gen_range(40f64, 45f64), lon: rng.gen_range(95f64, 96f64) }
+        Gps { lat: rng.gen_range(40f64..45f64), lon: rng.gen_range(95f64..96f64) }
     }
 }
 

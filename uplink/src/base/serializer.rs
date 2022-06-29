@@ -25,6 +25,10 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
     Client(#[from] ClientError),
+    #[error("Packet was not expected {0:?}")]
+    UnexpectedPacket(Packet),
+    #[error("Storage is disabled/missing")]
+    MissingPersistence,
 }
 
 enum Status {
@@ -68,7 +72,7 @@ pub struct Serializer {
     config: Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
     client: AsyncClient,
-    storage: Storage,
+    storage: Option<Storage>,
     metrics: Metrics,
 }
 
@@ -77,10 +81,22 @@ impl Serializer {
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
         client: AsyncClient,
-        storage: Storage,
     ) -> Result<Serializer, Error> {
-        let metrics_config = config.streams.get("metrics").unwrap();
+        let metrics_config =
+            config.streams.get("metrics").expect("Missing metrics Stream in config");
         let metrics = Metrics::new(&metrics_config.topic);
+
+        let storage = match &config.persistence {
+            Some(persistence) => {
+                let storage = Storage::new(
+                    &persistence.path,
+                    persistence.max_file_size,
+                    persistence.max_file_count,
+                )?;
+                Some(storage)
+            }
+            None => None,
+        };
 
         Ok(Serializer { config, collector_rx, client, storage, metrics })
     }
@@ -93,7 +109,7 @@ impl Serializer {
     ) -> Result<(String, Vec<u8>, Option<(String, usize)>, Option<PayloadSize>), Error> {
         let data = self.collector_rx.recv_async().await?;
         let mut topic = data.topic().as_ref().to_owned();
-        let mut payload = data.serialize();
+        let mut payload = data.serialize()?;
         let anomalies = data.anomalies();
         let mut payload_size = None;
 
@@ -105,7 +121,7 @@ impl Serializer {
             compressor.shutdown().await?;
             payload = compressor.into_inner();
 
-            let mut tokens = topic.split("/").collect::<Vec<&str>>();
+            let mut tokens = topic.split('/').collect::<Vec<&str>>();
             tokens.push("zip");
             topic = tokens.join("/");
 
@@ -129,12 +145,14 @@ impl Serializer {
             let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
             publish.pkid = 1;
 
-            if let Err(e) = publish.write(&mut self.storage.writer()) {
+            if let Err(e) =
+                publish.write(self.storage.as_mut().ok_or(Error::MissingPersistence)?.writer())
+            {
                 error!("Failed to fill write buffer during bad network. Error = {:?}", e);
                 continue;
             }
 
-            match self.storage.flush_on_overflow() {
+            match self.storage.as_mut().ok_or(Error::MissingPersistence)?.flush_on_overflow() {
                 Ok(_) => {}
                 Err(e) => {
                     error!(
@@ -160,31 +178,31 @@ impl Serializer {
         loop {
             select! {
                 data = self.collect_data() => {
-                      let (topic, payload, anomalies, payload_size) = data?;
+                    let (topic, payload, anomalies, payload_size) = data?;
 
-                      self.metrics.update(anomalies, payload_size);
+                    self.metrics.update(anomalies, payload_size);
 
-                      let payload_size = payload.len();
-                      let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
-                      publish.pkid = 1;
+                    let payload_size = payload.len();
+                    let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
+                    publish.pkid = 1;
 
-                      match publish.write(&mut self.storage.writer()) {
-                           Ok(_) => self.metrics.add_total_disk_size(payload_size),
-                           Err(e) => {
-                               error!("Failed to fill disk buffer. Error = {:?}", e);
-                               continue
-                           }
-                      }
+                    match publish.write(self.storage.as_mut().ok_or(Error::MissingPersistence)?.writer()) {
+                        Ok(_) => self.metrics.add_total_disk_size(payload_size),
+                        Err(e) => {
+                            error!("Failed to fill disk buffer. Error = {:?}", e);
+                            continue
+                        }
+                    }
 
-                      match self.storage.flush_on_overflow() {
-                            Ok(deleted) => if deleted.is_some() {
-                                self.metrics.increment_lost_segments();
-                            },
-                            Err(e) => {
-                                error!("Failed to flush disk buffer. Error = {:?}", e);
-                                continue
-                            }
-                      }
+                    match self.storage.as_mut().ok_or(Error::MissingPersistence)?.flush_on_overflow() {
+                        Ok(deleted) => if deleted.is_some() {
+                            self.metrics.increment_lost_segments();
+                        },
+                        Err(e) => {
+                            error!("Failed to flush disk buffer. Error = {:?}", e);
+                            continue
+                        }
+                    }
                 }
                 o = &mut publish => {
                     o?;
@@ -206,13 +224,16 @@ impl Serializer {
         let client = self.client.clone();
 
         // Done reading all the pending files
-        if self.storage.reload_on_eof().unwrap() {
+        if self.storage.as_mut().ok_or(Error::MissingPersistence)?.reload_on_eof().unwrap() {
             return Ok(Status::Normal);
         }
 
-        let publish = match read(&mut self.storage.reader(), max_packet_size) {
+        let publish = match read(
+            self.storage.as_mut().ok_or(Error::MissingPersistence)?.reader(),
+            max_packet_size,
+        ) {
             Ok(Packet::Publish(publish)) => publish,
-            Ok(packet) => unreachable!("{:?}", packet),
+            Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
             Err(e) => {
                 error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
                 return Ok(Status::Normal);
@@ -233,15 +254,23 @@ impl Serializer {
                     let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                     publish.pkid = 1;
 
-                    match publish.write(&mut self.storage.writer()) {
-                        Ok(_) => self.metrics.add_total_disk_size(payload_size),
+                    match publish.write(self.storage.as_mut().ok_or(Error::MissingPersistence)?.writer()) {
+                        Ok(_) => self.metrics.add_total_sent_size(payload_size),
                         Err(e) => {
                             error!("Failed to fill disk buffer. Error = {:?}", e);
                             continue
                         }
                     }
 
-                    match self.storage.flush_on_overflow() {
+                    match publish.write(self.storage.as_mut().ok_or(Error::MissingPersistence)?.writer()) {
+                        Ok(_) => self.metrics.add_total_sent_size(payload_size),
+                        Err(e) => {
+                            error!("Failed to fill disk buffer. Error = {:?}", e);
+                            continue
+                        }
+                    }
+
+                    match self.storage.as_mut().ok_or(Error::MissingPersistence)?.flush_on_overflow() {
                         Ok(deleted) => if deleted.is_some() {
                             self.metrics.increment_lost_segments();
                         },
@@ -264,7 +293,7 @@ impl Serializer {
                         Err(e) => return Err(e.into()),
                     };
 
-                    match self.storage.reload_on_eof() {
+                    match self.storage.as_mut().ok_or(Error::MissingPersistence)?.reload_on_eof() {
                         // Done reading all pending files
                         Ok(true) => return Ok(Status::Normal),
                         Ok(false) => {},
@@ -274,9 +303,9 @@ impl Serializer {
                         }
                     }
 
-                    let publish = match read(&mut self.storage.reader(), max_packet_size) {
+                    let publish = match read(self.storage.as_mut().ok_or(Error::MissingPersistence)?.reader(), max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
-                        Ok(packet) => unreachable!("{:?}", packet),
+                        Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
                         Err(e) => {
                             error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
                             return Ok(Status::Normal)
@@ -319,7 +348,7 @@ impl Serializer {
 
                 }
                 _ = interval.tick() => {
-                    let (topic, payload) = self.metrics.next();
+                    let (topic, payload) = self.metrics.next()?;
                     let payload_size = payload.len();
                     match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
@@ -339,7 +368,13 @@ impl Serializer {
         }
     }
 
-    pub async fn start(&mut self) -> Result<(), Error> {
+    pub async fn start(mut self) -> Result<(), Error> {
+        if self.storage.is_none() {
+            loop {
+                self.normal().await?;
+            }
+        }
+
         let mut status = Status::EventLoopReady;
 
         loop {
@@ -426,17 +461,17 @@ impl Metrics {
         self.errors.push_str(" | ");
     }
 
-    pub fn next(&mut self) -> (&str, Vec<u8>) {
+    pub fn next(&mut self) -> Result<(&str, Vec<u8>), Error> {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
         self.sequence += 1;
 
-        let payload = serde_json::to_vec(&vec![&self]).unwrap();
+        let payload = serde_json::to_vec(&vec![&self])?;
         self.errors.clear();
         // NOTE: We could reset payload size information here.
         self.lost_segments = 0;
-        (&self.topic, payload)
+        Ok((&self.topic, payload))
     }
 
     /// Update metrics with anomalies detected and payload size from before and after compression
