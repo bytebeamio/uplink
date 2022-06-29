@@ -145,14 +145,13 @@ impl Serializer {
             let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
             publish.pkid = 1;
 
-            if let Err(e) =
-                publish.write(self.storage.as_mut().ok_or(Error::MissingPersistence)?.writer())
-            {
+            let storage = self.storage.as_mut().ok_or(Error::MissingPersistence)?;
+            if let Err(e) = publish.write(storage.writer()) {
                 error!("Failed to fill write buffer during bad network. Error = {:?}", e);
                 continue;
             }
 
-            match self.storage.as_mut().ok_or(Error::MissingPersistence)?.flush_on_overflow() {
+            match storage.flush_on_overflow() {
                 Ok(_) => {}
                 Err(e) => {
                     error!(
@@ -186,7 +185,8 @@ impl Serializer {
                     let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                     publish.pkid = 1;
 
-                    match publish.write(self.storage.as_mut().ok_or(Error::MissingPersistence)?.writer()) {
+                    let storage = self.storage.as_mut().ok_or(Error::MissingPersistence)?;
+                    match publish.write(storage.writer()) {
                         Ok(_) => self.metrics.add_total_disk_size(payload_size),
                         Err(e) => {
                             error!("Failed to fill disk buffer. Error = {:?}", e);
@@ -194,7 +194,7 @@ impl Serializer {
                         }
                     }
 
-                    match self.storage.as_mut().ok_or(Error::MissingPersistence)?.flush_on_overflow() {
+                    match storage.flush_on_overflow() {
                         Ok(deleted) => if deleted.is_some() {
                             self.metrics.increment_lost_segments();
                         },
@@ -222,16 +222,14 @@ impl Serializer {
 
         let max_packet_size = self.config.max_packet_size;
         let client = self.client.clone();
+        let storage = self.storage.as_mut().ok_or(Error::MissingPersistence)?;
 
         // Done reading all the pending files
-        if self.storage.as_mut().ok_or(Error::MissingPersistence)?.reload_on_eof().unwrap() {
+        if storage.reload_on_eof().unwrap() {
             return Ok(Status::Normal);
         }
 
-        let publish = match read(
-            self.storage.as_mut().ok_or(Error::MissingPersistence)?.reader(),
-            max_packet_size,
-        ) {
+        let publish = match read(storage.reader(), max_packet_size) {
             Ok(Packet::Publish(publish)) => publish,
             Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
             Err(e) => {
@@ -254,7 +252,8 @@ impl Serializer {
                     let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                     publish.pkid = 1;
 
-                    match publish.write(self.storage.as_mut().ok_or(Error::MissingPersistence)?.writer()) {
+                    let storage = self.storage.as_mut().ok_or(Error::MissingPersistence)?;
+                    match publish.write(storage.writer()) {
                         Ok(_) => self.metrics.add_total_sent_size(payload_size),
                         Err(e) => {
                             error!("Failed to fill disk buffer. Error = {:?}", e);
@@ -262,15 +261,7 @@ impl Serializer {
                         }
                     }
 
-                    match publish.write(self.storage.as_mut().ok_or(Error::MissingPersistence)?.writer()) {
-                        Ok(_) => self.metrics.add_total_sent_size(payload_size),
-                        Err(e) => {
-                            error!("Failed to fill disk buffer. Error = {:?}", e);
-                            continue
-                        }
-                    }
-
-                    match self.storage.as_mut().ok_or(Error::MissingPersistence)?.flush_on_overflow() {
+                    match storage.flush_on_overflow() {
                         Ok(deleted) => if deleted.is_some() {
                             self.metrics.increment_lost_segments();
                         },
@@ -293,7 +284,8 @@ impl Serializer {
                         Err(e) => return Err(e.into()),
                     };
 
-                    match self.storage.as_mut().ok_or(Error::MissingPersistence)?.reload_on_eof() {
+                    let storage = self.storage.as_mut().ok_or(Error::MissingPersistence)?;
+                    match storage.reload_on_eof() {
                         // Done reading all pending files
                         Ok(true) => return Ok(Status::Normal),
                         Ok(false) => {},
@@ -303,7 +295,7 @@ impl Serializer {
                         }
                     }
 
-                    let publish = match read(self.storage.as_mut().ok_or(Error::MissingPersistence)?.reader(), max_packet_size) {
+                    let publish = match read(storage.reader(), max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
                         Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
                         Err(e) => {
