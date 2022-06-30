@@ -13,7 +13,7 @@ mod base;
 mod collector;
 
 pub mod config {
-    pub use crate::base::{Config, Ota, Persistence, Stats};
+    pub use crate::base::{Config, Ota, Persistence, Stats, CompressionAlgo};
 }
 
 pub use base::actions;

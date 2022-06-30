@@ -1,19 +1,22 @@
 use crate::base::{Config, Package};
 
-use async_compression::tokio::write::ZstdEncoder;
+use async_compression::tokio::write::{ZlibEncoder, ZstdEncoder};
 use bytes::Bytes;
 use disk::Storage;
 use flume::{Receiver, RecvError};
 use log::{error, info};
+use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::{select, time};
 
-use std::io;
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use super::CompressionAlgo;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -29,6 +32,8 @@ pub enum Error {
     UnexpectedPacket(Packet),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
+    #[error("LZ4 compression error: {0}")]
+    Lz4(#[from] lz4_flex::frame::Error),
 }
 
 enum Status {
@@ -113,23 +118,25 @@ impl Serializer {
         let anomalies = data.anomalies();
         let mut payload_size = None;
 
-        if self.config.compression && data.is_compressible() {
+        if self.config.compression.is_some() && data.is_compressible() {
             let before_compression = payload.len();
-
-            let mut compressor = ZstdEncoder::new(vec![]);
-            compressor.write_all(&payload).await?;
-            compressor.shutdown().await?;
-            payload = compressor.into_inner();
-
-            let mut tokens = topic.split('/').collect::<Vec<&str>>();
-            tokens.push("zip");
-            topic = tokens.join("/");
+            self.compress_data(&mut payload, &mut topic).await?;
 
             payload_size =
                 Some(PayloadSize { before_compression, after_compression: payload.len() });
         }
 
         Ok((topic, payload, anomalies, payload_size))
+    }
+
+    async fn compress_data(&self, payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
+        match self.config.compression.as_ref().unwrap() {
+            CompressionAlgo::Lz4 => lz4_compress(payload, topic)?,
+            CompressionAlgo::Zlib => zlib_compress(payload, topic).await?,
+            CompressionAlgo::Zstd => zstd_compress(payload, topic).await?,
+        }
+
+        Ok(())
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -382,6 +389,35 @@ impl Serializer {
     }
 }
 
+fn lz4_compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
+    let mut compressor = FrameEncoder::new(vec![]);
+    compressor.write_all(payload)?;
+    *payload = compressor.finish()?;
+    topic.push_str("/lz4");
+
+    Ok(())
+}
+
+async fn zlib_compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
+    let mut compressor = ZlibEncoder::new(vec![]);
+    compressor.write_all(payload).await?;
+    compressor.shutdown().await?;
+    *payload = compressor.into_inner();
+    topic.push_str("/zlib");
+
+    Ok(())
+}
+
+async fn zstd_compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
+    let mut compressor = ZstdEncoder::new(vec![]);
+    compressor.write_all(payload).await?;
+    compressor.shutdown().await?;
+    *payload = compressor.into_inner();
+    topic.push_str("/zstd");
+
+    Ok(())
+}
+
 async fn send_publish(
     client: AsyncClient,
     topic: String,
@@ -480,5 +516,61 @@ impl Metrics {
         if let Some((errors, count)) = anomalies {
             self.add_errors(errors, count);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Read;
+
+    use async_compression::tokio::bufread::{ZlibDecoder, ZstdDecoder};
+    use lz4_flex::frame::FrameDecoder;
+    use tokio::io::AsyncReadExt;
+
+    use super::{lz4_compress, zlib_compress, zstd_compress};
+
+    #[test]
+    fn compress_decompress_lz4() {
+        let mut payload = b"Hello World".to_vec();
+        let mut topic = "".to_string();
+
+        lz4_compress(&mut payload, &mut topic).unwrap();
+
+        let mut decompressor = FrameDecoder::new(payload.as_slice());
+
+        let mut decompressed = String::new();
+        decompressor.read_to_string(&mut decompressed).unwrap();
+
+        assert_eq!("Hello World", decompressed);
+    }
+
+    #[tokio::test]
+    async fn compress_decompress_zlib() {
+        let mut payload = b"Hello World".to_vec();
+        let mut topic = "".to_string();
+
+        zlib_compress(&mut payload, &mut topic).await.unwrap();
+
+        let mut decompressor = ZlibDecoder::new(payload.as_slice());
+
+        let mut decompressed = Vec::new();
+        decompressor.read_to_end(&mut decompressed).await.unwrap();
+
+        assert_eq!(b"Hello World".to_vec(), decompressed);
+    }
+
+    #[tokio::test]
+    async fn compress_decompress_zstd() {
+        let mut payload = b"Hello World".to_vec();
+        let mut topic = "".to_string();
+
+        zstd_compress(&mut payload, &mut topic).await.unwrap();
+
+        let mut decompressor = ZstdDecoder::new(payload.as_slice());
+
+        let mut decompressed = Vec::new();
+        decompressor.read_to_end(&mut decompressed).await.unwrap();
+
+        assert_eq!(b"Hello World".to_vec(), decompressed);
     }
 }

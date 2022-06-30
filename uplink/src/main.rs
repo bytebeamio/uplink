@@ -85,16 +85,12 @@ pub struct CommandLine {
     /// list of modules to log
     #[structopt(short = "m", long = "modules")]
     modules: Vec<String>,
-    /// compressing payloads
-    #[structopt(short = "z", long = "Enable compression of data payloads")]
-    compression: bool,
 }
 
 const DEFAULT_CONFIG: &str = r#"
     bridge_port = 5555
     max_packet_size = 102400
     max_inflight = 100
-    compression = false
     
     # Whitelist of binaries which uplink can spawn as a process
     # This makes sure that user is protected against random actions
@@ -138,8 +134,6 @@ fn initalize_config(commandline: &CommandLine) -> Result<Config, Error> {
         .join(Data::<Json>::file(&commandline.auth))
         .extract()
         .with_context(|| "Config error".to_string())?;
-
-    config.compression = commandline.compression;
 
     if let Some(persistence) = &config.persistence {
         fs::create_dir_all(&persistence.path)?;
@@ -212,6 +206,9 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     }
     if config.stats.enabled {
         println!("    processes: {:?}", config.stats.process_names);
+    }
+    if let Some(algo) = &config.compression {
+        println!("    compression: {:?}", algo);
     }
     println!("\n");
 }

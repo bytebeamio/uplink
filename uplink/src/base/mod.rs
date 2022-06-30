@@ -74,7 +74,14 @@ pub struct Config {
     pub streams: HashMap<String, StreamConfig>,
     pub ota: Ota,
     pub stats: Stats,
-    pub compression: bool,
+    pub compression: Option<CompressionAlgo>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub enum CompressionAlgo {
+    Lz4,
+    Zlib,
+    Zstd,
 }
 
 pub trait Point: Send + Debug {
