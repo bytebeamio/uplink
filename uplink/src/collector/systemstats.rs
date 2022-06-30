@@ -96,7 +96,9 @@ struct SystemStats {
 impl SystemStats {
     fn push(&mut self, sys: &sysinfo::System, timestamp: u64) -> Result<(), base::Error> {
         self.stat.update(sys, timestamp);
-        self.stream.push(self.stat.clone())
+        self.stream.push(self.stat.clone())?;
+
+        Ok(())
     }
 }
 
@@ -173,8 +175,9 @@ impl NetworkStats {
         self.sequence += 1;
         let net = self.map.entry(net_name.clone()).or_insert_with(|| Network::init(net_name));
         net.update(net_data, timestamp, self.sequence);
+        self.stream.push(net.clone())?;
 
-        self.stream.push(net.clone())
+        Ok(())
     }
 }
 
@@ -238,8 +241,9 @@ impl DiskStats {
         let disk =
             self.map.entry(disk_name.clone()).or_insert_with(|| Disk::init(disk_name, disk_data));
         disk.update(disk_data, timestamp, self.sequence);
+        self.stream.push(disk.clone())?;
 
-        self.stream.push(disk.clone())
+        Ok(())
     }
 }
 
@@ -301,8 +305,9 @@ impl ProcessorStats {
         self.sequence += 1;
         let proc = self.map.entry(proc_name.clone()).or_insert_with(|| Processor::init(proc_name));
         proc.update(proc_data, timestamp, self.sequence);
+        self.stream.push(proc.clone())?;
 
-        self.stream.push(proc.clone())
+        Ok(())
     }
 }
 
@@ -382,8 +387,9 @@ impl ProcessStats {
         let proc =
             self.map.entry(id).or_insert_with(|| Process::init(id, name, proc_data.start_time()));
         proc.update(proc_data, timestamp, self.sequence);
+        self.stream.push(proc.clone())?;
 
-        self.stream.push(proc.clone())
+        Ok(())
     }
 }
 
@@ -477,7 +483,8 @@ impl StatCollector {
         );
         let system = SystemStats { stat: System::init(&sys), stream };
 
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
 
         StatCollector { sys, system, config, processes, disks, networks, processors, timestamp }
     }

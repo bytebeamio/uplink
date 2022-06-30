@@ -1,11 +1,8 @@
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::mem;
-use std::sync::Arc;
+use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
 
 use flume::{SendError, Sender};
-use log::warn;
-use serde::Deserialize;
+use log::{info, warn};
+use serde::{Deserialize, Serialize};
 
 pub mod actions;
 pub mod mqtt;
@@ -17,10 +14,21 @@ pub enum Error {
     Send(#[from] SendError<Box<dyn Package>>),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+pub const DEFAULT_TIMEOUT: u64 = 60;
+
+#[inline]
+fn default_timeout() -> u64 {
+    DEFAULT_TIMEOUT
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StreamConfig {
     pub topic: String,
     pub buf_size: usize,
+    #[serde(default = "default_timeout")]
+    /// Duration(in seconds) that bridge collector waits from
+    /// receiving first element, before the stream gets flushed.
+    pub flush_period: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -89,6 +97,14 @@ pub enum Control {
     StartStream(String),
 }
 
+/// Signals status of stream buffer
+#[derive(Debug)]
+pub enum StreamStatus<'a> {
+    Partial(usize),
+    Flushed(&'a String),
+    Init(&'a String, Duration),
+}
+
 #[derive(Debug)]
 pub struct Stream<T> {
     name: Arc<String>,
@@ -98,6 +114,7 @@ pub struct Stream<T> {
     max_buffer_size: usize,
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
+    pub flush_period: Duration,
 }
 
 impl<T> Stream<T>
@@ -114,8 +131,29 @@ where
         let name = Arc::new(stream.into());
         let topic = Arc::new(topic.into());
         let buffer = Buffer::new(name.clone(), topic.clone());
+        let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
 
-        Stream { name, topic, last_sequence: 0, last_timestamp: 0, max_buffer_size, buffer, tx }
+        Stream {
+            name,
+            topic,
+            last_sequence: 0,
+            last_timestamp: 0,
+            max_buffer_size,
+            buffer,
+            tx,
+            flush_period,
+        }
+    }
+
+    pub fn with_config(
+        name: &String,
+        config: &StreamConfig,
+        tx: Sender<Box<dyn Package>>,
+    ) -> Stream<T> {
+        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx);
+        stream.flush_period = Duration::from_secs(config.flush_period);
+
+        stream
     }
 
     pub fn dynamic_with_size<S: Into<String>>(
@@ -170,33 +208,75 @@ where
         self.last_sequence = current_sequence;
         self.last_timestamp = current_timestamp;
 
-        // Send buffer to serializer
-        if self.buffer.buffer.len() >= self.max_buffer_size {
-            let name = self.name.clone();
-            let topic = self.topic.clone();
-            let buffer = mem::replace(&mut self.buffer, Buffer::new(name, topic));
-            Ok(Some(buffer))
+        // if max_buffer_size is breached, flush
+        let buf = if self.buffer.buffer.len() >= self.max_buffer_size {
+            Some(self.take_buffer())
         } else {
-            Ok(None)
-        }
+            None
+        };
+
+        Ok(buf)
     }
 
-    /// Fill buffer with data and trigger async channel send on max_buf_size
-    pub async fn fill(&mut self, data: T) -> Result<(), Error> {
-        if let Some(buf) = self.add(data)? {
+    // Returns buffer content, replacing with empty buffer in-place
+    fn take_buffer(&mut self) -> Buffer<T> {
+        let name = self.name.clone();
+        let topic = self.topic.clone();
+        info!("Flushing stream name: {}, topic: {}", name, topic);
+
+        mem::replace(&mut self.buffer, Buffer::new(name, topic))
+    }
+
+    /// Triggers flush and async channel send if not empty
+    pub async fn flush(&mut self) -> Result<(), Error> {
+        if !self.is_empty() {
+            let buf = self.take_buffer();
             self.tx.send_async(Box::new(buf)).await?;
         }
 
         Ok(())
     }
 
-    /// Push data into buffer and trigger sync channel send on max_buf_size
-    pub fn push(&mut self, data: T) -> Result<(), Error> {
+    /// Returns number of elements in Stream buffer
+    pub fn len(&self) -> usize {
+        self.buffer.buffer.len()
+    }
+
+    /// Check if Stream buffer is empty
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Fill buffer with data and trigger async channel send on breaching max_buf_size.
+    /// Returns [`StreamStatus`].
+    pub async fn fill(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
-            self.tx.send(Box::new(buf))?;
+            self.tx.send_async(Box::new(buf)).await?;
+            return Ok(StreamStatus::Flushed(&self.name));
         }
 
-        Ok(())
+        let status = match self.len() {
+            1 => StreamStatus::Init(&self.name, self.flush_period),
+            len => StreamStatus::Partial(len),
+        };
+
+        Ok(status)
+    }
+
+    /// Push data into buffer and trigger sync channel send on max_buf_size.
+    /// Returns [`StreamStatus`].
+    pub fn push(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
+        if let Some(buf) = self.add(data)? {
+            self.tx.send(Box::new(buf))?;
+            return Ok(StreamStatus::Flushed(&self.name));
+        }
+
+        let status = match self.len() {
+            1 => StreamStatus::Init(&self.name, self.flush_period),
+            len => StreamStatus::Partial(len),
+        };
+
+        Ok(status)
     }
 }
 
@@ -267,6 +347,7 @@ impl<T> Clone for Stream<T> {
             max_buffer_size: self.max_buffer_size,
             buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
             tx: self.tx.clone(),
+            flush_period: self.flush_period,
         }
     }
 }
