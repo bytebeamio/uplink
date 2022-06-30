@@ -579,7 +579,7 @@ impl Metrics {
 mod test {
     use super::*;
     use crate::{
-        base::{Stream, StreamConfig},
+        base::{Stream, StreamConfig, DEFAULT_TIMEOUT},
         config::Persistence,
         Payload,
     };
@@ -652,7 +652,11 @@ mod test {
         let mut streams = HashMap::new();
         streams.insert(
             "metrics".to_owned(),
-            StreamConfig { topic: Default::default(), buf_size: 100 },
+            StreamConfig {
+                topic: Default::default(),
+                buf_size: 100,
+                flush_period: DEFAULT_TIMEOUT,
+            },
         );
         Config {
             broker: "localhost".to_owned(),
