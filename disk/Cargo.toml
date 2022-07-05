@@ -8,7 +8,6 @@ edition = "2018"
 
 [dependencies]
 bytes = "1"
-seahash = "4"
 log = "0.4"
 
 [dev-dependencies]

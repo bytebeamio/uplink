@@ -79,7 +79,8 @@ impl Serializer {
         collector_rx: Receiver<Box<dyn Package>>,
         client: AsyncClient,
     ) -> Result<Serializer, Error> {
-        let metrics_config = config.streams.get("metrics").expect("Missing metrics Stream in config");
+        let metrics_config =
+            config.streams.get("metrics").expect("Missing metrics Stream in config");
         let metrics = Metrics::new(&metrics_config.topic);
 
         let storage = match &config.persistence {
