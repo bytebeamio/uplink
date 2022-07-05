@@ -74,9 +74,11 @@ mod tests {
     #[tokio::test]
     async fn compress_decompress_lz4() {
         let mut payload = b"Hello World".to_vec();
-        let mut topic = "".to_string();
+        let mut topic = "hello/world".to_string();
 
         CompressionAlgo::Lz4.compress(&mut payload, &mut topic).await.unwrap();
+
+        assert_eq!(topic, "hello/world/lz4");
 
         let mut decompressor = FrameDecoder::new(payload.as_slice());
 
@@ -89,9 +91,11 @@ mod tests {
     #[tokio::test]
     async fn compress_decompress_zlib() {
         let mut payload = b"Hello World".to_vec();
-        let mut topic = "".to_string();
+        let mut topic = "hello/world".to_string();
 
         CompressionAlgo::Zlib.compress(&mut payload, &mut topic).await.unwrap();
+
+        assert_eq!(topic, "hello/world/zlib");
 
         let mut decompressor = ZlibDecoder::new(payload.as_slice());
 
@@ -104,9 +108,11 @@ mod tests {
     #[tokio::test]
     async fn compress_decompress_zstd() {
         let mut payload = b"Hello World".to_vec();
-        let mut topic = "".to_string();
+        let mut topic = "hello/world".to_string();
 
         CompressionAlgo::Zstd.compress(&mut payload, &mut topic).await.unwrap();
+
+        assert_eq!(topic, "hello/world/zstd");
 
         let mut decompressor = ZstdDecoder::new(payload.as_slice());
 
