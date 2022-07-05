@@ -99,18 +99,25 @@ pub trait Package: Send + Debug + Sync {
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
 
-    async fn payload(
+    /// Configure compression on certain package types
+    fn is_compressible(&self) -> bool {
+        false
+    }
+
+    /// Extract data payload and associated topic from given package
+    async fn extract(
         &self,
         compression: &Option<CompressionAlgo>,
-    ) -> Result<String, compress::Error> {
+    ) -> Result<(Vec<u8>, String), compress::Error> {
         let mut topic = self.topic().to_string();
         let mut payload = self.serialize()?;
 
-        if let Some(algo) = compression {
-            algo.compress(&mut payload, &mut topic).await?;
+        match compression {
+            Some(algo) if self.is_compressible() => algo.compress(&mut payload, &mut topic).await?,
+            _ => {}
         }
 
-        Ok(topic)
+        Ok((payload, topic))
     }
 }
 

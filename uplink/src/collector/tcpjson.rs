@@ -242,4 +242,8 @@ impl Package for Buffer<Payload> {
     fn anomalies(&self) -> Option<(String, usize)> {
         self.anomalies()
     }
+
+    fn is_compressible(&self) -> bool {
+        true
+    }
 }

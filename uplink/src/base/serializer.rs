@@ -111,10 +111,9 @@ impl Serializer {
 
         loop {
             let data = self.collector_rx.recv_async().await?;
-            let topic = data.topic();
-            let payload = data.payload(&self.config.compression).await?;
+            let (payload, topic) = data.extract(&self.config.compression).await?;
 
-            let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+            let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
             publish.pkid = 1;
 
             if let Err(e) = publish.write(storage.writer()) {
@@ -157,10 +156,9 @@ impl Serializer {
                         self.metrics.add_errors(errors, count);
                       }
 
-                      let topic = data.topic();
-                      let payload = data.payload(&self.config.compression).await?;
+                      let (payload, topic) = data.extract(&self.config.compression).await?;
                       let payload_size = payload.len();
-                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                      let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
                       match publish.write(storage.writer()) {
@@ -229,10 +227,9 @@ impl Serializer {
                         self.metrics.add_errors(errors, count);
                       }
 
-                      let topic = data.topic();
-                      let payload = data.payload(&self.config.compression).await?;
+                      let (payload, topic) = data.extract(&self.config.compression).await?;
                       let payload_size = payload.len();
-                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                      let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
                       match publish.write(storage.writer()) {
@@ -309,10 +306,9 @@ impl Serializer {
                         self.metrics.add_errors(errors, count);
                     }
 
-                    let topic = data.topic();
-                    let payload = data.payload(&self.config.compression).await?;
+                    let (payload, topic) = data.extract(&self.config.compression).await?;
                     let payload_size = payload.len();
-                    match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
+                    match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
                             self.metrics.add_total_sent_size(payload_size);
                             continue;
