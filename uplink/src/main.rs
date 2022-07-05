@@ -54,7 +54,7 @@ use structopt::StructOpt;
 use tokio::task;
 
 use uplink::{Bridge, Config, Simulator, Uplink};
-use uplink::config::{CommandLine, initalize_config};
+use uplink::config::{CommandLine, initialize};
 
 fn initialize_logging(commandline: &CommandLine) {
     let level = match commandline.verbose {
@@ -121,7 +121,7 @@ async fn main() -> Result<(), Error> {
     let enable_simulator = commandline.simulator;
 
     initialize_logging(&commandline);
-    let config = Arc::new(initalize_config(
+    let config = Arc::new(initialize(
         fs::read_to_string(&commandline.auth)?.as_str(),
         commandline.config.as_ref()
             .and_then(|path| fs::read_to_string(path).ok())

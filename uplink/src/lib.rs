@@ -88,7 +88,7 @@ pub mod config {
 
     /// Reads config file to generate config struct and replaces places holders
     /// like bike id and data version
-    pub fn initalize_config(auth_config: &str, uplink_config: &str) -> Result<Config, anyhow::Error> {
+    pub fn initialize(auth_config: &str, uplink_config: &str) -> Result<Config, anyhow::Error> {
         let mut config = Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG));
 
         config = config.merge(Data::<Toml>::string(uplink_config));
