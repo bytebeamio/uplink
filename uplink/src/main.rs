@@ -207,6 +207,9 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     if config.stats.enabled {
         println!("    processes: {:?}", config.stats.process_names);
     }
+    if let Some(algo) = &config.compression {
+        println!("    compression: {:?}", algo);
+    }
     println!("\n");
 }
 
