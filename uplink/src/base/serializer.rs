@@ -18,6 +18,8 @@ pub enum Error {
     Collector(#[from] RecvError),
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("Package error {0}")]
+    Package(#[from] crate::base::Error),
     #[error("Io error {0}")]
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
@@ -110,7 +112,7 @@ impl Serializer {
         loop {
             let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
-            let payload = data.serialize()?;
+            let payload = data.payload(&self.config.compression).await?;
 
             let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
             publish.pkid = 1;
@@ -156,7 +158,7 @@ impl Serializer {
                       }
 
                       let topic = data.topic();
-                      let payload = data.serialize()?;
+                      let payload = data.payload(&self.config.compression).await?;
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
@@ -228,7 +230,7 @@ impl Serializer {
                       }
 
                       let topic = data.topic();
-                      let payload = data.serialize()?;
+                      let payload = data.payload(&self.config.compression).await?;
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
@@ -308,7 +310,7 @@ impl Serializer {
                     }
 
                     let topic = data.topic();
-                    let payload = data.serialize()?;
+                    let payload = data.payload(&self.config.compression).await?;
                     let payload_size = payload.len();
                     match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
