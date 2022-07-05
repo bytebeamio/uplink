@@ -18,8 +18,8 @@ pub enum Error {
     Collector(#[from] RecvError),
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
-    #[error("Package error {0}")]
-    Package(#[from] crate::base::Error),
+    #[error("Compress error {0}")]
+    Compress(#[from] super::compress::Error),
     #[error("Io error {0}")]
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]

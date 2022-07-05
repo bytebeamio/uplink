@@ -1,15 +1,15 @@
-use std::{collections::HashMap, fmt::Debug, io::Write, mem, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
 
-use async_compression::tokio::write::{ZlibEncoder, ZstdEncoder};
 use flume::{SendError, Sender};
 use log::{info, warn};
-use lz4_flex::frame::FrameEncoder;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
 
 pub mod actions;
+pub mod compress;
 pub mod mqtt;
 pub mod serializer;
+
+use compress::CompressionAlgo;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -86,52 +86,6 @@ pub struct Config {
     pub compression: Option<CompressionAlgo>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub enum CompressionAlgo {
-    Lz4,
-    Zlib,
-    Zstd,
-}
-
-impl CompressionAlgo {
-    pub async fn compress(&self, payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
-        match self {
-            Self::Lz4 => Self::lz4_compress(payload, topic),
-            Self::Zlib => Self::zlib_compress(payload, topic).await,
-            Self::Zstd => Self::zstd_compress(payload, topic).await,
-        }
-    }
-
-    fn lz4_compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
-        let mut compressor = FrameEncoder::new(vec![]);
-        compressor.write_all(payload)?;
-        *payload = compressor.finish()?;
-        topic.push_str("/lz4");
-
-        Ok(())
-    }
-
-    async fn zlib_compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
-        let mut compressor = ZlibEncoder::new(vec![]);
-        compressor.write_all(payload).await?;
-        compressor.shutdown().await?;
-        *payload = compressor.into_inner();
-        topic.push_str("/zlib");
-
-        Ok(())
-    }
-
-    async fn zstd_compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
-        let mut compressor = ZstdEncoder::new(vec![]);
-        compressor.write_all(payload).await?;
-        compressor.shutdown().await?;
-        *payload = compressor.into_inner();
-        topic.push_str("/zstd");
-
-        Ok(())
-    }
-}
-
 pub trait Point: Send + Debug {
     fn sequence(&self) -> u32;
     fn timestamp(&self) -> u64;
@@ -145,7 +99,10 @@ pub trait Package: Send + Debug + Sync {
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
 
-    async fn payload(&self, compression: &Option<CompressionAlgo>) -> Result<String, Error> {
+    async fn payload(
+        &self,
+        compression: &Option<CompressionAlgo>,
+    ) -> Result<String, compress::Error> {
         let mut topic = self.topic().to_string();
         let mut payload = self.serialize()?;
 
