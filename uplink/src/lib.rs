@@ -164,7 +164,7 @@ impl Uplink {
         Ok(Uplink { config, action_channel, data_channel, action_status })
     }
 
-    pub async fn spawn(&mut self) -> Result<(), Error> {
+    pub fn spawn(&mut self) -> Result<(), Error> {
         // Launch a thread to handle tunshell access
         let tunshell_keys = RxTx::bounded(10);
         let tunshell_config = self.config.clone();
@@ -209,20 +209,25 @@ impl Uplink {
             self.action_channel.tx.clone(),
         );
 
-        task::spawn(async move {
-            if let Err(e) = serializer.start().await {
-                error!("Serializer stopped!! Error = {:?}", e);
-            }
-        });
+        // Launch a thread to handle incoming and outgoing MQTT packets
+        let rt = tokio::runtime::Runtime::new()?;
+        thread::spawn(move || {
+            rt.block_on(async {
+                // Collect and forward data from connected applications as MQTT packets
+                task::spawn(async move {
+                    if let Err(e) = serializer.start().await {
+                        error!("Serializer stopped!! Error = {:?}", e);
+                    }
+                });
 
-        // Receive [Action]s
-        task::spawn(async move {
-            mqtt.start().await;
-        });
+                // Receive [Action]s
+                task::spawn(async move {
+                    mqtt.start().await;
+                });
 
-        // Process and forward received [Action]s to connected applications
-        task::spawn(async move {
-            actions.start().await;
+                // Process and forward received [Action]s to connected applications
+                actions.start().await;
+            })
         });
 
         Ok(())

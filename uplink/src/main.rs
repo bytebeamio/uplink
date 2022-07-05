@@ -132,7 +132,7 @@ async fn main() -> Result<(), Error> {
     banner(&commandline, &config);
 
     let mut uplink = Uplink::new(config.clone())?;
-    uplink.spawn().await?;
+    uplink.spawn()?;
 
     if enable_simulator {
         let mut simulator = Simulator::new(config.clone(), uplink.bridge_data_tx());
