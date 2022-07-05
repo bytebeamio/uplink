@@ -53,17 +53,17 @@ pub struct Action {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
-    id: String,
+    pub id: String,
     // sequence number
-    sequence: u32,
+    pub sequence: u32,
     // timestamp
-    timestamp: u64,
+    pub timestamp: u64,
     // running, failed
-    state: String,
+    pub state: String,
     // progress percentage for processes
-    progress: u8,
+    pub progress: u8,
     // list of error
-    errors: Vec<String>,
+    pub errors: Vec<String>,
 }
 
 impl ActionResponse {

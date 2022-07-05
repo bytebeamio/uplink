@@ -1,4 +1,4 @@
-#[doc = include_str!("../../README.md")]
+#[doc = include_str ! ("../../README.md")]
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
@@ -9,11 +9,110 @@ use flume::{bounded, Receiver, Sender};
 use log::error;
 use tokio::task;
 
-mod base;
-mod collector;
+pub mod base;
+pub mod collector;
 
 pub mod config {
+    use std::fs;
+    use anyhow::Context;
+    use figment::Figment;
+    use figment::providers::{Data, Json, Toml};
+    use structopt::StructOpt;
     pub use crate::base::{Config, Ota, Persistence, Stats};
+
+    #[derive(StructOpt, Debug)]
+    #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
+    pub struct CommandLine {
+        /// Binary version
+        #[structopt(skip = env ! ("VERGEN_BUILD_SEMVER"))]
+        pub version: String,
+        /// Build profile
+        #[structopt(skip = env ! ("VERGEN_CARGO_PROFILE"))]
+        pub profile: String,
+        /// Commit SHA
+        #[structopt(skip = env ! ("VERGEN_GIT_SHA"))]
+        pub commit_sha: String,
+        /// Commit SHA
+        #[structopt(skip = env ! ("VERGEN_GIT_COMMIT_TIMESTAMP"))]
+        pub commit_date: String,
+        /// config file
+        #[structopt(short = "c", help = "Config file")]
+        pub config: Option<String>,
+        /// config file
+        #[structopt(short = "a", help = "Authentication file")]
+        pub auth: String,
+        /// list of modules to log
+        #[structopt(short = "s", long = "simulator")]
+        pub simulator: bool,
+        /// log level (v: info, vv: debug, vvv: trace)
+        #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
+        pub verbose: u8,
+        /// list of modules to log
+        #[structopt(short = "m", long = "modules")]
+        pub modules: Vec<String>,
+    }
+
+    const DEFAULT_CONFIG: &str = r#"
+    bridge_port = 5555
+    max_packet_size = 102400
+    max_inflight = 100
+
+    # Whitelist of binaries which uplink can spawn as a process
+    # This makes sure that user is protected against random actions
+    # triggered from cloud.
+    actions = ["tunshell"]
+
+    [persistence]
+    path = "/tmp/uplink"
+    max_file_size = 104857600 # 100MB
+    max_file_count = 3
+
+    [streams.metrics]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/metrics/jsonarray"
+    buf_size = 10
+
+    # Action status stream from status messages from bridge
+    [streams.action_status]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
+    buf_size = 1
+
+    [ota]
+    enabled = false
+    path = "/var/tmp/ota-file"
+
+    [stats]
+    enabled = false
+    process_names = ["uplink"]
+    update_period = 30
+"#;
+
+    /// Reads config file to generate config struct and replaces places holders
+    /// like bike id and data version
+    pub fn initialize(auth_config: &str, uplink_config: &str) -> Result<Config, anyhow::Error> {
+        let mut config = Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG));
+
+        config = config.merge(Data::<Toml>::string(uplink_config));
+
+        let mut config: Config = config
+            .join(Data::<Json>::string(auth_config))
+            .extract()
+            .with_context(|| "Config error".to_string())?;
+
+        if let Some(persistence) = &config.persistence {
+            fs::create_dir_all(&persistence.path)?;
+        }
+        let tenant_id = config.project_id.trim();
+        let device_id = config.device_id.trim();
+        for config in config.streams.values_mut() {
+            let topic = str::replace(&config.topic, "{tenant_id}", tenant_id);
+            config.topic = topic;
+
+            let topic = str::replace(&config.topic, "{device_id}", device_id);
+            config.topic = topic;
+        }
+
+        Ok(config)
+    }
 }
 
 pub use base::actions;
