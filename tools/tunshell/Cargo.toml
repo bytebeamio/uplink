@@ -1,17 +1,26 @@
 [package]
+edition = "2018"
 name = "uplink-tunshell"
 version = "0.1.0"
-edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-clap = "3.0.0-beta.2"
+clap = { version = "3", features = ["derive"] }
 env_logger = "0.8.4"
 rand = "0.8.4"
 rumqttc = "0.7.0"
-serde = { version = "^1", features = ["derive"] }
 serde_json = "^1"
-tunshell-client = { git = "https://github.com/TimeToogo/tunshell.git" }
-tokio = { version = "0.2.21", features = ["rt-threaded"] }
+
+[dependencies.serde]
+features = ["derive"]
+version = "^1"
+
+[dependencies.tokio]
+features = ["rt-threaded"]
+version = "0.2.21"
+
+[dependencies.tunshell-client]
+git = "https://github.com/TimeToogo/tunshell.git"
+
+[dependencies.ureq]
+features = ["json"]
+version = "2.1.1"
 ureq = { version = "2.1.1", features = ["json"] }

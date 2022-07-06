@@ -1,12 +1,12 @@
 use std::process::exit;
 
-use clap::Clap;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use rumqttc::{Client, MqttOptions, QoS};
 use serde::{Deserialize, Serialize};
 use tunshell_client::{Client as TunshellClient, ClientMode, Config as TunshellConfig, HostShell};
+use clap::Parser;
 
-#[derive(Clap)]
+#[derive(Parser, Debug)]
 #[clap(version = "0.1.0")]
 struct Config {
     #[clap(short, long, default_value = "eu.relay.tunshell.com")]
@@ -78,7 +78,7 @@ fn main() {
 
     std::thread::spawn(move || {
         for (_, notification) in eventloop.iter().enumerate() {
-            // println!("Notification = {:?}", notification);
+            println!("Notification = {:?}", notification);
         }
     });
 
@@ -115,7 +115,10 @@ fn main() {
     // start tunshell
     match rt.block_on(client.start_session()) {
         Ok(code) => exit(code as i32),
-        Err(_) => exit(1),
+        Err(e) => {
+            println!("Session error = {:?}", e);
+            exit(1)
+        }
     }
 }
 
