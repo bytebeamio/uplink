@@ -241,10 +241,6 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Write new data to disk until back pressure due to slow n/w is resolved
     async fn slow(&mut self, publish: Publish) -> Result<Status, Error> {
-        let storage = match &mut self.storage {
-            Some(s) => s,
-            None => return Err(Error::MissingPersistence),
-        };
         info!("Switching to slow eventloop mode!!");
 
         // Note: self.client.publish() is executing code before await point
@@ -256,6 +252,11 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             select! {
                 data = self.collector_rx.recv_async() => {
+                    if self.storage.is_none() {
+                        error!("Data loss, no disk to handle network backpressure: {:?}", data);
+                        continue;
+                    }
+
                     let data = data?;
                     if let Some((errors, count)) = data.anomalies() {
                         self.metrics.add_errors(errors, count);
@@ -266,6 +267,7 @@ impl<C: MqttClient> Serializer<C> {
                     let payload_size = payload.len();
                     let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
 
+                    let storage = self.storage.as_mut().ok_or(Error::MissingPersistence)?;
                     match write_publish(storage, &mut publish) {
                         Ok(deleted) => {
                             self.metrics.add_total_disk_size(payload_size);
