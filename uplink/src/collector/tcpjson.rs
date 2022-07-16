@@ -161,6 +161,7 @@ impl Bridge {
                         StreamStatus::Partial(l) => {
                             debug!("Stream contains {} elements", l);
                         }
+                        StreamStatus::Ignore => {}
                     }
                 }
 

@@ -132,6 +132,7 @@ pub enum Control {
 /// Signals status of stream buffer
 #[derive(Debug)]
 pub enum StreamStatus<'a> {
+    Ignore,
     Partial(usize),
     Flushed(&'a String),
     Init(&'a String, Duration),
@@ -284,7 +285,12 @@ where
     pub async fn fill(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
-            return Ok(StreamStatus::Flushed(&self.name));
+            let status = if self.max_buffer_size < 2 {
+                StreamStatus::Ignore
+            } else {
+                StreamStatus::Flushed(&self.name)
+            };
+            return Ok(status);
         }
 
         let status = match self.len() {
