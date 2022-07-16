@@ -200,14 +200,14 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     /// Write all data received, from here-on, to disk only.
-    async fn crash(&mut self, mut publish: Publish) -> Result<Status, Error> {
+    async fn crash(&mut self, publish: Publish) -> Result<Status, Error> {
         let storage = match &mut self.storage {
             Some(s) => s,
             None => return Err(Error::MissingPersistence),
         };
 
         // Write first publish to disk
-        match write_publish(storage, &mut publish) {
+        match write_publish(storage, publish) {
             Ok(_) => {}
             Err(Error::Io(e)) => {
                 error!("Failed to flush disk buffer. Error = {:?}", e);
@@ -223,10 +223,10 @@ impl<C: MqttClient> Serializer<C> {
             let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
             let payload = data.serialize()?;
-            publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+            let publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
 
             // Write failed publish to disk
-            match write_publish(storage, &mut publish) {
+            match write_publish(storage, publish) {
                 Ok(_) => {}
                 Err(Error::Io(e)) => {
                     error!("Failed to flush disk buffer. Error = {:?}", e);
@@ -268,9 +268,9 @@ impl<C: MqttClient> Serializer<C> {
                     let topic = data.topic();
                     let payload = data.serialize()?;
                     let payload_size = payload.len();
-                    let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                    let publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
 
-                    match write_publish(storage, &mut publish) {
+                    match write_publish(storage, publish) {
                         Ok(deleted) => {
                             self.metrics.add_total_disk_size(payload_size);
                             if deleted {
@@ -338,9 +338,9 @@ impl<C: MqttClient> Serializer<C> {
                     let topic = data.topic();
                     let payload = data.serialize()?;
                     let payload_size = payload.len();
-                    let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                    let publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
 
-                    match write_publish(storage, &mut publish) {
+                    match write_publish(storage, publish) {
                         Ok(deleted) => {
                             self.metrics.add_total_disk_size(payload_size);
                             if deleted {
@@ -476,7 +476,7 @@ fn read_publish(storage: &mut Storage, max_packet_size: usize) -> Result<Publish
     }
 }
 
-fn write_publish(storage: &mut Storage, publish: &mut Publish) -> Result<bool, Error> {
+fn write_publish(storage: &mut Storage, mut publish: Publish) -> Result<bool, Error> {
     publish.pkid = 1;
     publish.write(storage.writer())?;
     let deleted = storage.flush_on_overflow()?.is_some();
@@ -739,7 +739,9 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_publish(&mut storage, &mut publish).unwrap();
+        publish.pkid = 1;
+
+        write_publish(&mut storage, publish.clone()).unwrap();
 
         assert_eq!(publish, read_publish(&mut storage, serializer.config.max_packet_size).unwrap());
     }
@@ -857,12 +859,12 @@ mod test {
         });
 
         // Force write a publish into storage
-        let mut publish = Publish::new(
+        let publish = Publish::new(
             "hello/world",
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_publish(&mut storage, &mut publish).unwrap();
+        write_publish(&mut storage, publish).unwrap();
 
         // Replace storage into serializer
         serializer.storage = Some(storage);
@@ -891,12 +893,12 @@ mod test {
         });
 
         // Force write a publish into storage
-        let mut publish = Publish::new(
+        let publish = Publish::new(
             "hello/world",
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_publish(&mut storage, &mut publish).unwrap();
+        write_publish(&mut storage, publish).unwrap();
 
         // Replace storage into serializer
         serializer.storage = Some(storage);
