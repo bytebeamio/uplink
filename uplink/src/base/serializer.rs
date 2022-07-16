@@ -252,10 +252,13 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             select! {
                 data = self.collector_rx.recv_async() => {
-                    if self.storage.is_none() {
-                        error!("Data loss, no disk to handle network backpressure: {:?}", data);
-                        continue;
-                    }
+                    let storage = match &mut self.storage {
+                        Some(s) => s,
+                        None => {
+                            error!("Data loss, no disk to handle network backpressure: {:?}", data);
+                            continue;
+                        }
+                    };
 
                     let data = data?;
                     if let Some((errors, count)) = data.anomalies() {
@@ -267,7 +270,6 @@ impl<C: MqttClient> Serializer<C> {
                     let payload_size = payload.len();
                     let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
 
-                    let storage = self.storage.as_mut().ok_or(Error::MissingPersistence)?;
                     match write_publish(storage, &mut publish) {
                         Ok(deleted) => {
                             self.metrics.add_total_disk_size(payload_size);
@@ -410,18 +412,15 @@ impl<C: MqttClient> Serializer<C> {
                 }
             };
 
-            let failed = match result {
+            match result {
                 Ok(_) => {
                     self.metrics.add_total_sent_size(payload_size);
                     continue;
                 }
-                Err(MqttError::TrySend(request)) => request,
+                Err(MqttError::TrySend(Request::Publish(publish))) => {
+                    return Ok(Status::SlowEventloop(publish))
+                }
                 Err(e) => unreachable!("Unexpected error: {}", e),
-            };
-
-            match failed {
-                Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
-                request => unreachable!("{:?}", request),
             }
         }
     }
