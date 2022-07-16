@@ -206,8 +206,26 @@ impl<C: MqttClient> Serializer<C> {
             None => return Err(Error::MissingPersistence),
         };
 
+        // Write first publish to disk
+        match write_publish(storage, &mut publish) {
+            Ok(_) => {}
+            Err(Error::Io(e)) => {
+                error!("Failed to flush disk buffer. Error = {:?}", e);
+            }
+            Err(Error::Mqtt(e)) => {
+                error!("Failed to fill disk buffer. Error = {:?}", e);
+            }
+            Err(e) => unreachable!("Unexpected error: {}", e),
+        }
+
         loop {
-            // Write failed publish to disk first
+            // Collect next data packet to write to disk
+            let data = self.collector_rx.recv_async().await?;
+            let topic = data.topic();
+            let payload = data.serialize()?;
+            publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+
+            // Write failed publish to disk
             match write_publish(storage, &mut publish) {
                 Ok(_) => {}
                 Err(Error::Io(e)) => {
@@ -218,12 +236,6 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 Err(e) => unreachable!("Unexpected error: {}", e),
             }
-
-            // Collect next data packet to write to disk
-            let data = self.collector_rx.recv_async().await?;
-            let topic = data.topic();
-            let payload = data.serialize()?;
-            publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
         }
     }
 
