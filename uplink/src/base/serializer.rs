@@ -698,31 +698,6 @@ mod test {
     }
 
     #[test]
-    // Runs serializer in direct mode, without persistence
-    fn normal_working() {
-        let config = default_config();
-        let (mut serializer, data_tx, net_rx) = defaults(Arc::new(config));
-
-        std::thread::spawn(move || {
-            tokio::runtime::Runtime::new().unwrap().block_on(serializer.start())
-        });
-
-        let mut collector = MockCollector::new(data_tx);
-        std::thread::spawn(move || {
-            collector.send(1).unwrap();
-        });
-
-        match net_rx.recv().unwrap() {
-            Request::Publish(Publish { qos: QoS::AtLeastOnce, payload, topic, .. }) => {
-                assert_eq!(topic, "hello/world");
-                let recvd = std::str::from_utf8(&payload).unwrap();
-                assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
-            }
-            r => panic!("Unexpected value returned: {:?}", r),
-        }
-    }
-
-    #[test]
     // Force runs serializer in normal mode, without persistence
     fn normal_to_slow() {
         let config = default_config();
