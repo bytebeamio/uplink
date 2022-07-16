@@ -240,7 +240,7 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     /// Write new data to disk until back pressure due to slow n/w is resolved
-    async fn disk(&mut self, publish: Publish) -> Result<Status, Error> {
+    async fn slow(&mut self, publish: Publish) -> Result<Status, Error> {
         let storage = match &mut self.storage {
             Some(s) => s,
             None => return Err(Error::MissingPersistence),
@@ -424,39 +424,6 @@ impl<C: MqttClient> Serializer<C> {
         }
     }
 
-    /// Direct mode is used in case uplink is used with persistence disabled.
-    /// It is operated differently from all other modes. Failure is terminal.
-    async fn direct(&mut self) -> Result<(), Error> {
-        let mut interval = time::interval(time::Duration::from_secs(10));
-
-        loop {
-            let payload_size = select! {
-                data = self.collector_rx.recv_async() => {
-                    let data = data?;
-
-                    // Extract anomalies detected by package during collection
-                    if let Some((errors, count)) = data.anomalies() {
-                        self.metrics.add_errors(errors, count);
-                    }
-
-                    let topic = data.topic();
-                    let payload = data.serialize()?;
-                    let payload_size = payload.len();
-                    self.client.publish(topic.as_ref(), QoS::AtLeastOnce, false, payload).await?;
-                    payload_size
-                }
-                _ = interval.tick() => {
-                    let (topic, payload) = self.metrics.next()?;
-                    let payload_size = payload.len();
-                    self.client.publish(topic, QoS::AtLeastOnce, false, payload).await?;
-                    payload_size
-                }
-            };
-
-            self.metrics.add_total_sent_size(payload_size);
-        }
-    }
-
     /// The Serializer writes data directly to network in [normal mode] using the [`try_publish()`] of the MQTT client
     /// being used. In case of the network being slow, this fails and we are forced into [disk mode], where in new data
     /// is written into ['Storage'] while consequently we await on a [`publish()`]. If the [`publish()`] succeeds, we
@@ -472,16 +439,12 @@ impl<C: MqttClient> Serializer<C> {
     /// [disk mode]: Serializer::disk
     /// [crash mode]: Serializer::crash
     pub async fn start(&mut self) -> Result<(), Error> {
-        if self.storage.is_none() {
-            return self.direct().await;
-        }
-
         let mut status = Status::EventLoopReady;
 
         loop {
             let next_status = match status {
                 Status::Normal => self.normal().await?,
-                Status::SlowEventloop(publish) => self.disk(publish).await?,
+                Status::SlowEventloop(publish) => self.slow(publish).await?,
                 Status::EventLoopReady => self.catchup().await?,
                 Status::EventLoopCrash(publish) => self.crash(publish).await?,
             };
@@ -833,7 +796,7 @@ mod test {
             "[{{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}}]".as_bytes(),
         );
         let status =
-            tokio::runtime::Runtime::new().unwrap().block_on(serializer.disk(publish)).unwrap();
+            tokio::runtime::Runtime::new().unwrap().block_on(serializer.slow(publish)).unwrap();
 
         assert_eq!(status, Status::EventLoopReady);
     }
@@ -860,7 +823,7 @@ mod test {
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
 
-        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.disk(publish)).unwrap() {
+        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.slow(publish)).unwrap() {
             Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
