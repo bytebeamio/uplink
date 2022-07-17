@@ -286,16 +286,13 @@ impl<C: MqttClient> Serializer<C> {
                     }
                 }
                 o = &mut publish => {
-                    let failed = match o {
+                    match o {
                         Ok(_) => return Ok(Status::EventLoopReady),
-                        Err(MqttError::Send(request)) => request,
+                        Err(MqttError::Send(Request::Publish(publish))) =>{
+                            return Ok(Status::EventLoopCrash(publish))
+                        },
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
-
-                    match failed {
-                        Request::Publish(publish) => return Ok(Status::EventLoopCrash(publish)),
-                        request => unreachable!("{:?}", request),
-                    }
                 }
             }
         }
@@ -360,7 +357,9 @@ impl<C: MqttClient> Serializer<C> {
                     // indefinitely write to disk to not loose data
                     let client = match o {
                         Ok(c) => c,
-                        Err(MqttError::Send(Request::Publish(publish))) => return Ok(Status::EventLoopCrash(publish)),
+                        Err(MqttError::Send(Request::Publish(publish))) => {
+                            return Ok(Status::EventLoopCrash(publish))
+                        },
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
