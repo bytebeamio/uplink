@@ -42,19 +42,14 @@
 use std::fs;
 use std::sync::Arc;
 
-use anyhow::{Context, Error};
-use figment::{
-    providers::Toml,
-    providers::{Data, Json},
-    Figment,
-};
+use anyhow::Error;
 use log::error;
 use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
 
-use uplink::{Bridge, Config, Simulator, Uplink};
-use uplink::config::{CommandLine, initialize};
+use uplink::config::{initialize, CommandLine};
+use uplink::{simulator, Bridge, Config, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) {
     let level = match commandline.verbose {
@@ -118,12 +113,13 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
-    let enable_simulator = commandline.simulator;
 
     initialize_logging(&commandline);
     let config = Arc::new(initialize(
         fs::read_to_string(&commandline.auth)?.as_str(),
-        commandline.config.as_ref()
+        commandline
+            .config
+            .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
             .unwrap_or("".to_string())
             .as_str(),
@@ -134,10 +130,15 @@ async fn main() -> Result<(), Error> {
     let mut uplink = Uplink::new(config.clone())?;
     uplink.spawn()?;
 
-    if enable_simulator {
-        let mut simulator = Simulator::new(config.clone(), uplink.bridge_data_tx());
+    if let (Some(num_devices), Some(gps_paths)) =
+        (commandline.simulator_num_devices, commandline.simulator_gps_paths)
+    {
+        let simulator_bridge = uplink.bridge_data_tx();
+        let simulator_actions = uplink.bridge_action_rx();
         task::spawn(async move {
-            simulator.start().await;
+            simulator::start(simulator_bridge, simulator_actions, num_devices, gps_paths)
+                .await
+                .unwrap()
         });
     }
 

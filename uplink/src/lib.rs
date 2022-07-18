@@ -13,12 +13,12 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
-    use std::fs;
-    use anyhow::Context;
-    use figment::Figment;
-    use figment::providers::{Data, Json, Toml};
-    use structopt::StructOpt;
     pub use crate::base::{Config, Ota, Persistence, Stats};
+    use anyhow::Context;
+    use figment::providers::{Data, Json, Toml};
+    use figment::Figment;
+    use std::fs;
+    use structopt::StructOpt;
 
     #[derive(StructOpt, Debug)]
     #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
@@ -41,9 +41,12 @@ pub mod config {
         /// config file
         #[structopt(short = "a", help = "Authentication file")]
         pub auth: String,
-        /// list of modules to log
-        #[structopt(short = "s", long = "simulator")]
-        pub simulator: bool,
+        /// number of devices to be simulated
+        #[structopt(short = "d", help = "Number of devices to be simulated")]
+        pub simulator_num_devices: Option<u32>,
+        /// gps paths to be used in simulation
+        #[structopt(short = "p", help = "Gps paths for simulation")]
+        pub simulator_gps_paths: Option<String>,
         /// log level (v: info, vv: debug, vvv: trace)
         #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
         pub verbose: u8,
@@ -123,7 +126,7 @@ pub use base::actions::{Action, ActionResponse};
 use base::mqtt::Mqtt;
 use base::serializer::Serializer;
 pub use base::{Config, Package, Point, Stream};
-pub use collector::simulator::Simulator;
+pub use collector::simulator;
 use collector::systemstats::StatCollector;
 pub use collector::tcpjson::{Bridge, Payload};
 pub use disk::Storage;
