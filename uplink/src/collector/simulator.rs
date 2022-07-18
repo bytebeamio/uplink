@@ -1,4 +1,4 @@
-use flume::Sender;
+use flume::{Receiver, Sender};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -486,7 +486,7 @@ pub async fn process_data_event(
 
 async fn process_action_response_event(
     event: &ActionResponseEvent,
-    data_tx: flume::Sender<Box<dyn Package>>,
+    data_tx: Sender<Box<dyn Package>>,
 ) {
     //info!("Sending action response {:?} {} {} {}", event.device_id, event.action_id, event.progress, event.status);
 
@@ -520,7 +520,7 @@ async fn process_action_response_event(
 pub async fn process_events(
     events: &mut BinaryHeap<Event>,
     partitions: &mut Partitions,
-    data_tx: flume::Sender<Box<dyn Package>>,
+    data_tx: Sender<Box<dyn Package>>,
 ) {
     if let Some(e) = events.pop() {
         let current_time = Instant::now();
@@ -572,8 +572,8 @@ pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
 }
 
 pub async fn start(
-    data_tx: flume::Sender<Box<dyn Package>>,
-    actions_rx: flume::Receiver<Action>,
+    data_tx: Sender<Box<dyn Package>>,
+    actions_rx: Receiver<Action>,
     num_devices: u32,
     gps_paths: String,
 ) -> Result<(), Error> {
@@ -625,10 +625,10 @@ impl Package for Buffer<Payload> {
     }
 
     fn topic(&self) -> Arc<String> {
-        todo!()
+        self.topic.clone()
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
-        todo!()
+        self.anomalies()
     }
 }
