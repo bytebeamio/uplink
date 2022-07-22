@@ -13,12 +13,12 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
-    use std::fs;
-    use anyhow::Context;
-    use figment::Figment;
-    use figment::providers::{Data, Json, Toml};
-    use structopt::StructOpt;
     pub use crate::base::{Config, Ota, Persistence, Stats};
+    use anyhow::Context;
+    use figment::providers::{Data, Json, Toml};
+    use figment::Figment;
+    use std::fs;
+    use structopt::StructOpt;
 
     #[derive(StructOpt, Debug)]
     #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
@@ -117,7 +117,7 @@ pub mod config {
 
 pub use base::actions;
 use base::actions::ota::OtaDownloader;
-use base::actions::tunshell::{Relay, TunshellSession};
+use base::actions::tunshell::TunshellSession;
 use base::actions::Actions;
 pub use base::actions::{Action, ActionResponse};
 use base::mqtt::Mqtt;
@@ -170,7 +170,6 @@ impl Uplink {
         let tunshell_config = self.config.clone();
         let tunshell_session = TunshellSession::new(
             tunshell_config,
-            Relay::default(),
             false,
             tunshell_keys.rx,
             self.action_status.clone(),

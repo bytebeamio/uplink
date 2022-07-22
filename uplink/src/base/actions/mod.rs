@@ -26,7 +26,7 @@ pub enum Error {
     #[error("Controller error {0}")]
     Controller(#[from] controller::Error),
     #[error("Error sending keys to tunshell thread {0}")]
-    TunshellSend(#[from] flume::SendError<String>),
+    TunshellSend(#[from] flume::SendError<Action>),
     #[error("Error forwarding Action {0}")]
     TrySend(#[from] flume::TrySendError<Action>),
     #[error("Invalid action")]
@@ -122,7 +122,7 @@ pub struct Actions {
     process: process::Process,
     controller: controller::Controller,
     actions_rx: Receiver<Action>,
-    tunshell_tx: Sender<String>,
+    tunshell_tx: Sender<Action>,
     ota_tx: Sender<Action>,
     bridge_tx: Sender<Action>,
 }
@@ -132,7 +132,7 @@ impl Actions {
         config: Arc<Config>,
         controllers: HashMap<String, Sender<Control>>,
         actions_rx: Receiver<Action>,
-        tunshell_tx: Sender<String>,
+        tunshell_tx: Sender<Action>,
         ota_tx: Sender<Action>,
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
@@ -178,8 +178,8 @@ impl Actions {
     /// Handle received actions
     async fn handle(&mut self, action: Action) -> Result<(), Error> {
         match action.name.as_ref() {
-            "tunshell" => {
-                self.tunshell_tx.send_async(action.payload).await?;
+            "launch_shell" => {
+                self.tunshell_tx.send_async(action).await?;
                 return Ok(());
             }
             "update_firmware" if self.config.ota.enabled => {
