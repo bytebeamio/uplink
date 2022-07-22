@@ -22,7 +22,7 @@ thiserror = "1"
 anyhow = "1"
 serde_json = "1.0"
 rand = "0.8"
-tunshell-client = { git = "https://github.com/TimeToogo/tunshell.git", rev = "80f991006bba21dfc0bfe07dc3a5c7cc8f0ea93d" }
+tunshell-client = { git = "https://github.com/TimeToogo/tunshell.git", branch = "master" }
 reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
 futures-util = "0.3"
 sysinfo = "0.23"
