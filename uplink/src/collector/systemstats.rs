@@ -492,8 +492,9 @@ impl StatCollector {
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
     pub fn start(mut self) {
         loop {
+            dbg!();
             std::thread::sleep(Duration::from_secs(self.config.stats.update_period));
-            self.timestamp += self.config.stats.update_period;
+            self.timestamp += self.config.stats.update_period * 1000;
 
             if let Err(e) = self.update() {
                 error!("Faced error while refreshing system statistics: {}", e);
@@ -527,6 +528,7 @@ impl StatCollector {
 
         // Refresh processor info
         for proc_data in self.sys.processors().iter() {
+            dbg!(self.timestamp);
             if let Err(e) = self.processors.push(proc_data, self.timestamp) {
                 error!("Couldn't send processor stats: {}", e);
             }

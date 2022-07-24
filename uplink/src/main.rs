@@ -72,7 +72,7 @@ fn initialize_logging(commandline: &CommandLine) {
         .set_level_padding(LevelPadding::Right);
 
     if commandline.modules.is_empty() {
-        config.add_filter_allow_str("uplink").add_filter_allow_str("disk");
+        config.add_filter_allow_str("uplink").add_filter_allow_str("disk").add_filter_allow_str("rumqttc");
     } else {
         for module in commandline.modules.iter() {
             config.add_filter_allow(module.to_string());

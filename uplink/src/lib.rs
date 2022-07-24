@@ -77,13 +77,14 @@ pub mod config {
     buf_size = 1
 
     [ota]
-    enabled = false
-    path = "/var/tmp/ota-file"
+    enabled = true
+    # path = "/var/tmp/ota-file"
+    path = "/Users/tekjar/Workspace/uplink"
 
     [stats]
     enabled = false
     process_names = ["uplink"]
-    update_period = 30
+    update_period = 5
 "#;
 
     /// Reads config file to generate config struct and replaces places holders

@@ -137,13 +137,18 @@ impl OtaDownloader {
             self.sequence = 0;
             // The 0 sized channel only allows one action to be in execution at a time. Only one action is accepted below,
             // all OTA actions before and after, till the next recv() won't get executed and will be reported to cloud.
+            dbg!();
             let action = self.ota_rx.recv()?;
+            dbg!();
             self.action_id = action.action_id.clone();
 
             match self.run(action).await {
                 Ok(_) => {
                     let status = ActionResponse::progress(&self.action_id, "Downloaded", 100)
                         .set_sequence(self.sequence());
+                    self.send_status(status).await;
+
+                    let status = ActionResponse::success(&self.action_id);
                     self.send_status(status).await;
                 }
                 Err(e) => {
@@ -167,7 +172,7 @@ impl OtaDownloader {
         let url = update.url.clone();
 
         // Create file to actually download into
-        let (file, file_path) = self.create_file(&url, &update.version)?;
+        let (file, file_path) = self.create_file(&url, &update.name)?;
 
         // Create handler to perform download from URL
         let resp = self.client.get(&url).send().await?;
@@ -175,28 +180,23 @@ impl OtaDownloader {
         self.download(resp, file).await?;
 
         // Update Action payload with `ota_path`, i.e. downloaded file's location in fs
-        update.ota_path = Some(file_path);
+        update.saved_path = Some(file_path);
         action.payload = serde_json::to_string(&update)?;
 
         // Forward Action packet through bridge
-        self.bridge_tx.try_send(action)?;
+        // self.bridge_tx.try_send(action)?;
 
         Ok(())
     }
 
     /// Creates file to download into
-    fn create_file(&self, url: &str, version: &str) -> Result<(File, String), Error> {
+    fn create_file(&self, url: &str, name: &str) -> Result<(File, String), Error> {
         // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
-        let mut ota_path = PathBuf::from(self.config.ota.path.clone());
-        ota_path.push(version);
-        create_dir_all(&ota_path)?;
+        let mut file_path = PathBuf::from(self.config.ota.path.clone());
+        create_dir_all(&file_path)?;
+        file_path.push(name);
 
-        let mut file_path = ota_path.to_owned();
-        let file_name =
-            url.split('/').last().ok_or_else(|| Error::FileNameMissing(url.to_owned()))?;
-        file_path.push(file_name);
-        let file_path = file_path.as_path();
-        let file = File::create(file_path)?;
+        let file = File::create(&file_path)?;
         let file_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
 
         Ok((file, file_path))
@@ -264,9 +264,11 @@ impl OtaDownloader {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct FirmwareUpdate {
     url: String,
-    version: String,
+    #[serde(alias = "version", alias = "file_name")]
+    name: String,
     /// Path to location in fs where download will be stored
-    ota_path: Option<String>,
+    #[serde(alias = "ota_path", alias = "path")]
+    saved_path: Option<String>,
 }
 
 #[cfg(test)]
@@ -304,11 +306,11 @@ mod test {
         // Create a firmware update action
         let ota_update = FirmwareUpdate {
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            version: "1.0".to_string(),
-            ota_path: None,
+            name: "1.0".to_string(),
+            saved_path: None,
         };
         let mut expected_forward = ota_update.clone();
-        expected_forward.ota_path = Some(ota_path + "/1.0/logo.png");
+        expected_forward.saved_path = Some(ota_path + "/1.0/logo.png");
         let ota_action = Action {
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
@@ -354,11 +356,11 @@ mod test {
         // Create a firmware update action
         let ota_update = FirmwareUpdate {
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            version: "1.0".to_string(),
-            ota_path: None,
+            name: "1.0".to_string(),
+            saved_path: None,
         };
         let mut expected_forward = ota_update.clone();
-        expected_forward.ota_path = Some(ota_path + "/1.0/logo.png");
+        expected_forward.saved_path = Some(ota_path + "/1.0/logo.png");
         let ota_action = Action {
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
