@@ -29,3 +29,8 @@ sysinfo = "0.23"
 
 [build-dependencies]
 vergen = { version = "7", features = ["git", "build", "time"] }
+
+[profile.release]
+opt-level = "s"
+strip = true
+panic = "unwind"
