@@ -13,7 +13,7 @@ pub mod controller;
 pub mod ota;
 mod process;
 pub mod tunshell;
-mod logcat;
+pub mod logcat;
 
 use crate::base::{Buffer, Point, Stream};
 pub use controller::Controller;

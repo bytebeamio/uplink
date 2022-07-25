@@ -61,8 +61,7 @@ struct LogEntry {
 }
 
 lazy_static::lazy_static! {
-    pub static ref LOGCAT_RE: regex::Regex = regex::Regex::new(r#"^(\S+ \S+) (\w)/([^(]+)\([^)]+\): (.*)$"#).unwrap();
-    // 07-24 14:52:18.220
+    pub static ref LOGCAT_RE: regex::Regex = regex::Regex::new(r#"^(\S+ \S+) (\w)/([^(\s]*).+?:\s*(.*)$"#).unwrap();
     pub static ref LOGCAT_TIME_RE: regex::Regex = regex::Regex::new(r#"^(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\.(\d+)$"#).unwrap();
 }
 
