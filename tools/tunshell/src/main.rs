@@ -32,6 +32,7 @@ struct Action {
 #[derive(Serialize)]
 pub struct Keys {
     session: String,
+    relay: String,
     encryption: String,
 }
 
@@ -67,10 +68,11 @@ fn main() {
     let (mut client, mut eventloop) = Client::new(mqttoptions, 3);
     let action = Action {
         id: "tunshell".to_string(),
-        name: "tunshell".to_string(),
-        kind: "tunshell".to_string(),
+        name: "launch_shell".to_string(),
+        kind: "launch_shell".to_string(),
         payload: serde_json::to_string(&Keys {
             session: target_key,
+            relay: "eu.relay.tunshell.com".to_string(),
             encryption: encrytion_key.clone(),
         })
         .unwrap(),
