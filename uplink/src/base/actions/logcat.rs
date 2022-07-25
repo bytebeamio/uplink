@@ -163,7 +163,7 @@ impl LogcatInstance {
                         }
                     }
                     Err(e) => {
-                        log::error!("failed to start logcat: {}", e);
+                        log::warn!("failed to start logcat: {}", e);
                     }
                 };
             });
