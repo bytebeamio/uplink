@@ -50,10 +50,10 @@ enum Status {
 ///          │EventLoopReady├───────────────────────►Serializer::catchup()├──────────────────────►EventLoopCrash(publish)│
 ///          └───────▲──────┘                       └──────────┬──────────┘                      └───────────┬───────────┘
 ///                  │                                         │                                             │
-///                  │                                         │ No more data left in Storage                │
-///                  │                                         │                                             │
+///                  │ Write to storage,                       │ No more data left in Storage                │
+///                  │ continue trying to publish              │                                             │
 ///     ┌────────────┴────────────┐                        ┌───▼──┐                             ┌────────────▼─────────────┐
-///     │Serializer::disk(publish)│                        │Normal│                             │Serializer::crash(publish)├──┐
+///     │Serializer::slow(publish)│                        │Normal│                             │Serializer::crash(publish)├──┐
 ///     └────────────▲────────────┘                        └───┬──┘                             └─────────────────────────▲┘  │
 ///                  │                                         │                                 Write all data to Storage└───┘
 ///                  │                                         │
@@ -61,7 +61,7 @@ enum Status {
 ///      ┌───────────┴──────────┐                   ┌──────────▼─────────┐
 ///      │SlowEventloop(publish)◄───────────────────┤Serializer::normal()│
 ///      └──────────────────────┘                   └────────────────────┘
-///       Slow Network,                             Forward all data to Bytebeam,
+///       Slow Network,                             Forward all data to broker,
 ///       save to Storage before forwarding         through AsyncClient
 ///
 ///```
@@ -107,7 +107,16 @@ impl Serializer {
         // Write failed publish to disk first
         publish.pkid = 1;
 
+        if let Err(e) = publish.write(storage.writer()) {
+            error!("Failed to fill write buffer during bad network. Error = {:?}", e);
+        }
+
+        if let Err(e) = storage.flush_on_overflow() {
+            error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
+        }
+
         loop {
+            // Collect next data packet to write to disk
             let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
             let payload = data.serialize()?;
@@ -120,25 +129,15 @@ impl Serializer {
                 continue;
             }
 
-            match storage.flush_on_overflow() {
-                Ok(_) => {}
-                Err(e) => {
-                    error!(
-                        "Failed to flush write buffer to disk during bad network. Error = {:?}",
-                        e
-                    );
-                    continue;
-                }
+            if let Err(e) = storage.flush_on_overflow() {
+                error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
+                continue;
             }
         }
     }
 
     /// Write new data to disk until back pressure due to slow n/w is resolved
-    async fn disk(&mut self, publish: Publish) -> Result<Status, Error> {
-        let storage = match &mut self.storage {
-            Some(s) => s,
-            None => return Err(Error::MissingPersistence),
-        };
+    async fn slow(&mut self, publish: Publish) -> Result<Status, Error> {
         info!("Switching to slow eventloop mode!!");
 
         // Note: self.client.publish() is executing code before await point
@@ -150,6 +149,14 @@ impl Serializer {
         loop {
             select! {
                 data = self.collector_rx.recv_async() => {
+                    let storage = match &mut self.storage {
+                        Some(s) => s,
+                        None => {
+                            error!("Data loss, no disk to handle network backpressure: {:?}", data);
+                            continue;
+                        }
+                    };
+
                       let data = data?;
                       if let Some((errors, count)) = data.anomalies() {
                         self.metrics.add_errors(errors, count);
@@ -180,8 +187,13 @@ impl Serializer {
                       }
                 }
                 o = &mut publish => {
-                    o?;
-                    return Ok(Status::EventLoopReady)
+                    match o {
+                        Ok(_) => return Ok(Status::EventLoopReady),
+                        Err(ClientError::Request(SendError(Request::Publish(publish)))) =>{
+                            return Ok(Status::EventLoopCrash(publish))
+                        },
+                        Err(e) => unreachable!("Unexpected error: {}", e),
+                    }
                 }
             }
         }
@@ -341,6 +353,19 @@ impl Serializer {
         }
     }
 
+    /// The Serializer writes data directly to network in [normal mode] by [`try_publish()`]in on the MQTT client. In case
+    /// of the network being slow, this fails and we are forced into [slow mode], where in new data is written into ['Storage']
+    /// while consequently we await on a [`publish()`]. If the [`publish()`] succeeds, we move into [catchup mode] or otherwise,
+    /// if it fails we move to [crash mode]. In [catchup mode], we continuously write to ['Storage'] while also pushing data
+    /// onto network by [`publish()`]. If a [`publish()`] succeds, we load the next [`Publish`] packet from [`storage`], whereas
+    /// if it fails, we transition into [crash mode] where we merely write all data received, directly into disk.
+    ///
+    /// [`try_publish()`]: AsyncClient::try_publish
+    /// [`publish()`]: AsyncClient::publish
+    /// [normal mode]: Serializer::normal
+    /// [catchup mode]: Serializer::catchup
+    /// [slow mode]: Serializer::slow
+    /// [crash mode]: Serializer::crash
     pub async fn start(mut self) -> Result<(), Error> {
         if self.storage.is_none() {
             loop {
@@ -353,7 +378,7 @@ impl Serializer {
         loop {
             let next_status = match status {
                 Status::Normal => self.normal().await?,
-                Status::SlowEventloop(publish) => self.disk(publish).await?,
+                Status::SlowEventloop(publish) => self.slow(publish).await?,
                 Status::EventLoopReady => self.catchup().await?,
                 Status::EventLoopCrash(publish) => self.crash(publish).await?,
             };
