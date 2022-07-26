@@ -48,6 +48,7 @@ pub enum Error {
     MissingPersistence,
 }
 
+#[derive(Debug, PartialEq)]
 enum Status {
     Normal,
     SlowEventloop(Publish),
@@ -528,5 +529,394 @@ impl Metrics {
         self.errors.clear();
         self.lost_segments = 0;
         Ok((&self.topic, payload))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        base::{Stream, StreamConfig, DEFAULT_TIMEOUT},
+        config::Persistence,
+        Payload,
+    };
+    use std::collections::HashMap;
+
+    #[derive(Clone)]
+    pub struct MockClient {
+        pub net_tx: flume::Sender<Request>,
+    }
+
+    const PERSIST_FOLDER: &str = "/tmp/uplink_test";
+
+    #[async_trait::async_trait]
+    impl MqttClient for MockClient {
+        async fn publish<S, V>(
+            &self,
+            topic: S,
+            qos: QoS,
+            retain: bool,
+            payload: V,
+        ) -> Result<(), MqttError>
+        where
+            S: Into<String> + Send,
+            V: Into<Vec<u8>> + Send,
+        {
+            let mut publish = Publish::new(topic, qos, payload);
+            publish.retain = retain;
+            let publish = Request::Publish(publish);
+            self.net_tx.send_async(publish).await.map_err(|e| MqttError::Send(e.into_inner()))?;
+            Ok(())
+        }
+
+        fn try_publish<S, V>(
+            &self,
+            topic: S,
+            qos: QoS,
+            retain: bool,
+            payload: V,
+        ) -> Result<(), MqttError>
+        where
+            S: Into<String>,
+            V: Into<Vec<u8>>,
+        {
+            let mut publish = Publish::new(topic, qos, payload);
+            publish.retain = retain;
+            let publish = Request::Publish(publish);
+            self.net_tx.try_send(publish).map_err(|e| MqttError::TrySend(e.into_inner()))?;
+            Ok(())
+        }
+
+        async fn publish_bytes<S>(
+            &self,
+            topic: S,
+            qos: QoS,
+            retain: bool,
+            payload: Bytes,
+        ) -> Result<(), MqttError>
+        where
+            S: Into<String> + Send,
+        {
+            let mut publish = Publish::from_bytes(topic, qos, payload);
+            publish.retain = retain;
+            let publish = Request::Publish(publish);
+            self.net_tx.send_async(publish).await.map_err(|e| MqttError::Send(e.into_inner()))?;
+            Ok(())
+        }
+    }
+
+    fn write_to_storage(storage: &mut Storage, publish: &Publish) {
+        if let Err(e) = publish.write(storage.writer()) {
+            panic!("Failed to fill write buffer. Error = {:?}", e);
+        }
+
+        if let Err(e) = storage.flush_on_overflow() {
+            panic!("Failed to flush write buffer to disk. Error = {:?}", e);
+        }
+    }
+
+    fn read_from_storage(storage: &mut Storage, max_packet_size: usize) -> Publish {
+        if storage.reload_on_eof().unwrap() {
+            panic!("No publishes found in storage");
+        }
+
+        match read(storage.reader(), max_packet_size) {
+            Ok(Packet::Publish(publish)) => return publish,
+            v => {
+                panic!("Failed to read publish from storage. read: {:?}", v);
+            }
+        }
+    }
+
+    fn default_config() -> Config {
+        let mut streams = HashMap::new();
+        streams.insert(
+            "metrics".to_owned(),
+            StreamConfig {
+                topic: Default::default(),
+                buf_size: 100,
+                flush_period: DEFAULT_TIMEOUT,
+            },
+        );
+        Config {
+            broker: "localhost".to_owned(),
+            port: 1883,
+            device_id: "123".to_owned(),
+            streams,
+            max_packet_size: 1024 * 1024,
+            ..Default::default()
+        }
+    }
+
+    fn config_with_persistence(path: String) -> Config {
+        std::fs::create_dir_all(&path).unwrap();
+        let mut config = default_config();
+        config.persistence = Some(Persistence {
+            path: path.clone(),
+            max_file_size: 10 * 1024 * 1024,
+            max_file_count: 3,
+        });
+
+        config
+    }
+
+    fn defaults(
+        config: Arc<Config>,
+    ) -> (Serializer<MockClient>, flume::Sender<Box<dyn Package>>, Receiver<Request>) {
+        let (data_tx, data_rx) = flume::bounded(1);
+        let (net_tx, net_rx) = flume::bounded(1);
+        let client = MockClient { net_tx };
+
+        (Serializer::new(config, data_rx, client).unwrap(), data_tx, net_rx)
+    }
+
+    #[derive(Error, Debug)]
+    pub enum Error {
+        #[error("Serde error {0}")]
+        Serde(#[from] serde_json::Error),
+        #[error("Stream error {0}")]
+        Base(#[from] crate::base::Error),
+    }
+
+    struct MockCollector {
+        stream: Stream<Payload>,
+    }
+
+    impl MockCollector {
+        fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
+            MockCollector { stream: Stream::new("hello", "hello/world", 1, data_tx) }
+        }
+
+        fn send(&mut self, i: u32) -> Result<(), Error> {
+            let payload = Payload {
+                stream: "hello".to_owned(),
+                sequence: i,
+                timestamp: 0,
+                payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,
+            };
+            self.stream.push(payload)?;
+
+            Ok(())
+        }
+    }
+
+    #[test]
+    // Force runs serializer in normal mode, without persistence
+    fn normal_to_slow() {
+        let config = default_config();
+        let (mut serializer, data_tx, net_rx) = defaults(Arc::new(config));
+
+        // Slow Network, takes packets only once in 10s
+        std::thread::spawn(move || loop {
+            std::thread::sleep(time::Duration::from_secs(10));
+            net_rx.recv().unwrap();
+        });
+
+        let mut collector = MockCollector::new(data_tx);
+        std::thread::spawn(move || {
+            for i in 1..3 {
+                collector.send(i).unwrap();
+            }
+        });
+
+        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.normal()).unwrap() {
+            Status::SlowEventloop(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
+                assert_eq!(topic, "hello/world");
+                let recvd = std::str::from_utf8(&payload).unwrap();
+                assert_eq!(recvd, "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+            }
+            s => panic!("Unexpected status: {:?}", s),
+        }
+    }
+
+    #[test]
+    // Force write publish to storage and verify by reading back
+    fn read_write_storage() {
+        let config = Arc::new(config_with_persistence(format!("{}/disk", PERSIST_FOLDER)));
+        std::fs::create_dir_all(&config.persistence.as_ref().unwrap().path).unwrap();
+
+        let (mut serializer, _, _) = defaults(config);
+        let mut storage = serializer.storage.take().unwrap();
+
+        let mut publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+        );
+        publish.pkid = 1;
+
+        write_to_storage(&mut storage, &publish);
+
+        let stored_publish = read_from_storage(&mut storage, serializer.config.max_packet_size);
+
+        assert_eq!(publish, stored_publish);
+    }
+
+    #[test]
+    // Force runs serializer in disk mode, with network returning
+    fn disk_to_catchup() {
+        let config = Arc::new(config_with_persistence(format!("{}/disk_catchup", PERSIST_FOLDER)));
+
+        let (mut serializer, data_tx, net_rx) = defaults(config);
+
+        // Slow Network, takes packets only once in 10s
+        std::thread::spawn(move || loop {
+            std::thread::sleep(time::Duration::from_secs(5));
+            net_rx.recv().unwrap();
+        });
+
+        let mut collector = MockCollector::new(data_tx);
+        // Faster collector, send data every 5s
+        std::thread::spawn(move || {
+            for i in 1..10 {
+                collector.send(i).unwrap();
+                std::thread::sleep(time::Duration::from_secs(3));
+            }
+        });
+
+        let publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}}]".as_bytes(),
+        );
+        let status =
+            tokio::runtime::Runtime::new().unwrap().block_on(serializer.disk(publish)).unwrap();
+
+        assert_eq!(status, Status::EventLoopReady);
+    }
+
+    #[test]
+    // Force runs serializer in disk mode, with crashed network
+    fn disk_to_crash() {
+        let config = Arc::new(config_with_persistence(format!("{}/disk_crash", PERSIST_FOLDER)));
+
+        let (mut serializer, data_tx, _) = defaults(config);
+
+        let mut collector = MockCollector::new(data_tx);
+        // Faster collector, send data every 5s
+        std::thread::spawn(move || {
+            for i in 1..10 {
+                collector.send(i).unwrap();
+                std::thread::sleep(time::Duration::from_secs(3));
+            }
+        });
+
+        let publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+        );
+
+        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.disk(publish)).unwrap() {
+            Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
+                assert_eq!(topic, "hello/world");
+                let recvd = std::str::from_utf8(&payload).unwrap();
+                assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+            }
+            s => panic!("Unexpected status: {:?}", s),
+        }
+    }
+
+    #[test]
+    // Force runs serializer in catchup mode, with empty persistence
+    fn catchup_to_normal_empty_persistence() {
+        let config = Arc::new(config_with_persistence(format!("{}/catchup_empty", PERSIST_FOLDER)));
+
+        let (mut serializer, _, _) = defaults(config);
+
+        let status =
+            tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap();
+        assert_eq!(status, Status::Normal);
+    }
+
+    #[test]
+    // Force runs serializer in catchup mode, with data already in persistence
+    fn catchup_to_normal_with_persistence() {
+        let config =
+            Arc::new(config_with_persistence(format!("{}/catchup_normal", PERSIST_FOLDER)));
+
+        let (mut serializer, data_tx, net_rx) = defaults(config);
+        let mut storage = serializer.storage.take().unwrap();
+
+        let mut collector = MockCollector::new(data_tx);
+        // Run a collector practically once
+        std::thread::spawn(move || {
+            for i in 2..6 {
+                collector.send(i).unwrap();
+                std::thread::sleep(time::Duration::from_secs(100));
+            }
+        });
+
+        // Decent network that lets collector push data once into storage
+        std::thread::spawn(move || {
+            std::thread::sleep(time::Duration::from_secs(5));
+            for i in 1..6 {
+                match net_rx.recv().unwrap() {
+                    Request::Publish(Publish { payload, .. }) => {
+                        let recvd = String::from_utf8(payload.to_vec()).unwrap();
+                        let expected = format!(
+                            "[{{\"sequence\":{i},\"timestamp\":0,\"msg\":\"Hello, World!\"}}]",
+                        );
+                        assert_eq!(recvd, expected)
+                    }
+                    r => unreachable!("Unexpected request: {:?}", r),
+                }
+            }
+        });
+
+        // Force write a publish into storage
+        let publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+        );
+
+        write_to_storage(&mut storage, &publish);
+
+        // Replace storage into serializer
+        serializer.storage = Some(storage);
+        let status =
+            tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap();
+        assert_eq!(status, Status::Normal);
+    }
+
+    #[test]
+    // Force runs serializer in catchup mode, with persistence and crashed network
+    fn catchup_to_crash_with_persistence() {
+        let config = Arc::new(config_with_persistence(format!("{}/catchup_crash", PERSIST_FOLDER)));
+
+        std::fs::create_dir_all(&config.persistence.as_ref().unwrap().path).unwrap();
+
+        let (mut serializer, data_tx, _) = defaults(config);
+        let mut storage = serializer.storage.take().unwrap();
+
+        let mut collector = MockCollector::new(data_tx);
+        // Run a collector
+        std::thread::spawn(move || {
+            for i in 2..6 {
+                collector.send(i).unwrap();
+                std::thread::sleep(time::Duration::from_secs(10));
+            }
+        });
+
+        // Force write a publish into storage
+        let publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+        );
+
+        write_to_storage(&mut storage, &publish);
+
+        // Replace storage into serializer
+        serializer.storage = Some(storage);
+        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
+            Status::EventLoopCrash(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "hello/world");
+                let recvd = std::str::from_utf8(&payload).unwrap();
+                assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+            }
+            s => unreachable!("Unexpected status: {:?}", s),
+        }
     }
 }
