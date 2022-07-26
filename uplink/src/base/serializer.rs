@@ -18,6 +18,8 @@ pub enum Error {
     Collector(#[from] RecvError),
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("Compress error {0}")]
+    Compress(#[from] super::compress::Error),
     #[error("Io error {0}")]
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
@@ -109,10 +111,9 @@ impl Serializer {
 
         loop {
             let data = self.collector_rx.recv_async().await?;
-            let topic = data.topic();
-            let payload = data.serialize()?;
+            let (payload, topic) = data.extract(&self.config.compression).await?;
 
-            let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+            let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
             publish.pkid = 1;
 
             if let Err(e) = publish.write(storage.writer()) {
@@ -155,10 +156,9 @@ impl Serializer {
                         self.metrics.add_errors(errors, count);
                       }
 
-                      let topic = data.topic();
-                      let payload = data.serialize()?;
+                      let (payload, topic) = data.extract(&self.config.compression).await?;
                       let payload_size = payload.len();
-                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                      let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
                       match publish.write(storage.writer()) {
@@ -227,10 +227,9 @@ impl Serializer {
                         self.metrics.add_errors(errors, count);
                       }
 
-                      let topic = data.topic();
-                      let payload = data.serialize()?;
+                      let (payload, topic) = data.extract(&self.config.compression).await?;
                       let payload_size = payload.len();
-                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                      let mut publish = Publish::new(topic, QoS::AtLeastOnce, payload);
                       publish.pkid = 1;
 
                       match publish.write(storage.writer()) {
@@ -307,10 +306,9 @@ impl Serializer {
                         self.metrics.add_errors(errors, count);
                     }
 
-                    let topic = data.topic();
-                    let payload = data.serialize()?;
+                    let (payload, topic) = data.extract(&self.config.compression).await?;
                     let payload_size = payload.len();
-                    match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
+                    match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
                         Ok(_) => {
                             self.metrics.add_total_sent_size(payload_size);
                             continue;

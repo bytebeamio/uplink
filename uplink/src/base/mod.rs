@@ -5,13 +5,22 @@ use log::{info, warn};
 use serde::{Deserialize, Serialize};
 
 pub mod actions;
+pub mod compress;
 pub mod mqtt;
 pub mod serializer;
 
+use compress::CompressionAlgo;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Io error {0}")]
+    Io(#[from] std::io::Error),
     #[error("Send error {0}")]
     Send(#[from] SendError<Box<dyn Package>>),
+    #[error("LZ4 compression error: {0}")]
+    Lz4(#[from] lz4_flex::frame::Error),
+    #[error("Serde error {0}")]
+    Serde(#[from] serde_json::Error),
 }
 
 pub const DEFAULT_TIMEOUT: u64 = 60;
@@ -74,6 +83,7 @@ pub struct Config {
     pub streams: HashMap<String, StreamConfig>,
     pub ota: Ota,
     pub stats: Stats,
+    pub compression: Option<CompressionAlgo>,
 }
 
 pub trait Point: Send + Debug {
@@ -81,12 +91,34 @@ pub trait Point: Send + Debug {
     fn timestamp(&self) -> u64;
 }
 
-pub trait Package: Send + Debug {
+#[async_trait::async_trait]
+pub trait Package: Send + Debug + Sync {
     fn topic(&self) -> Arc<String>;
     // TODO: Implement a generic Return type that can wrap
     // around custom serialization error types.
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
+
+    /// Configure compression on certain package types
+    fn is_compressible(&self) -> bool {
+        false
+    }
+
+    /// Extract data payload and associated topic from given package
+    async fn extract(
+        &self,
+        compression: &Option<CompressionAlgo>,
+    ) -> Result<(Vec<u8>, String), compress::Error> {
+        let mut topic = self.topic().to_string();
+        let mut payload = self.serialize()?;
+
+        match compression {
+            Some(algo) if self.is_compressible() => algo.compress(&mut payload, &mut topic).await?,
+            _ => {}
+        }
+
+        Ok((payload, topic))
+    }
 }
 
 /// Signal to modify the behaviour of collector
@@ -100,6 +132,7 @@ pub enum Control {
 /// Signals status of stream buffer
 #[derive(Debug)]
 pub enum StreamStatus<'a> {
+    Ignore,
     Partial(usize),
     Flushed(&'a String),
     Init(&'a String, Duration),
@@ -252,7 +285,12 @@ where
     pub async fn fill(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
-            return Ok(StreamStatus::Flushed(&self.name));
+            let status = if self.max_buffer_size < 2 {
+                StreamStatus::Ignore
+            } else {
+                StreamStatus::Flushed(&self.name)
+            };
+            return Ok(status);
         }
 
         let status = match self.len() {
