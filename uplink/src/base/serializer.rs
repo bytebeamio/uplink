@@ -12,6 +12,26 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::{select, time};
 
+#[derive(thiserror::Error, Debug)]
+pub enum MqttError {
+    #[error("Client error {0}")]
+    Client(ClientError),
+    #[error("SendError(..)")]
+    Send(Request),
+    #[error("TrySendError(..)")]
+    TrySend(Request),
+}
+
+impl From<ClientError> for MqttError {
+    fn from(e: ClientError) -> Self {
+        match e {
+            ClientError::Request(e) => MqttError::Send(e.into_inner()),
+            ClientError::TryRequest(e) => MqttError::TrySend(e.into_inner()),
+            e => MqttError::Client(e),
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Collector recv error {0}")]
@@ -21,7 +41,7 @@ pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
-    Client(#[from] ClientError),
+    Client(#[from] MqttError),
     #[error("Packet was not expected {0:?}")]
     UnexpectedPacket(Packet),
     #[error("Storage is disabled/missing")]
@@ -33,6 +53,86 @@ enum Status {
     SlowEventloop(Publish),
     EventLoopReady,
     EventLoopCrash(Publish),
+}
+
+#[async_trait::async_trait]
+pub trait MqttClient: Clone {
+    async fn publish<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String> + Send,
+        V: Into<Vec<u8>> + Send;
+
+    fn try_publish<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String>,
+        V: Into<Vec<u8>>;
+    async fn publish_bytes<S>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: Bytes,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String> + Send;
+}
+
+#[async_trait::async_trait]
+impl MqttClient for AsyncClient {
+    async fn publish<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String> + Send,
+        V: Into<Vec<u8>> + Send,
+    {
+        self.publish(topic, qos, retain, payload).await?;
+        Ok(())
+    }
+
+    fn try_publish<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String>,
+        V: Into<Vec<u8>>,
+    {
+        self.try_publish(topic, qos, retain, payload)?;
+        Ok(())
+    }
+    async fn publish_bytes<S>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: Bytes,
+    ) -> Result<(), MqttError>
+    where
+        S: Into<String> + Send,
+    {
+        self.publish_bytes(topic, qos, retain, payload).await?;
+        Ok(())
+    }
 }
 
 /// The uplink Serializer is the component that deals with sending data to the Bytebeam platform.
@@ -65,20 +165,20 @@ enum Status {
 ///       save to Storage before forwarding         through AsyncClient
 ///
 ///```
-pub struct Serializer {
+pub struct Serializer<C: MqttClient> {
     config: Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
-    client: AsyncClient,
+    client: C,
     storage: Option<Storage>,
     metrics: Metrics,
 }
 
-impl Serializer {
+impl<C: MqttClient> Serializer<C> {
     pub fn new(
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
-        client: AsyncClient,
-    ) -> Result<Serializer, Error> {
+        client: C,
+    ) -> Result<Serializer<C>, Error> {
         let metrics_config =
             config.streams.get("metrics").expect("Missing metrics Stream in config");
         let metrics = Metrics::new(&metrics_config.topic);
@@ -256,10 +356,7 @@ impl Serializer {
                     // indefinitely write to disk to not loose data
                     let client = match o {
                         Ok(c) => c,
-                        Err(ClientError::Request(request)) => match request.into_inner() {
-                            Request::Publish(publish) => return Ok(Status::EventLoopCrash(publish)),
-                            request => unreachable!("{:?}", request),
-                        },
+                        Err(MqttError::Send(Request::Publish(publish))) => return Ok(Status::EventLoopCrash(publish)),
                         Err(e) => return Err(e.into()),
                     };
 
@@ -298,7 +395,7 @@ impl Serializer {
         let mut interval = time::interval(time::Duration::from_secs(10));
 
         loop {
-            let failed = select! {
+            select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
 
@@ -315,7 +412,7 @@ impl Serializer {
                             self.metrics.add_total_sent_size(payload_size);
                             continue;
                         }
-                        Err(ClientError::TryRequest(request)) => request,
+                        Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
                         Err(e) => return Err(e.into()),
                     }
 
@@ -328,16 +425,11 @@ impl Serializer {
                             self.metrics.add_total_sent_size(payload_size);
                             continue;
                         }
-                        Err(ClientError::TryRequest(request)) => request,
+                        Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
                         Err(e) => return Err(e.into()),
                     }
                 }
-            };
-
-            match failed.into_inner() {
-                Request::Publish(publish) => return Ok(Status::SlowEventloop(publish)),
-                request => unreachable!("{:?}", request),
-            };
+            }
         }
     }
 
@@ -363,11 +455,11 @@ impl Serializer {
     }
 }
 
-async fn send_publish(
-    client: AsyncClient,
+async fn send_publish<C: MqttClient>(
+    client: C,
     topic: String,
     payload: Bytes,
-) -> Result<AsyncClient, ClientError> {
+) -> Result<C, MqttError> {
     client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
 }

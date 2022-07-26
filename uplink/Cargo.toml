@@ -25,6 +25,7 @@ rand = "0.8"
 tunshell-client = { git = "https://github.com/TimeToogo/tunshell.git", branch = "master" }
 reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
 futures-util = "0.3"
+async-trait = "0.1"
 sysinfo = "0.23"
 
 [build-dependencies]
