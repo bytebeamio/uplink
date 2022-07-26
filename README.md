@@ -1,3 +1,13 @@
+# Android executable instructions
+
+* install latest `cargo-ndk` from github.
+* `export ANDROID_NDK_HOME=~/Android/Sdk/ndk/25.0.8775105`
+* `cargo ndk --target x86_64-linux-android --platform 28 build --bin uplink`
+* move executable to `/data/local/`
+* set port to something else
+* set persistence path to `/data/local/uplink`
+* `chmod +x uplink_exe`
+
 # uplink
 
 [![Rust][workflow-badge]][workflow] [![@bytebeamio][twitter-badge]][twitter]
