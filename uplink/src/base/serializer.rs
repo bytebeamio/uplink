@@ -187,13 +187,8 @@ impl Serializer {
                       }
                 }
                 o = &mut publish => {
-                    match o {
-                        Ok(_) => return Ok(Status::EventLoopReady),
-                        Err(ClientError::Request(SendError(Request::Publish(publish)))) =>{
-                            return Ok(Status::EventLoopCrash(publish))
-                        },
-                        Err(e) => unreachable!("Unexpected error: {}", e),
-                    }
+                    o?;
+                    return Ok(Status::EventLoopReady);
                 }
             }
         }
