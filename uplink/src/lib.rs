@@ -207,6 +207,7 @@ impl Uplink {
             ota_tx,
             self.action_status.clone(),
             self.action_channel.tx.clone(),
+            self.bridge_data_tx().clone(),
         );
 
         // Launch a thread to handle incoming and outgoing MQTT packets

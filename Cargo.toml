@@ -8,3 +8,14 @@ members = [
 ]
 
 exclude = ["tools/tunshell"]
+
+[profile.dev]
+opt-level = 1
+debug = true
+strip = true
+panic = "unwind"
+
+[profile.release]
+opt-level = "s"
+strip = true
+panic = "unwind"

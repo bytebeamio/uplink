@@ -42,12 +42,7 @@
 use std::fs;
 use std::sync::Arc;
 
-use anyhow::{Context, Error};
-use figment::{
-    providers::Toml,
-    providers::{Data, Json},
-    Figment,
-};
+use anyhow::Error;
 use log::error;
 use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;

@@ -73,7 +73,7 @@ impl Mqtt {
                         error!("Incoming publish handle failed. Error = {:?}", e);
                     }
                 }
-                Ok(Event::Incoming(i)) => info!("Incoming = {:?}", i),
+                Ok(Event::Incoming(i)) => debug!("Incoming = {:?}", i),
                 Ok(Event::Outgoing(o)) => debug!("Outgoing = {:?}", o),
                 Err(e) => {
                     error!("Connection error = {:?}", e.to_string());
