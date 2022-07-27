@@ -39,30 +39,28 @@ enum Status {
 /// In case of network issues, the Serializer enters various states depending on severeness, managed by `Serializer::start()`.                                                                                       
 ///
 /// ```text
-///        ┌───────────────────┐
-///        │Serializer::start()│
-///        └─────────┬─────────┘
-///                  │
-///                  │ State transitions happen
-///                  │ within the loop{}             Load data in Storage from
-///                  │                               previouse sessions/iterations                  AsyncClient has crashed
-///          ┌───────▼──────┐                       ┌─────────────────────┐                      ┌───────────────────────┐
-///          │EventLoopReady├───────────────────────►Serializer::catchup()├──────────────────────►EventLoopCrash(publish)│
-///          └───────▲──────┘                       └──────────┬──────────┘                      └───────────┬───────────┘
-///                  │                                         │                                             │
-///                  │ Write to storage,                       │ No more data left in Storage                │
-///                  │ continue trying to publish              │                                             │
-///     ┌────────────┴────────────┐                        ┌───▼──┐                             ┌────────────▼─────────────┐
-///     │Serializer::slow(publish)│                        │Normal│                             │Serializer::crash(publish)├──┐
-///     └────────────▲────────────┘                        └───┬──┘                             └─────────────────────────▲┘  │
-///                  │                                         │                                 Write all data to Storage└───┘
-///                  │                                         │
-///                  │                                         │
-///      ┌───────────┴──────────┐                   ┌──────────▼─────────┐
-///      │SlowEventloop(publish)◄───────────────────┤Serializer::normal()│
-///      └──────────────────────┘                   └────────────────────┘
-///       Slow Network,                             Forward all data to broker,
-///       save to Storage before forwarding         through AsyncClient
+///
+///                         Send publishes in Storage to          No more publishes
+///                         Network, write new data to disk       left in Storage
+///                         ┌---------------------┐               ┌──────┐                  ┌--------------------┐
+///                         │Serializer::catchup()├───────────────►Normal├──────────────────►Serializer::normal()│ Forward all data to Network
+///                         └---------▲-----------┘               └──────┘                  └--------------------┘
+///                                   │                                                             │   │
+///                                   │                               ┌─────────────────────────────┘   │
+///                                   │                               │                                 │
+///                                   │                               │ Slow network encountered        │
+/// ┌-------------------┐      ┌──────┴───────┐           ┌───────────▼──────────┐         ┌────────────▼──────────┐
+/// |Serializer::start()├──────►EventloopReady│           │SlowEventloop(publish)│    ┌────►EventloopCrash(publish)│ Network has crashed,
+/// └-------------------┘      └──────▲───────┘           └───────────┬──────────┘    │    └───────────┬───────────┘ write all data to Storage
+///                                   │                               │               │                │
+///                                   │  ┌────────────────────────────┘               │                │
+///                                   │  │                                            │                │
+///                                   │  │                                            │                │
+///                       ┌--------------▼----------┐                                 │   ┌------------▼-------------┐
+///                       │Serializer::slow(publish)├─────────────────────────────────┘   │Serializer::crash(publish)├─┐
+///                       └-------------------------┘                                     └-------------------------▲┘ │
+///                        Write to storage, but                                           Write all data to Storage└──┘
+///                        continue trying to publish
 ///
 ///```
 pub struct Serializer {
@@ -186,9 +184,12 @@ impl Serializer {
                             }
                       }
                 }
-                o = &mut publish => {
-                    o?;
-                    return Ok(Status::EventLoopReady);
+                o = &mut publish => match o {
+                    Ok(_) => return Ok(Status::EventLoopReady),
+                    Err(ClientError::Request(SendError(Request::Publish(publish)))) =>{
+                        return Ok(Status::EventLoopCrash(publish))
+                    },
+                    Err(e) => unreachable!("Unexpected error: {}", e),
                 }
             }
         }
