@@ -19,7 +19,7 @@ version = "0.2.21"
 
 [dependencies.tunshell-client]
 git = "https://github.com/TimeToogo/tunshell.git"
-rev = "80f991006bba21dfc0bfe07dc3a5c7cc8f0ea93d"
+rev = "71363fdf79374a05c247576d62e12541dd682fec"
 
 [dependencies.ureq]
 features = ["json"]
