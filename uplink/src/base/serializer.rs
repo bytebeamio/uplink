@@ -42,25 +42,25 @@ enum Status {
 ///
 ///                         Send publishes in Storage to          No more publishes
 ///                         Network, write new data to disk       left in Storage
-///                         ┌---------------------┐               ┌──────┐                  ┌--------------------┐
-///                         │Serializer::catchup()├───────────────►Normal├──────────────────►Serializer::normal()│ Forward all data to Network
-///                         └---------▲-----------┘               └──────┘                  └--------------------┘
-///                                   │                                                             │   │
-///                                   │                               ┌─────────────────────────────┘   │
-///                                   │                               │                                 │
-///                                   │                               │ Slow network encountered        │
-/// ┌-------------------┐      ┌──────┴───────┐           ┌───────────▼──────────┐         ┌────────────▼──────────┐
-/// |Serializer::start()├──────►EventloopReady│           │SlowEventloop(publish)│    ┌────►EventloopCrash(publish)│ Network has crashed,
-/// └-------------------┘      └──────▲───────┘           └───────────┬──────────┘    │    └───────────┬───────────┘ write all data to Storage
-///                                   │                               │               │                │
-///                                   │  ┌────────────────────────────┘               │                │
-///                                   │  │                                            │                │
-///                                   │  │                                            │                │
-///                       ┌--------------▼----------┐                                 │   ┌------------▼-------------┐
-///                       │Serializer::slow(publish)├─────────────────────────────────┘   │Serializer::crash(publish)├─┐
-///                       └-------------------------┘                                     └-------------------------▲┘ │
-///                        Write to storage, but                                           Write all data to Storage└──┘
-///                        continue trying to publish
+///                         ┌---------------------┐               ┌──────┐                   ┌--------------------┐
+///                         │Serializer::catchup()├───────────────►Normal├───────────────────►Serializer::normal()│ Forward all data to Network
+///                         └---------▲-----------┘               └──────┘                   └----------┬---------┘
+///                                   │                                                                 │
+///                                   │                                                                 │
+///                                   │                                                                 │
+///                                   │                                                                 │
+/// ┌-------------------┐      ┌──────┴───────┐                                             ┌───────────▼──────────┐
+/// |Serializer::start()├──────►EventloopReady│ Network is available/ready                  │SlowEventloop(publish)│ Slow network encountered
+/// └-------------------┘      └──────▲───────┘                                             └───────────┬──────────┘
+///                                   │                                                                 │
+///                                   └───────────────────────────────────────────────────────────┐     │
+///                                                                                               │     │
+///                                                                                               │     │
+///                       ┌--------------------------┐    ┌───────────────────────┐        ┌------┴-----▼------------┐
+///                     ┌─►Serializer::crash(publish)◄────┤EventloopCrash(publish)◄────────┤Serializer::slow(publish)│
+///                     │ └┬-------------------------┘    └───────────────────────┘        └-------------------------┘
+///                     └──┘ Write all data to Storage    Network has crashed               Write to storage,
+///                                                                                         but continue trying to publish
 ///
 ///```
 pub struct Serializer {
