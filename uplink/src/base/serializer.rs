@@ -42,8 +42,6 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Mqtt client error {0}")]
     Client(#[from] MqttError),
-    #[error("Packet was not expected {0:?}")]
-    UnexpectedPacket(Packet),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
 }
@@ -318,7 +316,7 @@ impl<C: MqttClient> Serializer<C> {
 
         let publish = match read(storage.reader(), max_packet_size) {
             Ok(Packet::Publish(publish)) => publish,
-            Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
+            Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
             Err(e) => {
                 error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
                 return Ok(Status::Normal);
@@ -366,7 +364,7 @@ impl<C: MqttClient> Serializer<C> {
                     let client = match o {
                         Ok(c) => c,
                         Err(MqttError::Send(Request::Publish(publish))) => return Ok(Status::EventLoopCrash(publish)),
-                        Err(e) => return Err(e.into()),
+                        Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
                     match storage.reload_on_eof() {
@@ -381,7 +379,7 @@ impl<C: MqttClient> Serializer<C> {
 
                     let publish = match read(storage.reader(), max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
-                        Ok(packet) => return Err(Error::UnexpectedPacket(packet)),
+                        Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
                         Err(e) => {
                             error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
                             return Ok(Status::Normal)
@@ -422,7 +420,7 @@ impl<C: MqttClient> Serializer<C> {
                             continue;
                         }
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
-                        Err(e) => return Err(e.into()),
+                        Err(e) => unreachable!("Unexpected error: {}", e),
                     }
 
                 }
@@ -435,7 +433,7 @@ impl<C: MqttClient> Serializer<C> {
                             continue;
                         }
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
-                        Err(e) => return Err(e.into()),
+                        Err(e) => unreachable!("Unexpected error: {}", e),
                     }
                 }
             }
