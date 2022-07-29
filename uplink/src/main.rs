@@ -42,19 +42,13 @@
 use std::fs;
 use std::sync::Arc;
 
-use anyhow::{Context, Error};
-use figment::{
-    providers::Toml,
-    providers::{Data, Json},
-    Figment,
-};
 use log::error;
 use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
 
+use uplink::config::{initialize, CommandLine};
 use uplink::{Bridge, Config, Simulator, Uplink};
-use uplink::config::{CommandLine, initialize};
 
 fn initialize_logging(commandline: &CommandLine) {
     let level = match commandline.verbose {
@@ -116,16 +110,18 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 }
 
 #[tokio::main(worker_threads = 4)]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), anyhow::Error> {
     let commandline: CommandLine = StructOpt::from_args();
     let enable_simulator = commandline.simulator;
 
     initialize_logging(&commandline);
     let config = Arc::new(initialize(
         fs::read_to_string(&commandline.auth)?.as_str(),
-        commandline.config.as_ref()
+        commandline
+            .config
+            .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
-            .unwrap_or("".to_string())
+            .unwrap_or_default()
             .as_str(),
     )?);
 

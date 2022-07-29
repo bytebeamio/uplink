@@ -111,6 +111,12 @@ impl Gps {
     }
 }
 
+impl Default for Gps {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct Can {
     data: u64,
@@ -119,5 +125,11 @@ pub struct Can {
 impl Can {
     pub fn new() -> Can {
         Can { data: 10 }
+    }
+}
+
+impl Default for Can {
+    fn default() -> Self {
+        Self::new()
     }
 }
