@@ -302,7 +302,7 @@ impl<C: MqttClient> Serializer<C> {
     async fn catchup(&mut self) -> Result<Status, Error> {
         let storage = match &mut self.storage {
             Some(s) => s,
-            None => return Err(Error::MissingPersistence),
+            None => return Ok(Status::Normal),
         };
         info!("Switching to catchup mode!!");
 
@@ -454,12 +454,6 @@ impl<C: MqttClient> Serializer<C> {
     /// [slow mode]: Serializer::slow
     /// [crash mode]: Serializer::crash
     pub async fn start(mut self) -> Result<(), Error> {
-        if self.storage.is_none() {
-            loop {
-                self.normal().await?;
-            }
-        }
-
         let mut status = Status::EventLoopReady;
 
         loop {
