@@ -139,26 +139,24 @@ impl MqttClient for AsyncClient {
 ///
 /// ```text
 ///
-///                         Send publishes in Storage to                                   No more publishes
-///                         Network, write new data to disk                                left in Storage
-///                        ┌---------------------┐                                         ┌──────┐
-///                        │Serializer::catchup()├──────────────┬──────────────────────────►Normal│
-///                        └---------┬-----------┘              │ Network has crashed      └───┬──┘
-///                                  │              ┌───────────▼───────────┐                  │
-///                                  │              │EventloopCrash(publish)│                  │
-///                                  │ Network is   └───────────┬───────────┘                  │
-///                                  │ available/ready          │                              │
-/// ┌-------------------┐    ┌───────┴──────┐      ┌------------▼-------------┐     ┌----------▼---------┐
-/// │Serializer::start()├────►EventloopReady│  ┌───►Serializer::crash(publish)├─┐   │Serializer::normal()│ Forward all data to Network
-/// └-------------------┘    └───────▲──────┘  │   └-------------------------▲┘ │   └----------┬---------┘
-///                                  │         │    Write all data to Storage└──┘              │
-///                                  │         │                                               │
-///                                  │         │                                               │
-///                                  │         │                                               │
-///                        ┌---------┴---------┴-----┐                             ┌───────────▼──────────┐
-///                        │Serializer::slow(publish)◄─────────────────────────────┤SlowEventloop(publish)│
-///                        └-------------------------┘                             └──────────────────────┘
-///                         Write to storage,                                       Slow network encountered
+///                         Send publishes in Storage to                                  No more publishes
+///                         Network, write new data to disk                               left in Storage
+///                        ┌---------------------┐                                       ┌──────┐
+///                        │Serializer::catchup()├───────────────────────────────────────►Normal│
+///                        └---------▲---------┬-┘                                       └───┬──┘
+///                                  │         │     Network has crashed                     │
+///                       Network is │         │    ┌───────────────────────┐                │
+///                        available │         ├────►EventloopCrash(publish)│                │
+/// ┌-------------------┐    ┌───────┴──────┐  │    └───────────┬───────────┘     ┌----------▼---------┐
+/// │Serializer::start()├────►EventloopReady│  │   ┌------------▼-------------┐   │Serializer::normal()│ Forward all data to Network
+/// └-------------------┘    └───────▲──────┘  │   │Serializer::crash(publish)├─┐ └----------┬---------┘
+///                                  │         │   └-------------------------▲┘ │            │
+///                                  │         │    Write all data to Storage└──┘            │
+///                                  │         │                                             │
+///                        ┌---------┴---------┴-----┐                           ┌───────────▼──────────┐
+///                        │Serializer::slow(publish)◄───────────────────────────┤SlowEventloop(publish)│
+///                        └-------------------------┘                           └──────────────────────┘
+///                         Write to storage,                                     Slow network encountered
 ///                         but continue trying to publish                                                              
 ///
 ///```
