@@ -136,9 +136,11 @@ async fn main() -> Result<(), Error> {
         let simulator_bridge = uplink.bridge_data_tx();
         let simulator_actions = uplink.bridge_action_rx();
         task::spawn(async move {
-            simulator::start(simulator_bridge, simulator_actions, num_devices, gps_paths)
-                .await
-                .unwrap()
+            if let Err(e) =
+                simulator::start(simulator_bridge, simulator_actions, num_devices, gps_paths).await
+            {
+                error!("Error while running simulator: {}", e)
+            }
         });
     }
 
