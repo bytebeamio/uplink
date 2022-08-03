@@ -334,7 +334,7 @@ pub fn generate_device_shadow_data(device: &DeviceData, sequence: u64) -> Payloa
 }
 
 pub fn read_gps_paths(paths_dir: String) -> Vec<Arc<Vec<Location>>> {
-    (0..1000)
+    (0..10)
         .map(|i| {
             let file_name = format!("{}/path{}.json", paths_dir, i);
 
