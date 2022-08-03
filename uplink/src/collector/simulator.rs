@@ -350,7 +350,7 @@ pub fn read_gps_paths(paths_dir: String) -> Vec<Arc<Vec<Location>>> {
 pub fn new_device_data(device_id: u32, paths: &Vec<Arc<Vec<Location>>>) -> DeviceData {
     let mut rng = rand::thread_rng();
 
-    let n = rng.gen_range(0..1000);
+    let n = rng.gen_range(0..10);
     let path = paths.get(n).unwrap().clone();
     let path_index = rng.gen_range(0..path.len()) as u32;
 
