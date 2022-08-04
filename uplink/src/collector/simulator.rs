@@ -467,7 +467,7 @@ pub async fn process_data_event(
     if let Err(e) = partitions
         .map
         .entry(data.stream.clone())
-        .or_insert(Stream::new(&data.stream, &data.stream, 100, partitions.tx.clone()))
+        .or_insert(Stream::new(&data.stream, &data.stream, 10, partitions.tx.clone()))
         .fill(data)
         .await
     {
