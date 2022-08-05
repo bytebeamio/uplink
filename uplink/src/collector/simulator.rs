@@ -67,7 +67,7 @@ pub struct ActionResponseEvent {
     action_id: String,
     device_id: String,
     status: String,
-    progress: u16,
+    progress: u8,
 }
 
 #[derive(Clone)]
@@ -143,24 +143,25 @@ pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
     };
 }
 
-pub fn generate_float(start: f64, end: f64) -> Value {
+pub fn generate_float(start: f64, end: f64) -> f64 {
     let mut rng = rand::thread_rng();
 
-    json!(rng.gen_range(start..end))
+    rng.gen_range(start..end)
 }
 
-pub fn generate_int(start: i32, end: i32) -> Value {
-    json!(rand::thread_rng().gen_range(start..end) as i64)
+pub fn generate_int(start: i32, end: i32) -> i64 {
+    rand::thread_rng().gen_range(start..end) as i64
 }
 
-pub fn generate_bool_string(p: f64) -> Value {
+pub fn generate_bool_string(p: f64) -> String {
     if rand::thread_rng().gen_bool(p) {
-        return Value::String("on".to_owned());
+        "on".to_owned()
     } else {
-        return Value::String("off".to_owned());
+        "off".to_owned()
     }
 }
 
+#[derive(Debug, Serialize)]
 struct Bms {
     periodicity_ms: i32,
     mosfet_temperature: f64,
@@ -207,49 +208,49 @@ struct Bms {
 
 pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let mut payload = serde_json::Map::new();
-
-    payload.insert("periodicity_ms".to_owned(), json!(250));
-    payload.insert("mosfet_temperature".to_owned(), generate_float(40f64, 45f64));
-    payload.insert("ambient_temperature".to_owned(), generate_float(35f64, 40f64));
-    payload.insert("mosfet_status".to_owned(), json!(1));
-    payload.insert("cell_voltage_count".to_owned(), json!(16));
-    payload.insert("cell_voltage_1".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_2".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_3".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_4".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_5".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_6".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_7".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_8".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_9".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_10".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_11".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_12".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_13".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_14".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_15".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_voltage_16".to_owned(), generate_float(3.0f64, 3.2f64));
-    payload.insert("cell_thermistor_count".to_owned(), json!(8));
-    payload.insert("cell_temp_1".to_owned(), generate_float(40.0f64, 43.0f64));
-    payload.insert("cell_temp_2".to_owned(), generate_float(40.0f64, 43.0f64));
-    payload.insert("cell_temp_3".to_owned(), generate_float(40.0f64, 43.0f64));
-    payload.insert("cell_temp_4".to_owned(), generate_float(40.0f64, 43.0f64));
-    payload.insert("cell_temp_5".to_owned(), generate_float(40.0f64, 43.0f64));
-    payload.insert("cell_temp_6".to_owned(), generate_float(40.0f64, 43.0f64));
-    payload.insert("cell_temp_7".to_owned(), generate_float(40.0f64, 43.0f64));
-    payload.insert("cell_temp_8".to_owned(), generate_float(40.0f64, 43.0f64));
-    payload.insert("cell_balancing_status".to_owned(), json!(1));
-    payload.insert("pack_voltage".to_owned(), generate_float(95f64, 96f64));
-    payload.insert("pack_current".to_owned(), generate_float(15f64, 20f64));
-    payload.insert("pack_soc".to_owned(), generate_float(80f64, 90f64));
-    payload.insert("pack_soh".to_owned(), generate_float(9.5f64, 9.9f64));
-    payload.insert("pack_sop".to_owned(), generate_float(9.5f64, 9.9f64));
-    payload.insert("pack_cycle_count".to_owned(), generate_int(100, 150));
-    payload.insert("pack_available_energy".to_owned(), generate_int(2000, 3000));
-    payload.insert("pack_consumed_energy".to_owned(), generate_int(2000, 3000));
-    payload.insert("pack_fault".to_owned(), json!(0));
-    payload.insert("pack_status".to_owned(), json!(1));
+    let payload = Bms {
+        periodicity_ms: 250,
+        mosfet_temperature: generate_float(40f64, 45f64),
+        ambient_temperature: generate_float(35f64, 40f64),
+        mosfet_status: 1,
+        cell_voltage_count: 16,
+        cell_voltage_1: generate_float(3.0f64, 3.2f64),
+        cell_voltage_2: generate_float(3.0f64, 3.2f64),
+        cell_voltage_3: generate_float(3.0f64, 3.2f64),
+        cell_voltage_4: generate_float(3.0f64, 3.2f64),
+        cell_voltage_5: generate_float(3.0f64, 3.2f64),
+        cell_voltage_6: generate_float(3.0f64, 3.2f64),
+        cell_voltage_7: generate_float(3.0f64, 3.2f64),
+        cell_voltage_8: generate_float(3.0f64, 3.2f64),
+        cell_voltage_9: generate_float(3.0f64, 3.2f64),
+        cell_voltage_10: generate_float(3.0f64, 3.2f64),
+        cell_voltage_11: generate_float(3.0f64, 3.2f64),
+        cell_voltage_12: generate_float(3.0f64, 3.2f64),
+        cell_voltage_13: generate_float(3.0f64, 3.2f64),
+        cell_voltage_14: generate_float(3.0f64, 3.2f64),
+        cell_voltage_15: generate_float(3.0f64, 3.2f64),
+        cell_voltage_16: generate_float(3.0f64, 3.2f64),
+        cell_thermistor_count: 8,
+        cell_temp_1: generate_float(40.0f64, 43.0f64),
+        cell_temp_2: generate_float(40.0f64, 43.0f64),
+        cell_temp_3: generate_float(40.0f64, 43.0f64),
+        cell_temp_4: generate_float(40.0f64, 43.0f64),
+        cell_temp_5: generate_float(40.0f64, 43.0f64),
+        cell_temp_6: generate_float(40.0f64, 43.0f64),
+        cell_temp_7: generate_float(40.0f64, 43.0f64),
+        cell_temp_8: generate_float(40.0f64, 43.0f64),
+        cell_balancing_status: 1,
+        pack_voltage: generate_float(95f64, 96f64),
+        pack_current: generate_float(15f64, 20f64),
+        pack_soc: generate_float(80f64, 90f64),
+        pack_soh: generate_float(9.5f64, 9.9f64),
+        pack_sop: generate_float(9.5f64, 9.9f64),
+        pack_cycle_count: generate_int(100, 150),
+        pack_available_energy: generate_int(2000, 3000),
+        pack_consumed_energy: generate_int(2000, 3000),
+        pack_fault: 0,
+        pack_status: 1,
+    };
 
     return Payload {
         timestamp,
@@ -259,6 +260,7 @@ pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
     };
 }
 
+#[derive(Debug, Serialize)]
 struct Imu {
     ax: f64,
     ay: f64,
@@ -273,19 +275,17 @@ struct Imu {
 
 pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let mut payload = serde_json::Map::new();
-
-    payload.insert("ax".to_owned(), generate_float(1f64, 2.8f64));
-    payload.insert("ay".to_owned(), generate_float(1f64, 2.8f64));
-    payload.insert("az".to_owned(), generate_float(9.79f64, 9.82f64));
-
-    payload.insert("pitch".to_owned(), generate_float(0.8f64, 1f64));
-    payload.insert("roll".to_owned(), generate_float(0.8f64, 1f64));
-    payload.insert("yaw".to_owned(), generate_float(0.8f64, 1f64));
-
-    payload.insert("magx".to_owned(), generate_float(-45f64, -15f64));
-    payload.insert("magy".to_owned(), generate_float(-45f64, -15f64));
-    payload.insert("magz".to_owned(), generate_float(-45f64, -15f64));
+    let payload = Imu {
+        ax: generate_float(1f64, 2.8f64),
+        ay: generate_float(1f64, 2.8f64),
+        az: generate_float(9.79f64, 9.82f64),
+        pitch: generate_float(0.8f64, 1f64),
+        roll: generate_float(0.8f64, 1f64),
+        yaw: generate_float(0.8f64, 1f64),
+        magx: generate_float(-45f64, -15f64),
+        magy: generate_float(-45f64, -15f64),
+        magz: generate_float(-45f64, -15f64),
+    };
 
     return Payload {
         timestamp,
@@ -295,6 +295,7 @@ pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
     };
 }
 
+#[derive(Debug, Serialize)]
 struct Motor {
     motor_temperature1: f64,
     motor_temperature2: f64,
@@ -306,15 +307,15 @@ struct Motor {
 
 pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let mut payload = serde_json::Map::new();
+    let payload = Motor {
+        motor_temperature1: generate_float(40f64, 45f64),
+        motor_temperature2: generate_float(40f64, 45f64),
+        motor_temperature3: generate_float(40f64, 45f64),
 
-    payload.insert("motor_temperature1".to_owned(), generate_float(40f64, 45f64));
-    payload.insert("motor_temperature2".to_owned(), generate_float(40f64, 45f64));
-    payload.insert("motor_temperature3".to_owned(), generate_float(40f64, 45f64));
-
-    payload.insert("motor_voltage".to_owned(), generate_float(95f64, 96f64));
-    payload.insert("motor_current".to_owned(), generate_float(20f64, 25f64));
-    payload.insert("motor_rpm".to_owned(), generate_int(1000, 9000));
+        motor_voltage: generate_float(95f64, 96f64),
+        motor_current: generate_float(20f64, 25f64),
+        motor_rpm: generate_int(1000, 9000),
+    };
 
     return Payload {
         timestamp,
@@ -324,6 +325,7 @@ pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
     };
 }
 
+#[derive(Debug, Serialize)]
 struct PeripheralState {
     gps_status: String,
     gsm_status: String,
@@ -338,17 +340,17 @@ struct PeripheralState {
 
 pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let mut payload = serde_json::Map::new();
-
-    payload.insert("gps_status".to_owned(), generate_bool_string(0.99));
-    payload.insert("gsm_status".to_owned(), generate_bool_string(0.99));
-    payload.insert("imu_status".to_owned(), generate_bool_string(0.99));
-    payload.insert("left_indicator".to_owned(), generate_bool_string(0.1));
-    payload.insert("right_indicator".to_owned(), generate_bool_string(0.1));
-    payload.insert("headlamp".to_owned(), generate_bool_string(0.9));
-    payload.insert("horn".to_owned(), generate_bool_string(0.05));
-    payload.insert("left_brake".to_owned(), generate_bool_string(0.1));
-    payload.insert("right_brake".to_owned(), generate_bool_string(0.1));
+    let payload = PeripheralState {
+        gps_status: generate_bool_string(0.99),
+        gsm_status: generate_bool_string(0.99),
+        imu_status: generate_bool_string(0.99),
+        left_indicator: generate_bool_string(0.1),
+        right_indicator: generate_bool_string(0.1),
+        headlamp: generate_bool_string(0.9),
+        horn: generate_bool_string(0.05),
+        left_brake: generate_bool_string(0.1),
+        right_brake: generate_bool_string(0.1),
+    };
 
     return Payload {
         timestamp,
@@ -361,6 +363,7 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Pay
     };
 }
 
+#[derive(Debug, Serialize)]
 struct DeviceShadow {
     mode: String,
     status: String,
@@ -368,20 +371,20 @@ struct DeviceShadow {
     config_version: String,
     distance_travelled: i64,
     range: i64,
-    SOC: f64,
+    soc: f64,
 }
 
 pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let mut payload = serde_json::Map::new();
-
-    payload.insert("mode".to_owned(), Value::String("economy".to_owned()));
-    payload.insert("status".to_owned(), Value::String("Locked".to_owned()));
-    payload.insert("firmware_version".to_owned(), Value::String("1.33-Aug-2020b1".to_owned()));
-    payload.insert("config_version".to_owned(), Value::String("1.23".to_owned()));
-    payload.insert("distance_travelled".to_owned(), generate_int(20000, 30000));
-    payload.insert("range".to_owned(), generate_int(50000, 60000));
-    payload.insert("SOC".to_owned(), generate_float(50f64, 90f64));
+    let payload = DeviceShadow {
+        mode: "economy".to_owned(),
+        status: "Locked".to_owned(),
+        firmware_version: "1.33-Aug-2020b1".to_owned(),
+        config_version: "1.23".to_owned(),
+        distance_travelled: generate_int(20000, 30000),
+        range: generate_int(50000, 60000),
+        soc: generate_float(50f64, 90f64),
+    };
 
     return Payload {
         timestamp,
@@ -552,9 +555,8 @@ async fn process_action_response_event(
     //info!("Sending action response {:?} {} {} {}", event.device_id, event.action_id, event.progress, event.status);
 
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let mut payload = serde_json::Map::new();
 
-    let payload = ActionResponse::progress(&event.action_id, &event.status, &event.progress);
+    let payload = ActionResponse::progress(&event.action_id, &event.status, event.progress);
 
     let data = Payload {
         timestamp,
