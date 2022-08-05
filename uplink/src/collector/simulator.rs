@@ -374,42 +374,42 @@ pub fn generate_initial_events(
             event_type: DataEventType::GenerateGPS,
             device: device.clone(),
             timestamp: timestamp,
-            sequence: 0,
+            sequence: 1,
         }));
 
         events.push(Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateVehicleData,
             device: device.clone(),
             timestamp: timestamp,
-            sequence: 0,
+            sequence: 1,
         }));
 
         events.push(Event::DataEvent(DataEvent {
             event_type: DataEventType::GeneratePeripheralData,
             device: device.clone(),
             timestamp: timestamp,
-            sequence: 0,
+            sequence: 1,
         }));
 
         events.push(Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateMotor,
             device: device.clone(),
             timestamp: timestamp,
-            sequence: 0,
+            sequence: 1,
         }));
 
         events.push(Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateBMS,
             device: device.clone(),
             timestamp: timestamp,
-            sequence: 0,
+            sequence: 1,
         }));
 
         events.push(Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateIMU,
             device: device.clone(),
             timestamp: timestamp,
-            sequence: 0,
+            sequence: 1,
         }));
     }
 }
