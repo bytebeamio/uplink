@@ -115,7 +115,7 @@ impl Ord for Event {
 
 impl PartialOrd for Event {
     fn partial_cmp(&self, other: &Event) -> Option<Ordering> {
-        Some(other.cmp(&self))
+        Some(other.cmp(self))
     }
 }
 
@@ -411,7 +411,7 @@ pub fn read_gps_paths(paths_dir: String) -> Vec<Arc<Vec<Location>>> {
         .collect::<Vec<_>>()
 }
 
-pub fn new_device_data(device_id: u32, paths: &Vec<Arc<Vec<Location>>>) -> DeviceData {
+pub fn new_device_data(device_id: u32, paths: &[Arc<Vec<Location>>]) -> DeviceData {
     let mut rng = rand::thread_rng();
 
     let n = rng.gen_range(0..10);
@@ -419,8 +419,8 @@ pub fn new_device_data(device_id: u32, paths: &Vec<Arc<Vec<Location>>>) -> Devic
     let path_index = rng.gen_range(0..path.len()) as u32;
 
     DeviceData {
-        device_id: device_id,
-        path: path,
+        device_id,
+        path,
         path_offset: path_index,
         time_offset: Duration::from_millis(rng.gen_range(0..10000)),
     }
@@ -429,7 +429,7 @@ pub fn new_device_data(device_id: u32, paths: &Vec<Arc<Vec<Location>>>) -> Devic
 pub fn generate_initial_events(
     events: &mut BinaryHeap<Event>,
     timestamp: Instant,
-    devices: &Vec<DeviceData>,
+    devices: &[DeviceData],
 ) {
     for device in devices.iter() {
         let timestamp = timestamp + device.time_offset;
@@ -437,42 +437,42 @@ pub fn generate_initial_events(
         events.push(Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateGPS,
             device: device.clone(),
-            timestamp: timestamp,
+            timestamp,
             sequence: 1,
         }));
 
         events.push(Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateVehicleData,
             device: device.clone(),
-            timestamp: timestamp,
+            timestamp,
             sequence: 1,
         }));
 
         events.push(Event::DataEvent(DataEvent {
             event_type: DataEventType::GeneratePeripheralData,
             device: device.clone(),
-            timestamp: timestamp,
+            timestamp,
             sequence: 1,
         }));
 
         events.push(Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateMotor,
             device: device.clone(),
-            timestamp: timestamp,
+            timestamp,
             sequence: 1,
         }));
 
         events.push(Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateBMS,
             device: device.clone(),
-            timestamp: timestamp,
+            timestamp,
             sequence: 1,
         }));
 
         events.push(Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateIMU,
             device: device.clone(),
-            timestamp: timestamp,
+            timestamp,
             sequence: 1,
         }));
     }
@@ -480,22 +480,18 @@ pub fn generate_initial_events(
 
 pub fn create_streams(num_devices: u32) -> Vec<(String, usize)> {
     (1..(num_devices + 1))
-        .map(|i| {
+        .flat_map(|i| {
             vec![
-                (format!("/tenants/demo/devices/{}/events/gps/jsonarray", i), 1 as usize),
-                (
-                    format!("/tenants/demo/devices/{}/events/peripheral_state/jsonarray", i),
-                    1 as usize,
-                ),
-                (format!("/tenants/demo/devices/{}/events/device_shadow/jsonarray", i), 1 as usize),
-                (format!("/tenants/demo/devices/{}/events/motor/jsonarray", i), 4 as usize),
-                (format!("/tenants/demo/devices/{}/events/bms/jsonarray", i), 4 as usize),
-                (format!("/tenants/demo/devices/{}/events/imu/jsonarray", i), 10 as usize),
-                (format!("/tenants/demo/devices/{}/action/status", i), 1 as usize),
+                (format!("/tenants/demo/devices/{}/events/gps/jsonarray", i), 1),
+                (format!("/tenants/demo/devices/{}/events/peripheral_state/jsonarray", i), 1),
+                (format!("/tenants/demo/devices/{}/events/device_shadow/jsonarray", i), 1),
+                (format!("/tenants/demo/devices/{}/events/motor/jsonarray", i), 4),
+                (format!("/tenants/demo/devices/{}/events/bms/jsonarray", i), 4),
+                (format!("/tenants/demo/devices/{}/events/imu/jsonarray", i), 10),
+                (format!("/tenants/demo/devices/{}/action/status", i), 1),
             ]
             .into_iter()
         })
-        .flatten()
         .collect()
 }
 
