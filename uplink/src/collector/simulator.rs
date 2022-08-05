@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
 use crate::base::{actions::Action, Package, Stream};
-use crate::Payload;
+use crate::{ActionResponse, Payload};
 
 use rand::Rng;
 
@@ -467,10 +467,7 @@ async fn process_action_response_event(
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
-    payload.insert(String::from("errors"), Value::Array(vec![]));
-    payload.insert(String::from("id"), Value::String(event.action_id.to_string()));
-    payload.insert(String::from("progress"), json!(event.progress as i64));
-    payload.insert(String::from("state"), Value::String(event.status.clone()));
+    let payload = ActionResponse::progress(&event.action_id, &event.status, &event.progress);
 
     let data = Payload {
         timestamp,
