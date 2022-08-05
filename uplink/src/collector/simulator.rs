@@ -161,6 +161,50 @@ pub fn generate_bool_string(p: f64) -> Value {
     }
 }
 
+struct Bms {
+    periodicity_ms: i32,
+    mosfet_temperature: f64,
+    ambient_temperature: f64,
+    mosfet_status: i32,
+    cell_voltage_count: i32,
+    cell_voltage_1: f64,
+    cell_voltage_2: f64,
+    cell_voltage_3: f64,
+    cell_voltage_4: f64,
+    cell_voltage_5: f64,
+    cell_voltage_6: f64,
+    cell_voltage_7: f64,
+    cell_voltage_8: f64,
+    cell_voltage_9: f64,
+    cell_voltage_10: f64,
+    cell_voltage_11: f64,
+    cell_voltage_12: f64,
+    cell_voltage_13: f64,
+    cell_voltage_14: f64,
+    cell_voltage_15: f64,
+    cell_voltage_16: f64,
+    cell_thermistor_count: i32,
+    cell_temp_1: f64,
+    cell_temp_2: f64,
+    cell_temp_3: f64,
+    cell_temp_4: f64,
+    cell_temp_5: f64,
+    cell_temp_6: f64,
+    cell_temp_7: f64,
+    cell_temp_8: f64,
+    cell_balancing_status: i32,
+    pack_voltage: f64,
+    pack_current: f64,
+    pack_soc: f64,
+    pack_soh: f64,
+    pack_sop: f64,
+    pack_cycle_count: i64,
+    pack_available_energy: i64,
+    pack_consumed_energy: i64,
+    pack_fault: i32,
+    pack_status: i32,
+}
+
 pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
@@ -215,6 +259,18 @@ pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
     };
 }
 
+struct Imu {
+    ax: f64,
+    ay: f64,
+    az: f64,
+    pitch: f64,
+    roll: f64,
+    yaw: f64,
+    magx: f64,
+    magy: f64,
+    magz: f64,
+}
+
 pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
@@ -239,6 +295,15 @@ pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
     };
 }
 
+struct Motor {
+    motor_temperature1: f64,
+    motor_temperature2: f64,
+    motor_temperature3: f64,
+    motor_voltage: f64,
+    motor_current: f64,
+    motor_rpm: i64,
+}
+
 pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
@@ -257,6 +322,18 @@ pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
         stream: format!("/tenants/demo/devices/{}/events/motor/jsonarray", device.device_id),
         payload: json!(payload),
     };
+}
+
+struct PeripheralState {
+    gps_status: String,
+    gsm_status: String,
+    imu_status: String,
+    left_indicator: String,
+    right_indicator: String,
+    headlamp: String,
+    horn: String,
+    left_brake: String,
+    right_brake: String,
 }
 
 pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Payload {
@@ -282,6 +359,16 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Pay
         ),
         payload: json!(payload),
     };
+}
+
+struct DeviceShadow {
+    mode: String,
+    status: String,
+    firmware_version: String,
+    config_version: String,
+    distance_travelled: i64,
+    range: i64,
+    SOC: f64,
 }
 
 pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payload {
