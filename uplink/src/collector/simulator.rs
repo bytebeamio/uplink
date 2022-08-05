@@ -151,7 +151,7 @@ pub struct Partitions {
 }
 
 pub fn generate_gps_data(device: &DeviceData, sequence: u64) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
     let path_len = device.path.len() as u32;
@@ -188,7 +188,7 @@ pub fn generate_bool_string(p: f64) -> Value {
 }
 
 pub fn generate_bms_data(device: &DeviceData, sequence: u64) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
     payload.insert("periodicity_ms".to_owned(), json!(250));
@@ -242,7 +242,7 @@ pub fn generate_bms_data(device: &DeviceData, sequence: u64) -> Payload {
 }
 
 pub fn generate_imu_data(device: &DeviceData, sequence: u64) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
     payload.insert("ax".to_owned(), generate_float(1f64, 2.8f64));
@@ -266,7 +266,7 @@ pub fn generate_imu_data(device: &DeviceData, sequence: u64) -> Payload {
 }
 
 pub fn generate_motor_data(device: &DeviceData, sequence: u64) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
     payload.insert("motor_temperature1".to_owned(), generate_float(40f64, 45f64));
@@ -286,7 +286,7 @@ pub fn generate_motor_data(device: &DeviceData, sequence: u64) -> Payload {
 }
 
 pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u64) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
     payload.insert("gps_status".to_owned(), generate_bool_string(0.99));
@@ -311,7 +311,7 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u64) -> Pay
 }
 
 pub fn generate_device_shadow_data(device: &DeviceData, sequence: u64) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
     payload.insert("mode".to_owned(), Value::String("economy".to_owned()));
@@ -490,7 +490,7 @@ async fn process_action_response_event(
 ) {
     //info!("Sending action response {:?} {} {} {}", event.device_id, event.action_id, event.progress, event.status);
 
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
     payload.insert(String::from("errors"), Value::Array(vec![]));
