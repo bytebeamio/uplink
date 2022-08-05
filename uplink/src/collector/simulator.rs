@@ -7,16 +7,11 @@ use tokio::select;
 use tokio_util::codec::LinesCodecError;
 
 use std::collections::{BinaryHeap, HashMap};
-use std::io;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{cmp::Ordering, fs, io, sync::Arc};
 
-use crate::base::{actions::Action, Buffer, Package, Stream};
-use crate::Point;
-use std::{
-    cmp::Ordering,
-    fs,
-    sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+use crate::base::{actions::Action, Package, Stream};
+use crate::Payload;
 
 use rand::Rng;
 
@@ -34,33 +29,12 @@ pub enum Error {
     Recv(#[from] flume::RecvError),
 }
 
-// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is inturn a json
-// TODO which cloud will doubel deserialize (Batch 1st and messages next)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Payload {
-    #[serde(skip_serializing)]
-    stream: String,
-    timestamp: u64,
-    sequence: u64,
-    #[serde(flatten)]
-    payload: Value,
-}
-
-impl Point for Payload {
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-
-    fn sequence(&self) -> u32 {
-        self.sequence as u32
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Location {
     latitude: f64,
     longitude: f64,
 }
+
 #[derive(Clone)]
 pub struct DeviceData {
     device_id: u32,
@@ -84,7 +58,7 @@ pub struct DataEvent {
     timestamp: Instant,
     event_type: DataEventType,
     device: DeviceData,
-    sequence: u64,
+    sequence: u32,
 }
 
 #[derive(Clone, PartialEq)]
@@ -150,12 +124,12 @@ pub struct Partitions {
     tx: Sender<Box<dyn Package>>,
 }
 
-pub fn generate_gps_data(device: &DeviceData, sequence: u64) -> Payload {
+pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
     let path_len = device.path.len() as u32;
-    let path_index = ((device.path_offset as u64 + sequence) % (path_len as u64)) as usize;
+    let path_index = ((device.path_offset + sequence) % path_len) as usize;
     let position = device.path.get(path_index).unwrap();
 
     payload.insert("latitude".to_owned(), json!(position.longitude));
@@ -187,7 +161,7 @@ pub fn generate_bool_string(p: f64) -> Value {
     }
 }
 
-pub fn generate_bms_data(device: &DeviceData, sequence: u64) -> Payload {
+pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
@@ -241,7 +215,7 @@ pub fn generate_bms_data(device: &DeviceData, sequence: u64) -> Payload {
     };
 }
 
-pub fn generate_imu_data(device: &DeviceData, sequence: u64) -> Payload {
+pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
@@ -265,7 +239,7 @@ pub fn generate_imu_data(device: &DeviceData, sequence: u64) -> Payload {
     };
 }
 
-pub fn generate_motor_data(device: &DeviceData, sequence: u64) -> Payload {
+pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
@@ -285,7 +259,7 @@ pub fn generate_motor_data(device: &DeviceData, sequence: u64) -> Payload {
     };
 }
 
-pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u64) -> Payload {
+pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
@@ -310,7 +284,7 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u64) -> Pay
     };
 }
 
-pub fn generate_device_shadow_data(device: &DeviceData, sequence: u64) -> Payload {
+pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
 
@@ -616,19 +590,5 @@ pub async fn start(
             _ = process_events(&mut events, &mut partitions, data_tx.clone()) => {
             }
         }
-    }
-}
-
-impl Package for Buffer<Payload> {
-    fn serialize(&self) -> Result<Vec<u8>, serde_json::Error> {
-        serde_json::to_vec(&self.buffer)
-    }
-
-    fn topic(&self) -> Arc<String> {
-        self.topic.clone()
-    }
-
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
     }
 }
