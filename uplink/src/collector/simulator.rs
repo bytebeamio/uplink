@@ -371,6 +371,7 @@ struct DeviceShadow {
     config_version: String,
     distance_travelled: i64,
     range: i64,
+    #[serde(rename(serialize = "SOC"))]
     soc: f64,
 }
 
