@@ -545,10 +545,7 @@ pub async fn process_data_event(
     }));
 }
 
-async fn process_action_response_event(
-    event: &ActionResponseEvent,
-    data_tx: Sender<Box<dyn Package>>,
-) {
+async fn process_action_response_event(event: &ActionResponseEvent, partitions: &mut Partitions) {
     //info!("Sending action response {:?} {} {} {}", event.device_id, event.action_id, event.progress, event.status);
 
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
@@ -562,23 +559,24 @@ async fn process_action_response_event(
         payload: json!(payload),
     };
 
-    let mut stream = Stream::new(&data.stream, &data.stream, 1, data_tx);
-
     info!(
         "Sending action response {:?} {} {} {}",
         event.device_id, event.action_id, event.progress, event.status
     );
-    if let Err(e) = stream.fill(data).await {
+
+    if let Err(e) = partitions
+        .map
+        .entry(data.stream.clone())
+        .or_insert(Stream::new(&data.stream, &data.stream, 10, partitions.tx.clone()))
+        .fill(data)
+        .await
+    {
         error!("Failed to send action result {:?}", e);
     }
     info!("Successfully sent action response");
 }
 
-pub async fn process_events(
-    events: &mut BinaryHeap<Event>,
-    partitions: &mut Partitions,
-    data_tx: Sender<Box<dyn Package>>,
-) {
+pub async fn process_events(events: &mut BinaryHeap<Event>, partitions: &mut Partitions) {
     if let Some(e) = events.pop() {
         let current_time = Instant::now();
         let timestamp = event_timestamp(&e);
@@ -597,7 +595,7 @@ pub async fn process_events(
             }
 
             Event::ActionResponseEvent(event) => {
-                process_action_response_event(&event, data_tx).await;
+                process_action_response_event(&event, partitions).await;
             }
         }
     } else {
@@ -642,7 +640,7 @@ pub async fn start(
 
     generate_initial_events(&mut events, Instant::now(), &devices);
 
-    let mut partitions = Partitions { map: HashMap::new(), tx: data_tx.clone() };
+    let mut partitions = Partitions { map: HashMap::new(), tx: data_tx };
     let mut time = Instant::now();
     let mut i = 0;
 
@@ -670,7 +668,7 @@ pub async fn start(
                 generate_action_events(&action, &mut events);
             }
 
-            _ = process_events(&mut events, &mut partitions, data_tx.clone()) => {
+            _ = process_events(&mut events, &mut partitions) => {
             }
         }
     }
