@@ -1,7 +1,7 @@
 use flume::{Receiver, Sender};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use thiserror::Error;
 use tokio::select;
 use tokio_util::codec::LinesCodecError;
@@ -140,20 +140,16 @@ impl Partitions {
 
 pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let mut payload = serde_json::Map::new();
 
     let path_len = device.path.len() as u32;
     let path_index = ((device.path_offset + sequence) % path_len) as usize;
     let position = device.path.get(path_index).unwrap();
 
-    payload.insert("latitude".to_owned(), json!(position.longitude));
-    payload.insert("longitude".to_owned(), json!(position.latitude));
-
     return Payload {
         timestamp,
         sequence,
         stream: format!("/tenants/demo/devices/{}/events/gps/jsonarray", device.device_id),
-        payload: Value::Object(payload),
+        payload: json!(position),
     };
 }
 
