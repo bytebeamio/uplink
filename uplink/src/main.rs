@@ -46,7 +46,6 @@ use anyhow::Error;
 use log::error;
 use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
-use tokio::task;
 
 use uplink::config::{initialize, CommandLine};
 use uplink::{simulator, Bridge, Config, Uplink};
@@ -121,7 +120,7 @@ async fn main() -> Result<(), Error> {
             .config
             .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
-            .unwrap_or("".to_string())
+            .unwrap_or_else(|| "".to_string())
             .as_str(),
     )?);
 
@@ -133,24 +132,25 @@ async fn main() -> Result<(), Error> {
     if let (Some(num_devices), Some(gps_paths)) =
         (commandline.simulator_num_devices, commandline.simulator_gps_paths)
     {
-        let simulator_bridge = uplink.bridge_data_tx();
-        let simulator_actions = uplink.bridge_action_rx();
-        task::spawn(async move {
-            if let Err(e) =
-                simulator::start(simulator_bridge, simulator_actions, num_devices, gps_paths).await
-            {
-                error!("Error while running simulator: {}", e)
-            }
-        });
-    }
-
-    let mut bridge = Bridge::new(
+        if let Err(e) = simulator::start(
+            uplink.bridge_data_tx(),
+            uplink.bridge_action_rx(),
+            num_devices,
+            gps_paths,
+        )
+        .await
+        {
+            error!("Error while running simulator: {}", e)
+        }
+    } else if let Err(e) = Bridge::new(
         config,
         uplink.bridge_data_tx(),
         uplink.bridge_action_rx(),
         uplink.action_status(),
-    );
-    if let Err(e) = bridge.start().await {
+    )
+    .start()
+    .await
+    {
         error!("Bridge stopped!! Error = {:?}", e);
     }
 
