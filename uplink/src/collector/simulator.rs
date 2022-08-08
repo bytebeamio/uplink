@@ -124,6 +124,20 @@ pub struct Partitions {
     tx: Sender<Box<dyn Package>>,
 }
 
+impl Partitions {
+    async fn send(&mut self, payload: Payload) {
+        if let Err(e) = self
+            .map
+            .entry(payload.stream.clone())
+            .or_insert(Stream::new(&payload.stream, &payload.stream, 10, self.tx.clone()))
+            .fill(payload)
+            .await
+        {
+            error!("Failed to send action result {:?}", e);
+        }
+    }
+}
+
 pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let mut payload = serde_json::Map::new();
@@ -525,15 +539,7 @@ pub async fn process_data_event(
         DataEventType::GenerateBMS => generate_bms_data(&event.device, event.sequence),
     };
 
-    if let Err(e) = partitions
-        .map
-        .entry(data.stream.clone())
-        .or_insert(Stream::new(&data.stream, &data.stream, 10, partitions.tx.clone()))
-        .fill(data)
-        .await
-    {
-        error!("Failed to send data. Error = {:?}", e);
-    }
+    partitions.send(data).await;
 
     let duration = next_event_duration(event.event_type);
 
@@ -564,15 +570,7 @@ async fn process_action_response_event(event: &ActionResponseEvent, partitions: 
         event.device_id, event.action_id, event.progress, event.status
     );
 
-    if let Err(e) = partitions
-        .map
-        .entry(data.stream.clone())
-        .or_insert(Stream::new(&data.stream, &data.stream, 10, partitions.tx.clone()))
-        .fill(data)
-        .await
-    {
-        error!("Failed to send action result {:?}", e);
-    }
+    partitions.send(data).await;
     info!("Successfully sent action response");
 }
 
