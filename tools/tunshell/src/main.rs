@@ -1,12 +1,12 @@
 use std::process::exit;
 
-use clap::Clap;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use rumqttc::{Client, MqttOptions, QoS};
 use serde::{Deserialize, Serialize};
 use tunshell_client::{Client as TunshellClient, ClientMode, Config as TunshellConfig, HostShell};
+use clap::Parser;
 
-#[derive(Clap)]
+#[derive(Parser, Debug)]
 #[clap(version = "0.1.0")]
 struct Config {
     #[clap(short, long, default_value = "eu.relay.tunshell.com")]
@@ -32,6 +32,7 @@ struct Action {
 #[derive(Serialize)]
 pub struct Keys {
     session: String,
+    relay: String,
     encryption: String,
 }
 
@@ -67,10 +68,11 @@ fn main() {
     let (mut client, mut eventloop) = Client::new(mqttoptions, 3);
     let action = Action {
         id: "tunshell".to_string(),
-        name: "tunshell".to_string(),
-        kind: "tunshell".to_string(),
+        name: "launch_shell".to_string(),
+        kind: "launch_shell".to_string(),
         payload: serde_json::to_string(&Keys {
             session: target_key,
+            relay: "eu.relay.tunshell.com".to_string(),
             encryption: encrytion_key.clone(),
         })
         .unwrap(),
@@ -78,7 +80,7 @@ fn main() {
 
     std::thread::spawn(move || {
         for (_, notification) in eventloop.iter().enumerate() {
-            // println!("Notification = {:?}", notification);
+            println!("Notification = {:?}", notification);
         }
     });
 
@@ -115,7 +117,10 @@ fn main() {
     // start tunshell
     match rt.block_on(client.start_session()) {
         Ok(code) => exit(code as i32),
-        Err(_) => exit(1),
+        Err(e) => {
+            println!("Session error = {:?}", e);
+            exit(1)
+        }
     }
 }
 

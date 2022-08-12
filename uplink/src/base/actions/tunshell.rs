@@ -6,25 +6,22 @@ use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
-use crate::base::{self, actions::ActionResponse, Stream};
-
-pub struct Relay {
-    host: String,
-    tls_port: u16,
-    ws_port: u16,
-}
+use crate::{
+    base::{self, actions::ActionResponse, Stream},
+    Action,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Keys {
     session: String,
+    relay: String,
     encryption: String,
 }
 
 pub struct TunshellSession {
     _config: Arc<base::Config>,
-    relay: Relay,
     echo_stdout: bool,
-    keys_rx: Receiver<String>,
+    actions_rx: Receiver<Action>,
     action_status: Stream<ActionResponse>,
     last_process_done: Arc<Mutex<bool>>,
 }
@@ -32,16 +29,14 @@ pub struct TunshellSession {
 impl TunshellSession {
     pub fn new(
         config: Arc<base::Config>,
-        relay: Relay,
         echo_stdout: bool,
-        tunshell_rx: Receiver<String>,
+        tunshell_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
     ) -> Self {
         Self {
             _config: config,
-            relay,
             echo_stdout,
-            keys_rx: tunshell_rx,
+            actions_rx: tunshell_rx,
             action_status,
             last_process_done: Arc::new(Mutex::new(true)),
         }
@@ -51,9 +46,9 @@ impl TunshellSession {
         Config::new(
             ClientMode::Target,
             &keys.session,
-            &self.relay.host,
-            self.relay.tls_port,
-            self.relay.ws_port,
+            &keys.relay,
+            5000,
+            443,
             &keys.encryption,
             true,
             self.echo_stdout,
@@ -62,9 +57,10 @@ impl TunshellSession {
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) {
-        while let Ok(keys) = self.keys_rx.recv_async().await {
+        while let Ok(action) = self.actions_rx.recv_async().await {
+            let action_id = action.action_id.clone();
             if !(*self.last_process_done.lock().unwrap()) {
-                let status = ActionResponse::failure("tunshell", "busy".to_owned());
+                let status = ActionResponse::failure(&action_id, "busy".to_owned());
                 if let Err(e) = self.action_status.fill(status).await {
                     error!("Failed to send status, Error = {:?}", e);
                 };
@@ -73,11 +69,11 @@ impl TunshellSession {
             }
 
             // println!("{:?}", keys);
-            let keys = match serde_json::from_str(&keys) {
+            let keys = match serde_json::from_str(&action.payload) {
                 Ok(k) => k,
                 Err(e) => {
                     error!("Failed to deserialize keys. Error = {:?}", e);
-                    let status = ActionResponse::failure("tunshell", "corruptkeys".to_owned());
+                    let status = ActionResponse::failure(&action_id, "corruptkeys".to_owned());
                     if let Err(e) = self.action_status.fill(status).await {
                         error!("Failed to send status, Error = {:?}", e);
                     };
@@ -92,18 +88,24 @@ impl TunshellSession {
 
             tokio::spawn(async move {
                 *last_process_done.lock().unwrap() = false;
+                let response = ActionResponse::progress(&action_id, "ShellSpawned", 100);
+                if let Err(e) = status_tx.fill(response).await {
+                    error!("Failed to send status. Error {:?}", e);
+                }
 
                 let send_status = match client.start_session().compat().await {
                     Ok(status) => {
                         if status != 0 {
-                            let response = ActionResponse::failure("tunshell", status.to_string());
+                            let response = ActionResponse::failure(&action_id, status.to_string());
                             status_tx.fill(response).await
                         } else {
-                            status_tx.fill(ActionResponse::success("tunshell")).await
+                            log::info!("tunshell exited with status: {}", status);
+                            status_tx.fill(ActionResponse::success(&action_id)).await
                         }
                     }
                     Err(e) => {
-                        status_tx.fill(ActionResponse::failure("tunshell", e.to_string())).await
+                        log::warn!("tunshell client error: {}", e);
+                        status_tx.fill(ActionResponse::failure(&action_id, e.to_string())).await
                     }
                 };
 
@@ -114,11 +116,5 @@ impl TunshellSession {
                 *last_process_done.lock().unwrap() = true;
             });
         }
-    }
-}
-
-impl Default for Relay {
-    fn default() -> Self {
-        Relay { host: "eu.relay.tunshell.com".to_string(), tls_port: 5000, ws_port: 443 }
     }
 }

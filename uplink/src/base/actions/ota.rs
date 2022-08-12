@@ -316,7 +316,7 @@ mod test {
             payload: json!(ota_update).to_string(),
         };
 
-        std::thread::sleep(Duration::from_millis(1));
+        std::thread::sleep(Duration::from_millis(10));
 
         // Send action to OtaDownloader with Sender<Action>
         ota_tx.try_send(ota_action).unwrap();
@@ -366,7 +366,7 @@ mod test {
             payload: json!(ota_update).to_string(),
         };
 
-        std::thread::sleep(Duration::from_millis(1));
+        std::thread::sleep(Duration::from_millis(10));
 
         // Send action to OtaDownloader with Sender<Action>
         ota_tx.try_send(ota_action.clone()).unwrap();
