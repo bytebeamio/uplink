@@ -91,7 +91,11 @@ pub mod config {
 
     /// Reads config file to generate config struct and replaces places holders
     /// like bike id and data version
-    pub fn initialize(auth_config: &str, uplink_config: &str) -> Result<Config, anyhow::Error> {
+    pub fn initialize(
+        auth_config: &str,
+        uplink_config: &str,
+        simulated: bool,
+    ) -> Result<Config, anyhow::Error> {
         let mut config = Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG));
 
         config = config.merge(Data::<Toml>::string(uplink_config));
@@ -100,6 +104,11 @@ pub mod config {
             .join(Data::<Json>::string(auth_config))
             .extract()
             .with_context(|| "Config error".to_string())?;
+
+        if simulated {
+            config.device_id = "+".to_string();
+            config.simulated = true;
+        }
 
         if let Some(persistence) = &config.persistence {
             fs::create_dir_all(&persistence.path)?;

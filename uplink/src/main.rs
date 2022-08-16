@@ -122,6 +122,7 @@ async fn main() -> Result<(), Error> {
             .and_then(|path| fs::read_to_string(path).ok())
             .unwrap_or_else(|| "".to_string())
             .as_str(),
+        commandline.simulator_gps_paths.is_some() && commandline.simulator_gps_paths.is_some(),
     )?);
 
     banner(&commandline, &config);

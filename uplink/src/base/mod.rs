@@ -74,6 +74,8 @@ pub struct Config {
     pub streams: HashMap<String, StreamConfig>,
     pub ota: Ota,
     pub stats: Stats,
+    #[serde(skip)]
+    pub simulated: bool,
 }
 
 pub trait Point: Send + Debug {
