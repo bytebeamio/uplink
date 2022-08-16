@@ -40,6 +40,8 @@ pub enum Error {
 /// said device, in this case, uplink.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
+    #[serde(skip)]
+    pub device_id: String,
     // action id
     #[serde(alias = "id")]
     pub action_id: String,

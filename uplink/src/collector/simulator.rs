@@ -604,7 +604,7 @@ pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
     for i in 1..100 {
         events.push(Event::ActionResponseEvent(ActionResponseEvent {
             action_id: action.action_id.clone(),
-            device_id: "123".to_string(),
+            device_id: action.device_id.clone(),
             progress: i,
             status: String::from("in_progress"),
             timestamp: now + Duration::from_secs(i as u64),
@@ -613,7 +613,7 @@ pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
 
     events.push(Event::ActionResponseEvent(ActionResponseEvent {
         action_id: action.action_id.clone(),
-        device_id: "123".to_string(),
+        device_id: action.device_id.clone(),
         progress: 100,
         status: String::from("Completed"),
         timestamp: now + Duration::from_secs(100),
