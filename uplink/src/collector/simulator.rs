@@ -10,6 +10,7 @@ use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
+use crate::base::SimulatorConfig;
 use crate::base::{actions::Action, Package, Stream};
 use crate::{ActionResponse, Payload};
 
@@ -408,7 +409,7 @@ pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payloa
     };
 }
 
-pub fn read_gps_paths(paths_dir: String) -> Vec<Arc<Vec<Location>>> {
+pub fn read_gps_paths(paths_dir: &str) -> Vec<Arc<Vec<Location>>> {
     (0..10)
         .map(|i| {
             let file_name = format!("{}/path{}.json", paths_dir, i);
@@ -623,10 +624,10 @@ pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
 pub async fn start(
     data_tx: Sender<Box<dyn Package>>,
     actions_rx: Receiver<Action>,
-    num_devices: u32,
-    gps_paths: String,
+    simulator_config: &SimulatorConfig,
 ) -> Result<(), Error> {
-    let paths = read_gps_paths(gps_paths);
+    let paths = read_gps_paths(&simulator_config.gps_paths);
+    let num_devices = simulator_config.num_devices;
 
     let devices = (1..(num_devices + 1)).map(|i| new_device_data(i, &paths)).collect::<Vec<_>>();
 

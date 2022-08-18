@@ -87,7 +87,7 @@ impl Mqtt {
     }
 
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
-        if !self.config.simulated && publish.topic != self.actions_subscription {
+        if self.config.simulator.is_none() && publish.topic != self.actions_subscription {
             error!("Unsolicited publish on {}", publish.topic);
             return Ok(());
         }
@@ -95,7 +95,7 @@ impl Mqtt {
         let mut action: Action = serde_json::from_slice(&publish.payload)?;
 
         // Collect device_id information from publish topic for simulation purpose
-        if self.config.simulated {
+        if self.config.simulator.is_some() {
             let tokens: Vec<&str> = publish.topic.split('/').collect();
             let mut tokens = tokens.iter();
             while let Some(token) = tokens.next() {

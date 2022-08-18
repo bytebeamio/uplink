@@ -122,7 +122,6 @@ async fn main() -> Result<(), Error> {
             .and_then(|path| fs::read_to_string(path).ok())
             .unwrap_or_else(|| "".to_string())
             .as_str(),
-        commandline.simulator_gps_paths.is_some() && commandline.simulator_gps_paths.is_some(),
     )?);
 
     banner(&commandline, &config);
@@ -130,14 +129,11 @@ async fn main() -> Result<(), Error> {
     let mut uplink = Uplink::new(config.clone())?;
     uplink.spawn()?;
 
-    if let (Some(num_devices), Some(gps_paths)) =
-        (commandline.simulator_num_devices, commandline.simulator_gps_paths)
-    {
+    if let Some(simulator_config) = &config.simulator {
         if let Err(e) = simulator::start(
             uplink.bridge_data_tx(),
             uplink.bridge_action_rx(),
-            num_devices,
-            gps_paths,
+            simulator_config
         )
         .await
         {

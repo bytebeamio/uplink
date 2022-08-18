@@ -41,12 +41,6 @@ pub mod config {
         /// config file
         #[structopt(short = "a", help = "Authentication file")]
         pub auth: String,
-        /// number of devices to be simulated
-        #[structopt(short = "d", help = "Number of devices to be simulated")]
-        pub simulator_num_devices: Option<u32>,
-        /// gps paths to be used in simulation
-        #[structopt(short = "p", help = "Gps paths for simulation")]
-        pub simulator_gps_paths: Option<String>,
         /// log level (v: info, vv: debug, vvv: trace)
         #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
         pub verbose: u8,
@@ -94,7 +88,6 @@ pub mod config {
     pub fn initialize(
         auth_config: &str,
         uplink_config: &str,
-        simulated: bool,
     ) -> Result<Config, anyhow::Error> {
         let mut config = Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG));
 
@@ -105,9 +98,8 @@ pub mod config {
             .extract()
             .with_context(|| "Config error".to_string())?;
 
-        if simulated {
+        if config.simulator.is_some() {
             config.device_id = "+".to_string();
-            config.simulated = true;
         }
 
         if let Some(persistence) = &config.persistence {
