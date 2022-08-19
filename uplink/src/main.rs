@@ -42,19 +42,14 @@
 use std::fs;
 use std::sync::Arc;
 
-use anyhow::{Context, Error};
-use figment::{
-    providers::Toml,
-    providers::{Data, Json},
-    Figment,
-};
+use anyhow::Error;
 use log::error;
 use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
 use tokio::task;
 
+use uplink::config::{initialize, CommandLine};
 use uplink::{Bridge, Config, Simulator, Uplink};
-use uplink::config::{CommandLine, initialize};
 
 fn initialize_logging(commandline: &CommandLine) {
     let level = match commandline.verbose {
@@ -123,7 +118,9 @@ async fn main() -> Result<(), Error> {
     initialize_logging(&commandline);
     let config = Arc::new(initialize(
         fs::read_to_string(&commandline.auth)?.as_str(),
-        commandline.config.as_ref()
+        commandline
+            .config
+            .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
             .unwrap_or("".to_string())
             .as_str(),
