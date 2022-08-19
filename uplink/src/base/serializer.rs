@@ -14,8 +14,6 @@ use tokio::{select, time};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MqttError {
-    #[error("Client error {0}")]
-    Client(ClientError),
     #[error("SendError(..)")]
     Send(Request),
     #[error("TrySendError(..)")]
@@ -25,9 +23,8 @@ pub enum MqttError {
 impl From<ClientError> for MqttError {
     fn from(e: ClientError) -> Self {
         match e {
-            ClientError::Request(e) => MqttError::Send(e.into_inner()),
-            ClientError::TryRequest(e) => MqttError::TrySend(e.into_inner()),
-            e => MqttError::Client(e),
+            ClientError::Request(r) => MqttError::Send(r),
+            ClientError::TryRequest(r) => MqttError::TrySend(r),
         }
     }
 }
