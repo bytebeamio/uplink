@@ -98,14 +98,6 @@ pub trait Package: Send + Debug {
     fn anomalies(&self) -> Option<(String, usize)>;
 }
 
-/// Signal to modify the behaviour of collector
-#[derive(Debug)]
-pub enum Control {
-    Shutdown,
-    StopStream(String),
-    StartStream(String),
-}
-
 /// Signals status of stream buffer
 #[derive(Debug)]
 pub enum StreamStatus<'a> {

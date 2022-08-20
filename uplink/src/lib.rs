@@ -1,5 +1,4 @@
 #[doc = include_str ! ("../../README.md")]
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 
@@ -121,7 +120,7 @@ pub mod config {
 
 pub use base::actions;
 use base::actions::ota::OtaDownloader;
-use base::actions::tunshell::{Relay, TunshellSession};
+use base::actions::tunshell::TunshellSession;
 use base::actions::Actions;
 pub use base::actions::{Action, ActionResponse};
 use base::mqtt::Mqtt;
@@ -174,7 +173,6 @@ impl Uplink {
         let tunshell_config = self.config.clone();
         let tunshell_session = TunshellSession::new(
             tunshell_config,
-            Relay::default(),
             false,
             tunshell_keys.rx,
             self.action_status.clone(),
@@ -202,10 +200,8 @@ impl Uplink {
         let serializer =
             Serializer::new(self.config.clone(), self.data_channel.rx.clone(), mqtt.client())?;
 
-        let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
         let actions = Actions::new(
             self.config.clone(),
-            controllers,
             raw_action_channel.rx,
             tunshell_keys.tx,
             ota_tx,

@@ -14,6 +14,10 @@ Uplink is a rust based utility for efficiently sending data and receiving comman
 - Provides remote shell access through [Tunshell][tunshell]
 - Supports TLS with easy cross-compilation.
 
+### Install Pre-built Binary
+
+Pre-built binaries for select platform targets have been made available in the [repo's releases page](https://github.com/bytebeamio/uplink/releases/), download the binary specific to your system and add it's location to PATH.
+
 ### Build and Install
 
 Build and install with [Cargo][crates.io]:
