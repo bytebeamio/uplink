@@ -1,21 +1,18 @@
-use super::{Config, Control, Package};
+use super::{Config, Package};
 use flume::{Receiver, Sender, TrySendError};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::time::Duration;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub mod controller;
 pub mod ota;
 mod process;
 pub mod tunshell;
 
 use crate::base::{Buffer, Point, Stream};
-pub use controller::Controller;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -23,8 +20,6 @@ pub enum Error {
     Serde(#[from] serde_json::Error),
     #[error("Process error {0}")]
     Process(#[from] process::Error),
-    #[error("Controller error {0}")]
-    Controller(#[from] controller::Error),
     #[error("Error sending keys to tunshell thread {0}")]
     TunshellSend(#[from] flume::SendError<Action>),
     #[error("Error forwarding Action {0}")]
@@ -43,7 +38,7 @@ pub struct Action {
     // action id
     #[serde(alias = "id")]
     pub action_id: String,
-    // control or process
+    // determines if action is a process
     pub kind: String,
     // action name
     pub name: String,
@@ -120,7 +115,6 @@ pub struct Actions {
     config: Arc<Config>,
     action_status: Stream<ActionResponse>,
     process: process::Process,
-    controller: controller::Controller,
     actions_rx: Receiver<Action>,
     tunshell_tx: Sender<Action>,
     ota_tx: Sender<Action>,
@@ -130,25 +124,14 @@ pub struct Actions {
 impl Actions {
     pub fn new(
         config: Arc<Config>,
-        controllers: HashMap<String, Sender<Control>>,
         actions_rx: Receiver<Action>,
         tunshell_tx: Sender<Action>,
         ota_tx: Sender<Action>,
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
     ) -> Actions {
-        let controller = Controller::new(controllers, action_status.clone());
         let process = process::Process::new(action_status.clone());
-        Actions {
-            config,
-            action_status,
-            process,
-            controller,
-            actions_rx,
-            tunshell_tx,
-            ota_tx,
-            bridge_tx,
-        }
+        Actions { config, action_status, process, actions_rx, tunshell_tx, ota_tx, bridge_tx }
     }
 
     /// Start receiving and processing [Action]s
@@ -201,11 +184,6 @@ impl Actions {
 
         // Regular actions are executed natively
         match action.kind.as_ref() {
-            "control" => {
-                let command = action.name.clone();
-                let id = action.action_id;
-                self.controller.execute(&id, command).await?;
-            }
             "process" => {
                 let command = action.name.clone();
                 let payload = action.payload.clone();

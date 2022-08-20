@@ -6,7 +6,7 @@ An `Action` is the term used to refer to messages that carry commands and other 
 ```js
 {
     "action_id": "...", // An integer value that can be used to maintain indempotence
-    "kind": "...",      // May hold values such as control, process, depending on end-use
+    "kind": "...",      // May hold values such as process, depending on end-use
     "name": "...",      // Name given to Action
     "payload": "..."    // Can contain JSON formatted data as a string
 }
