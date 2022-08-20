@@ -29,24 +29,18 @@ data to a single channel so that we don't have to use select!
 Actions
 ------
 
-Actions are requests from cloud over mqtt or locally from grpc to
-perform following operations
+Actions are requests from cloud over mqtt to perform the following operations
 
 * Receive system actions like reboot, shutdown, ota etc
-* Actions for stopping collector or a given channel of a collector
-* Actions should be able to start a new collector so that we can
-  remotely start a collector. So actions is the entry point in the main
-  thread
-* Actions have controller tx to each collector for remote actions. e.g.
-  stop collecting data of a given channel, shutdown the collector, collection interval
+* Start a tunshell instance for users to be able to remotely login to
+  the system running uplink
+* Execute a command/process on the system running uplink
 
 Collector
 -------
 
 * Collects data from hardware (or journal like)
 * Creates packable data out of collected data and send it over channel
-* Handle controller notifications..stop a channel, slowdown a channel,
-  stop the collector
 
 
 Self Instrumentation
@@ -78,9 +72,7 @@ As per our current use case, a collector should be able to do following
 tasks
 
 * Collect data from hardware or network
-* Handle actions notification to shutdown and restart collection of a
-  single channel or the collector itself. so a controller notification
-  should go to a given collector
+* Handle actions notifications(action_status)
 
 Each collector should sit into uplink's collector lifecycle. 
 
