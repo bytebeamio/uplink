@@ -1,5 +1,4 @@
 #[doc = include_str ! ("../../README.md")]
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 
@@ -195,10 +194,8 @@ impl Uplink {
         let serializer =
             Serializer::new(self.config.clone(), self.data_channel.rx.clone(), mqtt.client())?;
 
-        let controllers: HashMap<String, Sender<base::Control>> = HashMap::new();
         let actions = Actions::new(
             self.config.clone(),
-            controllers,
             raw_action_channel.rx,
             tunshell_keys.tx,
             ota_tx,
