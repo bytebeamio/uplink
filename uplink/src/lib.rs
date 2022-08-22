@@ -89,8 +89,8 @@ pub mod config {
     pub fn initialize(auth_config: &str, uplink_config: &str) -> Result<Config, anyhow::Error> {
         let config = config::Config::builder()
             .add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml))
-            .add_source(File::new(uplink_config, FileFormat::Toml))
-            .add_source(File::new(auth_config, FileFormat::Json))
+            .add_source(File::from_str(uplink_config, FileFormat::Toml))
+            .add_source(File::from_str(auth_config, FileFormat::Json))
             .add_source(Environment::default())
             .build()?;
 
