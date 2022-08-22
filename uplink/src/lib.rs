@@ -127,50 +127,38 @@ use collector::systemstats::StatCollector;
 pub use collector::tcpjson::{Bridge, Payload};
 pub use disk::Storage;
 
-struct RxTx<T> {
-    rx: Receiver<T>,
-    tx: Sender<T>,
-}
-
-impl<T> RxTx<T> {
-    fn bounded(cap: usize) -> RxTx<T> {
-        let (tx, rx) = bounded(cap);
-
-        RxTx { rx, tx }
-    }
-}
-
 pub struct Uplink {
     config: Arc<Config>,
-    action_channel: RxTx<Action>,
-    data_channel: RxTx<Box<dyn Package>>,
+    action_rx: Receiver<Action>,
+    action_tx: Sender<Action>,
+    data_rx: Receiver<Box<dyn Package>>,
+    data_tx: Sender<Box<dyn Package>>,
     action_status: Stream<ActionResponse>,
 }
 
 impl Uplink {
     pub fn new(config: Arc<Config>) -> Result<Uplink, Error> {
-        let action_channel = RxTx::bounded(10);
-        let data_channel = RxTx::bounded(10);
+        let (action_tx, action_rx) = bounded(10);
+        let (data_tx, data_rx) = bounded(10);
 
         let action_status_topic = &config
             .streams
             .get("action_status")
             .ok_or_else(|| Error::msg("Action status topic missing from config"))?
             .topic;
-        let action_status =
-            Stream::new("action_status", action_status_topic, 1, data_channel.tx.clone());
+        let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
 
-        Ok(Uplink { config, action_channel, data_channel, action_status })
+        Ok(Uplink { config, action_rx, action_tx, data_rx, data_tx, action_status })
     }
 
     pub fn spawn(&mut self) -> Result<(), Error> {
         // Launch a thread to handle tunshell access
-        let tunshell_keys = RxTx::bounded(10);
+        let (tunshell_keys_tx, tunshell_keys_rx) = bounded(10);
         let tunshell_config = self.config.clone();
         let tunshell_session = TunshellSession::new(
             tunshell_config,
             false,
-            tunshell_keys.rx,
+            tunshell_keys_rx,
             self.action_status.clone(),
         );
         thread::spawn(move || tunshell_session.start());
@@ -179,30 +167,29 @@ impl Uplink {
         let (ota_tx, ota_downloader) = OtaDownloader::new(
             self.config.clone(),
             self.action_status.clone(),
-            self.action_channel.tx.clone(),
+            self.action_tx.clone(),
         )?;
         if self.config.ota.enabled {
             thread::spawn(move || ota_downloader.start());
         }
 
         // Launch a thread to collect system statistics
-        let stat_collector = StatCollector::new(self.config.clone(), self.data_channel.tx.clone());
+        let stat_collector = StatCollector::new(self.config.clone(), self.data_tx.clone());
         if self.config.stats.enabled {
             thread::spawn(move || stat_collector.start());
         }
 
-        let raw_action_channel = RxTx::bounded(10);
-        let mut mqtt = Mqtt::new(self.config.clone(), raw_action_channel.tx);
-        let serializer =
-            Serializer::new(self.config.clone(), self.data_channel.rx.clone(), mqtt.client())?;
+        let (raw_action_tx, raw_action_rx) = bounded(10);
+        let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
+        let serializer = Serializer::new(self.config.clone(), self.data_rx.clone(), mqtt.client())?;
 
         let actions = Actions::new(
             self.config.clone(),
-            raw_action_channel.rx,
-            tunshell_keys.tx,
+            raw_action_rx,
+            tunshell_keys_tx,
             ota_tx,
             self.action_status.clone(),
-            self.action_channel.tx.clone(),
+            self.action_tx.clone(),
         );
 
         // Launch a thread to handle incoming and outgoing MQTT packets
@@ -230,11 +217,11 @@ impl Uplink {
     }
 
     pub fn bridge_action_rx(&self) -> Receiver<Action> {
-        self.action_channel.rx.clone()
+        self.action_rx.clone()
     }
 
     pub fn bridge_data_tx(&self) -> Sender<Box<dyn Package>> {
-        self.data_channel.tx.clone()
+        self.data_tx.clone()
     }
 
     pub fn action_status(&self) -> Stream<ActionResponse> {
