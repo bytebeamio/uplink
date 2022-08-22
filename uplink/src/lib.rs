@@ -14,9 +14,7 @@ pub mod collector;
 
 pub mod config {
     pub use crate::base::{Config, Ota, Persistence, Stats};
-    use anyhow::Context;
-    use figment::providers::{Data, Json, Toml};
-    use figment::Figment;
+    use config::{Environment, File, FileFormat};
     use std::fs;
     use structopt::StructOpt;
 
@@ -89,14 +87,14 @@ pub mod config {
     /// Reads config file to generate config struct and replaces places holders
     /// like bike id and data version
     pub fn initialize(auth_config: &str, uplink_config: &str) -> Result<Config, anyhow::Error> {
-        let mut config = Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG));
+        let config = config::Config::builder()
+            .add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml))
+            .add_source(File::new(uplink_config, FileFormat::Toml))
+            .add_source(File::new(auth_config, FileFormat::Json))
+            .add_source(Environment::default())
+            .build()?;
 
-        config = config.merge(Data::<Toml>::string(uplink_config));
-
-        let mut config: Config = config
-            .join(Data::<Json>::string(auth_config))
-            .extract()
-            .with_context(|| "Config error".to_string())?;
+        let mut config: Config = config.try_deserialize()?;
 
         if let Some(persistence) = &config.persistence {
             fs::create_dir_all(&persistence.path)?;

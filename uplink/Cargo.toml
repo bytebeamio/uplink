@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 structopt = "0.3"
-figment = { version = "0.10.6", features = ["toml", "json"] }
+config = { version = "0.13.2", default-features = false, features = ["toml", "json"] }
 log = "0.4"
 simplelog = "0.11"
 disk = { path = "../disk" }
