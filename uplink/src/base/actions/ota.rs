@@ -310,6 +310,7 @@ mod test {
         let mut expected_forward = ota_update.clone();
         expected_forward.ota_path = Some(ota_path + "/1.0/logo.png");
         let ota_action = Action {
+            device_id: Default::default(),
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
@@ -360,6 +361,7 @@ mod test {
         let mut expected_forward = ota_update.clone();
         expected_forward.ota_path = Some(ota_path + "/1.0/logo.png");
         let ota_action = Action {
+            device_id: Default::default(),
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),

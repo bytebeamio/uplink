@@ -46,10 +46,9 @@ use anyhow::Error;
 use log::error;
 use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
-use tokio::task;
 
 use uplink::config::{initialize, CommandLine};
-use uplink::{Bridge, Config, Simulator, Uplink};
+use uplink::{simulator, Bridge, Config, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) {
     let level = match commandline.verbose {
@@ -113,7 +112,6 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
-    let enable_simulator = commandline.simulator;
 
     initialize_logging(&commandline);
     let config = Arc::new(initialize(
@@ -122,7 +120,7 @@ async fn main() -> Result<(), Error> {
             .config
             .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
-            .unwrap_or("".to_string())
+            .unwrap_or_else(|| "".to_string())
             .as_str(),
     )?);
 
@@ -131,20 +129,25 @@ async fn main() -> Result<(), Error> {
     let mut uplink = Uplink::new(config.clone())?;
     uplink.spawn()?;
 
-    if enable_simulator {
-        let mut simulator = Simulator::new(config.clone(), uplink.bridge_data_tx());
-        task::spawn(async move {
-            simulator.start().await;
-        });
-    }
-
-    let mut bridge = Bridge::new(
+    if let Some(simulator_config) = &config.simulator {
+        if let Err(e) = simulator::start(
+            uplink.bridge_data_tx(),
+            uplink.bridge_action_rx(),
+            simulator_config
+        )
+        .await
+        {
+            error!("Error while running simulator: {}", e)
+        }
+    } else if let Err(e) = Bridge::new(
         config,
         uplink.bridge_data_tx(),
         uplink.bridge_action_rx(),
         uplink.action_status(),
-    );
-    if let Err(e) = bridge.start().await {
+    )
+    .start()
+    .await
+    {
         error!("Bridge stopped!! Error = {:?}", e);
     }
 

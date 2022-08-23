@@ -73,3 +73,15 @@ path = "/var/tmp/ota-file"
 enabled = false
 process_names = ["uplink"]
 update_period = 30
+
+# Configurations associated with running uplink in simulator mode, if enabled 
+# uplink will push simulated data for device_id 1..=num_devices and respond to any
+# actions triggered on the tenant connected to, with progress 0..=100.
+# NOTE: uplink bridge will hence be turned off.
+#
+# Required Parameters
+# - num_devices: number of devices to be simulated
+# - gps_paths: path to directory containing files with gps paths to be used in simulation
+[simulator]
+num_devices = 10
+gps_paths = "./paths/"
