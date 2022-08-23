@@ -13,9 +13,7 @@ pub mod collector;
 
 pub mod config {
     pub use crate::base::{Config, Ota, Persistence, Stats};
-    use anyhow::Context;
-    use figment::providers::{Data, Json, Toml};
-    use figment::Figment;
+    use config::{Environment, File, FileFormat};
     use std::fs;
     use structopt::StructOpt;
 
@@ -84,18 +82,15 @@ pub mod config {
 
     /// Reads config file to generate config struct and replaces places holders
     /// like bike id and data version
-    pub fn initialize(
-        auth_config: &str,
-        uplink_config: &str,
-    ) -> Result<Config, anyhow::Error> {
-        let mut config = Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG));
+    pub fn initialize(auth_config: &str, uplink_config: &str) -> Result<Config, anyhow::Error> {
+        let config = config::Config::builder()
+            .add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml))
+            .add_source(File::from_str(uplink_config, FileFormat::Toml))
+            .add_source(File::from_str(auth_config, FileFormat::Json))
+            .add_source(Environment::default())
+            .build()?;
 
-        config = config.merge(Data::<Toml>::string(uplink_config));
-
-        let mut config: Config = config
-            .join(Data::<Json>::string(auth_config))
-            .extract()
-            .with_context(|| "Config error".to_string())?;
+        let mut config: Config = config.try_deserialize()?;
 
         if config.simulator.is_some() {
             config.device_id = "+".to_string();
