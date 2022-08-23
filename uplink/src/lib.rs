@@ -40,9 +40,6 @@ pub mod config {
         /// config file
         #[structopt(short = "a", help = "Authentication file")]
         pub auth: String,
-        /// list of modules to log
-        #[structopt(short = "s", long = "simulator")]
-        pub simulator: bool,
         /// log level (v: info, vv: debug, vvv: trace)
         #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
         pub verbose: u8,
@@ -87,7 +84,10 @@ pub mod config {
 
     /// Reads config file to generate config struct and replaces places holders
     /// like bike id and data version
-    pub fn initialize(auth_config: &str, uplink_config: &str) -> Result<Config, anyhow::Error> {
+    pub fn initialize(
+        auth_config: &str,
+        uplink_config: &str,
+    ) -> Result<Config, anyhow::Error> {
         let mut config = Figment::new().merge(Data::<Toml>::string(DEFAULT_CONFIG));
 
         config = config.merge(Data::<Toml>::string(uplink_config));
@@ -96,6 +96,10 @@ pub mod config {
             .join(Data::<Json>::string(auth_config))
             .extract()
             .with_context(|| "Config error".to_string())?;
+
+        if config.simulator.is_some() {
+            config.device_id = "+".to_string();
+        }
 
         if let Some(persistence) = &config.persistence {
             fs::create_dir_all(&persistence.path)?;
@@ -122,7 +126,7 @@ pub use base::actions::{Action, ActionResponse};
 use base::mqtt::Mqtt;
 use base::serializer::Serializer;
 pub use base::{Config, Package, Point, Stream};
-pub use collector::simulator::Simulator;
+pub use collector::simulator;
 use collector::systemstats::StatCollector;
 pub use collector::tcpjson::{Bridge, Payload};
 pub use disk::Storage;
