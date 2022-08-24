@@ -1,0 +1,6 @@
+#!/bin/sh
+
+cd /usr/share/bytebeam/uplink
+
+export RUST_LOG=debug
+exec ./target/debug/uplink -c config/uplink.toml -i 2 -a certs/
