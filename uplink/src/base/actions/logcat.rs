@@ -150,7 +150,7 @@ impl LogcatInstance {
                                             log_stream.push(payload).unwrap();
                                             log_index += 1;
                                         } else {
-                                            log::error!("log line in unknown format: {:?}", next_line);
+                                            log::warn!("log line in unknown format: {:?}", next_line);
                                         }
                                     }
                                     Err(e) => {
