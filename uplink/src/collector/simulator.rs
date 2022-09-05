@@ -122,6 +122,7 @@ impl PartialOrd for Event {
 
 pub struct Partitions {
     map: HashMap<String, Stream<Payload>>,
+    action_statuses: HashMap<String, Stream<ActionResponse>>,
     tx: Sender<Box<dyn Package>>,
 }
 
@@ -132,6 +133,19 @@ impl Partitions {
             .entry(payload.stream.clone())
             .or_insert(Stream::new(&payload.stream, &payload.stream, 10, self.tx.clone()))
             .fill(payload)
+            .await
+        {
+            error!("Failed to send action result {:?}", e);
+        }
+    }
+
+    async fn send_action_response(&mut self, device_id: &str, response: ActionResponse) {
+        let stream = format!("/tenants/demo/devices/{}/action/status", device_id);
+        if let Err(e) = self
+            .action_statuses
+            .entry(stream.clone())
+            .or_insert(Stream::new(&stream, &stream, 1, self.tx.clone()))
+            .fill(response)
             .await
         {
             error!("Failed to send action result {:?}", e);
@@ -366,10 +380,7 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Pay
     return Payload {
         timestamp,
         sequence,
-        stream: format!(
-            "/tenants/demo/devices/{}/events/peripherals/jsonarray",
-            device.device_id
-        ),
+        stream: format!("/tenants/demo/devices/{}/events/peripherals/jsonarray", device.device_id),
         payload: json!(payload),
     };
 }
@@ -550,24 +561,14 @@ pub async fn process_data_event(
 
 async fn process_action_response_event(event: &ActionResponseEvent, partitions: &mut Partitions) {
     //info!("Sending action response {:?} {} {} {}", event.device_id, event.action_id, event.progress, event.status);
-
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-
-    let payload = ActionResponse::progress(&event.action_id, &event.status, event.progress);
-
-    let data = Payload {
-        timestamp,
-        sequence: 0,
-        stream: format!("/tenants/demo/devices/{}/action/status", event.device_id),
-        payload: json!(payload),
-    };
+    let response = ActionResponse::progress(&event.action_id, &event.status, event.progress);
 
     info!(
         "Sending action response {:?} {} {} {}",
         event.device_id, event.action_id, event.progress, event.status
     );
 
-    partitions.send(data).await;
+    partitions.send_action_response(&event.device_id, response).await;
     info!("Successfully sent action response");
 }
 
@@ -635,7 +636,8 @@ pub async fn start(
 
     generate_initial_events(&mut events, Instant::now(), &devices);
 
-    let mut partitions = Partitions { map: HashMap::new(), tx: data_tx };
+    let mut partitions =
+        Partitions { map: HashMap::new(), action_statuses: HashMap::new(), tx: data_tx };
     let mut time = Instant::now();
     let mut i = 0;
 
