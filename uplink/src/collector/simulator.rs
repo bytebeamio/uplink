@@ -144,7 +144,7 @@ impl Partitions {
         if let Err(e) = self
             .action_statuses
             .entry(stream.clone())
-            .or_insert(Stream::new(&stream, &stream, 10, self.tx.clone()))
+            .or_insert(Stream::new(&stream, &stream, 1, self.tx.clone()))
             .fill(response)
             .await
         {
