@@ -38,7 +38,6 @@ pub struct Bridge {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
     actions_rx: Receiver<Action>,
-    current_action: Option<String>,
     action_status: Stream<ActionResponse>,
 }
 
@@ -49,12 +48,10 @@ impl Bridge {
         actions_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
     ) -> Bridge {
-        Bridge { config, data_tx, actions_rx, current_action: None, action_status }
+        Bridge { config, data_tx, actions_rx, action_status }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let mut action_status = self.action_status.clone();
-
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
             let listener = TcpListener::bind(&addr).await?;
@@ -74,7 +71,7 @@ impl Bridge {
                         let action = action?;
                         error!("Bridge down!! Action ID = {}", action.action_id);
                         let status = ActionResponse::failure(&action.action_id, "Bridge down");
-                        if let Err(e) = action_status.fill(status).await {
+                        if let Err(e) = self.action_status.fill(status).await {
                             error!("Failed to send busy status. Error = {:?}", e);
                         }
                     }
@@ -91,7 +88,7 @@ impl Bridge {
 
     pub async fn collect(
         &mut self,
-        mut framed: Framed<TcpStream, LinesCodec>,
+        mut client: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
         let mut bridge_partitions = HashMap::new();
         for (name, config) in &self.config.streams {
@@ -99,19 +96,23 @@ impl Bridge {
             bridge_partitions.insert(name.to_owned(), stream);
         }
 
-        let mut action_status = self.action_status.clone();
-        let action_timeout = time::sleep(Duration::from_secs(100));
+        // action_timeout is reset whenever
+        // - a new action is received
+        // - an action_response is received
+        // current_action is reset when the action_timeout ends
+        let mut current_action = None;
+        let action_timeout = time::sleep(Duration::ZERO);
         tokio::pin!(action_timeout);
 
         let mut flush_handler = DelayMap::new();
 
         loop {
             select! {
-                frame = framed.next() => {
-                    let frame = frame.ok_or(Error::StreamDone)??;
-                    debug!("Received line = {:?}", frame);
+                line = client.next() => {
+                    let line = line.ok_or(Error::StreamDone)??;
+                    debug!("Received line = {:?}", line);
 
-                    let data: Payload = match serde_json::from_str(&frame) {
+                    let data: Payload = match serde_json::from_str(&line) {
                         Ok(d) => d,
                         Err(e) => {
                             error!("Deserialization error = {:?}", e);
@@ -122,12 +123,11 @@ impl Bridge {
                     // If incoming data is a response for an action, drop it
                     // if timeout is already sent to cloud
                     if data.stream == "action_status" {
-                        match self.current_action.take() {
-                            Some(id) => debug!("Response for action = {:?}", id),
-                            None => {
-                                error!("Action timed out already");
-                                continue
-                            }
+                        if current_action.is_none() {
+                            error!("Action timed out already, ignoring response: {:?}", data);
+                            continue;
+                        } else {
+                            action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
                         }
                     }
 
@@ -164,29 +164,30 @@ impl Bridge {
                     }
                 }
 
-                action = self.actions_rx.recv_async() => {
+                action = self.actions_rx.recv_async(), if current_action.is_none() => {
                     let action = action?;
-                    self.current_action = Some(action.action_id.to_owned());
 
-                    action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
-                    let data = match serde_json::to_string(&action) {
-                        Ok(d) => d,
+                    match serde_json::to_string(&action) {
+                        Ok(data) => {
+                            current_action = Some(action.action_id.to_owned());
+                            action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
+                            client.send(data).await?;
+                        },
                         Err(e) => {
                             error!("Serialization error = {:?}", e);
                             continue
                         }
                     };
 
-                    framed.send(data).await?;
                 }
 
-                _ = &mut action_timeout, if self.current_action.is_some() => {
-                    let action = self.current_action.take().unwrap();
+                _ = &mut action_timeout, if current_action.is_some() => {
+                    let action = current_action.take().unwrap();
                     error!("Timeout waiting for action response. Action ID = {}", action);
 
                     // Send failure response to cloud
                     let status = ActionResponse::failure(&action, "Action timed out");
-                    if let Err(e) = action_status.fill(status).await {
+                    if let Err(e) = self.action_status.fill(status).await {
                         error!("Failed to fill. Error = {:?}", e);
                     }
                 }
