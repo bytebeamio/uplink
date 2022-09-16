@@ -171,15 +171,18 @@ impl Actions {
 
     /// Start receiving and processing [Action]s
     pub async fn start(mut self) {
-        self.logcat = Some(
-            LogcatInstance::new(
-                self.create_log_stream(),
-                &LogcatConfig {
-                    tags: vec!["*".to_string()],
-                    min_level: LogLevel::Debug
-                }
-            )
-        );
+        if self.config.run_logcat {
+            debug!("starting logcat");
+            self.logcat = Some(
+                LogcatInstance::new(
+                    self.create_log_stream(),
+                    &LogcatConfig {
+                        tags: vec!["*".to_string()],
+                        min_level: LogLevel::Debug
+                    }
+                )
+            );
+        }
         loop {
             let action = match self.actions_rx.recv_async().await {
                 Ok(v) => v,

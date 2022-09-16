@@ -54,6 +54,7 @@ pub mod config {
 
     const DEFAULT_CONFIG: &str = r#"
     bridge_port = 5555
+    run_logcat = true
     max_packet_size = 102400
     max_inflight = 100
 
