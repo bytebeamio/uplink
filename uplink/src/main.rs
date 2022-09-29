@@ -2,8 +2,8 @@
 //! We use [`rumqttc`], which implements the MQTT protocol, to communicate with the platform. Communication is handled separately as ingress and egress
 //! by [`Mqtt`] and [`Serializer`] respectively. [`Action`]s are received and forwarded by Mqtt to the [`Actions`] module, where it is handled depending
 //! on it's type and purpose, forwarding it to either the [`Bridge`](collector::tcpjson::Bridge), [`Process`](base::actions::process::Process),
-//! [`Controller`](base::actions::controller::Controller), [`OtaDownloader`](base::actions::ota::OtaDownloader) or [`TunshellSession`](base::actions::tunshell::TunshellSession).
-//! Bridge forwards received Actions to devices connected to it through the `bridge_port` and collects response data from these devices, to forward to the platform.
+//! [`OtaDownloader`](base::actions::ota::OtaDownloader) or [`TunshellSession`](base::actions::tunshell::TunshellSession). Bridge forwards received Actions
+//! to devices connected to it through the `bridge_port` and collects response data from these devices, to forward to the platform.
 //!
 //! Response data can be of multiple types, of interest to us are [`ActionResponse`](base::actions::response::ActionResponse)s, which are forwarded to Actions
 //! and then to Serializer where depending on the network, it may be stored onto disk with [`Storage`](disk::Storage) to ensure packets aren't lost.
@@ -46,10 +46,9 @@ use anyhow::Error;
 use log::error;
 use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
 use structopt::StructOpt;
-use tokio::task;
 
-use uplink::{Bridge, Config, Simulator, Uplink};
-use uplink::config::{CommandLine, initialize};
+use uplink::config::{initialize, CommandLine};
+use uplink::{simulator, Bridge, Config, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) {
     let level = match commandline.verbose {
@@ -113,14 +112,15 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
-    let enable_simulator = commandline.simulator;
 
     initialize_logging(&commandline);
     let config = Arc::new(initialize(
         fs::read_to_string(&commandline.auth)?.as_str(),
-        commandline.config.as_ref()
+        commandline
+            .config
+            .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
-            .unwrap_or("".to_string())
+            .unwrap_or_else(|| "".to_string())
             .as_str(),
     )?);
 
@@ -129,20 +129,25 @@ async fn main() -> Result<(), Error> {
     let mut uplink = Uplink::new(config.clone())?;
     uplink.spawn()?;
 
-    if enable_simulator {
-        let mut simulator = Simulator::new(config.clone(), uplink.bridge_data_tx());
-        task::spawn(async move {
-            simulator.start().await;
-        });
-    }
-
-    let mut bridge = Bridge::new(
+    if let Some(simulator_config) = &config.simulator {
+        if let Err(e) = simulator::start(
+            uplink.bridge_data_tx(),
+            uplink.bridge_action_rx(),
+            simulator_config
+        )
+        .await
+        {
+            error!("Error while running simulator: {}", e)
+        }
+    } else if let Err(e) = Bridge::new(
         config,
         uplink.bridge_data_tx(),
         uplink.bridge_action_rx(),
         uplink.action_status(),
-    );
-    if let Err(e) = bridge.start().await {
+    )
+    .start()
+    .await
+    {
         error!("Bridge stopped!! Error = {:?}", e);
     }
 

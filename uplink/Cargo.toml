@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 structopt = "0.3"
-figment = { version = "0.10.6", features = ["toml", "json"] }
+config = { version = "0.13.2", default-features = false, features = ["toml", "json"] }
 log = "0.4"
 simplelog = "0.11"
 disk = { path = "../disk" }
@@ -15,7 +15,7 @@ tokio-util = { version = "0.7.2", features = ["codec", "time"] }
 tokio-stream = "0.1"
 tokio-compat-02 = "0.2.0"
 flume = "0.10"
-rumqttc = "0.11"
+rumqttc = "0.14"
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
@@ -25,6 +25,7 @@ rand = "0.8"
 tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch" }
 reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
 futures-util = "0.3"
+async-trait = "0.1"
 sysinfo = "0.23"
 lazy_static = "1.4.0"
 regex = "1.6.0"

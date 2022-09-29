@@ -60,6 +60,14 @@ pub struct Stats {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct SimulatorConfig {
+    /// number of devices to be simulated
+    pub num_devices: u32,
+    /// path to directory containing files with gps paths to be used in simulation
+    pub gps_paths: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -75,6 +83,7 @@ pub struct Config {
     pub streams: HashMap<String, StreamConfig>,
     pub ota: Ota,
     pub stats: Stats,
+    pub simulator: Option<SimulatorConfig>,
 }
 
 pub trait Point: Send + Debug {
@@ -88,14 +97,6 @@ pub trait Package: Send + Debug {
     // around custom serialization error types.
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
-}
-
-/// Signal to modify the behaviour of collector
-#[derive(Debug)]
-pub enum Control {
-    Shutdown,
-    StopStream(String),
-    StartStream(String),
 }
 
 /// Signals status of stream buffer
