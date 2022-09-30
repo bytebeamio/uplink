@@ -11,18 +11,15 @@ def recv_action(s):
 
 # Constructs a payload and sends it over TCP to uplink
 def send_data(s, payload):
-    t = int(time.time()*1000000)
-    send = json.dumps({
-        "stream": "action_status",
-        "sequence": 0,
-        "timestamp": t,
-        "payload": payload
-    })
+    send = json.dumps(payload)
     s.sendall(bytes(send, encoding="utf-8"))
 
 # Constructs a JSON `action_status` as a response to received action on completion
 def action_complete(id):
     return {
+        "stream": "action_status",
+        "sequence": 0,
+        "timestamp": int(time.time()*1000000),
         "id": id,
         "state": "Completed",
         "progress": 100,
@@ -31,6 +28,10 @@ def action_complete(id):
 
 while True:
     action = recv_action(s)
+    print(action)
+
     resp = action_complete(action["action_id"])
+    print(resp)
+    
     time.sleep(5)
     send_data(s, resp)

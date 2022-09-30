@@ -7,25 +7,21 @@ import (
 	"time"
 )
 
-type Payload struct {
-	Stream    string    	`json:"stream"`
-	Sequence  int32     	`json:"sequence"`
-	Timestamp int64     	`json:"timestamp"`
-	Payload   ActionStatus  `json:"payload"`
-}
-
 type ActionStatus struct {
-	Id        int64    `json:"id"`
+	Stream    string   `json:"stream"`
+	Sequence  int32    `json:"sequence"`
+	Timestamp int64    `json:"timestamp"`
+	Id        string   `json:"id"`
 	State     string   `json:"state"`
 	Progress  int8     `json:"progress"`
 	Errors    []string `json:"errors"`
 }
 
 type Action struct {
-	Id      int64  `json:"id"`
-	Kind    string `json:"timestamp"`
-	Name    string `json:"name"`
-	Payload string `json:"payload"`
+	Id      string	`json:"action_id"`
+	Kind    string  `json:"timestamp"`
+	Name    string  `json:"name"`
+	Payload string  `json:"payload"`
 }
 
 func main() {
@@ -51,16 +47,14 @@ func main() {
 		}
 
 		// Respond as Completed
-		reply := Payload{
+		reply := ActionStatus {
 			Stream: "action_status",
 			Sequence: 1,
 			Timestamp: time.Now().UnixNano() / int64(time.Millisecond),
-			Payload: ActionStatus{
-				Id: action.Id,
-				State: "Completed",
-				Progress: 100,
-				Errors: []string{},
-			},
+			Id: action.Id,
+			State: "Completed",
+			Progress: 100,
+			Errors: []string{},
 		}
 
 		fmt.Println(reply)
