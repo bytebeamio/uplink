@@ -50,6 +50,11 @@ flush_period = 30
 topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
 buf_size = 1
 
+# Set buf_size to 1 for the device_shadow stream
+[streams.device_shadow]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
+buf_size = 1
+
 # Configurations associated with the OTA module of uplink, if enabled Actions
 # with `name: "update_firmware"` can trigger the OtaDownloader to download the
 # OTA package.
@@ -82,6 +87,6 @@ update_period = 30
 # Required Parameters
 # - num_devices: number of devices to be simulated
 # - gps_paths: path to directory containing files with gps paths to be used in simulation
-[simulator]
-num_devices = 10
-gps_paths = "./paths/"
+# [simulator]
+# num_devices = 10
+# gps_paths = "./paths/"
