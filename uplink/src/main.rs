@@ -45,7 +45,6 @@ use std::sync::Arc;
 use anyhow::Error;
 use log::error;
 use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
-use stdio_override::{StderrOverride, StdoutOverride};
 use structopt::StructOpt;
 
 use uplink::config::{initialize, CommandLine};
@@ -112,23 +111,9 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
-
-    #[cfg(target_os="android")]
-    let _out_guard = StdoutOverride::override_file("/data/vendor/uplink/stdout.log").unwrap();
-
-    #[cfg(target_os="android")]
-    let _err_guard = StderrOverride::override_file("/data/vendor/uplink/stderr.log").unwrap();
-
-    println!("0");
     let commandline: CommandLine = StructOpt::from_args();
-    println!("1");
-    fs::read_to_string(&commandline.auth).unwrap();
-    println!("2");
-    fs::read_to_string(&commandline.config.as_ref().unwrap()).unwrap();
-    println!("3");
 
     initialize_logging(&commandline);
-    println!("4");
     let config = Arc::new(initialize(
         fs::read_to_string(&commandline.auth)?.as_str(),
         commandline
@@ -138,7 +123,17 @@ async fn main() -> Result<(), Error> {
             .unwrap_or_else(|| "".to_string())
             .as_str(),
     )?);
-    println!("5");
+
+    #[cfg(target_os="android")]
+    let (_out_guard, _err_guard) = {
+        let out_path = format!("{}/{}", config.persistence.as_ref().unwrap().path, "stdout.log");
+        let err_path = format!("{}/{}", config.persistence.as_ref().unwrap().path, "stderr.log");
+        std::fs::remove_file(out_path.as_str()).unwrap();
+        std::fs::remove_file(err_path.as_str()).unwrap();
+        let _out_guard = stdio_override::StdoutOverride::override_file(out_path).unwrap();
+        let _err_guard = stdio_override::StderrOverride::override_file(err_path).unwrap();
+        (_out_guard, _err_guard)
+    };
 
     banner(&commandline, &config);
 
