@@ -124,18 +124,16 @@ async fn main() -> Result<(), Error> {
             .as_str(),
     )?);
 
-    #[cfg(target_os="android")]
-    let (_out_guard, _err_guard) = {
+    let _log_guards = config.log_dir.as_ref().map(|log_dir| {
+        std::fs::create_dir_all(log_dir).unwrap();
+        let out_path = format!("{}/{}", log_dir, "stdout.log");
+        let err_path = format!("{}/{}", log_dir, "stderr.log");
         let _ = std::fs::remove_file(out_path.as_str());
         let _ = std::fs::remove_file(err_path.as_str());
-        let persistence = config.persistence.as_ref().unwrap().path;
-        let out_path = format!("{}/{}", persistence, "stdout.log");
-        let err_path = format!("{}/{}", persistence, "stderr.log");
-        std::fs::create_dir_all(persistence).unwrap();
         let _out_guard = stdio_override::StdoutOverride::override_file(out_path).unwrap();
         let _err_guard = stdio_override::StderrOverride::override_file(err_path).unwrap();
         (_out_guard, _err_guard)
-    };
+    });
 
     banner(&commandline, &config);
 
