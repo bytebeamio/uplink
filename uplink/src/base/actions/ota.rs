@@ -146,9 +146,11 @@ impl OtaDownloader {
 
             match self.run(action).await {
                 Ok(_) => {
-                    let status = ActionResponse::progress(&self.action_id, "Downloaded", 100)
-                        .set_sequence(self.sequence());
-                    self.send_status(status).await;
+                    if !cfg!(target_os="android") {
+                        let status = ActionResponse::progress(&self.action_id, "Downloaded", 100)
+                            .set_sequence(self.sequence());
+                        self.send_status(status).await;
+                    }
                 }
                 Err(e) => {
                     let status = ActionResponse::failure(&self.action_id, e.to_string())
@@ -178,15 +180,7 @@ impl OtaDownloader {
         info!("Downloading from {} into {}", url, file_path);
         self.download(resp, file).await?;
 
-        // Update Action payload with `ota_path`, i.e. downloaded file's location in fs
-        update.ota_path = Some(file_path.clone());
-        action.payload = serde_json::to_string(&update)?;
-
-        // Forward Action packet through bridge
-        self.bridge_tx.try_send(action)?;
-
-        #[cfg(target_os="android")]
-        {
+        if cfg!(target_os="android") {
             let mut installer = Command::new("pm")
                 .arg("install")
                 .arg("-t")
@@ -197,11 +191,23 @@ impl OtaDownloader {
                 let mut message = String::new();
                 installer.stdout.take().unwrap().read_to_string(&mut message)?;
                 installer.stderr.take().unwrap().read_to_string(&mut message)?;
-                return Err(Error::InstallationError(message));
+                self.send_status(ActionResponse::failure(&self.action_id, &message)).await;
+                Err(Error::InstallationError(message))
+            } else {
+                self.send_status(ActionResponse::success(&self.action_id)).await;
+                Ok(())
             }
+        } else {
+            // Update Action payload with `ota_path`, i.e. downloaded file's location in fs
+            update.ota_path = Some(file_path.clone());
+            action.payload = serde_json::to_string(&update)?;
+
+            // Forward Action packet through bridge
+            self.bridge_tx.try_send(action)?;
+
+            Ok(())
         }
 
-        Ok(())
     }
 
     /// Creates file to download into
@@ -266,7 +272,6 @@ impl OtaDownloader {
     }
 
     async fn send_status(&mut self, status: ActionResponse) {
-        debug!("Action status: {:?}", status);
         if let Err(e) = self.status_bucket.fill(status).await {
             error!("Failed to send downloader status. Error = {:?}", e);
         }
