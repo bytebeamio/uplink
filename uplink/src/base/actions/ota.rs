@@ -51,6 +51,8 @@ use serde::{Deserialize, Serialize};
 
 use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf, sync::Arc};
+use std::io::Read;
+use std::process::Command;
 
 use super::{Action, ActionResponse};
 use crate::base::{Config, Stream};
@@ -73,6 +75,8 @@ pub enum Error {
     FilePathMissing,
     #[error("Download failed, content length zero")]
     EmptyFile,
+    #[error("Couldn't install apk")]
+    InstallationError(String)
 }
 
 /// This struct contains the necessary components to download and store an OTA update as notified
@@ -171,15 +175,31 @@ impl OtaDownloader {
 
         // Create handler to perform download from URL
         let resp = self.client.get(&url).send().await?;
-        info!("Dowloading from {} into {}", url, file_path);
+        info!("Downloading from {} into {}", url, file_path);
         self.download(resp, file).await?;
 
         // Update Action payload with `ota_path`, i.e. downloaded file's location in fs
-        update.ota_path = Some(file_path);
+        update.ota_path = Some(file_path.clone());
         action.payload = serde_json::to_string(&update)?;
 
         // Forward Action packet through bridge
         self.bridge_tx.try_send(action)?;
+
+        #[cfg(target_os="android")]
+        {
+            let mut installer = Command::new("pm")
+                .arg("install")
+                .arg("-t")
+                .arg(file_path)
+                .spawn()?;
+            let status = installer.wait()?;
+            if !status.success() {
+                let mut message = String::new();
+                installer.stdout.take().unwrap().read_to_string(&mut message)?;
+                installer.stderr.take().unwrap().read_to_string(&mut message)?;
+                return Err(Error::InstallationError(message));
+            }
+        }
 
         Ok(())
     }
