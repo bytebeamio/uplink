@@ -95,7 +95,13 @@ impl Bridge {
     ) -> Result<(), Error> {
         let mut bridge_partitions = HashMap::new();
         for (name, config) in &self.config.streams {
-            let stream = Stream::with_config(name, config, self.data_tx.clone());
+            let stream = Stream::with_config(
+                name,
+                &self.config.project_id,
+                &self.config.device_id,
+                config,
+                self.data_tx.clone(),
+            );
             bridge_partitions.insert(name.to_owned(), stream);
         }
 

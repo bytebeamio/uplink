@@ -102,11 +102,11 @@ pub mod config {
         let tenant_id = config.project_id.trim();
         let device_id = config.device_id.trim();
         for config in config.streams.values_mut() {
-            let topic = str::replace(&config.topic, "{tenant_id}", tenant_id);
-            config.topic = topic;
-
-            let topic = str::replace(&config.topic, "{device_id}", device_id);
-            config.topic = topic;
+            if let Some(topic) = &config.topic {
+                let topic = str::replace(topic, "{tenant_id}", tenant_id);
+                let topic = str::replace(&topic, "{device_id}", device_id);
+                config.topic = Some(topic);
+            }
         }
 
         Ok(config)
@@ -144,7 +144,9 @@ impl Uplink {
             .streams
             .get("action_status")
             .ok_or_else(|| Error::msg("Action status topic missing from config"))?
-            .topic;
+            .topic
+            .as_ref()
+            .unwrap();
         let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
 
         Ok(Uplink { config, action_rx, action_tx, data_rx, data_tx, action_status })
