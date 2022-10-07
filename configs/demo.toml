@@ -1,0 +1,7 @@
+[ota]
+enabled = true
+path = "/var/tmp/ota-file"
+
+[simulator]
+num_devices = 10
+gps_paths = "./paths/"
