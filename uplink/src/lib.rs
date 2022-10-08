@@ -65,11 +65,6 @@ pub mod config {
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/metrics/jsonarray"
     buf_size = 10
 
-    # Action status stream from status messages from bridge
-    [streams.action_status]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
-    buf_size = 1
-
     [ota]
     enabled = false
     path = "/var/tmp/ota-file"
@@ -180,7 +175,16 @@ impl Uplink {
 
         let (raw_action_tx, raw_action_rx) = bounded(10);
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
-        let serializer = Serializer::new(self.config.clone(), self.data_rx.clone(), mqtt.client())?;
+        let metrics_config =
+            self.config.streams.get("metrics").expect("Missing metrics Stream in config");
+        let metrics_stream =
+            Stream::with_config(&"metrics".to_owned(), metrics_config, self.bridge_data_tx());
+        let serializer = Serializer::new(
+            self.config.clone(),
+            self.data_rx.clone(),
+            metrics_stream,
+            mqtt.client(),
+        )?;
 
         let actions = Actions::new(
             self.config.clone(),
