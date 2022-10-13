@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
 
 use flume::{SendError, Sender};
-use log::{info, warn};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 
 pub mod actions;
@@ -204,7 +204,7 @@ where
         }
 
         if current_timestamp < self.last_timestamp {
-            warn!("Timestamp anomaly!! [{}, {}]", current_timestamp, self.last_timestamp);
+            debug!("Timestamp anomaly!! [{}, {}]", current_timestamp, self.last_timestamp);
             self.buffer.add_timestamp_anomaly(self.last_timestamp, current_timestamp);
         }
 

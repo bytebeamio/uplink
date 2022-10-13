@@ -45,7 +45,7 @@
 use bytes::BytesMut;
 use flume::{Receiver, RecvError, Sender};
 use futures_util::StreamExt;
-use log::{debug, error, info};
+use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
