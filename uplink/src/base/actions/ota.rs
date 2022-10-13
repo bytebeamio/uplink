@@ -146,11 +146,6 @@ impl OtaDownloader {
 
             match self.run(action).await {
                 Ok(_) => {
-                    if !cfg!(target_os="android") {
-                        let status = ActionResponse::progress(&self.action_id, "Downloaded", 100)
-                            .set_sequence(self.sequence());
-                        self.send_status(status).await;
-                    }
                 }
                 Err(e) => {
                     let status = ActionResponse::failure(&self.action_id, e.to_string())
@@ -204,6 +199,10 @@ impl OtaDownloader {
 
             // Forward Action packet through bridge
             self.bridge_tx.try_send(action)?;
+
+            let status = ActionResponse::progress(&self.action_id, "Downloaded", 100)
+                .set_sequence(self.sequence());
+            self.send_status(status).await;
 
             Ok(())
         }
@@ -266,7 +265,7 @@ impl OtaDownloader {
             }
         }
 
-        info!("Firmware dowloaded sucessfully");
+        info!("Firmware downloaded successfully");
 
         Ok(())
     }
