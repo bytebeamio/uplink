@@ -68,6 +68,13 @@ pub struct SimulatorConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct JournalctlConfig {
+    pub enabled: bool,
+    pub tags: Vec<String>,
+    pub priority: u8,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -79,10 +86,12 @@ pub struct Config {
     pub max_inflight: u16,
     pub actions: Vec<String>,
     pub persistence: Option<Persistence>,
+    pub log_dir: Option<String>,
     pub streams: HashMap<String, StreamConfig>,
     pub ota: Ota,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
+    pub journalctl: Option<JournalctlConfig>
 }
 
 pub trait Point: Send + Debug {

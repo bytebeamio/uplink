@@ -56,6 +56,11 @@ pub mod config {
     # triggered from cloud.
     actions = ["tunshell"]
 
+    [journalctl]
+    enabled = false
+    tags = ["kernel"]
+    priority = 6
+
     [persistence]
     path = "/tmp/uplink"
     max_file_size = 104857600 # 100MB
@@ -189,6 +194,7 @@ impl Uplink {
             ota_tx,
             self.action_status.clone(),
             self.action_tx.clone(),
+            self.bridge_data_tx().clone(),
         );
 
         // Launch a thread to handle incoming and outgoing MQTT packets
