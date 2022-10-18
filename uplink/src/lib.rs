@@ -62,7 +62,6 @@ pub mod config {
     max_file_count = 3
 
     [streams.metrics]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/metrics/jsonarray"
     buf_size = 10
 
     # Action status stream from status messages from bridge
