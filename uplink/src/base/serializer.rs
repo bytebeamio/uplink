@@ -643,7 +643,7 @@ mod test {
         streams.insert(
             "metrics".to_owned(),
             StreamConfig {
-                topic: Default::default(),
+                topic: Some("metrics/topic".to_string()),
                 buf_size: 100,
                 flush_period: DEFAULT_TIMEOUT,
             },
