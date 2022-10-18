@@ -173,7 +173,7 @@ impl<C: MqttClient> Serializer<C> {
     ) -> Result<Serializer<C>, Error> {
         let metrics_config =
             config.streams.get("metrics").expect("Missing metrics Stream in config");
-        let metrics = Metrics::new(&metrics_config.topic);
+        let metrics = Metrics::new(metrics_config.topic.as_ref().unwrap());
 
         let storage = match &config.persistence {
             Some(persistence) => {
@@ -643,7 +643,7 @@ mod test {
         streams.insert(
             "metrics".to_owned(),
             StreamConfig {
-                topic: Default::default(),
+                topic: Some("metrics/topic".to_string()),
                 buf_size: 100,
                 flush_period: DEFAULT_TIMEOUT,
             },

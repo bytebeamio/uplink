@@ -23,7 +23,7 @@ fn default_timeout() -> u64 {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StreamConfig {
-    pub topic: String,
+    pub topic: Option<String>,
     pub buf_size: usize,
     #[serde(default = "default_timeout")]
     /// Duration(in seconds) that bridge collector waits from
@@ -148,10 +148,16 @@ where
 
     pub fn with_config(
         name: &String,
+        project_id: &String,
+        device_id: &String,
         config: &StreamConfig,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx);
+        let mut stream = if let Some(topic) = &config.topic {
+            Stream::new(name, topic, config.buf_size, tx)
+        } else {
+            Stream::dynamic_with_size(name, project_id, device_id, config.buf_size, tx)
+        };
         stream.flush_period = Duration::from_secs(config.flush_period);
 
         stream
