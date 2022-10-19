@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
 
 use flume::{SendError, Sender};
-use log::{debug, info, warn};
+use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 
 pub mod actions;
@@ -114,7 +114,7 @@ pub struct Stream<T> {
     topic: Arc<String>,
     last_sequence: u32,
     last_timestamp: u64,
-    max_buffer_size: usize,
+    pub max_buffer_size: usize,
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
     pub flush_period: Duration,
@@ -199,7 +199,7 @@ where
 
         // Anomaly detection
         if current_sequence <= self.last_sequence {
-            warn!("Sequence number anomaly! [{}, {}]", current_sequence, self.last_sequence);
+            debug!("Sequence number anomaly! [{}, {}]", current_sequence, self.last_sequence);
             self.buffer.add_sequence_anomaly(self.last_sequence, current_sequence);
         }
 
@@ -225,7 +225,7 @@ where
     fn take_buffer(&mut self) -> Buffer<T> {
         let name = self.name.clone();
         let topic = self.topic.clone();
-        info!("Flushing stream name: {}, topic: {}", name, topic);
+        trace!("Flushing stream name: {}, topic: {}", name, topic);
 
         mem::replace(&mut self.buffer, Buffer::new(name, topic))
     }
