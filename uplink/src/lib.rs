@@ -178,8 +178,13 @@ impl Uplink {
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
         let metrics_config =
             self.config.streams.get("metrics").expect("Missing metrics Stream in config");
-        let metrics_stream =
-            Stream::with_config(&"metrics".to_owned(), metrics_config, self.bridge_data_tx());
+        let metrics_stream = Stream::with_config(
+            &"metrics".to_owned(),
+            &self.config.project_id,
+            &self.config.device_id,
+            metrics_config,
+            self.bridge_data_tx(),
+        );
         let serializer = Serializer::new(
             self.config.clone(),
             self.data_rx.clone(),

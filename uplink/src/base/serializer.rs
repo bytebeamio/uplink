@@ -695,8 +695,13 @@ mod test {
             buf_size: 100,
             flush_period: DEFAULT_TIMEOUT,
         };
-        let metrics_stream =
-            Stream::with_config(&"metrics".to_owned(), &metrics_config, data_tx.clone());
+        let metrics_stream = Stream::with_config(
+            &"metrics".to_owned(),
+            &config.project_id,
+            &config.device_id,
+            &metrics_config,
+            data_tx.clone(),
+        );
 
         (Serializer::new(config, data_rx, metrics_stream, client).unwrap(), data_tx, net_rx)
     }
