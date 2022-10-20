@@ -51,8 +51,6 @@ use serde::{Deserialize, Serialize};
 
 use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf, sync::Arc};
-use std::io::Read;
-use std::process::Command;
 
 use super::{Action, ActionResponse};
 use crate::base::{Config, Stream};
@@ -76,7 +74,7 @@ pub enum Error {
     #[error("Download failed, content length zero")]
     EmptyFile,
     #[error("Couldn't install apk")]
-    InstallationError(String)
+    InstallationError(String),
 }
 
 /// This struct contains the necessary components to download and store an OTA update as notified
@@ -114,7 +112,7 @@ impl OtaDownloader {
             }
             None => client_builder,
         }
-        .build()?;
+            .build()?;
 
         // Create rendezvous channel with flume
         let (ota_tx, ota_rx) = flume::bounded(0);
@@ -145,8 +143,7 @@ impl OtaDownloader {
             self.action_id = action.action_id.clone();
 
             match self.run(action).await {
-                Ok(_) => {
-                }
+                Ok(_) => {}
                 Err(e) => {
                     let status = ActionResponse::failure(&self.action_id, e.to_string())
                         .set_sequence(self.sequence());
@@ -175,38 +172,18 @@ impl OtaDownloader {
         info!("Downloading from {} into {}", url, file_path);
         self.download(resp, file).await?;
 
-        if cfg!(target_os="android") {
-            let mut installer = Command::new("pm")
-                .arg("install")
-                .arg("-t")
-                .arg(file_path)
-                .spawn()?;
-            let status = installer.wait()?;
-            if !status.success() {
-                let mut message = String::new();
-                installer.stdout.take().unwrap().read_to_string(&mut message)?;
-                installer.stderr.take().unwrap().read_to_string(&mut message)?;
-                self.send_status(ActionResponse::failure(&self.action_id, &message)).await;
-                Err(Error::InstallationError(message))
-            } else {
-                self.send_status(ActionResponse::success(&self.action_id)).await;
-                Ok(())
-            }
-        } else {
-            // Update Action payload with `ota_path`, i.e. downloaded file's location in fs
-            update.ota_path = Some(file_path.clone());
-            action.payload = serde_json::to_string(&update)?;
+        // Update Action payload with `ota_path`, i.e. downloaded file's location in fs
+        update.ota_path = Some(file_path.clone());
+        action.payload = serde_json::to_string(&update)?;
 
-            // Forward Action packet through bridge
-            self.bridge_tx.try_send(action)?;
+        // Forward Action packet through bridge
+        self.bridge_tx.try_send(action)?;
 
-            let status = ActionResponse::progress(&self.action_id, "Downloaded", 100)
-                .set_sequence(self.sequence());
-            self.send_status(status).await;
+        let status = ActionResponse::progress(&self.action_id, "Downloaded", 100)
+            .set_sequence(self.sequence());
+        self.send_status(status).await;
 
-            Ok(())
-        }
-
+        Ok(())
     }
 
     /// Creates file to download into
