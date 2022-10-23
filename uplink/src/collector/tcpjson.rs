@@ -210,7 +210,7 @@ impl Bridge {
                     };
                 }
 
-                _ = &mut current_action_.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end), if current_action_.is_some() => {
+                _ = &mut current_action_.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
                     let action = current_action_.take().unwrap();
                     error!("Timeout waiting for action response. Action ID = {}", action.id);
 
