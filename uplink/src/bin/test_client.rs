@@ -24,7 +24,7 @@ async fn main() {
     let mut idx = 1;
     loop {
         let action_s = framed.next().await.unwrap().unwrap();
-        println!("Received: {:?}", action_s);
+        println!("Received: {}", action_s);
         let action = serde_json::from_str::<Action>(action_s.as_str()).unwrap();
         idx += 1;
         let response = Response {
@@ -36,7 +36,7 @@ async fn main() {
             progress: 100,
         };
         let resp = serde_json::to_string(&response).unwrap();
-        println!("Sending: {:?}", resp);
+        println!("Sending: {}", resp);
         framed.send(resp).await.unwrap();
     }
 }
