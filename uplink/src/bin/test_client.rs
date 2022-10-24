@@ -12,8 +12,9 @@ struct Response {
     sequence: u32,
     timestamp: u64,
     action_id: String,
-    status: String,
+    state: String,
     progress: u8,
+    errors: Vec<String>,
 }
 
 #[tokio::main]
@@ -32,8 +33,9 @@ async fn main() {
             sequence: idx,
             timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
             action_id: action.action_id,
-            status: "Completed".to_string(),
+            state: "Completed".to_string(),
             progress: 100,
+            errors: vec![],
         };
         let resp = serde_json::to_string(&response).unwrap();
         println!("Sending: {}", resp);

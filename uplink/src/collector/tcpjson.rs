@@ -136,7 +136,7 @@ impl Bridge {
                                 .and_then(|id| id.as_str()) {
                                 let action_id = current_action_.as_ref().unwrap().id.as_str();
                                 if action_id == response_id {
-                                    if let Some("Completed") = data.payload.as_object().unwrap().get("status")
+                                    if let Some("Completed") = data.payload.as_object().unwrap().get("state")
                                         .and_then(|s| s.as_str()) {
                                         current_action_ = None;
                                     } else {
