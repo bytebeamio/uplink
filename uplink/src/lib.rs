@@ -64,6 +64,10 @@ pub mod config {
     [streams.metrics]
     buf_size = 10
 
+    [streams.action_status]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
+    buf_size = 1
+
     [ota]
     enabled = false
     path = "/var/tmp/ota-file"
