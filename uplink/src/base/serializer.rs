@@ -217,6 +217,7 @@ impl<C: MqttClient> Serializer<C> {
             // Collect next data packet to write to disk
             let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
+            info!("Data received on topic='{}'", topic);
             let payload = data.serialize()?;
 
             let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
@@ -261,6 +262,7 @@ impl<C: MqttClient> Serializer<C> {
                       }
 
                       let topic = data.topic();
+                      info!("Data received on topic='{}'", topic);
                       let payload = data.serialize()?;
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
@@ -336,6 +338,7 @@ impl<C: MqttClient> Serializer<C> {
                       }
 
                       let topic = data.topic();
+                      info!("Data received on topic='{}'", topic);
                       let payload = data.serialize()?;
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
@@ -413,6 +416,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                     let topic = data.topic();
+                    info!("Data received on topic='{}'", topic);
                     let payload = data.serialize()?;
                     let payload_size = payload.len();
                     match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
