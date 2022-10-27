@@ -164,14 +164,14 @@ pub struct Serializer<C: MqttClient> {
     client: C,
     storage: Option<Storage>,
     metrics: Metrics,
-    metrics_stream: Stream<Metrics>,
+    metrics_stream: Option<Stream<Metrics>>,
 }
 
 impl<C: MqttClient> Serializer<C> {
     pub fn new(
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
-        metrics_stream: Stream<Metrics>,
+        metrics_stream: Option<Stream<Metrics>>,
         client: C,
     ) -> Result<Serializer<C>, Error> {
         let storage = match &config.persistence {
@@ -425,9 +425,12 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                 }
-                _ = interval.tick() => {
+                _ = interval.tick(), if self.metrics_stream.is_some() => {
                     let metrics = self.metrics.next();
-                    self.metrics_stream.fill(metrics).await.unwrap();
+                    let stream = self.metrics_stream.as_mut().unwrap();
+                    if let Err(e) = stream.fill(metrics).await {
+                        error!("Couldn't write serializer metrics to stream: {}", e)
+                    }
                 }
             }
         }
@@ -567,11 +570,7 @@ mod test {
     use serde_json::Value;
 
     use super::*;
-    use crate::{
-        base::{Stream, StreamConfig, DEFAULT_TIMEOUT},
-        config::Persistence,
-        Payload,
-    };
+    use crate::{base::Stream, config::Persistence, Payload};
     use std::collections::HashMap;
 
     #[derive(Clone)]
@@ -690,20 +689,7 @@ mod test {
         let (net_tx, net_rx) = flume::bounded(1);
         let client = MockClient { net_tx };
 
-        let metrics_config = StreamConfig {
-            topic: Default::default(),
-            buf_size: 100,
-            flush_period: DEFAULT_TIMEOUT,
-        };
-        let metrics_stream = Stream::with_config(
-            &"metrics".to_owned(),
-            &config.project_id,
-            &config.device_id,
-            &metrics_config,
-            data_tx.clone(),
-        );
-
-        (Serializer::new(config, data_rx, metrics_stream, client).unwrap(), data_tx, net_rx)
+        (Serializer::new(config, data_rx, None, client).unwrap(), data_tx, net_rx)
     }
 
     #[derive(Error, Debug)]
