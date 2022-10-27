@@ -351,10 +351,10 @@ pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
 }
 
 #[derive(Debug, Serialize)]
-struct Peripheral {
-    gps: String,
-    gsm: String,
-    imu: String,
+struct PeripheralState {
+    gps_status: String,
+    gsm_status: String,
+    imu_status: String,
     left_indicator: String,
     right_indicator: String,
     headlamp: String,
@@ -365,10 +365,10 @@ struct Peripheral {
 
 pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let payload = Peripheral {
-        gps: generate_bool_string(0.99),
-        gsm: generate_bool_string(0.99),
-        imu: generate_bool_string(0.99),
+    let payload = PeripheralState {
+        gps_status: generate_bool_string(0.99),
+        gsm_status: generate_bool_string(0.99),
+        imu_status: generate_bool_string(0.99),
         left_indicator: generate_bool_string(0.1),
         right_indicator: generate_bool_string(0.1),
         headlamp: generate_bool_string(0.9),
@@ -380,7 +380,7 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Pay
     return Payload {
         timestamp,
         sequence,
-        stream: format!("/tenants/demo/devices/{}/events/peripherals/jsonarray", device.device_id),
+        stream: format!("/tenants/demo/devices/{}/events/peripheral_state/jsonarray", device.device_id),
         payload: json!(payload),
     };
 }
