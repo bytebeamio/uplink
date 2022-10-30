@@ -200,7 +200,7 @@ impl Bridge {
 
                 action = self.actions_rx.recv_async(), if current_action_.is_none() => {
                     let action = action?;
-                    info!("Received action: {action}")
+                    info!("Received action: {:?}", action);
 
                     match serde_json::to_string(&action) {
                         Ok(data) => {
