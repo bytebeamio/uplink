@@ -123,7 +123,7 @@ impl Bridge {
             select! {
                 line = client.next() => {
                     let line = line.ok_or(Error::StreamDone)??;
-                    debug!("Received line = {:?}", line);
+                    info!("Received line = {:?}", line);
 
                     let data: Payload = match serde_json::from_str(&line) {
                         Ok(d) => d,
@@ -200,6 +200,7 @@ impl Bridge {
 
                 action = self.actions_rx.recv_async(), if current_action_.is_none() => {
                     let action = action?;
+                    info!("Received action: {action}")
 
                     match serde_json::to_string(&action) {
                         Ok(data) => {
