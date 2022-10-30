@@ -33,26 +33,27 @@ max_file_count = 3
 # Table of pre-configured data streams
 #
 # Required Parameters
-# - topic: Topic-filter to which data shall be published
 # - buf-size: Number of data points that shall be included in each Publish
-# - flush-period: Duration in seconds after a data point enters the stream
+# - topic(optional): topic-filter to which data shall be published. If left
+#   unconfigured, stream will be created dynamically.
+# - flush-period(optional): Duration in seconds after a data point enters the stream
 #   and WILL be flushed by collector. Defaults to 60s in case not configured.
 #
 # NOTE: The metrics stream is one to which the Serializer Metrics module
 # publishes associated data onto, to keep track of serializer performance.
 [streams.metrics]
-topic = "/tenants/{tenant_id}/devices/{device_id}/events/metrics/jsonarray"
 buf_size = 10
 flush_period = 30
 
 # The action_status stream is used to push progress of Actions in execution
+#
+# NOTE: Action statuses are expected on a specifc topic as configured below.
 [streams.action_status]
 topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
 buf_size = 1
 
 # Set buf_size to 1 for the device_shadow stream
 [streams.device_shadow]
-topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
 buf_size = 1
 
 # Configurations associated with the OTA module of uplink, if enabled Actions

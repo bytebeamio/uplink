@@ -63,10 +63,8 @@ pub mod config {
     max_file_count = 3
 
     [streams.metrics]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/metrics/jsonarray"
     buf_size = 10
 
-    # Action status stream from status messages from bridge
     [streams.action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     buf_size = 1
@@ -103,11 +101,11 @@ pub mod config {
         let tenant_id = config.project_id.trim();
         let device_id = config.device_id.trim();
         for config in config.streams.values_mut() {
-            let topic = str::replace(&config.topic, "{tenant_id}", tenant_id);
-            config.topic = topic;
-
-            let topic = str::replace(&config.topic, "{device_id}", device_id);
-            config.topic = topic;
+            if let Some(topic) = &config.topic {
+                let topic = str::replace(topic, "{tenant_id}", tenant_id);
+                let topic = str::replace(&topic, "{device_id}", device_id);
+                config.topic = Some(topic);
+            }
         }
 
         Ok(config)
@@ -145,7 +143,9 @@ impl Uplink {
             .streams
             .get("action_status")
             .ok_or_else(|| Error::msg("Action status topic missing from config"))?
-            .topic;
+            .topic
+            .as_ref()
+            .unwrap();
         let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
 
         Ok(Uplink { config, action_rx, action_tx, data_rx, data_tx, action_status })
@@ -181,7 +181,23 @@ impl Uplink {
 
         let (raw_action_tx, raw_action_rx) = bounded(10);
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
-        let serializer = Serializer::new(self.config.clone(), self.data_rx.clone(), mqtt.client())?;
+
+        let metrics_config = self.config.streams.get("metrics");
+        let metrics_stream = metrics_config.map(|metrics_config| {
+            Stream::with_config(
+                &"metrics".to_owned(),
+                &self.config.project_id,
+                &self.config.device_id,
+                metrics_config,
+                self.bridge_data_tx(),
+            )
+        });
+        let serializer = Serializer::new(
+            self.config.clone(),
+            self.data_rx.clone(),
+            metrics_stream,
+            mqtt.client(),
+        )?;
 
         let actions = Actions::new(
             self.config.clone(),
