@@ -108,6 +108,8 @@ impl OtaDownloader {
                 let device = Identity::from_pem(&buf)?;
                 client_builder.add_root_certificate(ca).identity(device)
             }
+            // TODO: cover circumstance where uplink as simulator must use certs from env variables
+            // None if config.simulator.is_some() => {},
             None => client_builder,
         }
         .build()?;
