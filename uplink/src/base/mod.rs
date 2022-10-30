@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
 
 use flume::{SendError, Sender};
-use log::{info, warn};
+use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 
 pub mod actions;
@@ -75,10 +75,12 @@ pub struct Config {
     pub port: u16,
     pub authentication: Option<Authentication>,
     pub bridge_port: u16,
+    pub run_logcat: bool,
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub actions: Vec<String>,
     pub persistence: Option<Persistence>,
+    pub log_dir: Option<String>,
     pub streams: HashMap<String, StreamConfig>,
     pub ota: Ota,
     pub stats: Stats,
@@ -112,7 +114,7 @@ pub struct Stream<T> {
     topic: Arc<String>,
     last_sequence: u32,
     last_timestamp: u64,
-    max_buffer_size: usize,
+    pub max_buffer_size: usize,
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
     pub flush_period: Duration,
@@ -203,12 +205,12 @@ where
 
         // Anomaly detection
         if current_sequence <= self.last_sequence {
-            warn!("Sequence number anomaly! [{}, {}]", current_sequence, self.last_sequence);
+            debug!("Sequence number anomaly! [{}, {}]", current_sequence, self.last_sequence);
             self.buffer.add_sequence_anomaly(self.last_sequence, current_sequence);
         }
 
         if current_timestamp < self.last_timestamp {
-            warn!("Timestamp anomaly!! [{}, {}]", current_timestamp, self.last_timestamp);
+            debug!("Timestamp anomaly!! [{}, {}]", current_timestamp, self.last_timestamp);
             self.buffer.add_timestamp_anomaly(self.last_timestamp, current_timestamp);
         }
 
@@ -229,7 +231,7 @@ where
     fn take_buffer(&mut self) -> Buffer<T> {
         let name = self.name.clone();
         let topic = self.topic.clone();
-        info!("Flushing stream name: {}, topic: {}", name, topic);
+        trace!("Flushing stream name: {}, topic: {}", name, topic);
 
         mem::replace(&mut self.buffer, Buffer::new(name, topic))
     }

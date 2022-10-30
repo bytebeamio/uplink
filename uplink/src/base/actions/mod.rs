@@ -11,8 +11,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub mod ota;
 mod process;
 pub mod tunshell;
+pub mod logcat;
 
 use crate::base::{Buffer, Point, Stream};
+use crate::actions::logcat::{LogcatConfig, LogcatInstance, LogLevel};
+use crate::Payload;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -121,6 +124,8 @@ pub struct Actions {
     tunshell_tx: Sender<Action>,
     ota_tx: Sender<Action>,
     bridge_tx: Sender<Action>,
+    bridge_data_tx: Sender<Box<dyn Package>>,
+    logcat: Option<LogcatInstance>,
 }
 
 impl Actions {
@@ -131,13 +136,46 @@ impl Actions {
         ota_tx: Sender<Action>,
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
+        bridge_data_tx: Sender<Box<dyn Package>>,
     ) -> Actions {
         let process = process::Process::new(action_status.clone());
-        Actions { config, action_status, process, actions_rx, tunshell_tx, ota_tx, bridge_tx }
+        Actions {
+            config,
+            action_status,
+            process,
+            actions_rx,
+            tunshell_tx,
+            ota_tx,
+            bridge_tx,
+            bridge_data_tx,
+            logcat: None,
+        }
+    }
+
+    fn create_log_stream(&self) -> Stream<Payload> {
+        Stream::dynamic_with_size(
+            "logs",
+            &self.config.project_id,
+            &self.config.device_id,
+            32,
+            self.bridge_data_tx.clone(),
+        )
     }
 
     /// Start receiving and processing [Action]s
     pub async fn start(mut self) {
+        if self.config.run_logcat {
+            debug!("starting logcat");
+            self.logcat = Some(
+                LogcatInstance::new(
+                    self.create_log_stream(),
+                    &LogcatConfig {
+                        tags: vec!["*".to_string()],
+                        min_level: LogLevel::Debug
+                    }
+                )
+            );
+        }
         loop {
             let action = match self.actions_rx.recv_async().await {
                 Ok(v) => v,
@@ -167,6 +205,20 @@ impl Actions {
                 self.tunshell_tx.send_async(action).await?;
                 return Ok(());
             }
+            "configure_logcat" => {
+                match serde_json::from_str::<LogcatConfig>(action.payload.as_str()) {
+                    Ok(mut logcat_config) => {
+                        logcat_config.tags = logcat_config.tags.into_iter()
+                            .filter(|tag| !tag.is_empty())
+                            .collect();
+                        log::info!("restarting logcat with following config: {:?}", logcat_config);
+                        self.logcat = Some(LogcatInstance::new(self.create_log_stream(), &logcat_config))
+                    }
+                    Err(e) => {
+                        error!("couldn't parse logcat config payload:\n{}\n{}", action.payload, e)
+                    }
+                }
+            },
             "update_firmware" if self.config.ota.enabled => {
                 // if action can't be sent, Error out and notify cloud
                 self.ota_tx.try_send(action).map_err(|e| match e {

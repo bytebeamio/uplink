@@ -203,6 +203,16 @@ nc localhost 5555
 
 The complete API reference for the uplink library is available within the [library documentation][docs.rs].
 
+# Android executable instructions
+
+* install `cargo-ndk` v2.11.0 (`cargo install cargo-ndk --version 2.11.0`)
+* `export ANDROID_NDK_HOME=~/Android/Sdk/ndk/25.0.8775105`
+* `cargo ndk --target x86_64-linux-android --platform 23 build --bin uplink`
+* move executable to `/data/local/`
+* set port to something else
+* set persistence path to `/data/local/uplink`
+* `chmod +x uplink_exe`
+
 ### Contributing
 Please follow the [code of conduct][coc] while opening issues to report bugs or before you contribute fixes, also do read our [contributor guide][contribute] to get a better idea of what we'd appreciate and what we won't.
 
