@@ -21,7 +21,7 @@ fn default_timeout() -> u64 {
     DEFAULT_TIMEOUT
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamConfig {
     pub topic: Option<String>,
     pub buf_size: usize,
@@ -82,6 +82,8 @@ pub struct Config {
     pub persistence: Option<Persistence>,
     pub log_dir: Option<String>,
     pub streams: HashMap<String, StreamConfig>,
+    pub action_status: StreamConfig,
+    pub serializer_metrics: Option<StreamConfig>,
     pub ota: Ota,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
