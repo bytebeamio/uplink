@@ -48,6 +48,7 @@ pub mod config {
 
     const DEFAULT_CONFIG: &str = r#"
     bridge_port = 5555
+    run_logcat = true
     max_packet_size = 102400
     max_inflight = 100
 
@@ -205,6 +206,7 @@ impl Uplink {
             ota_tx,
             self.action_status.clone(),
             self.action_tx.clone(),
+            self.bridge_data_tx().clone(),
         );
 
         // Launch a thread to handle incoming and outgoing MQTT packets

@@ -5,12 +5,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::time::{Duration, Instant};
+use tokio::time::{Duration, Sleep};
 use tokio::{select, time};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::{collections::HashMap, io, sync::Arc};
+use std::pin::Pin;
 
 use super::util::DelayMap;
 use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
@@ -38,7 +39,6 @@ pub struct Bridge {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
     actions_rx: Receiver<Action>,
-    current_action: Option<String>,
     action_status: Stream<ActionResponse>,
 }
 
@@ -49,12 +49,10 @@ impl Bridge {
         actions_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
     ) -> Bridge {
-        Bridge { config, data_tx, actions_rx, current_action: None, action_status }
+        Bridge { config, data_tx, actions_rx, action_status }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let mut action_status = self.action_status.clone();
-
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
             let listener = TcpListener::bind(&addr).await?;
@@ -74,7 +72,7 @@ impl Bridge {
                         let action = action?;
                         error!("Bridge down!! Action ID = {}", action.action_id);
                         let status = ActionResponse::failure(&action.action_id, "Bridge down");
-                        if let Err(e) = action_status.fill(status).await {
+                        if let Err(e) = self.action_status.fill(status).await {
                             error!("Failed to send busy status. Error = {:?}", e);
                         }
                     }
@@ -91,7 +89,7 @@ impl Bridge {
 
     pub async fn collect(
         &mut self,
-        mut framed: Framed<TcpStream, LinesCodec>,
+        mut client: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
         let mut bridge_partitions = HashMap::new();
         for (name, config) in &self.config.streams {
@@ -105,19 +103,29 @@ impl Bridge {
             bridge_partitions.insert(name.to_owned(), stream);
         }
 
-        let mut action_status = self.action_status.clone();
-        let action_timeout = time::sleep(Duration::from_secs(100));
-        tokio::pin!(action_timeout);
+        let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
+        struct CurrentAction {
+            id: String,
+            timeout: Pin<Box<Sleep>>,
+        }
+        // - set to None when
+        // -- timeout ends
+        // -- A response with status "Completed" is received
+        // - set to a value when
+        // -- it is currently None and a new action is received
+        // - timeout is updated
+        // -- when a non "Completed" action is received
+        let mut current_action_: Option<CurrentAction> = None;
 
         let mut flush_handler = DelayMap::new();
 
         loop {
             select! {
-                frame = framed.next() => {
-                    let frame = frame.ok_or(Error::StreamDone)??;
-                    debug!("Received line = {:?}", frame);
+                line = client.next() => {
+                    let line = line.ok_or(Error::StreamDone)??;
+                    info!("Received line = {:?}", line);
 
-                    let data: Payload = match serde_json::from_str(&frame) {
+                    let data: Payload = match serde_json::from_str(&line) {
                         Ok(d) => d,
                         Err(e) => {
                             error!("Deserialization error = {:?}", e);
@@ -128,12 +136,29 @@ impl Bridge {
                     // If incoming data is a response for an action, drop it
                     // if timeout is already sent to cloud
                     if data.stream == "action_status" {
-                        match self.current_action.take() {
-                            Some(id) => debug!("Response for action = {:?}", id),
-                            None => {
-                                error!("Action timed out already");
-                                continue
+                        if current_action_.is_some() {
+                            if let Some(response_id) = data.payload.as_object()
+                                .and_then(|payload| payload.get("action_id"))
+                                .and_then(|id| id.as_str()) {
+                                let action_id = current_action_.as_ref().unwrap().id.as_str();
+                                if action_id == response_id {
+                                    if let Some("Completed") = data.payload.as_object().unwrap().get("state")
+                                        .and_then(|s| s.as_str()) {
+                                        current_action_ = None;
+                                    } else {
+                                        current_action_.as_mut().unwrap().timeout = Box::pin(time::sleep(Duration::from_secs(10)));
+                                    }
+                                } else {
+                                    error!("action_id in action_status({response_id}) does not match that of active action ({action_id})");
+                                    continue;
+                                }
+                            } else {
+                                error!("No valid action_id in action_status stream payload");
+                                continue;
                             }
+                        } else {
+                            error!("Action timed out already, ignoring response: {:?}", data);
+                            continue;
                         }
                     }
 
@@ -150,6 +175,7 @@ impl Bridge {
                         }
                     };
 
+                    let max_stream_size = stream.max_buffer_size;
                     let state = match stream.fill(data).await {
                         Ok(s) => s,
                         Err(e) => {
@@ -161,38 +187,43 @@ impl Bridge {
                     // Remove timeout from flush_handler for selected stream if stream state is flushed,
                     // do nothing if stream state is partial. Insert a new timeout if initial fill.
                     // Warn in case stream flushed stream was not in the queue.
-                    match state {
-                        StreamStatus::Flushed(name) => flush_handler.remove(name),
-                        StreamStatus::Init(name, flush_period) => flush_handler.insert(name, flush_period),
-                        StreamStatus::Partial(l) => {
-                            debug!("Stream contains {} elements", l);
+                    if max_stream_size > 1 {
+                        match state {
+                            StreamStatus::Flushed(name) => flush_handler.remove(name),
+                            StreamStatus::Init(name, flush_period) => flush_handler.insert(name, flush_period),
+                            StreamStatus::Partial(l) => {
+                                debug!("Stream contains {} elements", l);
+                            }
                         }
                     }
                 }
 
-                action = self.actions_rx.recv_async() => {
+                action = self.actions_rx.recv_async(), if current_action_.is_none() => {
                     let action = action?;
-                    self.current_action = Some(action.action_id.to_owned());
+                    info!("Received action: {:?}", action);
 
-                    action_timeout.as_mut().reset(Instant::now() + Duration::from_secs(10));
-                    let data = match serde_json::to_string(&action) {
-                        Ok(d) => d,
+                    match serde_json::to_string(&action) {
+                        Ok(data) => {
+                            current_action_ = Some(CurrentAction {
+                                id: action.action_id.clone(),
+                                timeout: Box::pin(time::sleep(Duration::from_secs(10))),
+                            });
+                            client.send(data).await?;
+                        },
                         Err(e) => {
                             error!("Serialization error = {:?}", e);
                             continue
                         }
                     };
-
-                    framed.send(data).await?;
                 }
 
-                _ = &mut action_timeout, if self.current_action.is_some() => {
-                    let action = self.current_action.take().unwrap();
-                    error!("Timeout waiting for action response. Action ID = {}", action);
+                _ = &mut current_action_.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
+                    let action = current_action_.take().unwrap();
+                    error!("Timeout waiting for action response. Action ID = {}", action.id);
 
                     // Send failure response to cloud
-                    let status = ActionResponse::failure(&action, "Action timed out");
-                    if let Err(e) = action_status.fill(status).await {
+                    let status = ActionResponse::failure(&action.id, "Action timed out");
+                    if let Err(e) = self.action_status.fill(status).await {
                         error!("Failed to fill. Error = {:?}", e);
                     }
                 }
