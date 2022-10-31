@@ -8,13 +8,13 @@ use tokio::time::Duration;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod logcat;
 pub mod ota;
 mod process;
 pub mod tunshell;
-pub mod logcat;
 
 use crate::base::{Buffer, Point, Stream};
-use crate::actions::logcat::{LogcatConfig, LogcatInstance, LogLevel};
+use crate::middleware::logcat::{LogLevel, LogcatConfig, LogcatInstance};
 use crate::Payload;
 
 #[derive(Error, Debug)]
@@ -116,7 +116,7 @@ impl Point for ActionResponse {
     }
 }
 
-pub struct Actions {
+pub struct Middleware {
     config: Arc<Config>,
     action_status: Stream<ActionResponse>,
     process: process::Process,
@@ -128,7 +128,7 @@ pub struct Actions {
     logcat: Option<LogcatInstance>,
 }
 
-impl Actions {
+impl Middleware {
     pub fn new(
         config: Arc<Config>,
         actions_rx: Receiver<Action>,
@@ -137,9 +137,9 @@ impl Actions {
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
         bridge_data_tx: Sender<Box<dyn Package>>,
-    ) -> Actions {
+    ) -> Self {
         let process = process::Process::new(action_status.clone());
-        Actions {
+        Self {
             config,
             action_status,
             process,
@@ -166,15 +166,10 @@ impl Actions {
     pub async fn start(mut self) {
         if self.config.run_logcat {
             debug!("starting logcat");
-            self.logcat = Some(
-                LogcatInstance::new(
-                    self.create_log_stream(),
-                    &LogcatConfig {
-                        tags: vec!["*".to_string()],
-                        min_level: LogLevel::Debug
-                    }
-                )
-            );
+            self.logcat = Some(LogcatInstance::new(
+                self.create_log_stream(),
+                &LogcatConfig { tags: vec!["*".to_string()], min_level: LogLevel::Debug },
+            ));
         }
         loop {
             let action = match self.actions_rx.recv_async().await {
@@ -208,17 +203,17 @@ impl Actions {
             "configure_logcat" => {
                 match serde_json::from_str::<LogcatConfig>(action.payload.as_str()) {
                     Ok(mut logcat_config) => {
-                        logcat_config.tags = logcat_config.tags.into_iter()
-                            .filter(|tag| !tag.is_empty())
-                            .collect();
+                        logcat_config.tags =
+                            logcat_config.tags.into_iter().filter(|tag| !tag.is_empty()).collect();
                         log::info!("restarting logcat with following config: {:?}", logcat_config);
-                        self.logcat = Some(LogcatInstance::new(self.create_log_stream(), &logcat_config))
+                        self.logcat =
+                            Some(LogcatInstance::new(self.create_log_stream(), &logcat_config))
                     }
                     Err(e) => {
                         error!("couldn't parse logcat config payload:\n{}\n{}", action.payload, e)
                     }
                 }
-            },
+            }
             "update_firmware" if self.config.ota.enabled => {
                 // if action can't be sent, Error out and notify cloud
                 self.ota_tx.try_send(action).map_err(|e| match e {

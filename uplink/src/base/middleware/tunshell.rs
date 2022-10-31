@@ -7,7 +7,7 @@ use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
 use crate::{
-    base::{self, actions::ActionResponse, Stream},
+    base::{self, middleware::ActionResponse, Stream},
     Action,
 };
 

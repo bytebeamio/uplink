@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
 use crate::base::SimulatorConfig;
-use crate::base::{actions::Action, Package, Stream};
+use crate::base::{middleware::Action, Package, Stream};
 use crate::{ActionResponse, Payload};
 
 use rand::Rng;

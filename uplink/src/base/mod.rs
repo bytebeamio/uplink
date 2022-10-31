@@ -4,7 +4,7 @@ use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 
-pub mod actions;
+pub mod middleware;
 pub mod mqtt;
 pub mod serializer;
 

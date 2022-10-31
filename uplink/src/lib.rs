@@ -125,11 +125,11 @@ pub mod config {
     }
 }
 
-pub use base::actions;
-use base::actions::ota::OtaDownloader;
-use base::actions::tunshell::TunshellSession;
-use base::actions::Actions;
-pub use base::actions::{Action, ActionResponse};
+pub use base::middleware;
+use base::middleware::ota::OtaDownloader;
+use base::middleware::tunshell::TunshellSession;
+use base::middleware::Middleware;
+pub use base::middleware::{Action, ActionResponse};
 use base::mqtt::Mqtt;
 use base::serializer::Serializer;
 pub use base::{Config, Package, Point, Stream};
@@ -210,7 +210,7 @@ impl Uplink {
             mqtt.client(),
         )?;
 
-        let actions = Actions::new(
+        let actions = Middleware::new(
             self.config.clone(),
             raw_action_rx,
             tunshell_keys_tx,

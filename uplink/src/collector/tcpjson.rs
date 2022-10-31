@@ -14,7 +14,7 @@ use std::{collections::HashMap, io, sync::Arc};
 use std::pin::Pin;
 
 use super::util::DelayMap;
-use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
+use crate::base::middleware::{Action, ActionResponse, Error as ActionsError};
 use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus};
 
 #[derive(Error, Debug)]
