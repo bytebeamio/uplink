@@ -14,7 +14,7 @@ use std::{collections::HashMap, io, sync::Arc};
 use std::pin::Pin;
 
 use super::util::DelayMap;
-use crate::base::middleware::{Action, ActionResponse, Error as ActionsError};
+use crate::base::middleware::{Action, ActionResponse, MiddlewareError};
 use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus};
 
 #[derive(Error, Debug)]
@@ -30,7 +30,7 @@ pub enum Error {
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
     #[error("Download OTA error")]
-    Actions(#[from] ActionsError),
+    Actions(#[from] MiddlewareError),
     #[error("Couldn't fill stream")]
     Stream(#[from] crate::base::Error),
 }
