@@ -197,6 +197,7 @@ impl Disk {
     }
 
     fn update(&mut self, disk: &sysinfo::Disk, timestamp: u64, sequence: u32) {
+        self.total = disk.total_space();
         self.available = disk.available_space();
         self.used = self.total - self.available;
         self.timestamp = timestamp;
@@ -421,6 +422,7 @@ impl StatCollector {
         sys.refresh_disks_list();
         sys.refresh_networks_list();
         sys.refresh_memory();
+        sys.refresh_cpu();
 
         let max_buf_size = config.stats.stream_size.unwrap_or(10);
 

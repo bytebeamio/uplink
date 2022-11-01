@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
 
 use flume::{SendError, Sender};
-use log::{info, warn};
+use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 
 pub mod actions;
@@ -21,9 +21,9 @@ fn default_timeout() -> u64 {
     DEFAULT_TIMEOUT
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamConfig {
-    pub topic: String,
+    pub topic: Option<String>,
     pub buf_size: usize,
     #[serde(default = "default_timeout")]
     /// Duration(in seconds) that bridge collector waits from
@@ -82,12 +82,15 @@ pub struct Config {
     pub port: u16,
     pub authentication: Option<Authentication>,
     pub bridge_port: u16,
+    pub run_logcat: bool,
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub actions: Vec<String>,
     pub persistence: Option<Persistence>,
     pub log_dir: Option<String>,
     pub streams: HashMap<String, StreamConfig>,
+    pub action_status: StreamConfig,
+    pub serializer_metrics: Option<StreamConfig>,
     pub ota: Ota,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
@@ -121,7 +124,7 @@ pub struct Stream<T> {
     topic: Arc<String>,
     last_sequence: u32,
     last_timestamp: u64,
-    max_buffer_size: usize,
+    pub max_buffer_size: usize,
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
     pub flush_period: Duration,
@@ -157,10 +160,16 @@ where
 
     pub fn with_config(
         name: &String,
+        project_id: &String,
+        device_id: &String,
         config: &StreamConfig,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx);
+        let mut stream = if let Some(topic) = &config.topic {
+            Stream::new(name, topic, config.buf_size, tx)
+        } else {
+            Stream::dynamic_with_size(name, project_id, device_id, config.buf_size, tx)
+        };
         stream.flush_period = Duration::from_secs(config.flush_period);
 
         stream
@@ -206,12 +215,12 @@ where
 
         // Anomaly detection
         if current_sequence <= self.last_sequence {
-            warn!("Sequence number anomaly! [{}, {}]", current_sequence, self.last_sequence);
+            debug!("Sequence number anomaly! [{}, {}]", current_sequence, self.last_sequence);
             self.buffer.add_sequence_anomaly(self.last_sequence, current_sequence);
         }
 
         if current_timestamp < self.last_timestamp {
-            warn!("Timestamp anomaly!! [{}, {}]", current_timestamp, self.last_timestamp);
+            debug!("Timestamp anomaly!! [{}, {}]", current_timestamp, self.last_timestamp);
             self.buffer.add_timestamp_anomaly(self.last_timestamp, current_timestamp);
         }
 
@@ -232,7 +241,7 @@ where
     fn take_buffer(&mut self) -> Buffer<T> {
         let name = self.name.clone();
         let topic = self.topic.clone();
-        info!("Flushing stream name: {}, topic: {}", name, topic);
+        trace!("Flushing stream name: {}, topic: {}", name, topic);
 
         mem::replace(&mut self.buffer, Buffer::new(name, topic))
     }

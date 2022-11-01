@@ -1,4 +1,5 @@
-use crate::base::{Config, Package};
+use crate::base::{Buffer, Config, Package};
+use crate::{Point, Stream};
 
 use bytes::Bytes;
 use disk::Storage;
@@ -163,18 +164,16 @@ pub struct Serializer<C: MqttClient> {
     client: C,
     storage: Option<Storage>,
     metrics: Metrics,
+    metrics_stream: Option<Stream<Metrics>>,
 }
 
 impl<C: MqttClient> Serializer<C> {
     pub fn new(
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
+        metrics_stream: Option<Stream<Metrics>>,
         client: C,
     ) -> Result<Serializer<C>, Error> {
-        let metrics_config =
-            config.streams.get("metrics").expect("Missing metrics Stream in config");
-        let metrics = Metrics::new(&metrics_config.topic);
-
         let storage = match &config.persistence {
             Some(persistence) => {
                 let storage = Storage::new(
@@ -187,7 +186,14 @@ impl<C: MqttClient> Serializer<C> {
             None => None,
         };
 
-        Ok(Serializer { config, collector_rx, client, storage, metrics })
+        Ok(Serializer {
+            config,
+            collector_rx,
+            client,
+            storage,
+            metrics: Metrics::new(),
+            metrics_stream,
+        })
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -419,16 +425,11 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                 }
-                _ = interval.tick() => {
-                    let (topic, payload) = self.metrics.next()?;
-                    let payload_size = payload.len();
-                    match self.client.try_publish(topic, QoS::AtLeastOnce, false, payload) {
-                        Ok(_) => {
-                            self.metrics.add_total_sent_size(payload_size);
-                            continue;
-                        }
-                        Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
-                        Err(e) => unreachable!("Unexpected error: {}", e),
+                _ = interval.tick(), if self.metrics_stream.is_some() => {
+                    let metrics = self.metrics.next();
+                    let stream = self.metrics_stream.as_mut().unwrap();
+                    if let Err(e) = stream.fill(metrics).await {
+                        error!("Couldn't write serializer metrics to stream: {}", e)
                     }
                 }
             }
@@ -473,10 +474,8 @@ async fn send_publish<C: MqttClient>(
     Ok(client)
 }
 
-#[derive(Debug, Default, Serialize)]
-struct Metrics {
-    #[serde(skip_serializing)]
-    topic: String,
+#[derive(Debug, Default, Serialize, Clone)]
+pub struct Metrics {
     sequence: u32,
     timestamp: u64,
     total_sent_size: usize,
@@ -487,8 +486,8 @@ struct Metrics {
 }
 
 impl Metrics {
-    pub fn new<T: Into<String>>(topic: T) -> Metrics {
-        Metrics { topic: topic.into(), errors: String::with_capacity(1024), ..Default::default() }
+    pub fn new() -> Metrics {
+        Metrics { errors: String::with_capacity(1024), ..Default::default() }
     }
 
     pub fn add_total_sent_size(&mut self, size: usize) {
@@ -527,16 +526,42 @@ impl Metrics {
         self.errors.push_str(" | ");
     }
 
-    pub fn next(&mut self) -> Result<(&str, Vec<u8>), Error> {
+    pub fn next(&mut self) -> Metrics {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
         self.sequence += 1;
 
-        let payload = serde_json::to_vec(&vec![&self])?;
+        let metrics = self.clone();
+
         self.errors.clear();
         self.lost_segments = 0;
-        Ok((&self.topic, payload))
+
+        metrics
+    }
+}
+
+impl Point for Metrics {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+}
+
+impl Package for Buffer<Metrics> {
+    fn topic(&self) -> Arc<String> {
+        self.topic.clone()
+    }
+
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        self.anomalies()
     }
 }
 
@@ -545,11 +570,7 @@ mod test {
     use serde_json::Value;
 
     use super::*;
-    use crate::{
-        base::{Stream, StreamConfig, DEFAULT_TIMEOUT},
-        config::Persistence,
-        Payload,
-    };
+    use crate::{base::Stream, config::Persistence, Payload};
     use std::collections::HashMap;
 
     #[derive(Clone)]
@@ -639,20 +660,11 @@ mod test {
     }
 
     fn default_config() -> Config {
-        let mut streams = HashMap::new();
-        streams.insert(
-            "metrics".to_owned(),
-            StreamConfig {
-                topic: Default::default(),
-                buf_size: 100,
-                flush_period: DEFAULT_TIMEOUT,
-            },
-        );
         Config {
             broker: "localhost".to_owned(),
             port: 1883,
             device_id: "123".to_owned(),
-            streams,
+            streams: HashMap::new(),
             max_packet_size: 1024 * 1024,
             ..Default::default()
         }
@@ -677,7 +689,7 @@ mod test {
         let (net_tx, net_rx) = flume::bounded(1);
         let client = MockClient { net_tx };
 
-        (Serializer::new(config, data_rx, client).unwrap(), data_tx, net_rx)
+        (Serializer::new(config, data_rx, None, client).unwrap(), data_tx, net_rx)
     }
 
     #[derive(Error, Debug)]

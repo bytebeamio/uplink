@@ -12,9 +12,11 @@ pub mod ota;
 mod process;
 pub mod tunshell;
 pub mod journalctl;
+pub mod logcat;
 
 use crate::base::{Buffer, Point, Stream};
 use crate::actions::journalctl::{JournalctlConfig, JournalctlInstance};
+use crate::actions::logcat::{LogcatConfig, LogcatInstance, LogLevel};
 use crate::Payload;
 
 #[derive(Error, Debug)]
@@ -126,6 +128,7 @@ pub struct Actions {
     bridge_tx: Sender<Action>,
     bridge_data_tx: Sender<Box<dyn Package>>,
     journalctl_instance: Option<JournalctlInstance>,
+    logcat: Option<LogcatInstance>,
 }
 
 impl Actions {
@@ -149,6 +152,7 @@ impl Actions {
             bridge_tx,
             bridge_data_tx,
             journalctl_instance: None,
+            logcat: None,
         }
     }
 
@@ -164,22 +168,29 @@ impl Actions {
 
     /// Start receiving and processing [Action]s
     pub async fn start(mut self) {
-        if let Some(journalctl) = &self.config.journalctl {
+        if let Some(super::JournalctlConfig { enabled: true, priority, tags }) =
+            &self.config.journalctl
+        {
             debug!("starting journalctl");
-            if journalctl.enabled {
-                self.journalctl_instance = Some(
-                    JournalctlInstance::new(
-                        self.create_log_stream(),
-                        &JournalctlConfig {
-                            tags: journalctl.tags.clone(),
-                            min_level: journalctl.priority
-                        }
-                    )
-                );
-
-            }
+            self.journalctl_instance = Some(JournalctlInstance::new(
+                self.create_log_stream(),
+                &JournalctlConfig { tags: tags.clone(), min_level: *priority },
+            ));
         }
 
+        if self.config.run_logcat {
+            debug!("starting logcat");
+            self.logcat = Some(
+                LogcatInstance::new(
+                    self.create_log_stream(),
+                    &LogcatConfig {
+                        tags: vec!["*".to_string()],
+                        min_level: LogLevel::Debug
+                    }
+                )
+            );
+        }
+        
         loop {
             let action = match self.actions_rx.recv_async().await {
                 Ok(v) => v,
@@ -220,6 +231,20 @@ impl Actions {
                     }
                     Err(e) => {
                         error!("couldn't parse journalctl config payload:\n{}\n{}", action.payload, e)
+                    }
+                }
+            }
+            "configure_logcat" => {
+                match serde_json::from_str::<LogcatConfig>(action.payload.as_str()) {
+                    Ok(mut logcat_config) => {
+                        logcat_config.tags = logcat_config.tags.into_iter()
+                            .filter(|tag| !tag.is_empty())
+                            .collect();
+                        log::info!("restarting logcat with following config: {:?}", logcat_config);
+                        self.logcat = Some(LogcatInstance::new(self.create_log_stream(), &logcat_config))
+                    }
+                    Err(e) => {
+                        error!("couldn't parse logcat config payload:\n{}\n{}", action.payload, e)
                     }
                 }
             },

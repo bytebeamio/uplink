@@ -1,0 +1,3 @@
+[simulator]
+num_devices = 50
+gps_paths = "./paths/"

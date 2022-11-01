@@ -45,7 +45,7 @@
 use bytes::BytesMut;
 use flume::{Receiver, RecvError, Sender};
 use futures_util::StreamExt;
-use log::{debug, error, info};
+use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
@@ -73,6 +73,8 @@ pub enum Error {
     FilePathMissing,
     #[error("Download failed, content length zero")]
     EmptyFile,
+    #[error("Couldn't install apk")]
+    InstallationError(String),
 }
 
 /// This struct contains the necessary components to download and store an OTA update as notified
@@ -108,9 +110,11 @@ impl OtaDownloader {
                 let device = Identity::from_pem(&buf)?;
                 client_builder.add_root_certificate(ca).identity(device)
             }
+            // TODO: cover circumstance where uplink as simulator must use certs from env variables
+            // None if config.simulator.is_some() => {},
             None => client_builder,
         }
-        .build()?;
+            .build()?;
 
         // Create rendezvous channel with flume
         let (ota_tx, ota_rx) = flume::bounded(0);
@@ -141,11 +145,7 @@ impl OtaDownloader {
             self.action_id = action.action_id.clone();
 
             match self.run(action).await {
-                Ok(_) => {
-                    let status = ActionResponse::progress(&self.action_id, "Downloaded", 100)
-                        .set_sequence(self.sequence());
-                    self.send_status(status).await;
-                }
+                Ok(_) => {}
                 Err(e) => {
                     let status = ActionResponse::failure(&self.action_id, e.to_string())
                         .set_sequence(self.sequence());
@@ -171,15 +171,19 @@ impl OtaDownloader {
 
         // Create handler to perform download from URL
         let resp = self.client.get(&url).send().await?;
-        info!("Dowloading from {} into {}", url, file_path);
+        info!("Downloading from {} into {}", url, file_path);
         self.download(resp, file).await?;
 
         // Update Action payload with `ota_path`, i.e. downloaded file's location in fs
-        update.ota_path = Some(file_path);
+        update.ota_path = Some(file_path.clone());
         action.payload = serde_json::to_string(&update)?;
 
         // Forward Action packet through bridge
         self.bridge_tx.try_send(action)?;
+
+        let status = ActionResponse::progress(&self.action_id, "Downloaded", 50)
+            .set_sequence(self.sequence());
+        self.send_status(status).await;
 
         Ok(())
     }
@@ -227,9 +231,9 @@ impl OtaDownloader {
                 // Calculate percentage on the basis of content_length if available,
                 // else increment 0..100 till task is completed.
                 let percentage = match content_length {
-                    Some(content_length) => (100 * downloaded / content_length) % 101,
+                    Some(content_length) => (50 * downloaded / content_length) % 101,
                     None => {
-                        downloaded = (downloaded + 1) % 100;
+                        downloaded = (downloaded + 1) % 50;
                         downloaded
                     }
                 };
@@ -240,13 +244,12 @@ impl OtaDownloader {
             }
         }
 
-        info!("Firmware dowloaded sucessfully");
+        info!("Firmware downloaded successfully");
 
         Ok(())
     }
 
     async fn send_status(&mut self, status: ActionResponse) {
-        debug!("Action status: {:?}", status);
         if let Err(e) = self.status_bucket.fill(status).await {
             error!("Failed to send downloader status. Error = {:?}", e);
         }
