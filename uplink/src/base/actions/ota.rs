@@ -114,7 +114,7 @@ impl OtaDownloader {
             // None if config.simulator.is_some() => {},
             None => client_builder,
         }
-            .build()?;
+        .build()?;
 
         // Create rendezvous channel with flume
         let (ota_tx, ota_rx) = flume::bounded(0);
