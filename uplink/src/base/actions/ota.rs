@@ -181,7 +181,7 @@ impl OtaDownloader {
         // Forward Action packet through bridge
         self.bridge_tx.try_send(action)?;
 
-        let status = ActionResponse::progress(&self.action_id, "Completed", 100)
+        let status = ActionResponse::progress(&self.action_id, "Downloaded", 50)
             .set_sequence(self.sequence());
         self.send_status(status).await;
 
@@ -231,9 +231,9 @@ impl OtaDownloader {
                 // Calculate percentage on the basis of content_length if available,
                 // else increment 0..100 till task is completed.
                 let percentage = match content_length {
-                    Some(content_length) => (100 * downloaded / content_length) % 101,
+                    Some(content_length) => (50 * downloaded / content_length) % 101,
                     None => {
-                        downloaded = (downloaded + 1) % 100;
+                        downloaded = (downloaded + 1) % 50;
                         downloaded
                     }
                 };
