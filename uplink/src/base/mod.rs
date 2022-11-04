@@ -69,7 +69,6 @@ pub struct SimulatorConfig {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct JournalctlConfig {
-    pub enabled: bool,
     pub tags: Vec<String>,
     pub priority: u8,
 }
