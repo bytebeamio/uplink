@@ -15,7 +15,12 @@ pub mod tunshell;
 
 use crate::base::{Buffer, Point, Stream};
 use crate::Payload;
-use logging::{new_journalctl, new_logcat, LoggerInstance, LoggingConfig};
+
+#[cfg(target_os = "linux")]
+use logging::new_journalctl;
+#[cfg(target_os = "android")]
+use logging::new_logcat;
+use logging::{LoggerInstance, LoggingConfig};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -164,6 +169,7 @@ impl Actions {
 
     /// Start receiving and processing [Action]s
     pub async fn start(mut self) {
+        #[cfg(target_os = "linux")]
         if let Some(super::JournalctlConfig { priority, tags }) = &self.config.journalctl {
             debug!("starting journalctl");
             self.logger = Some(new_journalctl(
@@ -172,6 +178,7 @@ impl Actions {
             ));
         }
 
+        #[cfg(target_os = "android")]
         if self.config.run_logcat {
             debug!("starting logcat");
             self.logger = Some(new_logcat(
@@ -209,12 +216,14 @@ impl Actions {
                 self.tunshell_tx.send_async(action).await?;
                 return Ok(());
             }
+            #[cfg(target_os = "linux")]
             "configure_journalctl" => {
                 let mut config = serde_json::from_str::<LoggingConfig>(action.payload.as_str())?;
                 config.tags = config.tags.into_iter().filter(|tag| !tag.is_empty()).collect();
                 log::info!("restarting journalctl with following config: {:?}", config);
                 self.logger = Some(new_journalctl(self.create_log_stream(), &config))
             }
+            #[cfg(target_os = "android")]
             "configure_logcat" => {
                 let mut config = serde_json::from_str::<LoggingConfig>(action.payload.as_str())?;
                 config.tags = config.tags.into_iter().filter(|tag| !tag.is_empty()).collect();
