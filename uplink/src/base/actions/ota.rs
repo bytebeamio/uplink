@@ -181,7 +181,7 @@ impl OtaDownloader {
         // Forward Action packet through bridge
         self.bridge_tx.try_send(action)?;
 
-        let status = ActionResponse::progress(&self.action_id, "Completed", 100)
+        let status = ActionResponse::progress(&self.action_id, "Downloaded", 50)
             .set_sequence(self.sequence());
         self.send_status(status).await;
 
@@ -209,7 +209,7 @@ impl OtaDownloader {
     /// Downloads from server and stores into file
     async fn download(&mut self, resp: Response, mut file: File) -> Result<(), Error> {
         // Error out in case of 0 sized files, but handle situation where file size is not
-        // reported by the webserver in response by incrementing count 0..100 over and over.
+        // reported by the webserver in response by incrementing count 0..50 over and over.
         let content_length = match resp.content_length() {
             None => None,
             Some(0) => return Err(Error::EmptyFile),
@@ -229,11 +229,11 @@ impl OtaDownloader {
             if downloaded / 102400 > next {
                 next += 1;
                 // Calculate percentage on the basis of content_length if available,
-                // else increment 0..100 till task is completed.
+                // else increment 0..50 till task is completed.
                 let percentage = match content_length {
-                    Some(content_length) => (100 * downloaded / content_length) % 101,
+                    Some(content_length) => 50 * downloaded / content_length,
                     None => {
-                        downloaded = (downloaded + 1) % 100;
+                        downloaded = (downloaded + 1) % 50;
                         downloaded
                     }
                 };
