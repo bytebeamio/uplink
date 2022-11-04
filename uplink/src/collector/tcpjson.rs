@@ -111,6 +111,7 @@ impl Bridge {
         // - set to None when
         // -- timeout ends
         // -- A response with status "Completed" is received
+        // -- A response with status "Failed" is received
         // - set to a value when
         // -- it is currently None and a new action is received
         // - timeout is updated
@@ -133,8 +134,7 @@ impl Bridge {
                         }
                     };
 
-                    // If incoming data is a response for an action, drop it
-                    // if timeout is already sent to cloud
+                    // If incoming data is a response for an action, drop it if timeout is already sent to cloud
                     if data.stream == "action_status" {
                         if current_action_.is_some() {
                             if let Some(response_id) = data.payload.as_object()
@@ -142,11 +142,15 @@ impl Bridge {
                                 .and_then(|id| id.as_str()) {
                                 let action_id = current_action_.as_ref().unwrap().id.as_str();
                                 if action_id == response_id {
-                                    if let Some("Completed") = data.payload.as_object().unwrap().get("state")
-                                        .and_then(|s| s.as_str()) {
-                                        current_action_ = None;
-                                    } else {
-                                        current_action_.as_mut().unwrap().timeout = Box::pin(time::sleep(Duration::from_secs(10)));
+                                    let state = data.payload.as_object().unwrap().get("state")
+                                        .and_then(|s| s.as_str());
+                                    match state {
+                                        Some("Completed") | Some("Failed") => {
+                                            current_action_ = None;
+                                        }
+                                        _ => {
+                                            current_action_.as_mut().unwrap().timeout = Box::pin(time::sleep(Duration::from_secs(10)));
+                                        }
                                     }
                                 } else {
                                     error!("action_id in action_status({response_id}) does not match that of active action ({action_id})");
