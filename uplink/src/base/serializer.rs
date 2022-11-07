@@ -1,4 +1,4 @@
-use crate::base::{Buffer, Config, Package};
+use crate::base::{Config, Package};
 use crate::{Point, Stream};
 
 use bytes::Bytes;
@@ -542,26 +542,16 @@ impl Metrics {
 }
 
 impl Point for Metrics {
+    fn stream(&self) -> &str {
+        "serializer_metrics"
+    }
+
     fn sequence(&self) -> u32 {
         self.sequence
     }
 
     fn timestamp(&self) -> u64 {
         self.timestamp
-    }
-}
-
-impl Package for Buffer<Metrics> {
-    fn topic(&self) -> Arc<String> {
-        self.topic.clone()
-    }
-
-    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
-        serde_json::to_vec(&self.buffer)
-    }
-
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
     }
 }
 

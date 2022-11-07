@@ -135,18 +135,20 @@ use base::middleware::Middleware;
 pub use base::middleware::{Action, ActionResponse};
 use base::mqtt::Mqtt;
 use base::serializer::Serializer;
-pub use base::{Config, Package, Point, Stream};
+pub use base::{Config, Package, Payload, Point, Stream};
 pub use collector::simulator;
 use collector::systemstats::StatCollector;
-pub use collector::tcpjson::{Bridge, Payload};
+pub use collector::tcpjson::Bridge;
 pub use disk::Storage;
 
 pub struct Uplink {
     config: Arc<Config>,
     action_rx: Receiver<Action>,
     action_tx: Sender<Action>,
-    data_rx: Receiver<Box<dyn Package>>,
-    data_tx: Sender<Box<dyn Package>>,
+    collector_data_rx: Receiver<Box<dyn Package>>,
+    collector_data_tx: Sender<Box<dyn Package>>,
+    bridge_data_rx: Receiver<Payload>,
+    bridge_data_tx: Sender<Payload>,
     action_status_rx: Receiver<ActionResponse>,
     action_status_tx: Sender<ActionResponse>,
 }
@@ -154,7 +156,8 @@ pub struct Uplink {
 impl Uplink {
     pub fn new(config: Arc<Config>) -> Result<Uplink, Error> {
         let (action_tx, action_rx) = bounded(10);
-        let (data_tx, data_rx) = bounded(10);
+        let (collector_data_tx, collector_data_rx) = bounded(10);
+        let (bridge_data_tx, bridge_data_rx) = bounded(10);
 
         let (action_status_tx, action_status_rx) = bounded(10);
 
@@ -162,8 +165,10 @@ impl Uplink {
             config,
             action_rx,
             action_tx,
-            data_rx,
-            data_tx,
+            collector_data_rx,
+            collector_data_tx,
+            bridge_data_rx,
+            bridge_data_tx,
             action_status_tx,
             action_status_rx,
         })
@@ -192,7 +197,8 @@ impl Uplink {
         }
 
         // Launch a thread to collect system statistics
-        let stat_collector = StatCollector::new(self.config.clone(), self.data_tx.clone());
+        let stat_collector =
+            StatCollector::new(self.config.clone(), self.collector_data_tx.clone());
         if self.config.stats.enabled {
             thread::spawn(move || stat_collector.start());
         }
@@ -206,13 +212,13 @@ impl Uplink {
                 &self.config.project_id,
                 &self.config.device_id,
                 metrics_config,
-                self.bridge_data_tx(),
+                self.collector_data_tx.clone(),
             )
         });
 
         let serializer = Serializer::new(
             self.config.clone(),
-            self.data_rx.clone(),
+            self.collector_data_rx.clone(),
             metrics_stream,
             mqtt.client(),
         )?;
@@ -231,7 +237,8 @@ impl Uplink {
             self.action_status_rx.clone(),
             self.action_status_tx.clone(),
             action_fwd,
-            self.bridge_data_tx().clone(),
+            self.collector_data_tx.clone(),
+            self.bridge_data_rx.clone(),
         );
 
         // Launch a thread to handle incoming and outgoing MQTT packets
@@ -262,8 +269,8 @@ impl Uplink {
         self.action_rx.clone()
     }
 
-    pub fn bridge_data_tx(&self) -> Sender<Box<dyn Package>> {
-        self.data_tx.clone()
+    pub fn bridge_data_tx(&self) -> Sender<Payload> {
+        self.bridge_data_tx.clone()
     }
 
     pub fn action_status_tx(&self) -> Sender<ActionResponse> {

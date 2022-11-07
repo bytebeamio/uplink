@@ -1,18 +1,18 @@
 use flume::{Receiver, Sender};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use thiserror::Error;
 use tokio::select;
 use tokio_util::codec::LinesCodecError;
 
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
-use crate::base::SimulatorConfig;
-use crate::base::{middleware::Action, Package, Stream};
-use crate::{ActionResponse, Payload};
+use crate::base::middleware::Action;
+use crate::base::{Payload, SimulatorConfig};
+use crate::ActionResponse;
 
 use rand::Rng;
 
@@ -117,39 +117,6 @@ impl Ord for Event {
 impl PartialOrd for Event {
     fn partial_cmp(&self, other: &Event) -> Option<Ordering> {
         Some(other.cmp(self))
-    }
-}
-
-pub struct Partitions {
-    map: HashMap<String, Stream<Payload>>,
-    action_statuses: HashMap<String, Stream<ActionResponse>>,
-    tx: Sender<Box<dyn Package>>,
-}
-
-impl Partitions {
-    async fn send(&mut self, payload: Payload) {
-        if let Err(e) = self
-            .map
-            .entry(payload.stream.clone())
-            .or_insert(Stream::new(&payload.stream, &payload.stream, 10, self.tx.clone()))
-            .fill(payload)
-            .await
-        {
-            error!("Failed to send action result {:?}", e);
-        }
-    }
-
-    async fn send_action_response(&mut self, device_id: &str, response: ActionResponse) {
-        let stream = format!("/tenants/demo/devices/{}/action/status", device_id);
-        if let Err(e) = self
-            .action_statuses
-            .entry(stream.clone())
-            .or_insert(Stream::new(&stream, &stream, 1, self.tx.clone()))
-            .fill(response)
-            .await
-        {
-            error!("Failed to send action result {:?}", e);
-        }
     }
 }
 
@@ -380,7 +347,10 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Pay
     return Payload {
         timestamp,
         sequence,
-        stream: format!("/tenants/demo/devices/{}/events/peripheral_state/jsonarray", device.device_id),
+        stream: format!(
+            "/tenants/demo/devices/{}/events/peripheral_state/jsonarray",
+            device.device_id
+        ),
         payload: json!(payload),
     };
 }
@@ -532,7 +502,7 @@ pub fn next_event_duration(event_type: DataEventType) -> Duration {
 pub async fn process_data_event(
     event: &DataEvent,
     events: &mut BinaryHeap<Event>,
-    partitions: &mut Partitions,
+    partitions: &Sender<Payload>,
 ) {
     let data = match event.event_type {
         DataEventType::GenerateGPS => generate_gps_data(&event.device, event.sequence),
@@ -547,7 +517,9 @@ pub async fn process_data_event(
         DataEventType::GenerateBMS => generate_bms_data(&event.device, event.sequence),
     };
 
-    partitions.send(data).await;
+    if let Err(e) = partitions.send_async(data).await {
+        error!("Failed to send action result {:?}", e);
+    }
 
     let duration = next_event_duration(event.event_type);
 
@@ -559,7 +531,7 @@ pub async fn process_data_event(
     }));
 }
 
-async fn process_action_response_event(event: &ActionResponseEvent, partitions: &mut Partitions) {
+async fn process_action_response_event(event: &ActionResponseEvent, partitions: &Sender<Payload>) {
     //info!("Sending action response {:?} {} {} {}", event.device_id, event.action_id, event.progress, event.status);
     let response = ActionResponse::progress(&event.action_id, &event.status, event.progress);
 
@@ -568,11 +540,18 @@ async fn process_action_response_event(event: &ActionResponseEvent, partitions: 
         event.device_id, event.action_id, event.progress, event.status
     );
 
-    partitions.send_action_response(&event.device_id, response).await;
+    let mut payload = serde_json::to_value(response).unwrap();
+    let stream = format!("/tenants/demo/devices/{}/action/status", event.device_id);
+    payload.as_object_mut().unwrap().insert("stream".to_string(), Value::from(stream));
+    let payload: Payload = serde_json::from_value(payload).unwrap();
+
+    if let Err(e) = partitions.send_async(payload).await {
+        error!("Failed to send action result {:?}", e);
+    }
     info!("Successfully sent action response");
 }
 
-pub async fn process_events(events: &mut BinaryHeap<Event>, partitions: &mut Partitions) {
+pub async fn process_events(events: &mut BinaryHeap<Event>, partitions: &Sender<Payload>) {
     if let Some(e) = events.pop() {
         let current_time = Instant::now();
         let timestamp = event_timestamp(&e);
@@ -623,7 +602,7 @@ pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
 }
 
 pub async fn start(
-    data_tx: Sender<Box<dyn Package>>,
+    data_tx: Sender<Payload>,
     actions_rx: Receiver<Action>,
     simulator_config: &SimulatorConfig,
 ) -> Result<(), Error> {
@@ -635,9 +614,6 @@ pub async fn start(
     let mut events = BinaryHeap::new();
 
     generate_initial_events(&mut events, Instant::now(), &devices);
-
-    let mut partitions =
-        Partitions { map: HashMap::new(), action_statuses: HashMap::new(), tx: data_tx };
     let mut time = Instant::now();
     let mut i = 0;
 
@@ -665,7 +641,7 @@ pub async fn start(
                 generate_action_events(&action, &mut events);
             }
 
-            _ = process_events(&mut events, &mut partitions) => {
+            _ = process_events(&mut events, &data_tx) => {
             }
         }
     }
