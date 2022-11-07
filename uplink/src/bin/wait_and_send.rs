@@ -24,7 +24,7 @@ async fn main() {
         println!("Using default value \"Completed\"");
         "Completed".to_string()
     });
-    let port = std::env::args().nth(1).unwrap_or("127.0.0.1:5555".to_string());
+    let port = std::env::args().nth(2).unwrap_or("127.0.0.1:5555".to_string());
     let stream = TcpStream::connect(port).await.unwrap();
     let mut framed = Framed::new(stream, LinesCodec::new());
     async fn respond<'a>(framed: &'a mut Framed<TcpStream, LinesCodec>, idx: &mut u32, action_id: &str, state: &str, progress: u8) {
@@ -42,7 +42,7 @@ async fn main() {
         println!("Sending: {}", resp);
         framed.send(resp).await.unwrap();
     }
-    let mut idx = 1;
+    let mut idx = 0;
     loop {
         let action_s = framed.next().await.unwrap().unwrap();
         println!("Received: {}", action_s);
