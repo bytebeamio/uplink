@@ -151,7 +151,7 @@ async fn main() -> Result<(), Error> {
         config,
         uplink.bridge_data_tx(),
         uplink.bridge_action_rx(),
-        uplink.action_status(),
+        uplink.action_status_tx(),
     )
     .start()
     .await

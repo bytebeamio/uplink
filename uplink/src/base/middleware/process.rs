@@ -1,4 +1,4 @@
-use flume::SendError;
+use flume::{SendError, Sender};
 use log::{debug, error, info};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -7,7 +7,6 @@ use tokio::{pin, select, task, time};
 
 use super::{ActionResponse, Package};
 
-use crate::base::Stream;
 use std::io;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -19,7 +18,7 @@ use std::time::Duration;
 /// It sends result and errors to the broker over collector_tx
 pub struct Process {
     // buffer to send status messages to cloud
-    action_status: Stream<ActionResponse>,
+    action_status_tx: Sender<ActionResponse>,
     // we use this flag to ignore new process spawn while previous process is in progress
     last_process_done: Arc<Mutex<bool>>,
 }
@@ -39,8 +38,8 @@ pub enum Error {
 }
 
 impl Process {
-    pub fn new(action_status: Stream<ActionResponse>) -> Process {
-        Process { last_process_done: Arc::new(Mutex::new(true)), action_status }
+    pub fn new(action_status_tx: Sender<ActionResponse>) -> Process {
+        Process { last_process_done: Arc::new(Mutex::new(true)), action_status_tx }
     }
 
     /// Run a process of specified command
@@ -69,7 +68,7 @@ impl Process {
         let stdout = child.stdout.take().ok_or(Error::NoStdout)?;
         let mut stdout = BufReader::new(stdout).lines();
 
-        let mut status_bucket = self.action_status.clone();
+        let action_status_tx = self.action_status_tx.clone();
         let last_process_done = self.last_process_done.clone();
 
         task::spawn(async move {
@@ -85,7 +84,7 @@ impl Process {
                         };
 
                         debug!("Action status: {:?}", status);
-                        if let Err(e) = status_bucket.fill(status).await {
+                        if let Err(e) = action_status_tx.send_async(status).await {
                             error!("Failed to send child process status. Error = {:?}", e);
                         }
                      }

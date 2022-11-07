@@ -37,7 +37,7 @@ pub struct Bridge {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
     actions_rx: Receiver<Action>,
-    action_status: Stream<ActionResponse>,
+    action_status_tx: Sender<ActionResponse>,
 }
 
 impl Bridge {
@@ -45,9 +45,9 @@ impl Bridge {
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
         actions_rx: Receiver<Action>,
-        action_status: Stream<ActionResponse>,
+        action_status_tx: Sender<ActionResponse>,
     ) -> Bridge {
-        Bridge { config, data_tx, actions_rx, action_status }
+        Bridge { config, data_tx, actions_rx, action_status_tx }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -70,7 +70,7 @@ impl Bridge {
                         let action = action?;
                         error!("Bridge down!! Action ID = {}", action.action_id);
                         let status = ActionResponse::failure(&action.action_id, "Bridge down");
-                        if let Err(e) = self.action_status.fill(status).await {
+                        if let Err(e) = self.action_status_tx.send_async(status).await {
                             error!("Failed to send busy status. Error = {:?}", e);
                         }
                     }
@@ -221,7 +221,7 @@ impl Bridge {
 
                     // Send failure response to cloud
                     let status = ActionResponse::failure(&action.id, "Action timed out");
-                    if let Err(e) = self.action_status.fill(status).await {
+                    if let Err(e) = self.action_status_tx.send_async(status).await {
                         error!("Failed to fill. Error = {:?}", e);
                     }
                 }

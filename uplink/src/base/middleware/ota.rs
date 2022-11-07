@@ -53,7 +53,7 @@ use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf, sync::Arc};
 
 use super::{Action, ActionResponse};
-use crate::base::{Config, Stream};
+use crate::base::Config;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -84,7 +84,7 @@ pub enum Error {
 pub struct OtaDownloader {
     config: Arc<Config>,
     action_id: String,
-    status_bucket: Stream<ActionResponse>,
+    action_status_tx: Sender<ActionResponse>,
     ota_rx: Receiver<Action>,
     bridge_tx: Sender<Action>,
     client: Client,
@@ -96,7 +96,7 @@ impl OtaDownloader {
     /// end of a "One" channel to send OTA actions onto.
     pub fn new(
         config: Arc<Config>,
-        status_bucket: Stream<ActionResponse>,
+        action_status_tx: Sender<ActionResponse>,
         bridge_tx: Sender<Action>,
     ) -> Result<(Sender<Action>, Self), Error> {
         // Authenticate with TLS certs from config
@@ -114,7 +114,7 @@ impl OtaDownloader {
             // None if config.simulator.is_some() => {},
             None => client_builder,
         }
-            .build()?;
+        .build()?;
 
         // Create rendezvous channel with flume
         let (ota_tx, ota_rx) = flume::bounded(0);
@@ -125,7 +125,7 @@ impl OtaDownloader {
                 config,
                 client,
                 ota_rx,
-                status_bucket,
+                action_status_tx,
                 bridge_tx,
                 sequence: 0,
                 action_id: String::default(),
@@ -250,7 +250,7 @@ impl OtaDownloader {
     }
 
     async fn send_status(&mut self, status: ActionResponse) {
-        if let Err(e) = self.status_bucket.fill(status).await {
+        if let Err(e) = self.action_status_tx.send_async(status).await {
             error!("Failed to send downloader status. Error = {:?}", e);
         }
     }
@@ -298,8 +298,7 @@ mod test {
         // Create channels to forward and push action_status on
         let (stx, srx) = flume::bounded(1);
         let (btx, brx) = flume::bounded(1);
-        let action_status = Stream::dynamic_with_size("actions_status", "", "", 1, stx);
-        let (ota_tx, downloader) = OtaDownloader::new(config, action_status, btx).unwrap();
+        let (ota_tx, downloader) = OtaDownloader::new(config, stx, btx).unwrap();
 
         // Start OtaDownloader in separate thread
         std::thread::spawn(|| downloader.start().unwrap());
@@ -326,9 +325,8 @@ mod test {
         ota_tx.try_send(ota_action).unwrap();
 
         // Collect action_status and ensure it is as expected
-        let bytes = srx.recv().unwrap().serialize().unwrap();
-        let status: Vec<ActionResponse> = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(status[0].state, "Downloading");
+        let status = srx.recv().unwrap();
+        assert_eq!(status.state, "Downloading");
 
         // Collect and ensure forwarded action contains expected info
         let forward: FirmwareUpdate = serde_json::from_str(&brx.recv().unwrap().payload).unwrap();
@@ -349,8 +347,7 @@ mod test {
         // Create channels to forward and push action_status on
         let (stx, _) = flume::bounded(1);
         let (btx, _) = flume::bounded(1);
-        let action_status = Stream::dynamic_with_size("actions_status", "", "", 1, stx);
-        let (ota_tx, downloader) = OtaDownloader::new(config, action_status, btx).unwrap();
+        let (ota_tx, downloader) = OtaDownloader::new(config, stx, btx).unwrap();
 
         // Start OtaDownloader in separate thread
         std::thread::spawn(|| downloader.start().unwrap());

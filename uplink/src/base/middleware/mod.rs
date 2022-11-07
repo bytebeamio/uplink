@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use flume::{Receiver, Sender, TrySendError};
 use log::{debug, error};
+use tokio::select;
 
 mod actions;
 pub mod logcat;
@@ -34,7 +35,8 @@ enum Error {
 
 pub struct Middleware {
     config: Arc<Config>,
-    action_status: Stream<ActionResponse>,
+    action_status_rx: Receiver<ActionResponse>,
+    action_status_tx: Sender<ActionResponse>,
     process: Process,
     actions_rx: Receiver<Action>,
     action_fwd: HashMap<String, Sender<Action>>,
@@ -46,14 +48,16 @@ impl Middleware {
     pub fn new(
         config: Arc<Config>,
         actions_rx: Receiver<Action>,
-        action_status: Stream<ActionResponse>,
+        action_status_rx: Receiver<ActionResponse>,
+        action_status_tx: Sender<ActionResponse>,
         action_fwd: HashMap<String, Sender<Action>>,
         bridge_data_tx: Sender<Box<dyn Package>>,
     ) -> Self {
-        let process = Process::new(action_status.clone());
+        let process = Process::new(action_status_tx.clone());
         Self {
             config,
-            action_status,
+            action_status_rx,
+            action_status_tx,
             process,
             actions_rx,
             action_fwd,
@@ -74,6 +78,15 @@ impl Middleware {
 
     /// Start receiving and processing [Action]s
     pub async fn start(mut self) {
+        let action_status_topic = self
+            .config
+            .action_status
+            .topic
+            .as_ref()
+            .expect("Action status topic missing from config");
+        let mut action_status =
+            Stream::new("action_status", action_status_topic, 1, self.bridge_data_tx.clone());
+
         if self.config.run_logcat {
             debug!("starting logcat");
             self.logcat = Some(LogcatInstance::new(
@@ -81,25 +94,37 @@ impl Middleware {
                 &LogcatConfig { tags: vec!["*".to_string()], min_level: LogLevel::Debug },
             ));
         }
+
         loop {
-            let action = match self.actions_rx.recv_async().await {
-                Ok(v) => v,
-                Err(e) => {
-                    error!("Action stream receiver error = {:?}", e);
-                    break;
+            select! {
+                action = self.actions_rx.recv_async() => {
+                    let action = match action {
+                        Ok(v) => v,
+                        Err(e) => {
+                            error!("Action stream receiver error = {:?}", e);
+                            break;
+                        }
+                    };
+
+                    debug!("Action = {:?}", action);
+
+                    let action_id = action.action_id.clone();
+                    let action_name = action.name.clone();
+                    let error = match self.handle(action).await {
+                        Ok(_) => continue,
+                        Err(e) => e,
+                    };
+
+                    self.forward_action_error(&action_id, &action_name, error).await;
                 }
-            };
 
-            debug!("Action = {:?}", action);
-
-            let action_id = action.action_id.clone();
-            let action_name = action.name.clone();
-            let error = match self.handle(action).await {
-                Ok(_) => continue,
-                Err(e) => e,
-            };
-
-            self.forward_action_error(&action_id, &action_name, error).await;
+                status = self.action_status_rx.recv_async() => {
+                    let status = status.expect("Missing");
+                    if let Err(e) = action_status.fill(status).await {
+                        error!("Failed to forward action status. Error = {:?}", e);
+                    }
+                }
+            }
         }
     }
 
@@ -163,7 +188,7 @@ impl Middleware {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
         let status = ActionResponse::failure(id, error.to_string());
 
-        if let Err(e) = self.action_status.fill(status).await {
+        if let Err(e) = self.action_status_tx.send_async(status).await {
             error!("Failed to send status. Error = {:?}", e);
         }
     }

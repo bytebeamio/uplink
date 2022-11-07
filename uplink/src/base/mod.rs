@@ -127,9 +127,9 @@ where
     T: Point + Debug + Send + 'static,
     Buffer<T>: Package,
 {
-    pub fn new<S: Into<String>>(
+    pub fn new<S: Into<String>, O: Into<String>>(
         stream: S,
-        topic: S,
+        topic: O,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {

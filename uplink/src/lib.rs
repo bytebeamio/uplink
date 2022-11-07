@@ -147,7 +147,8 @@ pub struct Uplink {
     action_tx: Sender<Action>,
     data_rx: Receiver<Box<dyn Package>>,
     data_tx: Sender<Box<dyn Package>>,
-    action_status: Stream<ActionResponse>,
+    action_status_rx: Receiver<ActionResponse>,
+    action_status_tx: Sender<ActionResponse>,
 }
 
 impl Uplink {
@@ -155,14 +156,17 @@ impl Uplink {
         let (action_tx, action_rx) = bounded(10);
         let (data_tx, data_rx) = bounded(10);
 
-        let action_status_topic = &config
-            .action_status
-            .topic
-            .as_ref()
-            .ok_or_else(|| Error::msg("Action status topic missing from config"))?;
-        let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
+        let (action_status_tx, action_status_rx) = bounded(10);
 
-        Ok(Uplink { config, action_rx, action_tx, data_rx, data_tx, action_status })
+        Ok(Uplink {
+            config,
+            action_rx,
+            action_tx,
+            data_rx,
+            data_tx,
+            action_status_tx,
+            action_status_rx,
+        })
     }
 
     pub fn spawn(&mut self) -> Result<(), Error> {
@@ -173,14 +177,14 @@ impl Uplink {
             tunshell_config,
             false,
             tunshell_keys_rx,
-            self.action_status.clone(),
+            self.action_status_tx.clone(),
         );
         thread::spawn(move || tunshell_session.start());
 
         // Launch a thread to handle downloads for OTA updates
         let (ota_tx, ota_downloader) = OtaDownloader::new(
             self.config.clone(),
-            self.action_status.clone(),
+            self.action_status_tx.clone(),
             self.action_tx.clone(),
         )?;
         if self.config.ota.enabled {
@@ -224,7 +228,8 @@ impl Uplink {
         let actions = Middleware::new(
             self.config.clone(),
             raw_action_rx,
-            self.action_status.clone(),
+            self.action_status_rx.clone(),
+            self.action_status_tx.clone(),
             action_fwd,
             self.bridge_data_tx().clone(),
         );
@@ -261,7 +266,7 @@ impl Uplink {
         self.data_tx.clone()
     }
 
-    pub fn action_status(&self) -> Stream<ActionResponse> {
-        self.action_status.clone()
+    pub fn action_status_tx(&self) -> Sender<ActionResponse> {
+        self.action_status_tx.clone()
     }
 }
