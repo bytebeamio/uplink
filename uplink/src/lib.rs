@@ -1,6 +1,6 @@
 #[doc = include_str ! ("../../README.md")]
 use std::sync::Arc;
-use std::thread;
+use std::{collections::HashMap, thread};
 
 use anyhow::Error;
 
@@ -213,13 +213,19 @@ impl Uplink {
             mqtt.client(),
         )?;
 
+        // Create an action to sender map for forwarding received actions
+        let mut action_fwd = HashMap::new();
+        action_fwd.insert("update_firmware".to_owned(), ota_tx);
+        action_fwd.insert("launch_shell".to_owned(), tunshell_keys_tx);
+        for action in self.config.actions.clone() {
+            action_fwd.insert(action, self.action_tx.clone());
+        }
+
         let actions = Middleware::new(
             self.config.clone(),
             raw_action_rx,
-            tunshell_keys_tx,
-            ota_tx,
             self.action_status.clone(),
-            self.action_tx.clone(),
+            action_fwd,
             self.bridge_data_tx().clone(),
         );
 

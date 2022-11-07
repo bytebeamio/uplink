@@ -1,20 +1,20 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use flume::{Receiver, Sender, TrySendError};
 use log::{debug, error};
 
-pub mod logcat;
 mod actions;
+pub mod logcat;
 pub mod ota;
 mod process;
 pub mod tunshell;
 
-use logcat::{LogLevel, LogcatConfig, LogcatInstance};
-use process::Process;
-pub use actions::{Action, ActionResponse};
 use crate::base::Stream;
 use crate::{Config, Package, Payload};
-
+pub use actions::{Action, ActionResponse};
+use logcat::{LogLevel, LogcatConfig, LogcatInstance};
+use process::Process;
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
@@ -28,8 +28,8 @@ enum Error {
     TrySend(#[from] flume::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
-    #[error("Another OTA downloading")]
-    Downloading,
+    #[error("Another Action is being processed by collector")]
+    CollectorOccupied,
 }
 
 pub struct Middleware {
@@ -37,9 +37,7 @@ pub struct Middleware {
     action_status: Stream<ActionResponse>,
     process: Process,
     actions_rx: Receiver<Action>,
-    tunshell_tx: Sender<Action>,
-    ota_tx: Sender<Action>,
-    bridge_tx: Sender<Action>,
+    action_fwd: HashMap<String, Sender<Action>>,
     bridge_data_tx: Sender<Box<dyn Package>>,
     logcat: Option<LogcatInstance>,
 }
@@ -48,10 +46,8 @@ impl Middleware {
     pub fn new(
         config: Arc<Config>,
         actions_rx: Receiver<Action>,
-        tunshell_tx: Sender<Action>,
-        ota_tx: Sender<Action>,
         action_status: Stream<ActionResponse>,
-        bridge_tx: Sender<Action>,
+        action_fwd: HashMap<String, Sender<Action>>,
         bridge_data_tx: Sender<Box<dyn Package>>,
     ) -> Self {
         let process = Process::new(action_status.clone());
@@ -60,9 +56,7 @@ impl Middleware {
             action_status,
             process,
             actions_rx,
-            tunshell_tx,
-            ota_tx,
-            bridge_tx,
+            action_fwd,
             bridge_data_tx,
             logcat: None,
         }
@@ -113,7 +107,7 @@ impl Middleware {
     async fn handle(&mut self, action: Action) -> Result<(), Error> {
         match action.name.as_ref() {
             "launch_shell" => {
-                self.tunshell_tx.send_async(action).await?;
+                self.action_fwd.get("launch_shell").unwrap().send_async(action).await?;
                 return Ok(());
             }
             "configure_logcat" => {
@@ -132,19 +126,22 @@ impl Middleware {
             }
             "update_firmware" if self.config.ota.enabled => {
                 // if action can't be sent, Error out and notify cloud
-                self.ota_tx.try_send(action).map_err(|e| match e {
-                    TrySendError::Full(_) => Error::Downloading,
-                    e => Error::TrySend(e),
+                self.action_fwd.get("update_firmware").unwrap().try_send(action).map_err(|e| {
+                    match e {
+                        TrySendError::Full(_) => Error::CollectorOccupied,
+                        e => Error::TrySend(e),
+                    }
                 })?;
                 return Ok(());
             }
-            _ => (),
-        }
 
-        // Bridge actions are forwarded
-        if !self.config.actions.contains(&action.name) {
-            self.bridge_tx.try_send(action)?;
-            return Ok(());
+            // Bridge actions are forwarded
+            name => {
+                if let Some(tx) = self.action_fwd.get(name) {
+                    tx.try_send(action)?;
+                    return Ok(());
+                }
+            }
         }
 
         // Regular actions are executed natively
