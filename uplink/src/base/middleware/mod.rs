@@ -119,7 +119,7 @@ impl Middleware {
                 }
 
                 status = self.action_status_rx.recv_async() => {
-                    let status = status.expect("Missing");
+                    let status = status.expect("Action status channel closed");
                     if let Err(e) = action_status.fill(status).await {
                         error!("Failed to forward action status. Error = {:?}", e);
                     }
