@@ -144,9 +144,22 @@ impl OtaDownloader {
             let action = self.ota_rx.recv()?;
             self.action_id = action.action_id.clone();
 
-            match self.run(action).await {
-                Ok(_) => {}
-                Err(e) => {
+            let mut error = None;
+            for _ in 0..3 {
+                match self.run(action.clone()).await {
+                    Ok(_) => {
+                        error = None;
+                        break
+                    }
+                    Err(e) => {
+                        error!("Download failed: {e}\nretrying");
+                        error = Some(e);
+                    }
+                }
+            }
+            match error {
+                None => {}
+                Some(e) => {
                     let status = ActionResponse::failure(&self.action_id, e.to_string())
                         .set_sequence(self.sequence());
                     self.send_status(status).await;
