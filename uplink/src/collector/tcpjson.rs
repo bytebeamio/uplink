@@ -112,10 +112,11 @@ impl Bridge {
         // -- timeout ends
         // -- A response with status "Completed" is received
         // -- A response with status "Failed" is received
+        // -- Bridge disconnects
         // - set to a value when
         // -- it is currently None and a new action is received
         // - timeout is updated
-        // -- when a non "Completed" action is received
+        // -- when a non "Completed" | "Failed" action is received
         let mut current_action_: Option<CurrentAction> = None;
 
         let mut flush_handler = DelayMap::new();
@@ -123,7 +124,17 @@ impl Bridge {
         loop {
             select! {
                 line = client.next() => {
-                    let line = line.ok_or(Error::StreamDone)??;
+                    let line = match line {
+                        None => {
+                            if let Some(action) = current_action_.take() {
+                                self.action_status.fill(ActionResponse::failure(action.id.as_str(), "bridge disconnected")).await?;
+                            }
+                            return Err(Error::StreamDone);
+                        }
+                        Some(lr) => {
+                            lr?
+                        }
+                    };
                     info!("Received line = {:?}", line);
 
                     let data: Payload = match serde_json::from_str(&line) {
