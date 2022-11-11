@@ -8,16 +8,19 @@ use tokio::time::Duration;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod logging;
 pub mod ota;
 mod process;
 pub mod tunshell;
-pub mod journalctl;
-pub mod logcat;
 
 use crate::base::{Buffer, Point, Stream};
-use crate::actions::journalctl::{JournalctlConfig, JournalctlInstance};
-use crate::actions::logcat::{LogcatConfig, LogcatInstance, LogLevel};
 use crate::Payload;
+
+#[cfg(target_os = "linux")]
+use logging::new_journalctl;
+#[cfg(target_os = "android")]
+use logging::new_logcat;
+use logging::{LoggerInstance, LoggingConfig};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -127,8 +130,7 @@ pub struct Actions {
     ota_tx: Sender<Action>,
     bridge_tx: Sender<Action>,
     bridge_data_tx: Sender<Box<dyn Package>>,
-    journalctl_instance: Option<JournalctlInstance>,
-    logcat: Option<LogcatInstance>,
+    logger: Option<LoggerInstance>,
 }
 
 impl Actions {
@@ -151,8 +153,7 @@ impl Actions {
             ota_tx,
             bridge_tx,
             bridge_data_tx,
-            journalctl_instance: None,
-            logcat: None,
+            logger: None,
         }
     }
 
@@ -168,29 +169,24 @@ impl Actions {
 
     /// Start receiving and processing [Action]s
     pub async fn start(mut self) {
-        if let Some(super::JournalctlConfig { enabled: true, priority, tags }) =
-            &self.config.journalctl
-        {
+        #[cfg(target_os = "linux")]
+        if let Some(super::JournalctlConfig { priority, tags }) = &self.config.journalctl {
             debug!("starting journalctl");
-            self.journalctl_instance = Some(JournalctlInstance::new(
+            self.logger = Some(new_journalctl(
                 self.create_log_stream(),
-                &JournalctlConfig { tags: tags.clone(), min_level: *priority },
+                &LoggingConfig { tags: tags.clone(), min_level: *priority },
             ));
         }
 
+        #[cfg(target_os = "android")]
         if self.config.run_logcat {
             debug!("starting logcat");
-            self.logcat = Some(
-                LogcatInstance::new(
-                    self.create_log_stream(),
-                    &LogcatConfig {
-                        tags: vec!["*".to_string()],
-                        min_level: LogLevel::Debug
-                    }
-                )
-            );
+            self.logger = Some(new_logcat(
+                self.create_log_stream(),
+                &LoggingConfig { tags: vec!["*".to_string()], min_level: 1 },
+            ));
         }
-        
+
         loop {
             let action = match self.actions_rx.recv_async().await {
                 Ok(v) => v,
@@ -220,34 +216,20 @@ impl Actions {
                 self.tunshell_tx.send_async(action).await?;
                 return Ok(());
             }
+            #[cfg(target_os = "linux")]
             "configure_journalctl" => {
-                match serde_json::from_str::<JournalctlConfig>(action.payload.as_str()) {
-                    Ok(mut journalctl_config) => {
-                        journalctl_config.tags = journalctl_config.tags.into_iter()
-                            .filter(|tag| !tag.is_empty())
-                            .collect();
-                        log::info!("restarting journalctl with following config: {:?}", journalctl_config);
-                        self.journalctl_instance = Some(JournalctlInstance::new(self.create_log_stream(), &journalctl_config))
-                    }
-                    Err(e) => {
-                        error!("couldn't parse journalctl config payload:\n{}\n{}", action.payload, e)
-                    }
-                }
+                let mut config = serde_json::from_str::<LoggingConfig>(action.payload.as_str())?;
+                config.tags = config.tags.into_iter().filter(|tag| !tag.is_empty()).collect();
+                log::info!("restarting journalctl with following config: {:?}", config);
+                self.logger = Some(new_journalctl(self.create_log_stream(), &config))
             }
+            #[cfg(target_os = "android")]
             "configure_logcat" => {
-                match serde_json::from_str::<LogcatConfig>(action.payload.as_str()) {
-                    Ok(mut logcat_config) => {
-                        logcat_config.tags = logcat_config.tags.into_iter()
-                            .filter(|tag| !tag.is_empty())
-                            .collect();
-                        log::info!("restarting logcat with following config: {:?}", logcat_config);
-                        self.logcat = Some(LogcatInstance::new(self.create_log_stream(), &logcat_config))
-                    }
-                    Err(e) => {
-                        error!("couldn't parse logcat config payload:\n{}\n{}", action.payload, e)
-                    }
-                }
-            },
+                let mut config = serde_json::from_str::<LoggingConfig>(action.payload.as_str())?;
+                config.tags = config.tags.into_iter().filter(|tag| !tag.is_empty()).collect();
+                log::info!("restarting logcat with following config: {:?}", config);
+                self.logger = Some(new_logcat(self.create_log_stream(), &config))
+            }
             "update_firmware" if self.config.ota.enabled => {
                 // if action can't be sent, Error out and notify cloud
                 self.ota_tx.try_send(action).map_err(|e| match e {
