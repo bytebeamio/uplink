@@ -171,20 +171,14 @@ impl Actions {
     pub async fn start(mut self) {
         #[cfg(target_os = "linux")]
         if let Some(super::JournalctlConfig { priority, tags }) = &self.config.journalctl {
-            debug!("starting journalctl");
-            self.logger = Some(new_journalctl(
-                self.create_log_stream(),
-                &LoggingConfig { tags: tags.clone(), min_level: *priority },
-            ));
+            let config = LoggingConfig { tags: tags.clone(), min_level: *priority };
+            new_journalctl(self.create_log_stream(), &config);
         }
 
         #[cfg(target_os = "android")]
         if self.config.run_logcat {
-            debug!("starting logcat");
-            self.logger = Some(new_logcat(
-                self.create_log_stream(),
-                &LoggingConfig { tags: vec!["*".to_string()], min_level: 1 },
-            ));
+            let config = LoggingConfig { tags: vec!["*".to_string()], min_level: 1 };
+            self.logger = Some(new_logcat(self.create_log_stream(), &config))
         }
 
         loop {
