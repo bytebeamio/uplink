@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tokio::time::Duration;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -95,6 +95,36 @@ impl From<&ActionResponse> for Payload {
                 "progress": resp.progress,
                 "errors": resp.errors
             }),
+        }
+    }
+}
+
+fn get_payload<'a>(payload: &'a Payload, key: &str) -> &'a Value {
+    payload.payload.get(key).unwrap_or_else(|| panic!("{} key missing from payload", key))
+}
+
+impl From<Payload> for ActionResponse {
+    fn from(payload: Payload) -> Self {
+        Self {
+            sequence: payload.sequence,
+            timestamp: payload.timestamp,
+            id: get_payload(&payload, "id")
+                .as_str()
+                .expect("couldn't convert to string")
+                .to_string(),
+            state: get_payload(&payload, "state")
+                .as_str()
+                .expect("couldn't convert to string")
+                .to_string(),
+            progress: get_payload(&payload, "progress")
+                .as_u64()
+                .expect("couldn't convert to string") as u8,
+            errors: get_payload(&payload, "errors")
+                .as_array()
+                .expect("couldn't convert to array")
+                .iter()
+                .map(|v| v.to_string())
+                .collect(),
         }
     }
 }

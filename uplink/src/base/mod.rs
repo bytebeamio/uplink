@@ -9,8 +9,6 @@ pub mod middleware;
 pub mod mqtt;
 pub mod serializer;
 
-use crate::ActionResponse;
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Send error {0}")]
@@ -395,30 +393,6 @@ pub struct Payload {
     pub timestamp: u64,
     #[serde(flatten)]
     pub payload: Value,
-}
-
-fn get_payload<'a>(payload: &'a Payload, key: &str) -> &'a Value {
-    payload.payload.get(key).unwrap_or_else(|| panic!("{} key missing from payload", key))
-}
-
-impl From<Payload> for ActionResponse {
-    fn from(payload: Payload) -> Self {
-        Self {
-            sequence: payload.sequence,
-            timestamp: payload.timestamp,
-            id: get_payload(&payload, "id").to_string(),
-            state: get_payload(&payload, "state").to_string(),
-            progress: get_payload(&payload, "progress")
-                .as_u64()
-                .expect("couldn't convert to number") as u8,
-            errors: get_payload(&payload, "errors")
-                .as_array()
-                .expect("couldn't convert to array")
-                .iter()
-                .map(|v| v.to_string())
-                .collect(),
-        }
-    }
 }
 
 impl Point for Payload {
