@@ -170,7 +170,8 @@ impl OtaDownloader {
         let (file, file_path) = self.create_file(&url, &update.version)?;
 
         // Create handler to perform download from URL
-        let resp = self.client.get(&url).send().await?;
+        // TODO: Error out for 1XX/3XX responses
+        let resp = self.client.get(&url).send().await?.error_for_status()?;
         info!("Downloading from {} into {}", url, file_path);
         self.download(resp, file).await?;
 
