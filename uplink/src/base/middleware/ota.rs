@@ -52,7 +52,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf, sync::Arc};
 
-use super::{Action, ActionResponse};
+use super::{Action, ActionResponse, Payload};
 use crate::base::Config;
 
 #[derive(thiserror::Error, Debug)]
@@ -78,13 +78,13 @@ pub enum Error {
 }
 
 /// This struct contains the necessary components to download and store an OTA update as notified
-/// by an [`Action`] with `name: "update_firmware"` while also sending periodic [`ActionResponse`]s
+/// by an [`Action`] with `name: "update_firmware"` while also sending periodic [`Payload`]s
 /// to update progress and finally forwarding the OTA [`Action`], updated with information regarding
 /// where the OTA file is stored in the file-system.
 pub struct OtaDownloader {
     config: Arc<Config>,
     action_id: String,
-    action_status_tx: Sender<ActionResponse>,
+    data_tx: Sender<Payload>,
     ota_rx: Receiver<Action>,
     bridge_tx: Sender<Action>,
     client: Client,
@@ -96,7 +96,7 @@ impl OtaDownloader {
     /// end of a "One" channel to send OTA actions onto.
     pub fn new(
         config: Arc<Config>,
-        action_status_tx: Sender<ActionResponse>,
+        data_tx: Sender<Payload>,
         bridge_tx: Sender<Action>,
     ) -> Result<(Sender<Action>, Self), Error> {
         // Authenticate with TLS certs from config
@@ -125,7 +125,7 @@ impl OtaDownloader {
                 config,
                 client,
                 ota_rx,
-                action_status_tx,
+                data_tx,
                 bridge_tx,
                 sequence: 0,
                 action_id: String::default(),
@@ -149,7 +149,7 @@ impl OtaDownloader {
                 Err(e) => {
                     let status = ActionResponse::failure(&self.action_id, e.to_string())
                         .set_sequence(self.sequence());
-                    self.send_status(status).await;
+                    self.send_status(status.as_payload()).await;
                 }
             }
         }
@@ -160,7 +160,7 @@ impl OtaDownloader {
         // Update action status for process initiated
         let status = ActionResponse::progress(&self.action_id, "Downloading", 0)
             .set_sequence(self.sequence());
-        self.send_status(status).await;
+        self.send_status(status.as_payload()).await;
 
         // Extract url information from action payload
         let mut update = serde_json::from_str::<FirmwareUpdate>(&action.payload)?;
@@ -184,7 +184,7 @@ impl OtaDownloader {
 
         let status = ActionResponse::progress(&self.action_id, "Downloaded", 50)
             .set_sequence(self.sequence());
-        self.send_status(status).await;
+        self.send_status(status.as_payload()).await;
 
         Ok(())
     }
@@ -241,7 +241,7 @@ impl OtaDownloader {
                 let status =
                     ActionResponse::progress(&self.action_id, "Downloading", percentage as u8)
                         .set_sequence(self.sequence());
-                self.send_status(status).await;
+                self.send_status(status.as_payload()).await;
             }
         }
 
@@ -250,8 +250,8 @@ impl OtaDownloader {
         Ok(())
     }
 
-    async fn send_status(&mut self, status: ActionResponse) {
-        if let Err(e) = self.action_status_tx.send_async(status).await {
+    async fn send_status(&mut self, status: Payload) {
+        if let Err(e) = self.data_tx.send_async(status).await {
             error!("Failed to send downloader status. Error = {:?}", e);
         }
     }
@@ -326,7 +326,7 @@ mod test {
         ota_tx.try_send(ota_action).unwrap();
 
         // Collect action_status and ensure it is as expected
-        let status = srx.recv().unwrap();
+        let status = ActionResponse::from(srx.recv().unwrap());
         assert_eq!(status.state, "Downloading");
 
         // Collect and ensure forwarded action contains expected info

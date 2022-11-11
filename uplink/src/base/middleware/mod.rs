@@ -16,7 +16,7 @@ pub mod tunshell;
 mod util;
 
 use crate::base::{Stream, StreamStatus};
-use crate::{Config, Package, Payload, Point};
+use crate::{Config, Package, Payload};
 pub use actions::{Action, ActionResponse};
 use logcat::{LogLevel, LogcatConfig, LogcatInstance};
 use process::Process;
@@ -40,12 +40,11 @@ enum Error {
 
 pub struct Middleware {
     config: Arc<Config>,
-    action_status_rx: Receiver<ActionResponse>,
-    action_status_tx: Sender<ActionResponse>,
     process: Process,
     actions_rx: Receiver<Action>,
     action_fwd: HashMap<String, Sender<Action>>,
     collector_data_tx: Sender<Box<dyn Package>>,
+    bridge_data_tx: Sender<Payload>,
     bridge_data_rx: Receiver<Payload>,
     logcat: Option<LogcatInstance>,
 }
@@ -54,21 +53,19 @@ impl Middleware {
     pub fn new(
         config: Arc<Config>,
         actions_rx: Receiver<Action>,
-        action_status_rx: Receiver<ActionResponse>,
-        action_status_tx: Sender<ActionResponse>,
         action_fwd: HashMap<String, Sender<Action>>,
         collector_data_tx: Sender<Box<dyn Package>>,
+        bridge_data_tx: Sender<Payload>,
         bridge_data_rx: Receiver<Payload>,
     ) -> Self {
-        let process = Process::new(action_status_tx.clone());
+        let process = Process::new(bridge_data_tx.clone());
         Self {
             config,
-            action_status_rx,
-            action_status_tx,
             process,
             actions_rx,
             action_fwd,
             collector_data_tx,
+            bridge_data_tx,
             bridge_data_rx,
             logcat: None,
         }
@@ -154,46 +151,50 @@ impl Middleware {
                     self.forward_action_error(&action_id, &action_name, error).await;
                 }
 
-                status = self.action_status_rx.recv_async() => {
-                    let status = status.expect("Action status channel closed");
-
-                    match &current_action_ {
-                        Some(action) => {
-                            if action.id == status.id {
-                                if status.state == "Completed"{
-                                    current_action_ = None;
-                                } else {
-                                    current_action_.as_mut().unwrap().timeout = Box::pin(sleep(Duration::from_secs(10)));
-                                }
-                            } else {
-                                error!("action_id in action_status({}) does not match that of active action ({})", status.id, action.id);
-                                continue;
-                            }
-                    }
-                     None => {
-                        error!("Action timed out already, ignoring response: {:?}", status);
-                        continue;
-                    }
-                }
-
-                    if let Err(e) = action_status.fill(status).await {
-                        error!("Failed to forward action status. Error = {:?}", e);
-                    }
-                }
-
                 data = self.bridge_data_rx.recv_async() => {
                     let data = data.expect("data channel closed");
 
-                    let stream = match bridge_partitions.get_mut(data.stream()) {
+                    // If incoming data is a response for an action, drop it
+                    // if timeout is already sent to cloud
+                    if data.stream == "action_status" {
+                        let status = ActionResponse::from(data);
+
+                        match &current_action_ {
+                            Some(action) => {
+                                if action.id == status.id {
+                                    if status.state == "Completed"{
+                                        current_action_ = None;
+                                    } else {
+                                        current_action_.as_mut().unwrap().timeout = Box::pin(sleep(Duration::from_secs(10)));
+                                    }
+                                } else {
+                                    error!("action_id in action_status({}) does not match that of active action ({})", status.id, action.id);
+                                    continue;
+                                }
+                            }
+                            None => {
+                                error!("Action timed out already, ignoring response: {:?}", status);
+                                continue;
+                            }
+                        }
+
+                        if let Err(e) = action_status.fill(status).await {
+                            error!("Failed to forward action status. Error = {:?}", e);
+                        }
+
+                        continue;
+                    }
+
+                    let stream = match bridge_partitions.get_mut(&data.stream) {
                         Some(partition) => partition,
                         None => {
                             if bridge_partitions.keys().len() > 20 {
-                                error!("Failed to create {:?} stream. More than max 20 streams", data.stream());
+                                error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
                                 continue
                             }
 
-                            let stream = Stream::dynamic(data.stream(), &self.config.project_id, &self.config.device_id, self.collector_data_tx.clone());
-                            bridge_partitions.entry(data.stream().to_owned()).or_insert(stream)
+                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.collector_data_tx.clone());
+                            bridge_partitions.entry(data.stream.to_owned()).or_insert(stream)
                         }
                     };
 
@@ -226,7 +227,7 @@ impl Middleware {
 
                     // Send failure response to cloud
                     let status = ActionResponse::failure(&action.id, "Action timed out");
-                    if let Err(e) = self.action_status_tx.send_async(status).await {
+                    if let Err(e) = self.bridge_data_tx.send_async(status.as_payload()).await {
                         error!("Failed to fill. Error = {:?}", e);
                     }
                 }
@@ -303,7 +304,7 @@ impl Middleware {
         error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
         let status = ActionResponse::failure(id, error.to_string());
 
-        if let Err(e) = self.action_status_tx.send_async(status).await {
+        if let Err(e) = self.bridge_data_tx.send_async(status.as_payload()).await {
             error!("Failed to send status. Error = {:?}", e);
         }
     }

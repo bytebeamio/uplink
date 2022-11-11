@@ -8,7 +8,7 @@ use tunshell_client::{Client, ClientMode, Config, HostShell};
 
 use crate::{
     base::{self, middleware::ActionResponse},
-    Action,
+    Action, Payload,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,7 +22,7 @@ pub struct TunshellSession {
     _config: Arc<base::Config>,
     echo_stdout: bool,
     actions_rx: Receiver<Action>,
-    action_status_tx: Sender<ActionResponse>,
+    data_tx: Sender<Payload>,
     last_process_done: Arc<Mutex<bool>>,
 }
 
@@ -31,13 +31,13 @@ impl TunshellSession {
         config: Arc<base::Config>,
         echo_stdout: bool,
         tunshell_rx: Receiver<Action>,
-        action_status_tx: Sender<ActionResponse>,
+        data_tx: Sender<Payload>,
     ) -> Self {
         Self {
             _config: config,
             echo_stdout,
             actions_rx: tunshell_rx,
-            action_status_tx,
+            data_tx,
             last_process_done: Arc::new(Mutex::new(true)),
         }
     }
@@ -61,7 +61,7 @@ impl TunshellSession {
             let action_id = action.action_id.clone();
             if !(*self.last_process_done.lock().unwrap()) {
                 let status = ActionResponse::failure(&action_id, "busy".to_owned());
-                if let Err(e) = self.action_status_tx.send_async(status).await {
+                if let Err(e) = self.data_tx.send_async(status.as_payload()).await {
                     error!("Failed to send status, Error = {:?}", e);
                 };
 
@@ -74,7 +74,7 @@ impl TunshellSession {
                 Err(e) => {
                     error!("Failed to deserialize keys. Error = {:?}", e);
                     let status = ActionResponse::failure(&action_id, "corruptkeys".to_owned());
-                    if let Err(e) = self.action_status_tx.send_async(status).await {
+                    if let Err(e) = self.data_tx.send_async(status.as_payload()).await {
                         error!("Failed to send status, Error = {:?}", e);
                     };
 
@@ -84,12 +84,12 @@ impl TunshellSession {
 
             let mut client = Client::new(self.config(keys), HostShell::new().unwrap());
             let last_process_done = self.last_process_done.clone();
-            let status_tx = self.action_status_tx.clone();
+            let status_tx = self.data_tx.clone();
 
             tokio::spawn(async move {
                 *last_process_done.lock().unwrap() = false;
                 let response = ActionResponse::progress(&action_id, "ShellSpawned", 100);
-                if let Err(e) = status_tx.send_async(response).await {
+                if let Err(e) = status_tx.send_async(response.as_payload()).await {
                     error!("Failed to send status. Error {:?}", e);
                 }
 
@@ -97,17 +97,17 @@ impl TunshellSession {
                     Ok(status) => {
                         if status != 0 {
                             let response = ActionResponse::failure(&action_id, status.to_string());
-                            status_tx.send_async(response).await
+                            status_tx.send_async(response.as_payload()).await
                         } else {
                             log::info!("tunshell exited with status: {}", status);
-                            status_tx.send_async(ActionResponse::success(&action_id)).await
+                            let response = ActionResponse::success(&action_id);
+                            status_tx.send_async(response.as_payload()).await
                         }
                     }
                     Err(e) => {
                         log::warn!("tunshell client error: {}", e);
-                        status_tx
-                            .send_async(ActionResponse::failure(&action_id, e.to_string()))
-                            .await
+                        let response = ActionResponse::failure(&action_id, e.to_string());
+                        status_tx.send_async(response.as_payload()).await
                     }
                 };
 

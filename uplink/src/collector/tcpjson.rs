@@ -10,7 +10,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use std::{io, sync::Arc};
 
 use crate::base::middleware::{Action, ActionResponse};
-use crate::base::{Config, Payload, Point};
+use crate::base::{Config, Payload};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -30,7 +30,6 @@ pub struct Bridge {
     config: Arc<Config>,
     data_tx: Sender<Payload>,
     actions_rx: Receiver<Action>,
-    action_status_tx: Sender<ActionResponse>,
 }
 
 impl Bridge {
@@ -38,9 +37,8 @@ impl Bridge {
         config: Arc<Config>,
         data_tx: Sender<Payload>,
         actions_rx: Receiver<Action>,
-        action_status_tx: Sender<ActionResponse>,
     ) -> Bridge {
-        Bridge { config, data_tx, actions_rx, action_status_tx }
+        Bridge { config, data_tx, actions_rx }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -63,7 +61,7 @@ impl Bridge {
                         let action = action?;
                         error!("Bridge down!! Action ID = {}", action.action_id);
                         let status = ActionResponse::failure(&action.action_id, "Bridge down");
-                        if let Err(e) = self.action_status_tx.send_async(status).await {
+                        if let Err(e) = self.data_tx.send_async(status.as_payload()).await {
                             error!("Failed to send busy status. Error = {:?}", e);
                         }
                     }
@@ -96,24 +94,8 @@ impl Bridge {
                         }
                     };
 
-                    // If incoming data is a response for an action, drop it
-                    // if timeout is already sent to cloud
-                    if data.stream() == "action_status" {
-                        let status = match serde_json::from_str(&line) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                error!("Deserialization error = {:?}", e);
-                                continue
-                            }
-                        };
-
-                        if let Err(e) = self.action_status_tx.send_async(status).await {
-                            error!("Send error = {:?}", e);
-                        }
-                    } else {
-                        if let Err(e) = self.data_tx.send_async(data).await {
-                            error!("Send error = {:?}", e);
-                        }
+                    if let Err(e) = self.data_tx.send_async(data).await {
+                        error!("Send error = {:?}", e);
                     }
                 }
 
@@ -122,8 +104,8 @@ impl Bridge {
                     info!("Received action: {:?}", action);
 
                     match serde_json::to_string(&action) {
-                        Ok(data) => {
-                            client.send(data).await?;
+                        Ok(action) => {
+                            client.send(action).await?;
                         },
                         Err(e) => {
                             error!("Serialization error = {:?}", e);

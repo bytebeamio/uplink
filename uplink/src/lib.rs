@@ -149,8 +149,6 @@ pub struct Uplink {
     collector_data_tx: Sender<Box<dyn Package>>,
     bridge_data_rx: Receiver<Payload>,
     bridge_data_tx: Sender<Payload>,
-    action_status_rx: Receiver<ActionResponse>,
-    action_status_tx: Sender<ActionResponse>,
 }
 
 impl Uplink {
@@ -158,8 +156,6 @@ impl Uplink {
         let (action_tx, action_rx) = bounded(10);
         let (collector_data_tx, collector_data_rx) = bounded(10);
         let (bridge_data_tx, bridge_data_rx) = bounded(10);
-
-        let (action_status_tx, action_status_rx) = bounded(10);
 
         Ok(Uplink {
             config,
@@ -169,8 +165,6 @@ impl Uplink {
             collector_data_tx,
             bridge_data_rx,
             bridge_data_tx,
-            action_status_tx,
-            action_status_rx,
         })
     }
 
@@ -182,14 +176,14 @@ impl Uplink {
             tunshell_config,
             false,
             tunshell_keys_rx,
-            self.action_status_tx.clone(),
+            self.bridge_data_tx.clone(),
         );
         thread::spawn(move || tunshell_session.start());
 
         // Launch a thread to handle downloads for OTA updates
         let (ota_tx, ota_downloader) = OtaDownloader::new(
             self.config.clone(),
-            self.action_status_tx.clone(),
+            self.bridge_data_tx.clone(),
             self.action_tx.clone(),
         )?;
         if self.config.ota.enabled {
@@ -234,10 +228,9 @@ impl Uplink {
         let actions = Middleware::new(
             self.config.clone(),
             raw_action_rx,
-            self.action_status_rx.clone(),
-            self.action_status_tx.clone(),
             action_fwd,
             self.collector_data_tx.clone(),
+            self.bridge_data_tx.clone(),
             self.bridge_data_rx.clone(),
         );
 
@@ -271,9 +264,5 @@ impl Uplink {
 
     pub fn bridge_data_tx(&self) -> Sender<Payload> {
         self.bridge_data_tx.clone()
-    }
-
-    pub fn action_status_tx(&self) -> Sender<ActionResponse> {
-        self.action_status_tx.clone()
     }
 }
