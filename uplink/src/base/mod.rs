@@ -95,7 +95,6 @@ pub struct Config {
 }
 
 pub trait Point: Send + Debug {
-    fn stream(&self) -> &str;
     fn sequence(&self) -> u32;
     fn timestamp(&self) -> u64;
 }
@@ -398,6 +397,15 @@ pub struct Payload {
     pub payload: Value,
 }
 
+fn get_payload<'a>(payload: &'a Payload, key: &str) -> &'a Value {
+    payload.payload.get(key).unwrap_or_else(|| panic!("{} key missing from payload", key))
+}
+
+impl From<Payload> for ActionResponse {
+    fn from(payload: Payload) -> Self {
+        Self {
+            sequence: payload.sequence,
+            timestamp: payload.timestamp,
             id: get_payload(&payload, "id").to_string(),
             state: get_payload(&payload, "state").to_string(),
             progress: get_payload(&payload, "progress")
@@ -414,10 +422,6 @@ pub struct Payload {
 }
 
 impl Point for Payload {
-    fn stream(&self) -> &str {
-        &self.stream
-    }
-
     fn sequence(&self) -> u32 {
         self.sequence
     }

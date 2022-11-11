@@ -65,10 +65,6 @@ impl System {
 }
 
 impl Point for System {
-    fn stream(&self) -> &str {
-        "uplink_system_stats"
-    }
-
     fn sequence(&self) -> u32 {
         self.sequence
     }
@@ -126,10 +122,6 @@ impl Network {
 }
 
 impl Point for Network {
-    fn stream(&self) -> &str {
-        "uplink_network_stats"
-    }
-
     fn sequence(&self) -> u32 {
         self.sequence
     }
@@ -186,10 +178,6 @@ impl Disk {
 }
 
 impl Point for Disk {
-    fn stream(&self) -> &str {
-        "uplink_disk_stats"
-    }
-
     fn sequence(&self) -> u32 {
         self.sequence
     }
@@ -241,10 +229,6 @@ impl Processor {
 }
 
 impl Point for Processor {
-    fn stream(&self) -> &str {
-        "uplink_processor_stats"
-    }
-
     fn sequence(&self) -> u32 {
         self.sequence
     }
@@ -307,10 +291,6 @@ impl Process {
 }
 
 impl Point for Process {
-    fn stream(&self) -> &str {
-        "uplink_process_stats"
-    }
-
     fn sequence(&self) -> u32 {
         self.sequence
     }

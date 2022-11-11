@@ -542,10 +542,6 @@ impl Metrics {
 }
 
 impl Point for Metrics {
-    fn stream(&self) -> &str {
-        "serializer_metrics"
-    }
-
     fn sequence(&self) -> u32 {
         self.sequence
     }
