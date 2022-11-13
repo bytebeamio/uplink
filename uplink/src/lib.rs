@@ -142,8 +142,8 @@ use base::mqtt::Mqtt;
 use base::serializer::Serializer;
 pub use base::{Config, Package, Point, Stream};
 pub use collector::simulator;
-use collector::systemstats::StatCollector;
 pub use collector::tcpjson::{Bridge, Payload};
+use collector::{logging::LoggerInstance, systemstats::StatCollector};
 pub use disk::Storage;
 
 pub struct Uplink {
@@ -198,6 +198,15 @@ impl Uplink {
             thread::spawn(move || stat_collector.start());
         }
 
+        let (log_tx, log_rx) = bounded(10);
+        // Launch log collector thread
+        let logger = LoggerInstance::new(self.config.clone(), self.data_tx.clone(), log_rx);
+        thread::spawn(|| {
+            if let Err(e) = logger.start() {
+                error!("Error running logger: {}", e);
+            }
+        });
+
         let (raw_action_tx, raw_action_rx) = bounded(10);
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
 
@@ -223,9 +232,9 @@ impl Uplink {
             raw_action_rx,
             tunshell_keys_tx,
             ota_tx,
+            log_tx,
             self.action_status.clone(),
             self.action_tx.clone(),
-            self.bridge_data_tx().clone(),
         );
 
         // Launch a thread to handle incoming and outgoing MQTT packets
