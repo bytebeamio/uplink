@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use flume::Receiver;
 use log::error;
@@ -23,7 +23,6 @@ pub struct TunshellSession {
     echo_stdout: bool,
     actions_rx: Receiver<Action>,
     action_status: Stream<ActionResponse>,
-    last_process_done: Arc<Mutex<bool>>,
 }
 
 impl TunshellSession {
@@ -38,7 +37,6 @@ impl TunshellSession {
             echo_stdout,
             actions_rx: tunshell_rx,
             action_status,
-            last_process_done: Arc::new(Mutex::new(true)),
         }
     }
 
@@ -59,14 +57,6 @@ impl TunshellSession {
     pub async fn start(mut self) {
         while let Ok(action) = self.actions_rx.recv_async().await {
             let action_id = action.action_id.clone();
-            if !(*self.last_process_done.lock().unwrap()) {
-                let status = ActionResponse::failure(&action_id, "busy".to_owned());
-                if let Err(e) = self.action_status.fill(status).await {
-                    error!("Failed to send status, Error = {:?}", e);
-                };
-
-                continue;
-            }
 
             // println!("{:?}", keys);
             let keys = match serde_json::from_str(&action.payload) {
@@ -83,11 +73,9 @@ impl TunshellSession {
             };
 
             let mut client = Client::new(self.config(keys), HostShell::new().unwrap());
-            let last_process_done = self.last_process_done.clone();
             let mut status_tx = self.action_status.clone();
 
             tokio::spawn(async move {
-                *last_process_done.lock().unwrap() = false;
                 let response = ActionResponse::progress(&action_id, "ShellSpawned", 100);
                 if let Err(e) = status_tx.fill(response).await {
                     error!("Failed to send status. Error {:?}", e);
@@ -112,8 +100,6 @@ impl TunshellSession {
                 if let Err(e) = send_status {
                     error!("Failed to send status. Error {:?}", e);
                 }
-
-                *last_process_done.lock().unwrap() = true;
             });
         }
     }
