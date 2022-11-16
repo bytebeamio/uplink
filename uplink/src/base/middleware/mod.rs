@@ -132,6 +132,20 @@ impl CurrentAction {
     fn start(id: String) -> Option<Self> {
         Some(Self { id, timeout: Box::pin(sleep(Duration::from_secs(u64::MAX))) })
     }
+
+    // When a non "Completed" status for current action is received, the timeout is updated,
+    // returns false only if status is not for current action
+    fn update(&mut self, status: &ActionResponse) -> bool {
+        if self.id != status.id {
+            return false;
+        }
+
+        if status.state != "Completed" {
+            self.timeout = Box::pin(sleep(Duration::from_secs(10)));
+        }
+
+        true
+    }
 }
 
 pub struct Middleware {
@@ -142,6 +156,12 @@ pub struct Middleware {
     collector_data_tx: Sender<Box<dyn Package>>,
     bridge_data_rx: Receiver<Payload>,
     logcat: Option<LogcatInstance>,
+    // - set to None when
+    // -- timeout ends
+    // -- A response with status "Completed" is received
+    // - set to a Some value when
+    // -- it is currently None and a new action is received
+    current_action: Option<CurrentAction>,
 }
 
 impl Middleware {
@@ -162,6 +182,7 @@ impl Middleware {
             collector_data_tx,
             bridge_data_rx,
             logcat: None,
+            current_action: None,
         }
     }
 
@@ -178,8 +199,6 @@ impl Middleware {
     /// Start receiving and processing [Action]s
     pub async fn start(mut self) {
         let mut end = Box::pin(sleep(Duration::from_secs(u64::MAX)));
-
-        let mut current_action_: Option<CurrentAction> = None;
 
         let action_status_topic = self
             .config
@@ -216,7 +235,7 @@ impl Middleware {
                     let action_id = action.action_id.clone();
                     let action_name = action.name.clone();
 
-                    if let Err(error) = self.handle(action, &mut current_action_).await {
+                    if let Err(error) = self.handle(action).await {
                         error!("Failed to execute. Command = {:?}, Error = {:?}", action_name, error);
                         let status = ActionResponse::failure(&action_id, error.to_string());
 
@@ -229,42 +248,35 @@ impl Middleware {
                 data = self.bridge_data_rx.recv_async() => {
                     let data = data.expect("data channel closed");
 
-                    // If incoming data is a response for an action, drop it
-                    // if timeout is already sent to cloud
-                    if data.stream == "action_status" {
-                        let status = ActionResponse::from(data);
-
-                        match &current_action_ {
-                            Some(action) => {
-                                if action.id == status.id {
-                                    if status.state == "Completed"{
-                                        current_action_ = None;
-                                    } else {
-                                        current_action_.as_mut().unwrap().timeout = Box::pin(sleep(Duration::from_secs(10)));
-                                    }
-                                } else {
-                                    error!("action_id in action_status({}) does not match that of active action ({})", status.id, action.id);
-                                    continue;
-                                }
-                            }
-                            None => {
-                                error!("Action timed out already, ignoring response: {:?}", status);
-                                continue;
-                            }
-                        }
-
-                        if let Err(e) = action_status.fill(status).await {
-                            error!("Failed to forward action status. Error = {:?}", e);
-                        }
-                    }else{
-                        streams.forward(data).await
+                    // If incoming data is not a response for an action forward to appropriate stream,
+                    // if it is, drop it if the timeout is already sent to cloud, else update timeout
+                    if data.stream != "action_status" {
+                        streams.forward(data).await;
+                        continue;
                     }
 
+                    let status = ActionResponse::from(data);
+                    if self.current_action.is_none() {
+                        error!("Action timed out already, ignoring response: {:?}", status);
+                        continue;
+                    }
 
+                    let action = self.current_action.as_mut().unwrap();
+                    if !action.update(&status) {
+                        error!(
+                            "action_id in action_status({}) does not match that of active action ({})",
+                            status.id, action.id
+                        );
+                        continue;
+                    }
+
+                    if let Err(e) = action_status.fill(status).await {
+                        error!("Failed to forward action status. Error = {:?}", e);
+                    }
                 }
 
-                _ = &mut current_action_.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
-                    let action = current_action_.take().unwrap();
+                _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
+                    let action = self.current_action.take().unwrap();
                     error!("Timeout waiting for action response. Action ID = {}", action.id);
 
                     // Send failure response to cloud
@@ -280,11 +292,7 @@ impl Middleware {
     }
 
     /// Handle received actions
-    async fn handle(
-        &mut self,
-        action: Action,
-        current_action: &mut Option<CurrentAction>,
-    ) -> Result<(), Error> {
+    async fn handle(&mut self, action: Action) -> Result<(), Error> {
         match action.name.as_ref() {
             "launch_shell" => {
                 self.action_fwd.get("launch_shell").unwrap().send_async(action).await?;
@@ -317,7 +325,7 @@ impl Middleware {
 
             // Bridge actions are forwarded to bridge if it isn't currently occupied
             name => {
-                if current_action.is_some() {
+                if self.current_action.is_some() {
                     error!(
                         "Action: {} still in execution",
                         self.current_action.as_ref().unwrap().id
@@ -326,7 +334,7 @@ impl Middleware {
                 }
 
                 if let Some(tx) = self.action_fwd.get(name) {
-                    *current_action = CurrentAction::start(action.action_id.clone());
+                    self.current_action = CurrentAction::start(action.action_id.clone());
                     tx.try_send(action)?;
                     return Ok(());
                 }
