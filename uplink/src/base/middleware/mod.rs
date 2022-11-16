@@ -129,7 +129,6 @@ pub struct Middleware {
     actions_rx: Receiver<Action>,
     action_fwd: HashMap<String, Sender<Action>>,
     collector_data_tx: Sender<Box<dyn Package>>,
-    bridge_data_tx: Sender<Payload>,
     bridge_data_rx: Receiver<Payload>,
     logcat: Option<LogcatInstance>,
 }
@@ -143,14 +142,13 @@ impl Middleware {
         bridge_data_tx: Sender<Payload>,
         bridge_data_rx: Receiver<Payload>,
     ) -> Self {
-        let process = Process::new(bridge_data_tx.clone());
+        let process = Process::new(bridge_data_tx);
         Self {
             config,
             process,
             actions_rx,
             action_fwd,
             collector_data_tx,
-            bridge_data_tx,
             bridge_data_rx,
             logcat: None,
         }
@@ -217,12 +215,15 @@ impl Middleware {
 
                     let action_id = action.action_id.clone();
                     let action_name = action.name.clone();
-                    let error = match self.handle(action).await {
-                        Ok(_) => continue,
-                        Err(e) => e,
-                    };
 
-                    self.forward_action_error(&action_id, &action_name, error).await;
+                    if let Err(error) = self.handle(action).await {
+                        error!("Failed to execute. Command = {:?}, Error = {:?}", action_name, error);
+                        let status = ActionResponse::failure(&action_id, error.to_string());
+
+                        if let Err(e) = action_status.fill(status).await {
+                            error!("Failed to send status. Error = {:?}", e);
+                        }
+                    }
                 }
 
                 data = self.bridge_data_rx.recv_async() => {
@@ -268,7 +269,7 @@ impl Middleware {
 
                     // Send failure response to cloud
                     let status = ActionResponse::failure(&action.id, "Action timed out");
-                    if let Err(e) = self.bridge_data_tx.send_async(status.as_payload()).await {
+                    if let Err(e) = action_status.fill(status).await {
                         error!("Failed to fill. Error = {:?}", e);
                     }
                 }
@@ -332,14 +333,5 @@ impl Middleware {
         }
 
         Ok(())
-    }
-
-    async fn forward_action_error(&mut self, id: &str, action: &str, error: Error) {
-        error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
-        let status = ActionResponse::failure(id, error.to_string());
-
-        if let Err(e) = self.bridge_data_tx.send_async(status.as_payload()).await {
-            error!("Failed to send status. Error = {:?}", e);
-        }
     }
 }
