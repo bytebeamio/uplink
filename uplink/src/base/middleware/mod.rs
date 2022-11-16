@@ -123,6 +123,17 @@ impl Streams {
     }
 }
 
+struct CurrentAction {
+    id: String,
+    timeout: Pin<Box<Sleep>>,
+}
+
+impl CurrentAction {
+    fn start(id: String) -> Option<Self> {
+        Some(Self { id, timeout: Box::pin(sleep(Duration::from_secs(u64::MAX))) })
+    }
+}
+
 pub struct Middleware {
     config: Arc<Config>,
     process: Process,
@@ -168,17 +179,6 @@ impl Middleware {
     pub async fn start(mut self) {
         let mut end = Box::pin(sleep(Duration::from_secs(u64::MAX)));
 
-        struct CurrentAction {
-            id: String,
-            timeout: Pin<Box<Sleep>>,
-        }
-        // - set to None when
-        // -- timeout ends
-        // -- A response with status "Completed" is received
-        // - set to a value when
-        // -- it is currently None and a new action is received
-        // - timeout is updated
-        // -- when a non "Completed" action is received
         let mut current_action_: Option<CurrentAction> = None;
 
         let action_status_topic = self
@@ -216,7 +216,7 @@ impl Middleware {
                     let action_id = action.action_id.clone();
                     let action_name = action.name.clone();
 
-                    if let Err(error) = self.handle(action).await {
+                    if let Err(error) = self.handle(action, &mut current_action_).await {
                         error!("Failed to execute. Command = {:?}, Error = {:?}", action_name, error);
                         let status = ActionResponse::failure(&action_id, error.to_string());
 
@@ -280,7 +280,11 @@ impl Middleware {
     }
 
     /// Handle received actions
-    async fn handle(&mut self, action: Action) -> Result<(), Error> {
+    async fn handle(
+        &mut self,
+        action: Action,
+        current_action: &mut Option<CurrentAction>,
+    ) -> Result<(), Error> {
         match action.name.as_ref() {
             "launch_shell" => {
                 self.action_fwd.get("launch_shell").unwrap().send_async(action).await?;
@@ -311,12 +315,23 @@ impl Middleware {
                 return Ok(());
             }
 
-            // Bridge actions are forwarded
+            // Bridge actions are forwarded to bridge if it isn't currently occupied
             name => {
+                if current_action.is_some() {
+                    error!(
+                        "Action: {} still in execution",
+                        self.current_action.as_ref().unwrap().id
+                    );
+                    return Ok(());
+                }
+
                 if let Some(tx) = self.action_fwd.get(name) {
+                    *current_action = CurrentAction::start(action.action_id.clone());
                     tx.try_send(action)?;
                     return Ok(());
                 }
+
+                error!("Action: {} handler not found", name)
             }
         }
 
