@@ -8,19 +8,11 @@ use tokio::time::Duration;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-mod logging;
 pub mod ota;
 mod process;
 pub mod tunshell;
 
 use crate::base::{Buffer, Point, Stream};
-use crate::Payload;
-
-#[cfg(target_os = "linux")]
-use logging::new_journalctl;
-#[cfg(target_os = "android")]
-use logging::new_logcat;
-use logging::{LoggerInstance, LoggingConfig};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -28,8 +20,8 @@ pub enum Error {
     Serde(#[from] serde_json::Error),
     #[error("Process error {0}")]
     Process(#[from] process::Error),
-    #[error("Error sending keys to tunshell thread {0}")]
-    TunshellSend(#[from] flume::SendError<Action>),
+    #[error("Error forwarding Action {0}")]
+    Send(#[from] flume::SendError<Action>),
     #[error("Error forwarding Action {0}")]
     TrySend(#[from] flume::TrySendError<Action>),
     #[error("Invalid action")]
@@ -128,9 +120,8 @@ pub struct Actions {
     actions_rx: Receiver<Action>,
     tunshell_tx: Sender<Action>,
     ota_tx: Sender<Action>,
+    log_tx: Sender<Action>,
     bridge_tx: Sender<Action>,
-    bridge_data_tx: Sender<Box<dyn Package>>,
-    logger: Option<LoggerInstance>,
 }
 
 impl Actions {
@@ -139,9 +130,9 @@ impl Actions {
         actions_rx: Receiver<Action>,
         tunshell_tx: Sender<Action>,
         ota_tx: Sender<Action>,
+        log_tx: Sender<Action>,
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
-        bridge_data_tx: Sender<Box<dyn Package>>,
     ) -> Actions {
         let process = process::Process::new(action_status.clone());
         Actions {
@@ -151,36 +142,13 @@ impl Actions {
             actions_rx,
             tunshell_tx,
             ota_tx,
+            log_tx,
             bridge_tx,
-            bridge_data_tx,
-            logger: None,
         }
-    }
-
-    fn create_log_stream(&self) -> Stream<Payload> {
-        Stream::dynamic_with_size(
-            "logs",
-            &self.config.project_id,
-            &self.config.device_id,
-            32,
-            self.bridge_data_tx.clone(),
-        )
     }
 
     /// Start receiving and processing [Action]s
     pub async fn start(mut self) {
-        #[cfg(target_os = "linux")]
-        if let Some(super::JournalctlConfig { priority, tags }) = &self.config.journalctl {
-            let config = LoggingConfig { tags: tags.clone(), min_level: *priority };
-            new_journalctl(self.create_log_stream(), &config);
-        }
-
-        #[cfg(target_os = "android")]
-        if self.config.run_logcat {
-            let config = LoggingConfig { tags: vec!["*".to_string()], min_level: 1 };
-            self.logger = Some(new_logcat(self.create_log_stream(), &config))
-        }
-
         loop {
             let action = match self.actions_rx.recv_async().await {
                 Ok(v) => v,
@@ -212,17 +180,13 @@ impl Actions {
             }
             #[cfg(target_os = "linux")]
             "configure_journalctl" => {
-                let mut config = serde_json::from_str::<LoggingConfig>(action.payload.as_str())?;
-                config.tags = config.tags.into_iter().filter(|tag| !tag.is_empty()).collect();
-                log::info!("restarting journalctl with following config: {:?}", config);
-                self.logger = Some(new_journalctl(self.create_log_stream(), &config))
+                self.log_tx.send_async(action).await?;
+                return Ok(());
             }
             #[cfg(target_os = "android")]
             "configure_logcat" => {
-                let mut config = serde_json::from_str::<LoggingConfig>(action.payload.as_str())?;
-                config.tags = config.tags.into_iter().filter(|tag| !tag.is_empty()).collect();
-                log::info!("restarting logcat with following config: {:?}", config);
-                self.logger = Some(new_logcat(self.create_log_stream(), &config))
+                self.log_tx.send_async(action).await?;
+                return Ok(());
             }
             "update_firmware" if self.config.ota.enabled => {
                 // if action can't be sent, Error out and notify cloud

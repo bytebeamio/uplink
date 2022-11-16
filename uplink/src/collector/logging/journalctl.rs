@@ -1,10 +1,9 @@
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use super::{spawn_logger, LoggerInstance, LoggingConfig};
-use crate::{Payload, Stream};
+use super::LoggingConfig;
+use crate::Payload;
 
 #[derive(Debug, Deserialize)]
 pub struct JournalctlConfig {
@@ -94,16 +93,7 @@ impl LogEntry {
     }
 }
 
-/// On a linux system, starts a journalctl instance that reports to the logs stream for a given
-/// device+project id, that journalctl instance is killed when this object is dropped
-/// On any other system, it's a noop
-
-pub fn new_journalctl(
-    log_stream: Stream<Payload>,
-    logging_config: &LoggingConfig,
-) -> LoggerInstance {
-    let kill_switch = Arc::new(Mutex::new(true));
-
+pub fn new_journalctl(logging_config: &LoggingConfig) -> Command {
     // silence everything
     let mut journalctl_args = ["-o", "json", "-f", "-p", &logging_config.min_level.to_string()]
         .map(String::from)
@@ -117,7 +107,6 @@ pub fn new_journalctl(
     log::info!("journalctl args: {:?}", journalctl_args);
     let mut journalctl = Command::new("journalctl");
     journalctl.args(journalctl_args).stdout(Stdio::piped());
-    spawn_logger(log_stream, kill_switch.clone(), journalctl);
 
-    LoggerInstance { kill_switch }
+    journalctl
 }

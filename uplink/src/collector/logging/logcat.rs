@@ -1,12 +1,11 @@
-use chrono::{Datelike, Local, Timelike};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::{Payload, Stream};
+use chrono::{Datelike, Local, Timelike};
 use serde::{Deserialize, Serialize};
 
-use super::{spawn_logger, LoggerInstance, LoggingConfig};
+use super::LoggingConfig;
+use crate::Payload;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
@@ -111,12 +110,7 @@ impl LogEntry {
     }
 }
 
-/// On an android system, starts a logcat instance that reports to the logs stream for a given
-/// device+project id, that logcat instance is killed when this object is dropped
-/// On any other system, it's a noop
-pub fn new_logcat(log_stream: Stream<Payload>, logging_config: &LoggingConfig) -> LoggerInstance {
-    let kill_switch = Arc::new(Mutex::new(true));
-
+pub fn new_logcat(logging_config: &LoggingConfig) -> Command {
     // silence everything
     let mut logcat_args = ["-v", "time", "*:S"].map(String::from).to_vec();
     // enable logging for requested tags
@@ -129,7 +123,6 @@ pub fn new_logcat(log_stream: Stream<Payload>, logging_config: &LoggingConfig) -
     log::info!("logcat args: {:?}", logcat_args);
     let mut logcat = Command::new("logcat");
     logcat.args(logcat_args).stdout(Stdio::piped());
-    spawn_logger(log_stream, kill_switch.clone(), logcat);
 
-    LoggerInstance { kill_switch }
+    logcat
 }
