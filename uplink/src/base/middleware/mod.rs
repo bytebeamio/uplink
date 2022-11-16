@@ -38,6 +38,91 @@ enum Error {
     CollectorOccupied,
 }
 
+struct Streams {
+    config: Arc<Config>,
+    data_tx: Sender<Box<dyn Package>>,
+    map: HashMap<String, Stream<Payload>>,
+    flush_handler: DelayMap<String>,
+}
+
+impl Streams {
+    fn new(config: Arc<Config>, data_tx: Sender<Box<dyn Package>>) -> Self {
+        let mut map = HashMap::new();
+        for (name, stream) in &config.streams {
+            let stream = Stream::with_config(
+                name,
+                &config.project_id,
+                &config.device_id,
+                stream,
+                data_tx.clone(),
+            );
+            map.insert(name.to_owned(), stream);
+        }
+
+        let flush_handler = DelayMap::new();
+
+        Self { config, data_tx, map, flush_handler }
+    }
+
+    async fn forward(&mut self, data: Payload) {
+        let stream = match self.map.get_mut(&data.stream) {
+            Some(partition) => partition,
+            None => {
+                if self.map.keys().len() > 20 {
+                    error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
+                    return;
+                }
+
+                let stream = Stream::dynamic(
+                    &data.stream,
+                    &self.config.project_id,
+                    &self.config.device_id,
+                    self.data_tx.clone(),
+                );
+                self.map.entry(data.stream.to_owned()).or_insert(stream)
+            }
+        };
+
+        let max_stream_size = stream.max_buffer_size;
+        let state = match stream.fill(data).await {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to send data. Error = {:?}", e.to_string());
+                return;
+            }
+        };
+
+        // Remove timeout from flush_handler for selected stream if stream state is flushed,
+        // do nothing if stream state is partial. Insert a new timeout if initial fill.
+        // Warn in case stream flushed stream was not in the queue.
+        if max_stream_size > 1 {
+            match state {
+                StreamStatus::Flushed(name) => self.flush_handler.remove(name),
+                StreamStatus::Init(name, flush_period) => {
+                    self.flush_handler.insert(name, flush_period)
+                }
+                StreamStatus::Partial(l) => {
+                    debug!("Stream contains {} elements", l);
+                }
+            }
+        }
+    }
+
+    fn is_flushable(&self) -> bool {
+        !self.flush_handler.is_empty()
+    }
+
+    // Flush stream/partitions that timeout
+    async fn flush(&mut self) {
+        let stream = self.flush_handler.next().await.unwrap();
+        let stream = self.map.get_mut(&stream).unwrap();
+        if let Err(e) = stream.flush().await {
+            error!("Failed to send data. Error = {:?}", e.to_string());
+            return;
+        }
+    }
+}
+
 pub struct Middleware {
     config: Arc<Config>,
     process: Process,
@@ -98,7 +183,6 @@ impl Middleware {
         // -- when a non "Completed" action is received
         let mut current_action_: Option<CurrentAction> = None;
 
-        let mut flush_handler = DelayMap::new();
         let action_status_topic = self
             .config
             .action_status
@@ -108,17 +192,7 @@ impl Middleware {
         let mut action_status =
             Stream::new("action_status", action_status_topic, 1, self.collector_data_tx.clone());
 
-        let mut bridge_partitions = HashMap::new();
-        for (name, config) in &self.config.streams {
-            let stream = Stream::with_config(
-                name,
-                &self.config.project_id,
-                &self.config.device_id,
-                config,
-                self.collector_data_tx.clone(),
-            );
-            bridge_partitions.insert(name.to_owned(), stream);
-        }
+        let mut streams = Streams::new(self.config.clone(), self.collector_data_tx.clone());
 
         if self.config.run_logcat {
             debug!("starting logcat");
@@ -181,44 +255,11 @@ impl Middleware {
                         if let Err(e) = action_status.fill(status).await {
                             error!("Failed to forward action status. Error = {:?}", e);
                         }
-
-                        continue;
+                    }else{
+                        streams.forward(data).await
                     }
 
-                    let stream = match bridge_partitions.get_mut(&data.stream) {
-                        Some(partition) => partition,
-                        None => {
-                            if bridge_partitions.keys().len() > 20 {
-                                error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
-                                continue
-                            }
 
-                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.collector_data_tx.clone());
-                            bridge_partitions.entry(data.stream.to_owned()).or_insert(stream)
-                        }
-                    };
-
-                    let max_stream_size = stream.max_buffer_size;
-                    let state = match stream.fill(data).await {
-                        Ok(s) => s,
-                        Err(e) => {
-                            error!("Failed to send data. Error = {:?}", e.to_string());
-                            continue
-                        }
-                    };
-
-                    // Remove timeout from flush_handler for selected stream if stream state is flushed,
-                    // do nothing if stream state is partial. Insert a new timeout if initial fill.
-                    // Warn in case stream flushed stream was not in the queue.
-                    if max_stream_size > 1 {
-                        match state {
-                            StreamStatus::Flushed(name) => flush_handler.remove(name),
-                            StreamStatus::Init(name, flush_period) => flush_handler.insert(name, flush_period),
-                            StreamStatus::Partial(l) => {
-                                debug!("Stream contains {} elements", l);
-                            }
-                        }
-                    }
                 }
 
                 _ = &mut current_action_.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
@@ -232,14 +273,7 @@ impl Middleware {
                     }
                 }
 
-                // Flush stream/partitions that timeout
-                Some(stream) = flush_handler.next(), if !flush_handler.is_empty() => {
-                    let stream = bridge_partitions.get_mut(&stream).unwrap();
-                    if let Err(e) = stream.flush().await{
-                        error!("Failed to send data. Error = {:?}", e.to_string());
-                        continue
-                    }
-                }
+                _ = streams.flush(), if streams.is_flushable() => {}
             }
         }
     }
