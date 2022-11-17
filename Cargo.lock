@@ -336,6 +336,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "demo"
+version = "1.0.0"
+dependencies = [
+ "config",
+ "log",
+ "serde",
+ "serde_json",
+ "simplelog",
+ "structopt",
+]
+
+[[package]]
 name = "digest"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

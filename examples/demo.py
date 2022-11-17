@@ -8,7 +8,6 @@ import threading
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect(("localhost", 5555))
-
 # Converts JSON data received over TCP into a python dictionary
 def recv_action(s):
     return json.loads(s.recv(2048))
@@ -38,6 +37,8 @@ def update_firmware(action):
 
 def recv_actions():
     while True:
+        print("hello")
+        print(s.recv(2048))
         action = recv_action(s)
         print(action)
 
@@ -60,11 +61,12 @@ def send_device_shadow(s, sequence):
         "timestamp": t,
         "Status": "running" 
     }
-
+    print(payload)
     send_data(s, payload)
 
 sequence = 1
 while True:
     time.sleep(5)
+    print("testing")
     send_device_shadow(s, sequence)
     sequence += 1

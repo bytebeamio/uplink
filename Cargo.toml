@@ -1,10 +1,12 @@
 [patch.crates-io]
 serial = { git = "https://github.com/bytebeamio/serial-rs", branch = "android_fix" }
 
+
 [workspace]
 members = [
     "uplink",
     "disk",
+    "examples/*"
 ]
 
 exclude = ["tools/tunshell"]
@@ -19,3 +21,6 @@ panic = "unwind"
 opt-level = "s"
 strip = true
 panic = "unwind"
+
+
+
