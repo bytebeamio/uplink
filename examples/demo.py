@@ -15,6 +15,8 @@ def recv_action(s):
 # Constructs a payload and sends it over TCP to uplink
 def send_data(s, payload):
     send = json.dumps(payload) + "\n"
+    print("send:")
+    print(send)
     s.sendall(bytes(send, encoding="utf-8"))
 
 # Constructs a JSON `action_status` as a response to received action on completion
@@ -38,7 +40,6 @@ def update_firmware(action):
 def recv_actions():
     while True:
         print("hello")
-        print(s.recv(2048))
         action = recv_action(s)
         print(action)
 
@@ -65,8 +66,8 @@ def send_device_shadow(s, sequence):
     send_data(s, payload)
 
 sequence = 1
-while True:
-    time.sleep(5)
-    print("testing")
-    send_device_shadow(s, sequence)
-    sequence += 1
+# while True:
+#     time.sleep(5)
+#     print("testing")
+#     send_device_shadow(s, sequence)
+#     sequence += 1
