@@ -1,13 +1,11 @@
-name: Releaser
+name: Build and release uplink binaries
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  release:
+    types: [published]
 
 jobs:
   build-release:
     name: Build release for ${{ matrix.target }}
-    needs: ['create-release']
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -86,25 +84,51 @@ jobs:
             rustembedded/cross:aarch64-unknown-linux-gnu \
             aarch64-linux-gnu-strip \
             /target/aarch64-unknown-linux-gnu/release/uplink
+      
+      - name: Get release
+        id: get_release
+        uses: bruceadams/get-release@v1.3.2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Upload release archive
         uses: actions/upload-release-asset@v1.0.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          upload_url: ${{ steps.get_release.outputs.upload_url }}
           asset_path: ./target/${{ matrix.target }}/release/uplink
           asset_name: uplink-${{matrix.target}}
           asset_content_type: application/octet-stream
 
-  create-release:
+  build-release-android:
+    name: Build release for ${{ matrix.target }}
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    container:
+      image: devduttshenoi/android-builder
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-linux-android, armv7-linux-androideabi, aarch64-linux-android, i686-linux-android]
     steps:
-      - name: create_release
-        id: create_release
-        uses: softprops/action-gh-release@v1
+      - uses: actions/checkout@v3
+
+      - name: Build with cargo-ndk
+        run: ANDROID_NDK_HOME="/root/android/ndk/25.1.8937393" cargo ndk --target ${{ matrix.target }} --platform 23 build --release --bin uplink
+      
+      - name: Get release
+        id: get_release
+        uses: bruceadams/get-release@v1.3.2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Upload release archive
+        uses: actions/upload-release-asset@v1.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          prerelease: false
+          upload_url: ${{ steps.get_release.outputs.upload_url }}
+          asset_path: ./target/${{ matrix.target }}/release/uplink
+          asset_name: uplink-${{ matrix.target }}
+          asset_content_type: application/octet-stream
 
