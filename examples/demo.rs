@@ -22,7 +22,7 @@ fn main() -> io::Result<()> {
     let mut line = String::new();
     loop{
        let result = stream.read_to_string(&mut line)?;
-       println!("Received data: {}", &line);
+       println!("Received data: {}", line);
        thread::sleep(Duration::from_millis(1)); 
     }
     Ok(())
