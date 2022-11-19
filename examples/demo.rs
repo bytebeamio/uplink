@@ -1,10 +1,8 @@
 #![allow(unused)]
-use std::io::{self, Read};
-use std::io::prelude::*;
-use std::time::{SystemTime,UNIX_EPOCH};
+use std::io::{self, Read, BufReader, prelude::*};
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::net::TcpStream;
-use std::{thread, time::Duration};
-use std::io::BufReader;
+use std::thread;
 
 
 
