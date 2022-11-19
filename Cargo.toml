@@ -5,8 +5,7 @@ serial = { git = "https://github.com/bytebeamio/serial-rs", branch = "android_fi
 [workspace]
 members = [
     "uplink",
-    "disk",
-    "examples/*"
+    "disk"
 ]
 
 exclude = ["tools/tunshell"]
