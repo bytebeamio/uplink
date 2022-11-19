@@ -37,7 +37,7 @@ fn send_device_shadow(mut stream: TcpStream){
       let time = 
            SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_millis();
     
-       //serializes data to be send
+       // JSON data to be sent to uplink
        let serialize = format!(
               r#"{{"stream": "device_shadow", "sequence": {seq},"timestamp": {time},"status": "running"}}"#
           ) + "\n";
