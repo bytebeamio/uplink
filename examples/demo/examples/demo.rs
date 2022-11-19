@@ -32,7 +32,7 @@ fn main() -> io::Result<()> {
     loop{
        let result = stream_clone.read(&mut line)?;
        let deserialized:Value = serde_json::from_slice(&line[0..result]).unwrap();
-       println!("data: {:?}", &deserialized);
+       println!("Received data: {:?}", &deserialized);
        thread::sleep(Duration::from_millis(1)); 
     }
     Ok(())
@@ -65,7 +65,7 @@ fn send_device_shadow(mut stream: TcpStream){
        };
        let current_payload = serde_json::to_string(&serialize).unwrap();
 
-       // sends serialized data to server by encooding it to utf8
+       // sends serialized data to server
        stream.write(&current_payload.as_bytes()).expect("write error");
     
        seq+=1; 
