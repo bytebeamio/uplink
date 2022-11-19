@@ -111,6 +111,11 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
+    if std::env::args().find(|a| a == "--sha").is_some() {
+        println!("{}", &env!("VERGEN_GIT_SHA")[0..8]);
+        return Ok(());
+    }
+
     let commandline: CommandLine = StructOpt::from_args();
 
     initialize_logging(&commandline);
