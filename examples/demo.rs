@@ -16,10 +16,11 @@ fn main() -> io::Result<()> {
     });
     
     // receives and prints json data
-    let mut line = String::new();
+    let mut line = [0;2048];
     loop{
-       let result = stream.read_to_string(&mut line)?;
-       println!("Received data: {}", line);
+       let result = stream.read(&mut line)?;
+       let data = str::from_utf8(&line[0..result]).unwrap();
+       println!("Received data: {}", data);
        thread::sleep(Duration::from_millis(1)); 
     }
     Ok(())
