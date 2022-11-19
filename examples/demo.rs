@@ -1,4 +1,3 @@
-#![allow(unused)]
 use std::io::{self, Read, BufReader, prelude::*};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::net::TcpStream;
