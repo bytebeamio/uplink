@@ -4,31 +4,38 @@ use std::io::prelude::*;
 use std::time::{SystemTime,UNIX_EPOCH};
 use std::net::TcpStream;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{thread, time::Duration};
-const MESSAGE_SIZE: usize = 5;
+use std::io::BufReader;
+
 
 #[derive(Serialize, Deserialize, Debug)]
  struct Payload{
      stream:String,
+     sequence: u32,
      timestamp:u64,
-     sequence: u64,
      status: String
  }
 
 fn main() -> io::Result<()> {
     let mut stream = TcpStream::connect("localhost:5555").expect("couldn't connect to server");
-        println!("Connected to the server!");
+    let mut stream_clone = stream.try_clone().expect("clone failed...");
+    println!("Connected to the server!");
+ 
+    // Thread for sending data
+    thread::spawn(move || {
         send_device_shadow(stream);
-        // loop{
-        // //     println!("hello");
-        // //         // Array with a fixed size
-        // //     let mut rx_bytes = [0u8; MESSAGE_SIZE];
-        // //     // Read from the current data in the TcpStream
-        // //     stream.read(&mut rx_bytes).expect("failed to read");
-        // //     let received = std::str::from_utf8(&rx_bytes).expect("valid utf8");
-        // //     println!("data: {}", received);
-        // //    }
-    Ok(());
+    });
+    
+    // receives and prints json data
+    let mut line = [0;2048];
+    loop{
+       let result = stream_clone.read(&mut line)?;
+       let deserialized:Value = serde_json::from_slice(&line[0..result]).unwrap();
+       println!("data: {:?}", &deserialized);
+       thread::sleep(Duration::from_millis(1)); 
+    }
+    Ok(())
 }
 
 // returns system time
@@ -39,10 +46,12 @@ fn get_system_time() -> u64 {
     .duration_since(UNIX_EPOCH)
     .expect("Time went backwards");
 
-    since_the_epoch.as_secs();
+    since_the_epoch.as_secs()
 }
 
+// sends data to server
 fn send_device_shadow(mut stream: TcpStream){
+    let mut seq:u32 = 1;
     loop{
       let time = get_system_time();
     
@@ -50,8 +59,8 @@ fn send_device_shadow(mut stream: TcpStream){
        let serialize = Payload
         {
          stream: "device_shadow".to_string(),
+         sequence: seq,
          timestamp: time,
-         sequence: 1,
          status: "running".to_string()
        };
        let current_payload = serde_json::to_string(&serialize).unwrap();
@@ -59,7 +68,8 @@ fn send_device_shadow(mut stream: TcpStream){
        // sends serialized data to server by encooding it to utf8
        stream.write(&current_payload.as_bytes()).expect("write error");
     
-
+       seq+=1; 
+       println!("wrote data");
        // sleeps for 4 secs
        thread::sleep(Duration::from_millis(4000));
     
