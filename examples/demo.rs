@@ -40,7 +40,7 @@ fn send_device_shadow(mut stream: TcpStream){
           ) + "\n";
 
 
-       // sends serialized data to server
+       // sends data to server
        stream.write(serialize.as_bytes()).expect("write error");
        stream.flush().unwrap();
 
