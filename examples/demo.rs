@@ -1,13 +1,9 @@
-use std::io::{self, prelude::*};
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use std::io::{prelude::*, BufReader, Result};
 use std::net::TcpStream;
 use std::thread;
-use io::BufReader;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-
-
-
-fn main() -> io::Result<()> {
+fn main() -> Result<()> {
     let mut stream = TcpStream::connect("localhost:5555").expect("couldn't connect to server");
     let stream_clone = stream.try_clone().expect("clone failed...");
     println!("Connected to the server!");
@@ -18,18 +14,13 @@ fn main() -> io::Result<()> {
     });
 
     // receives and prints data
-    let stream_reader = BufReader::new(&mut stream);
-
-    for data in stream_reader.lines(){
-        let data2 = data?.to_string();
-        println!("Received data: {:?}", data2);
+    let stream = BufReader::new(&mut stream);
+    for line in stream.lines() {
+        println!("Received data: {}", line?);
     }
     
     Ok(())
 }
-
-
-
 // sends data to server
 fn send_device_shadow(mut stream: TcpStream){
     let mut seq:u32 = 1;
@@ -38,19 +29,17 @@ fn send_device_shadow(mut stream: TcpStream){
            SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_millis();
     
        // JSON data to be sent to uplink
-       let serialize = format!(
+       let payload = format!(
               r#"{{"stream": "device_shadow", "sequence": {seq},"timestamp": {time},"status": "running"}}"#
           ) + "\n";
 
-
        // sends data to server
-       stream.write(serialize.as_bytes()).expect("write error");
+       stream.write(payload.as_bytes()).expect("write error");
        stream.flush().unwrap();
 
        seq+=1; 
        println!("wrote data");
        // sleeps for 4 secs
        thread::sleep(Duration::from_millis(4000));
-    
     }
 }
