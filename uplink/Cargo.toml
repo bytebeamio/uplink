@@ -34,3 +34,4 @@ stdio-override = "0.1.3"
 
 [build-dependencies]
 vergen = { version = "7", features = ["git", "build", "time"] }
+
