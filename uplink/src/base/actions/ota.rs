@@ -149,7 +149,7 @@ impl OtaDownloader {
                 match self.run(action.clone()).await {
                     Ok(_) => {
                         error = None;
-                        break
+                        break;
                     }
                     Err(e) => {
                         error!("Download failed: {e}\nretrying");
