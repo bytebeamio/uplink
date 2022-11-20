@@ -1,29 +1,30 @@
-use std::io::{self, Read, prelude::*};
+use std::io::{self, prelude::*};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::net::TcpStream;
 use std::thread;
-use std::str;
+use io::BufReader;
+
 
 
 
 fn main() -> io::Result<()> {
     let mut stream = TcpStream::connect("localhost:5555").expect("couldn't connect to server");
-    let mut stream_clone = stream.try_clone().expect("clone failed...");
+    let stream_clone = stream.try_clone().expect("clone failed...");
     println!("Connected to the server!");
  
     // Thread for sending data
     thread::spawn(move || {
         send_device_shadow(stream_clone);
     });
-    
-    // receives and prints json data
-    let mut line = [0;2048];
-    loop{
-       let result = stream.read(&mut line)?;
-       let data = str::from_utf8(&line[0..result]).unwrap();
-       println!("Received data: {}", data);
-       thread::sleep(Duration::from_millis(1)); 
+
+    // receives and prints data
+    let stream_reader = BufReader::new(&mut stream);
+
+    for data in stream_reader.lines(){
+        let data2 = data?.to_string();
+        println!("Received data: {:?}", data2);
     }
+    
     Ok(())
 }
 
