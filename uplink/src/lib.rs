@@ -58,11 +58,6 @@ pub mod config {
     # triggered from cloud.
     actions = ["tunshell"]
 
-    [journalctl]
-    enabled = false
-    tags = ["kernel"]
-    priority = 6
-
     [persistence]
     path = "/tmp/uplink"
     max_file_size = 104857600 # 100MB
