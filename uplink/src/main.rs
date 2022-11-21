@@ -136,8 +136,8 @@ async fn main() -> Result<(), Error> {
 
     if let Some(simulator_config) = &config.simulator {
         if let Err(e) =
-            simulator::start(uplink.bridge_data_tx(), uplink.bridge_action_rx(), simulator_config)
-                .await
+        simulator::start(uplink.bridge_data_tx(), uplink.bridge_action_rx(), simulator_config)
+            .await
         {
             error!("Error while running simulator: {}", e)
         }
@@ -147,8 +147,8 @@ async fn main() -> Result<(), Error> {
         uplink.bridge_action_rx(),
         uplink.action_status(),
     )
-    .start()
-    .await
+        .start()
+        .await
     {
         error!("Bridge stopped!! Error = {:?}", e);
     }
