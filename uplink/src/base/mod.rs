@@ -68,6 +68,12 @@ pub struct SimulatorConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct JournalctlConfig {
+    pub tags: Vec<String>,
+    pub priority: u8,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -75,7 +81,6 @@ pub struct Config {
     pub port: u16,
     pub authentication: Option<Authentication>,
     pub bridge_port: u16,
-    pub run_logcat: bool,
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub actions: Vec<String>,
@@ -87,6 +92,10 @@ pub struct Config {
     pub ota: Ota,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
+    #[cfg(target_os = "linux")]
+    pub journalctl: Option<JournalctlConfig>,
+    #[cfg(target_os = "android")]
+    pub run_logcat: bool,
 }
 
 pub trait Point: Send + Debug {
