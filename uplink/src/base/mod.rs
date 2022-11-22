@@ -3,6 +3,7 @@ use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
 use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub mod actions;
 pub mod mqtt;
@@ -369,5 +370,41 @@ impl<T> Clone for Stream<T> {
             tx: self.tx.clone(),
             flush_period: self.flush_period,
         }
+    }
+}
+
+// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
+// TODO which cloud will double deserialize (Batch 1st and messages next)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Payload {
+    #[serde(skip_serializing)]
+    pub stream: String,
+    pub sequence: u32,
+    pub timestamp: u64,
+    #[serde(flatten)]
+    pub payload: Value,
+}
+
+impl Point for Payload {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+}
+
+impl Package for Buffer<Payload> {
+    fn topic(&self) -> Arc<String> {
+        self.topic.clone()
+    }
+
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        self.anomalies()
     }
 }

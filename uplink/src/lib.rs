@@ -135,10 +135,9 @@ use base::actions::Actions;
 pub use base::actions::{Action, ActionResponse};
 use base::mqtt::Mqtt;
 use base::serializer::Serializer;
-pub use base::{Config, Package, Point, Stream};
-pub use collector::simulator;
-pub use collector::tcpjson::{Bridge, Payload};
+pub use base::{Config, Package, Payload, Point, Stream};
 use collector::{logging::LoggerInstance, systemstats::StatCollector};
+pub use collector::{simulator, tcpjson::Bridge};
 pub use disk::Storage;
 
 pub struct Uplink {
