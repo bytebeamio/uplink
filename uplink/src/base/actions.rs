@@ -1,14 +1,9 @@
-use std::{
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::{Package, Payload, Point};
-
-use super::Buffer;
+use crate::{Payload, Point};
 
 /// On the Bytebeam platform, an Action is how beamd and through it,
 /// the end-user, can communicate the tasks they want to perform on
@@ -116,19 +111,5 @@ impl Point for ActionResponse {
 
     fn timestamp(&self) -> u64 {
         self.timestamp
-    }
-}
-
-impl Package for Buffer<ActionResponse> {
-    fn topic(&self) -> Arc<String> {
-        self.topic.clone()
-    }
-
-    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
-        serde_json::to_vec(&self.buffer)
-    }
-
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
     }
 }

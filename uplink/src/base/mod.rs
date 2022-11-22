@@ -5,8 +5,8 @@ use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub mod middleware;
 pub mod actions;
+pub mod middleware;
 pub mod mqtt;
 pub mod serializer;
 
@@ -359,6 +359,24 @@ impl<T> Buffer<T> {
     }
 }
 
+impl<T> Package for Buffer<T>
+where
+    T: Debug + Send,
+    Vec<T>: Serialize,
+{
+    fn topic(&self) -> Arc<String> {
+        self.topic.clone()
+    }
+
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        self.anomalies()
+    }
+}
+
 impl<T> Clone for Stream<T> {
     fn clone(&self) -> Self {
         Stream {
@@ -393,19 +411,5 @@ impl Point for Payload {
 
     fn timestamp(&self) -> u64 {
         self.timestamp
-    }
-}
-
-impl Package for Buffer<Payload> {
-    fn topic(&self) -> Arc<String> {
-        self.topic.clone()
-    }
-
-    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
-        serde_json::to_vec(&self.buffer)
-    }
-
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
     }
 }
