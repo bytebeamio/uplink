@@ -135,29 +135,31 @@ impl Bridge {
                     // If incoming data is a response for an action, drop it
                     // if timeout is already sent to cloud
                     if data.stream == "action_status" {
-                        if current_action_.is_some() {
-                            if let Some(response_id) = data.payload.as_object()
-                                .and_then(|payload| payload.get("action_id"))
-                                .and_then(|id| id.as_str()) {
-                                let action_id = current_action_.as_ref().unwrap().id.as_str();
-                                if action_id == response_id {
-                                    if let Some("Completed") = data.payload.as_object().unwrap().get("state")
-                                        .and_then(|s| s.as_str()) {
-                                        current_action_ = None;
-                                    } else {
-                                        current_action_.as_mut().unwrap().timeout = Box::pin(time::sleep(Duration::from_secs(10)));
-                                    }
-                                } else {
-                                    error!("action_id in action_status({response_id}) does not match that of active action ({action_id})");
-                                    continue;
-                                }
-                            } else {
-                                error!("No valid action_id in action_status stream payload");
+                        let (action_id, timeout) = match &mut current_action_ {
+                            Some(CurrentAction { id, timeout }) => (id, timeout),
+                            None => {
+                                error!("Action timed out already, ignoring response: {:?}", data);
                                 continue;
                             }
-                        } else {
-                            error!("Action timed out already, ignoring response: {:?}", data);
+                        };
+
+                        let (response_id, state) = match ActionResponse::from_payload(&data) {
+                            Ok(ActionResponse { id, state, .. }) => (id, state),
+                            Err(e) => {
+                                error!("Couldn't parse payload as an action response: {e:?}");
+                                continue;
+                            }
+                        };
+
+                        if *action_id != response_id {
+                            error!("action_id in action_status({response_id}) does not match that of active action ({action_id})");
                             continue;
+                        }
+
+                        if state == "Completed" {
+                            current_action_ = None;
+                        } else {
+                            *timeout = Box::pin(time::sleep(Duration::from_secs(10)));
                         }
                     }
 
