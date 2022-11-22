@@ -2,7 +2,7 @@ use super::{Config, Package};
 use flume::{Receiver, Sender, TrySendError};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use thiserror::Error;
 use tokio::time::Duration;
 
@@ -141,7 +141,7 @@ impl Point for ActionResponse {
     }
 }
 
-pub struct Actions {
+pub struct Middleware {
     config: Arc<Config>,
     action_status: Stream<ActionResponse>,
     process: process::Process,
@@ -152,7 +152,7 @@ pub struct Actions {
     bridge_tx: Sender<Action>,
 }
 
-impl Actions {
+impl Middleware {
     pub fn new(
         config: Arc<Config>,
         actions_rx: Receiver<Action>,
@@ -161,18 +161,9 @@ impl Actions {
         log_tx: Sender<Action>,
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
-    ) -> Actions {
+    ) -> Self {
         let process = process::Process::new(action_status.clone());
-        Actions {
-            config,
-            action_status,
-            process,
-            actions_rx,
-            tunshell_tx,
-            ota_tx,
-            log_tx,
-            bridge_tx,
-        }
+        Self { config, action_status, process, actions_rx, tunshell_tx, ota_tx, log_tx, bridge_tx }
     }
 
     /// Start receiving and processing [Action]s

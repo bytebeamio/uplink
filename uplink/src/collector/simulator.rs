@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
 use crate::base::SimulatorConfig;
-use crate::base::{actions::Action, Package, Stream};
+use crate::base::{middleware::Action, Package, Stream};
 use crate::{ActionResponse, Payload};
 
 use rand::Rng;
@@ -380,7 +380,10 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Pay
     return Payload {
         timestamp,
         sequence,
-        stream: format!("/tenants/demo/devices/{}/events/peripheral_state/jsonarray", device.device_id),
+        stream: format!(
+            "/tenants/demo/devices/{}/events/peripheral_state/jsonarray",
+            device.device_id
+        ),
         payload: json!(payload),
     };
 }

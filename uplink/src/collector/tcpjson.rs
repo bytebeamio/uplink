@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::{collections::HashMap, io, sync::Arc};
 
 use super::util::DelayMap;
-use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
+use crate::base::middleware::{Action, ActionResponse, Error as ActionsError};
 use crate::base::{Config, Package, Stream, StreamStatus};
 use crate::Payload;
 
