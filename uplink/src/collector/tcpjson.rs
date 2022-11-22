@@ -12,9 +12,8 @@ use std::pin::Pin;
 use std::{collections::HashMap, io, sync::Arc};
 
 use super::util::DelayMap;
-use crate::base::middleware::{Action, ActionResponse, Error as ActionsError};
-use crate::base::{Config, Package, Stream, StreamStatus};
-use crate::Payload;
+use crate::base::{middleware::Error as ActionsError, StreamStatus};
+use crate::{Action, ActionResponse, Config, Package, Payload, Stream};
 
 #[derive(Error, Debug)]
 pub enum Error {

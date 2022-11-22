@@ -128,11 +128,11 @@ pub mod config {
     }
 }
 
+pub use base::actions::{Action, ActionResponse};
 pub use base::middleware;
 use base::middleware::ota::OtaDownloader;
 use base::middleware::tunshell::TunshellSession;
 use base::middleware::Middleware;
-pub use base::middleware::{Action, ActionResponse};
 use base::mqtt::Mqtt;
 use base::serializer::Serializer;
 pub use base::{Config, Package, Payload, Point, Stream};
