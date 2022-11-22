@@ -1,8 +1,6 @@
 use flume::{Receiver, RecvError, Sender};
 use futures_util::SinkExt;
 use log::{debug, error, info};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{Duration, Sleep};
@@ -10,12 +8,13 @@ use tokio::{select, time};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
-use std::{collections::HashMap, io, sync::Arc};
 use std::pin::Pin;
+use std::{collections::HashMap, io, sync::Arc};
 
 use super::util::DelayMap;
 use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
-use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus};
+use crate::base::{Config, Package, Stream, StreamStatus};
+use crate::Payload;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -136,29 +135,31 @@ impl Bridge {
                     // If incoming data is a response for an action, drop it
                     // if timeout is already sent to cloud
                     if data.stream == "action_status" {
-                        if current_action_.is_some() {
-                            if let Some(response_id) = data.payload.as_object()
-                                .and_then(|payload| payload.get("action_id"))
-                                .and_then(|id| id.as_str()) {
-                                let action_id = current_action_.as_ref().unwrap().id.as_str();
-                                if action_id == response_id {
-                                    if let Some("Completed") = data.payload.as_object().unwrap().get("state")
-                                        .and_then(|s| s.as_str()) {
-                                        current_action_ = None;
-                                    } else {
-                                        current_action_.as_mut().unwrap().timeout = Box::pin(time::sleep(Duration::from_secs(10)));
-                                    }
-                                } else {
-                                    error!("action_id in action_status({response_id}) does not match that of active action ({action_id})");
-                                    continue;
-                                }
-                            } else {
-                                error!("No valid action_id in action_status stream payload");
+                        let (action_id, timeout) = match &mut current_action_ {
+                            Some(CurrentAction { id, timeout }) => (id, timeout),
+                            None => {
+                                error!("Action timed out already, ignoring response: {:?}", data);
                                 continue;
                             }
-                        } else {
-                            error!("Action timed out already, ignoring response: {:?}", data);
+                        };
+
+                        let (response_id, state) = match ActionResponse::from_payload(&data) {
+                            Ok(ActionResponse { id, state, .. }) => (id, state),
+                            Err(e) => {
+                                error!("Couldn't parse payload as an action response: {e:?}");
+                                continue;
+                            }
+                        };
+
+                        if *action_id != response_id {
+                            error!("action_id in action_status({response_id}) does not match that of active action ({action_id})");
                             continue;
+                        }
+
+                        if state == "Completed" {
+                            current_action_ = None;
+                        } else {
+                            *timeout = Box::pin(time::sleep(Duration::from_secs(10)));
                         }
                     }
 
@@ -236,47 +237,5 @@ impl Bridge {
 
             }
         }
-    }
-}
-
-// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
-// TODO which cloud will double deserialize (Batch 1st and messages next)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Payload {
-    #[serde(skip_serializing)]
-    pub stream: String,
-    pub sequence: u32,
-    pub timestamp: u64,
-    #[serde(flatten)]
-    pub payload: Value,
-}
-
-impl Payload {
-    pub fn from_string<S: Into<String>>(input: S) -> Result<Self, Error> {
-        Ok(serde_json::from_str(&input.into())?)
-    }
-}
-
-impl Point for Payload {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-}
-
-impl Package for Buffer<Payload> {
-    fn topic(&self) -> Arc<String> {
-        self.topic.clone()
-    }
-
-    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
-        serde_json::to_vec(&self.buffer)
-    }
-
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
     }
 }

@@ -2,6 +2,7 @@ use super::{Config, Package};
 use flume::{Receiver, Sender, TrySendError};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use thiserror::Error;
 use tokio::time::Duration;
 
@@ -13,6 +14,7 @@ mod process;
 pub mod tunshell;
 
 use crate::base::{Buffer, Point, Stream};
+use crate::Payload;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -100,6 +102,32 @@ impl ActionResponse {
     pub fn set_sequence(mut self, seq: u32) -> ActionResponse {
         self.sequence = seq;
         self
+    }
+
+    pub fn as_payload(&self) -> Payload {
+        Payload::from(self)
+    }
+
+    pub fn from_payload(payload: &Payload) -> Result<Self, serde_json::Error> {
+        let intermediate = serde_json::to_value(payload)?;
+
+        serde_json::from_value(intermediate)
+    }
+}
+
+impl From<&ActionResponse> for Payload {
+    fn from(resp: &ActionResponse) -> Self {
+        Self {
+            stream: "action_status".to_owned(),
+            sequence: resp.sequence,
+            timestamp: resp.timestamp,
+            payload: json!({
+                "id": resp.id,
+                "state": resp.state,
+                "progress": resp.progress,
+                "errors": resp.errors
+            }),
+        }
     }
 }
 
