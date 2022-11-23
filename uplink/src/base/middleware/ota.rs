@@ -52,8 +52,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf, sync::Arc};
 
-use super::{Action, ActionResponse};
-use crate::base::{Config, Stream};
+use crate::{Action, ActionResponse, Config, Stream};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

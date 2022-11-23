@@ -8,8 +8,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use crate::base::actions::Action;
-use crate::base::Config;
+use crate::{Action, Config};
 use rumqttc::{
     AsyncClient, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS, TlsConfiguration,
     Transport,
