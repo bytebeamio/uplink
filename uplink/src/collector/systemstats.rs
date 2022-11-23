@@ -1,7 +1,7 @@
 use flume::Sender;
 use log::error;
 use serde::Serialize;
-use sysinfo::{DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, ProcessorExt, SystemExt};
+use sysinfo::{CpuExt, DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, SystemExt};
 use tokio::time::Instant;
 
 use std::{
@@ -221,7 +221,7 @@ impl Processor {
         Processor { name, ..Default::default() }
     }
 
-    fn update(&mut self, proc: &sysinfo::Processor, timestamp: u64, sequence: u32) {
+    fn update(&mut self, proc: &sysinfo::Cpu, timestamp: u64, sequence: u32) {
         self.frequency = proc.frequency();
         self.usage = proc.cpu_usage();
         self.timestamp = timestamp;
@@ -246,7 +246,7 @@ struct ProcessorStats {
 }
 
 impl ProcessorStats {
-    fn push(&mut self, proc_data: &sysinfo::Processor, timestamp: u64) -> Result<(), base::Error> {
+    fn push(&mut self, proc_data: &sysinfo::Cpu, timestamp: u64) -> Result<(), base::Error> {
         let proc_name = proc_data.name().to_string();
         self.sequence += 1;
         let proc = self.map.entry(proc_name.clone()).or_insert_with(|| Processor::init(proc_name));
@@ -392,7 +392,7 @@ impl StatCollector {
             max_buf_size,
             tx.clone(),
         );
-        for proc in sys.processors().iter() {
+        for proc in sys.cpus().iter() {
             let proc_name = proc.name().to_owned();
             map.insert(proc_name.clone(), Processor::init(proc_name));
         }
@@ -459,7 +459,7 @@ impl StatCollector {
         self.sys.refresh_networks();
 
         // Refresh processor info
-        for proc_data in self.sys.processors().iter() {
+        for proc_data in self.sys.cpus().iter() {
             if let Err(e) = self.processors.push(proc_data, self.timestamp) {
                 error!("Couldn't send processor stats: {}", e);
             }

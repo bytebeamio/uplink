@@ -1233,15 +1233,6 @@ dependencies = [
 
 [[package]]
 name = "ntapi"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c28774a7fd2fbb4f0babd8237ce554b73af68021b5f695a3cebd6c59bac0980f"
-dependencies = [
- "winapi 0.3.9",
-]
-
-[[package]]
-name = "ntapi"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc51db7b362b205941f71232e56c625156eb9a929f8cf74a428fd5bc094a4afc"
@@ -2235,21 +2226,6 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.23.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3977ec2e0520829be45c8a2df70db2bf364714d8a748316a10c3c35d4d2b01c9"
-dependencies = [
- "cfg-if 1.0.0",
- "core-foundation-sys",
- "libc",
- "ntapi 0.3.7",
- "once_cell",
- "rayon",
- "winapi 0.3.9",
-]
-
-[[package]]
-name = "sysinfo"
 version = "0.26.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c375d5fd899e32847b8566e10598d6e9f1d9b55ec6de3cdf9e7da4bdc51371bc"
@@ -2257,8 +2233,9 @@ dependencies = [
  "cfg-if 1.0.0",
  "core-foundation-sys",
  "libc",
- "ntapi 0.4.0",
+ "ntapi",
  "once_cell",
+ "rayon",
  "winapi 0.3.9",
 ]
 
@@ -2747,7 +2724,7 @@ dependencies = [
  "simplelog",
  "stdio-override",
  "structopt",
- "sysinfo 0.23.13",
+ "sysinfo",
  "thiserror",
  "tokio 1.22.0",
  "tokio-compat-02",
@@ -2799,7 +2776,7 @@ dependencies = [
  "git2",
  "rustc_version 0.4.0",
  "rustversion",
- "sysinfo 0.26.7",
+ "sysinfo",
  "thiserror",
  "time 0.3.17",
 ]
