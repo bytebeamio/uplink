@@ -1,7 +1,9 @@
 use flume::Sender;
 use log::error;
 use serde::Serialize;
-use sysinfo::{DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, ProcessorExt, SystemExt};
+use sysinfo::{
+    ComponentExt, CpuExt, DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, SystemExt,
+};
 use tokio::time::Instant;
 
 use std::{
@@ -221,7 +223,7 @@ impl Processor {
         Processor { name, ..Default::default() }
     }
 
-    fn update(&mut self, proc: &sysinfo::Processor, timestamp: u64, sequence: u32) {
+    fn update(&mut self, proc: &sysinfo::Cpu, timestamp: u64, sequence: u32) {
         self.frequency = proc.frequency();
         self.usage = proc.cpu_usage();
         self.timestamp = timestamp;
@@ -246,12 +248,61 @@ struct ProcessorStats {
 }
 
 impl ProcessorStats {
-    fn push(&mut self, proc_data: &sysinfo::Processor, timestamp: u64) -> Result<(), base::Error> {
+    fn push(&mut self, proc_data: &sysinfo::Cpu, timestamp: u64) -> Result<(), base::Error> {
         let proc_name = proc_data.name().to_string();
         self.sequence += 1;
         let proc = self.map.entry(proc_name.clone()).or_insert_with(|| Processor::init(proc_name));
         proc.update(proc_data, timestamp, self.sequence);
         self.stream.push(proc.clone())?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Serialize, Clone)]
+struct Component {
+    sequence: u32,
+    timestamp: u64,
+    label: String,
+    temperature: f32,
+}
+
+impl Component {
+    fn init(label: String) -> Self {
+        Component { label, ..Default::default() }
+    }
+
+    fn update(&mut self, proc: &sysinfo::Component, timestamp: u64, sequence: u32) {
+        self.temperature = proc.temperature();
+        self.timestamp = timestamp;
+        self.sequence = sequence;
+    }
+}
+
+impl Point for Component {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+}
+
+struct ComponentStats {
+    sequence: u32,
+    map: HashMap<String, Component>,
+    stream: Stream<Component>,
+}
+
+impl ComponentStats {
+    fn push(&mut self, comp_data: &sysinfo::Component, timestamp: u64) -> Result<(), base::Error> {
+        let comp_label = comp_data.label().to_string();
+        self.sequence += 1;
+        let comp =
+            self.map.entry(comp_label.clone()).or_insert_with(|| Component::init(comp_label));
+        comp.update(comp_data, timestamp, self.sequence);
+        self.stream.push(comp.clone())?;
 
         Ok(())
     }
@@ -342,6 +393,8 @@ pub struct StatCollector {
     networks: NetworkStats,
     /// Information regarding individual Disks.
     disks: DiskStats,
+    /// Temperature information from individual components.
+    components: ComponentStats,
     /// Uplink configuration.
     config: Arc<Config>,
 }
@@ -354,6 +407,7 @@ impl StatCollector {
         sys.refresh_networks_list();
         sys.refresh_memory();
         sys.refresh_cpu();
+        sys.refresh_components();
 
         let max_buf_size = config.stats.stream_size.unwrap_or(10);
 
@@ -392,7 +446,7 @@ impl StatCollector {
             max_buf_size,
             tx.clone(),
         );
-        for proc in sys.processors().iter() {
+        for proc in sys.cpus().iter() {
             let proc_name = proc.name().to_owned();
             map.insert(proc_name.clone(), Processor::init(proc_name));
         }
@@ -408,6 +462,15 @@ impl StatCollector {
         let processes = ProcessStats { sequence: 0, map: HashMap::new(), stream };
 
         let stream = Stream::dynamic_with_size(
+            "uplink_component_stats",
+            &config.project_id,
+            &config.device_id,
+            max_buf_size,
+            tx.clone(),
+        );
+        let components = ComponentStats { sequence: 0, map: HashMap::new(), stream };
+
+        let stream = Stream::dynamic_with_size(
             "uplink_system_stats",
             &config.project_id,
             &config.device_id,
@@ -419,7 +482,17 @@ impl StatCollector {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
 
-        StatCollector { sys, system, config, processes, disks, networks, processors, timestamp }
+        StatCollector {
+            sys,
+            system,
+            config,
+            processes,
+            disks,
+            networks,
+            processors,
+            timestamp,
+            components,
+        }
     }
 
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
@@ -459,12 +532,20 @@ impl StatCollector {
         self.sys.refresh_networks();
 
         // Refresh processor info
-        for proc_data in self.sys.processors().iter() {
+        for proc_data in self.sys.cpus().iter() {
             if let Err(e) = self.processors.push(proc_data, self.timestamp) {
                 error!("Couldn't send processor stats: {}", e);
             }
         }
         self.sys.refresh_cpu();
+
+        // Refresh component info
+        for comp_data in self.sys.components().iter() {
+            if let Err(e) = self.components.push(comp_data, self.timestamp) {
+                error!("Couldn't send component stats: {}", e);
+            }
+        }
+        self.sys.refresh_components();
 
         // Refresh processes info
         // NOTE: This can be further optimized by storing pids of interested processes
