@@ -381,8 +381,6 @@ impl ProcessStats {
 pub struct StatCollector {
     /// Handle to sysinfo struct containing system information.
     sys: sysinfo::System,
-    /// Frequently updated timestamp value, used to ensure idempotence.
-    timestamp: u64,
     /// System information values to be serialized.
     system: SystemStats,
     /// Information about running processes.
@@ -479,27 +477,13 @@ impl StatCollector {
         );
         let system = SystemStats { stat: System::init(&sys), stream };
 
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-
-        StatCollector {
-            sys,
-            system,
-            config,
-            processes,
-            disks,
-            networks,
-            processors,
-            timestamp,
-            components,
-        }
+        StatCollector { sys, system, config, processes, disks, networks, processors, components }
     }
 
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
     pub fn start(mut self) {
         loop {
             std::thread::sleep(Duration::from_secs(self.config.stats.update_period));
-            self.timestamp += self.config.stats.update_period;
 
             if let Err(e) = self.update() {
                 error!("Faced error while refreshing system statistics: {}", e);
@@ -510,57 +494,69 @@ impl StatCollector {
 
     /// Update system information values and increment sequence numbers, while sending to specific data streams.
     fn update(&mut self) -> Result<(), Error> {
-        if let Err(e) = self.system.push(&self.sys, self.timestamp) {
+        self.sys.refresh_memory();
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        if let Err(e) = self.system.push(&self.sys, timestamp) {
             error!("Couldn't send system stats: {}", e);
         }
-        self.sys.refresh_memory();
 
         // Refresh disk info
+        self.sys.refresh_disks();
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for disk_data in self.sys.disks() {
-            if let Err(e) = self.disks.push(disk_data, self.timestamp) {
+            if let Err(e) = self.disks.push(disk_data, timestamp) {
                 error!("Couldn't send disk stats: {}", e);
             }
         }
-        self.sys.refresh_disks();
 
         // Refresh network byte rate info
+        self.sys.refresh_networks();
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for (net_name, net_data) in self.sys.networks() {
-            if let Err(e) = self.networks.push(net_name.to_owned(), net_data, self.timestamp) {
+            if let Err(e) = self.networks.push(net_name.to_owned(), net_data, timestamp) {
                 error!("Couldn't send network stats: {}", e);
             }
         }
-        self.sys.refresh_networks();
 
         // Refresh processor info
+        self.sys.refresh_cpu();
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for proc_data in self.sys.cpus().iter() {
-            if let Err(e) = self.processors.push(proc_data, self.timestamp) {
+            if let Err(e) = self.processors.push(proc_data, timestamp) {
                 error!("Couldn't send processor stats: {}", e);
             }
         }
-        self.sys.refresh_cpu();
 
         // Refresh component info
+        self.sys.refresh_components();
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for comp_data in self.sys.components().iter() {
-            if let Err(e) = self.components.push(comp_data, self.timestamp) {
+            if let Err(e) = self.components.push(comp_data, timestamp) {
                 error!("Couldn't send component stats: {}", e);
             }
         }
-        self.sys.refresh_components();
 
         // Refresh processes info
         // NOTE: This can be further optimized by storing pids of interested processes
         // at init and only collecting process information for them instead of iterating
         // over all running processes as is being done now.
+        self.sys.refresh_processes();
+        let timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for (&id, p) in self.sys.processes() {
             let name = p.name().to_owned();
 
             if self.config.stats.process_names.contains(&name) {
-                if let Err(e) = self.processes.push(id.as_u32(), p, name, self.timestamp) {
+                if let Err(e) = self.processes.push(id.as_u32(), p, name, timestamp) {
                     error!("Couldn't send process stats: {}", e);
                 }
             }
         }
-        self.sys.refresh_processes();
 
         Ok(())
     }
