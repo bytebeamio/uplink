@@ -11,10 +11,9 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use std::pin::Pin;
 use std::{io, sync::Arc};
 
-use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
-use crate::base::{Config, Package, Stream};
-use crate::collector::util::Streams;
-use crate::Payload;
+use super::util::Streams;
+use crate::base::middleware::Error as ActionsError;
+use crate::{Action, ActionResponse, Config, Package, Payload, Stream};
 
 #[derive(Error, Debug)]
 pub enum Error {
