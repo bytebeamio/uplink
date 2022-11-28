@@ -120,7 +120,7 @@ async fn main() -> Result<(), Error> {
             .config
             .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
-            .unwrap_or_else(|| "".to_string())
+            .unwrap_or_default()
             .as_str(),
     )?);
 

@@ -264,7 +264,7 @@ impl OtaDownloader {
 /// Expected JSON format of data contained in the [`payload`] of an OTA [`Action`]
 ///
 /// [`payload`]: Action#structfield.payload
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct FirmwareUpdate {
     url: String,
     version: String,

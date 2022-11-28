@@ -77,7 +77,7 @@ impl LoggerInstance {
         loop {
             let action = self.log_rx.recv()?;
             let mut config = serde_json::from_str::<LoggingConfig>(action.payload.as_str())?;
-            config.tags = config.tags.into_iter().filter(|tag| !tag.is_empty()).collect();
+            config.tags.retain(|tag| !tag.is_empty());
             log::info!("restarting journalctl with following config: {:?}", config);
 
             // Ensure any logger child process created earlier gets killed
