@@ -63,7 +63,7 @@ pub enum Error {
     #[error("File io Error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Error forwarding OTA Action to bridge: {0}")]
-    TrySend(#[from] flume::TrySendError<Action>),
+    TrySend(Box<flume::TrySendError<Action>>),
     #[error("Error receiving action: {0}")]
     Recv(#[from] RecvError),
     #[error("Missing file name: {0}")]
@@ -74,6 +74,12 @@ pub enum Error {
     EmptyFile,
     #[error("Couldn't install apk")]
     InstallationError(String),
+}
+
+impl From<flume::TrySendError<Action>> for Error {
+    fn from(e: flume::TrySendError<Action>) -> Self {
+        Self::TrySend(Box::new(e))
+    }
 }
 
 /// This struct contains the necessary components to download and store an OTA update as notified
@@ -264,7 +270,7 @@ impl OtaDownloader {
 /// Expected JSON format of data contained in the [`payload`] of an OTA [`Action`]
 ///
 /// [`payload`]: Action#structfield.payload
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct FirmwareUpdate {
     url: String,
     version: String,

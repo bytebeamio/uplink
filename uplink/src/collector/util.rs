@@ -136,7 +136,6 @@ impl Streams {
         let stream = self.map.get_mut(&stream).unwrap();
         if let Err(e) = stream.flush().await {
             error!("Failed to send data. Error = {:?}", e.to_string());
-            return;
         }
     }
 }
