@@ -1,10 +1,10 @@
-use std::time::{SystemTime, UNIX_EPOCH};
 use futures_util::SinkExt;
-use tokio::net::{TcpStream};
+use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::net::TcpStream;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec};
-use uplink::{Action};
-use serde::{Deserialize, Serialize};
+use uplink::Action;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Response {
@@ -19,7 +19,7 @@ struct Response {
 
 #[tokio::main]
 async fn main() {
-    let port = std::env::args().nth(1).unwrap_or("127.0.0.1:5555".to_string());
+    let port = std::env::args().nth(1).unwrap_or_else(|| "127.0.0.1:5555".to_string());
     let stream = TcpStream::connect(port).await.unwrap();
     let mut framed = Framed::new(stream, LinesCodec::new());
     let mut idx = 1;
