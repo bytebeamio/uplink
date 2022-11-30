@@ -51,6 +51,7 @@ use serde::{Deserialize, Serialize};
 
 use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf, sync::Arc};
+use std::time::Duration;
 
 use super::{Action, ActionResponse};
 use crate::base::{Config, Stream};
@@ -156,6 +157,7 @@ impl OtaDownloader {
                         error = Some(e);
                     }
                 }
+                tokio::time::sleep(Duration::from_secs(30)).await;
             }
             match error {
                 None => {}
