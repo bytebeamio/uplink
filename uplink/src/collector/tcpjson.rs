@@ -160,7 +160,7 @@ impl Bridge {
                                             current_action_ = None;
                                         }
                                         _ => {
-                                            current_action_.as_mut().unwrap().timeout = Box::pin(time::sleep(Duration::from_secs(10)));
+                                            current_action_.as_mut().unwrap().timeout = Box::pin(time::sleep(Duration::from_secs(30)));
                                         }
                                     }
                                 } else {
@@ -221,7 +221,7 @@ impl Bridge {
                         Ok(data) => {
                             current_action_ = Some(CurrentAction {
                                 id: action.action_id.clone(),
-                                timeout: Box::pin(time::sleep(Duration::from_secs(10))),
+                                timeout: Box::pin(time::sleep(Duration::from_secs(30))),
                             });
                             client.send(data).await?;
                         },
