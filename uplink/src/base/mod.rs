@@ -73,6 +73,7 @@ pub struct SimulatorConfig {
 pub struct JournalctlConfig {
     pub tags: Vec<String>,
     pub priority: u8,
+    pub stream_size: Option<usize>
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
