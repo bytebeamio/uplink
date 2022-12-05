@@ -63,6 +63,7 @@ fn initialize_logging(commandline: &CommandLine) {
         .set_location_level(LevelFilter::Off)
         .set_target_level(LevelFilter::Error)
         .set_thread_level(LevelFilter::Error)
+        .set_time_to_local(true)
         .set_level_padding(LevelPadding::Right);
 
     if commandline.modules.is_empty() {
