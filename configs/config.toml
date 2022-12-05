@@ -63,17 +63,10 @@ flush_period = 30
 topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
 buf_size = 1
 
-# Configurations associated with the OTA module of uplink, if enabled Actions
-# with `name: "update_firmware"` can trigger the OtaDownloader to download the
-# OTA package.
-#
-# Required Parameters
-# - enabled: A boolean to determine if the feature must be enabled
-# - path: The location in file system where uplink will download and store
-#         OTA update files into.
-[ota]
-enabled = true
-path = "/var/tmp/ota-file"
+# The location in file system where uplink will download and store files from the URLs
+# mentioned in the "send_file" or "update_firmware" actions, over HTTP(S). If left
+# unconfigured, downloader will be disabled.
+download_path = "/var/tmp/ota-file"
 
 # Configurations associated with the system stats module of uplink, if enabled
 # system stats such as memory in use and CPU usage will be published onto special.

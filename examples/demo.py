@@ -33,7 +33,7 @@ def action_complete(id):
 def update_firmware(action):
     payload = json.loads(action['payload'])
     print(payload)
-    shutil.move(payload["ota_path"], "/tmp/foobar")
+    shutil.move(payload["download_path"], "/tmp/foobar")
     os.chmod("/tmp/foobar", 0o755)
 
 def recv_actions():
