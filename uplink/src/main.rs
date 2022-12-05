@@ -100,8 +100,8 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
         println!("    persistence_max_segment_size: {}", persistence.max_file_size);
         println!("    persistence_max_segment_count: {}", persistence.max_file_count);
     }
-    if config.ota.enabled {
-        println!("    ota_path: {}", config.ota.path);
+    if let Some(download_path) = &config.download_path {
+        println!("    download_path: {}", download_path);
     }
     if config.stats.enabled {
         println!("    processes: {:?}", config.stats.process_names);
@@ -134,7 +134,6 @@ async fn main() -> Result<(), Error> {
         let _err_guard = stdio_override::StderrOverride::override_file(err_path).unwrap();
         (_out_guard, _err_guard)
     });
-
     banner(&commandline, &config);
 
     let mut uplink = Uplink::new(config.clone())?;

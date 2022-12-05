@@ -13,7 +13,7 @@ pub mod collector;
 
 pub mod config {
     use crate::base::StreamConfig;
-    pub use crate::base::{Config, Ota, Persistence, Stats};
+    pub use crate::base::{Config, Persistence, Stats};
     use config::{Environment, File, FileFormat};
     use std::fs;
     use structopt::StructOpt;
@@ -72,10 +72,6 @@ pub mod config {
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     buf_size = 1
 
-    [ota]
-    enabled = false
-    path = "/var/tmp/ota-file"
-
     [stats]
     enabled = false
     process_names = ["uplink"]
@@ -130,12 +126,12 @@ pub mod config {
 
 pub use base::actions::{Action, ActionResponse};
 pub use base::middleware;
-use base::middleware::ota::OtaDownloader;
 use base::middleware::tunshell::TunshellSession;
 use base::middleware::Middleware;
 use base::mqtt::Mqtt;
 use base::serializer::Serializer;
 pub use base::{Config, Package, Payload, Point, Stream};
+use collector::downloader::FileDownloader;
 use collector::{logging::LoggerInstance, systemstats::StatCollector};
 pub use collector::{simulator, tcpjson::Bridge};
 pub use disk::Storage;
@@ -176,15 +172,22 @@ impl Uplink {
         );
         thread::spawn(move || tunshell_session.start());
 
-        // Launch a thread to handle downloads for OTA updates
-        let (ota_tx, ota_downloader) = OtaDownloader::new(
-            self.config.clone(),
-            self.action_status.clone(),
-            self.action_tx.clone(),
-        )?;
-        if self.config.ota.enabled {
-            thread::spawn(move || ota_downloader.start());
-        }
+        // Launch a thread to handle file downloads
+        let download_tx = if let Some(download_path) = self.config.download_path.clone() {
+            let (download_tx, file_downloader) = FileDownloader::new(
+                download_path,
+                self.config.authentication.clone(),
+                self.action_status.clone(),
+                self.action_tx.clone(),
+            )?;
+            thread::spawn(move || file_downloader.start());
+
+            download_tx
+        } else {
+            let (tx, _) = bounded(10);
+
+            tx
+        };
 
         // Launch a thread to collect system statistics
         let stat_collector = StatCollector::new(self.config.clone(), self.data_tx.clone());
@@ -225,7 +228,7 @@ impl Uplink {
             self.config.clone(),
             raw_action_rx,
             tunshell_keys_tx,
-            ota_tx,
+            download_tx,
             log_tx,
             self.action_status.clone(),
             self.action_tx.clone(),

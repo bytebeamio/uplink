@@ -42,15 +42,9 @@ pub struct Persistence {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Authentication {
-    ca_certificate: String,
-    device_certificate: String,
-    device_private_key: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct Ota {
-    pub enabled: bool,
-    pub path: String,
+    pub ca_certificate: String,
+    pub device_certificate: String,
+    pub device_private_key: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -92,7 +86,7 @@ pub struct Config {
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
     pub serializer_metrics: Option<StreamConfig>,
-    pub ota: Ota,
+    pub download_path: Option<String>,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
     #[cfg(target_os = "linux")]

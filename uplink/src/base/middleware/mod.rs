@@ -4,7 +4,6 @@ use thiserror::Error;
 
 use std::sync::Arc;
 
-pub mod ota;
 mod process;
 pub mod tunshell;
 
@@ -22,7 +21,7 @@ pub enum Error {
     TrySend(#[from] flume::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
-    #[error("Another OTA downloading")]
+    #[error("Another File is downloading")]
     Downloading,
 }
 
@@ -32,7 +31,7 @@ pub struct Middleware {
     process: process::Process,
     actions_rx: Receiver<Action>,
     tunshell_tx: Sender<Action>,
-    ota_tx: Sender<Action>,
+    download_tx: Sender<Action>,
     log_tx: Sender<Action>,
     bridge_tx: Sender<Action>,
 }
@@ -42,13 +41,22 @@ impl Middleware {
         config: Arc<Config>,
         actions_rx: Receiver<Action>,
         tunshell_tx: Sender<Action>,
-        ota_tx: Sender<Action>,
+        download_tx: Sender<Action>,
         log_tx: Sender<Action>,
         action_status: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
     ) -> Self {
         let process = process::Process::new(action_status.clone());
-        Self { config, action_status, process, actions_rx, tunshell_tx, ota_tx, log_tx, bridge_tx }
+        Self {
+            config,
+            action_status,
+            process,
+            actions_rx,
+            tunshell_tx,
+            download_tx,
+            log_tx,
+            bridge_tx,
+        }
     }
 
     /// Start receiving and processing [Action]s
@@ -92,9 +100,9 @@ impl Middleware {
                 self.log_tx.send_async(action).await?;
                 return Ok(());
             }
-            "update_firmware" if self.config.ota.enabled => {
+            "update_firmware" | "send_file" if self.config.download_path.is_some() => {
                 // if action can't be sent, Error out and notify cloud
-                self.ota_tx.try_send(action).map_err(|e| match e {
+                self.download_tx.try_send(action).map_err(|e| match e {
                     TrySendError::Full(_) => Error::Downloading,
                     e => Error::TrySend(e),
                 })?;
