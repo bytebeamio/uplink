@@ -173,9 +173,9 @@ impl Uplink {
         thread::spawn(move || tunshell_session.start());
 
         // Launch a thread to handle file downloads
-        let download_tx = if let Some(download_path) = self.config.download_path.clone() {
+        let download_tx = if let Some(downloader_cfg) = self.config.downloader.clone() {
             let (download_tx, file_downloader) = FileDownloader::new(
-                download_path,
+                downloader_cfg,
                 self.config.authentication.clone(),
                 self.action_status.clone(),
                 self.action_tx.clone(),

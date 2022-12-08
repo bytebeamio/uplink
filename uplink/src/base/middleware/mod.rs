@@ -100,15 +100,19 @@ impl Middleware {
                 self.log_tx.send_async(action).await?;
                 return Ok(());
             }
-            "update_firmware" | "send_file" if self.config.download_path.is_some() => {
-                // if action can't be sent, Error out and notify cloud
-                self.download_tx.try_send(action).map_err(|e| match e {
-                    TrySendError::Full(_) => Error::Downloading,
-                    e => Error::TrySend(e),
-                })?;
-                return Ok(());
+            action_name => {
+                if let Some(downloader) = &self.config.downloader {
+                    let action_name = action_name.to_string();
+                    if downloader.actions.contains(&action_name) {
+                        // if action can't be sent, Error out and notify cloud
+                        self.download_tx.try_send(action).map_err(|e| match e {
+                            TrySendError::Full(_) => Error::Downloading,
+                            e => Error::TrySend(e),
+                        })?;
+                        return Ok(());
+                    }
+                }
             }
-            _ => (),
         }
 
         // Bridge actions are forwarded

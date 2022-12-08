@@ -52,7 +52,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf};
 
-use crate::base::Authentication;
+use crate::base::{Authentication, Downloader};
 use crate::{Action, ActionResponse, Stream};
 
 #[derive(thiserror::Error, Debug)]
@@ -88,7 +88,7 @@ impl From<flume::TrySendError<Action>> for Error {
 /// the download [`Action`], updated with information regarding where the file is stored in the file-system
 /// to the connected bridge application.
 pub struct FileDownloader {
-    download_path: String,
+    downloader_cfg: Downloader,
     action_id: String,
     status_bucket: Stream<ActionResponse>,
     download_rx: Receiver<Action>,
@@ -101,7 +101,7 @@ impl FileDownloader {
     /// Create a struct to manage downloads, runs on a separate thread. Also returns a [`Sender`]
     /// end of a "One" channel to send associated actions onto.
     pub fn new(
-        download_path: String,
+        downloader_cfg: Downloader,
         auth_config: Option<Authentication>,
         status_bucket: Stream<ActionResponse>,
         bridge_tx: Sender<Action>,
@@ -127,7 +127,7 @@ impl FileDownloader {
         Ok((
             download_tx,
             Self {
-                download_path,
+                downloader_cfg,
                 client,
                 download_rx,
                 status_bucket,
@@ -169,7 +169,7 @@ impl FileDownloader {
         let url = update.url.clone();
 
         // Create file to actually download into
-        let (file, file_path) = self.create_file(&url, &update.version)?;
+        let (file, file_path) = self.create_file(&action.name, &url, &update.version)?;
 
         // Create handler to perform download from URL
         // TODO: Error out for 1XX/3XX responses
@@ -192,9 +192,10 @@ impl FileDownloader {
     }
 
     /// Creates file to download into
-    fn create_file(&self, url: &str, version: &str) -> Result<(File, String), Error> {
+    fn create_file(&self, name: &str, url: &str, version: &str) -> Result<(File, String), Error> {
         // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
-        let mut download_path = PathBuf::from(self.download_path.clone());
+        let mut download_path = PathBuf::from(self.downloader_cfg.path.clone());
+        download_path.push(name);
         download_path.push(version);
         create_dir_all(&download_path)?;
 

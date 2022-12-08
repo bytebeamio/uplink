@@ -100,8 +100,8 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
         println!("    persistence_max_segment_size: {}", persistence.max_file_size);
         println!("    persistence_max_segment_count: {}", persistence.max_file_count);
     }
-    if let Some(download_path) = &config.download_path {
-        println!("    download_path: {}", download_path);
+    if let Some(downloader_cfg) = &config.downloader {
+        println!("    download_path: {}", downloader_cfg.path);
     }
     if config.stats.enabled {
         println!("    processes: {:?}", config.stats.process_names);
