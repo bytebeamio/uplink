@@ -130,24 +130,25 @@ impl Bridge {
                             }
                         };
 
-                        let (response_id, state) = match ActionResponse::from_payload(&data) {
-                            Ok(ActionResponse { id, state, .. }) => (id, state),
+                        let response = match ActionResponse::from_payload(&data) {
+                            Ok(response) => response,
                             Err(e) => {
                                 error!("Couldn't parse payload as an action response: {e:?}");
                                 continue;
                             }
                         };
 
-                        if *action_id != response_id {
-                            error!("action_id in action_status({response_id}) does not match that of active action ({action_id})");
+                        if *action_id != response.id {
+                            error!("action_id in action_status({}) does not match that of active action ({})", response.id, action_id);
                             continue;
                         }
 
-                        if state == "Completed" {
+                        if &response.state == "Completed" || &response.state == "Failed" {
                             current_action_ = None;
                         } else {
                             *timeout = Box::pin(time::sleep(Duration::from_secs(10)));
                         }
+                        self.action_status.fill(response).await?;
                     } else {
                         streams.forward(data).await
                     }
