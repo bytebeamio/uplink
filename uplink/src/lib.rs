@@ -12,6 +12,7 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
+    use crate::base::StreamConfig;
     pub use crate::base::{Config, Ota, Persistence, Stats};
     use config::{Environment, File, FileFormat};
     use std::fs;
@@ -62,10 +63,12 @@ pub mod config {
     max_file_size = 104857600 # 100MB
     max_file_count = 3
 
-    [streams.metrics]
-    buf_size = 10
+    # Create empty streams map
+    [streams]
 
-    [streams.action_status]
+    # [serializer_metrics] is left disabled by default
+
+    [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     buf_size = 1
 
@@ -98,31 +101,43 @@ pub mod config {
         if let Some(persistence) = &config.persistence {
             fs::create_dir_all(&persistence.path)?;
         }
+
+        // replace placeholders with device/tenant ID
         let tenant_id = config.project_id.trim();
         let device_id = config.device_id.trim();
         for config in config.streams.values_mut() {
-            if let Some(topic) = &config.topic {
-                let topic = str::replace(topic, "{tenant_id}", tenant_id);
-                let topic = str::replace(&topic, "{device_id}", device_id);
-                config.topic = Some(topic);
-            }
+            replace_topic_placeholders(config, tenant_id, device_id);
+        }
+
+        replace_topic_placeholders(&mut config.action_status, tenant_id, device_id);
+
+        if let Some(config) = &mut config.serializer_metrics {
+            replace_topic_placeholders(config, tenant_id, device_id);
         }
 
         Ok(config)
     }
+
+    // Replace placeholders in topic strings with configured values for tenant_id and device_id
+    fn replace_topic_placeholders(config: &mut StreamConfig, tenant_id: &str, device_id: &str) {
+        if let Some(topic) = &config.topic {
+            let topic = topic.replace("{tenant_id}", tenant_id);
+            let topic = topic.replace("{device_id}", device_id);
+            config.topic = Some(topic);
+        }
+    }
 }
 
-pub use base::actions;
-use base::actions::ota::OtaDownloader;
-use base::actions::tunshell::TunshellSession;
-use base::actions::Actions;
 pub use base::actions::{Action, ActionResponse};
+pub use base::middleware;
+use base::middleware::ota::OtaDownloader;
+use base::middleware::tunshell::TunshellSession;
+use base::middleware::Middleware;
 use base::mqtt::Mqtt;
 use base::serializer::Serializer;
-pub use base::{Config, Package, Point, Stream};
-pub use collector::simulator;
-use collector::systemstats::StatCollector;
-pub use collector::tcpjson::{Bridge, Payload};
+pub use base::{Config, Package, Payload, Point, Stream};
+use collector::{logging::LoggerInstance, systemstats::StatCollector};
+pub use collector::{simulator, tcpjson::Bridge};
 pub use disk::Storage;
 
 pub struct Uplink {
@@ -140,12 +155,10 @@ impl Uplink {
         let (data_tx, data_rx) = bounded(10);
 
         let action_status_topic = &config
-            .streams
-            .get("action_status")
-            .ok_or_else(|| Error::msg("Action status topic missing from config"))?
+            .action_status
             .topic
             .as_ref()
-            .unwrap();
+            .ok_or_else(|| Error::msg("Action status topic missing from config"))?;
         let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
 
         Ok(Uplink { config, action_rx, action_tx, data_rx, data_tx, action_status })
@@ -179,11 +192,19 @@ impl Uplink {
             thread::spawn(move || stat_collector.start());
         }
 
+        let (log_tx, log_rx) = bounded(10);
+        // Launch log collector thread
+        let logger = LoggerInstance::new(self.config.clone(), self.data_tx.clone(), log_rx);
+        thread::spawn(|| {
+            if let Err(e) = logger.start() {
+                error!("Error running logger: {}", e);
+            }
+        });
+
         let (raw_action_tx, raw_action_rx) = bounded(10);
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
 
-        let metrics_config = self.config.streams.get("metrics");
-        let metrics_stream = metrics_config.map(|metrics_config| {
+        let metrics_stream = self.config.serializer_metrics.as_ref().map(|metrics_config| {
             Stream::with_config(
                 &"metrics".to_owned(),
                 &self.config.project_id,
@@ -192,6 +213,7 @@ impl Uplink {
                 self.bridge_data_tx(),
             )
         });
+
         let serializer = Serializer::new(
             self.config.clone(),
             self.data_rx.clone(),
@@ -199,14 +221,14 @@ impl Uplink {
             mqtt.client(),
         )?;
 
-        let actions = Actions::new(
+        let actions = Middleware::new(
             self.config.clone(),
             raw_action_rx,
             tunshell_keys_tx,
             ota_tx,
+            log_tx,
             self.action_status.clone(),
             self.action_tx.clone(),
-            self.bridge_data_tx().clone(),
         );
 
         // Launch a thread to handle incoming and outgoing MQTT packets

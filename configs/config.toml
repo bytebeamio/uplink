@@ -30,7 +30,8 @@ path = "/tmp/uplink"
 max_file_size = 104857600 # 100MB
 max_file_count = 3
 
-# Table of pre-configured data streams
+# Table of pre-configured data streams, specifies streams of data elements that are to
+# be collected, batched and forwarded to serializer to then be published onto platform.
 #
 # Required Parameters
 # - buf-size: Number of data points that shall be included in each Publish
@@ -39,21 +40,27 @@ max_file_count = 3
 # - flush-period(optional): Duration in seconds after a data point enters the stream
 #   and WILL be flushed by collector. Defaults to 60s in case not configured.
 #
-# NOTE: The metrics stream is one to which the Serializer Metrics module
-# publishes associated data onto, to keep track of serializer performance.
-[streams.metrics]
+# In the following config for the device_shadow stream we set buf_size to 1. streams is
+# internally constructed as a map of Name -> Config
+[streams.device_shadow]
+buf_size = 1
+
+# Built-in streams: Serializer metrics and action status are special cases and need to be
+# separately configured outside of the streams map. The metrics stream is one to which the
+# Serializer Metrics module publishes associated stats, to keep track of serializer performance.
+# If not configured, serializer metrics will not be forwarded to platform. In this example we
+# are enabling and publishing on reaching 10 elements or flushing on 30 seconds timeouts.
+[serializer_metrics]
 buf_size = 10
 flush_period = 30
 
-# The action_status stream is used to push progress of Actions in execution
+# The action_status stream is used to push progress of Actions in execution.
+# This configuration is required or will lead to fallback to default config.
 #
-# NOTE: Action statuses are expected on a specifc topic as configured below.
-[streams.action_status]
+# NOTE: Action statuses are expected on a specifc topic as configured in example below.
+# This also means that we require a topic to be configured or uplink will error out.
+[action_status]
 topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
-buf_size = 1
-
-# Set buf_size to 1 for the device_shadow stream
-[streams.device_shadow]
 buf_size = 1
 
 # Configurations associated with the OTA module of uplink, if enabled Actions

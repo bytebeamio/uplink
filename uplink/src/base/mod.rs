@@ -3,8 +3,10 @@ use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
 use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub mod actions;
+pub mod middleware;
 pub mod mqtt;
 pub mod serializer;
 
@@ -21,7 +23,7 @@ fn default_timeout() -> u64 {
     DEFAULT_TIMEOUT
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamConfig {
     pub topic: Option<String>,
     pub buf_size: usize,
@@ -68,6 +70,13 @@ pub struct SimulatorConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct JournalctlConfig {
+    pub tags: Vec<String>,
+    pub priority: u8,
+    pub stream_size: Option<usize>
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -75,15 +84,20 @@ pub struct Config {
     pub port: u16,
     pub authentication: Option<Authentication>,
     pub bridge_port: u16,
-    pub run_logcat: bool,
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub actions: Vec<String>,
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
+    pub action_status: StreamConfig,
+    pub serializer_metrics: Option<StreamConfig>,
     pub ota: Ota,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
+    #[cfg(target_os = "linux")]
+    pub journalctl: Option<JournalctlConfig>,
+    #[cfg(target_os = "android")]
+    pub run_logcat: bool,
 }
 
 pub trait Point: Send + Debug {
@@ -345,6 +359,24 @@ impl<T> Buffer<T> {
     }
 }
 
+impl<T> Package for Buffer<T>
+where
+    T: Debug + Send,
+    Vec<T>: Serialize,
+{
+    fn topic(&self) -> Arc<String> {
+        self.topic.clone()
+    }
+
+    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
+        serde_json::to_vec(&self.buffer)
+    }
+
+    fn anomalies(&self) -> Option<(String, usize)> {
+        self.anomalies()
+    }
+}
+
 impl<T> Clone for Stream<T> {
     fn clone(&self) -> Self {
         Stream {
@@ -357,5 +389,27 @@ impl<T> Clone for Stream<T> {
             tx: self.tx.clone(),
             flush_period: self.flush_period,
         }
+    }
+}
+
+// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
+// TODO which cloud will double deserialize (Batch 1st and messages next)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Payload {
+    #[serde(skip_serializing)]
+    pub stream: String,
+    pub sequence: u32,
+    pub timestamp: u64,
+    #[serde(flatten)]
+    pub payload: Value,
+}
+
+impl Point for Payload {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
     }
 }

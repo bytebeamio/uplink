@@ -5,9 +5,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::{pin, select, task, time};
 
-use super::{ActionResponse, Package};
+use crate::{ActionResponse, Package, Stream};
 
-use crate::base::Stream;
 use std::io;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};

@@ -53,8 +53,7 @@ use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf, sync::Arc};
 use std::time::Duration;
 
-use super::{Action, ActionResponse};
-use crate::base::{Config, Stream};
+use crate::{Action, ActionResponse, Config, Stream};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -65,7 +64,7 @@ pub enum Error {
     #[error("File io Error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Error forwarding OTA Action to bridge: {0}")]
-    TrySend(#[from] flume::TrySendError<Action>),
+    TrySend(Box<flume::TrySendError<Action>>),
     #[error("Error receiving action: {0}")]
     Recv(#[from] RecvError),
     #[error("Missing file name: {0}")]
@@ -76,6 +75,12 @@ pub enum Error {
     EmptyFile,
     #[error("Couldn't install apk")]
     InstallationError(String),
+}
+
+impl From<flume::TrySendError<Action>> for Error {
+    fn from(e: flume::TrySendError<Action>) -> Self {
+        Self::TrySend(Box::new(e))
+    }
 }
 
 /// This struct contains the necessary components to download and store an OTA update as notified
@@ -185,7 +190,8 @@ impl OtaDownloader {
         let (file, file_path) = self.create_file(&url, &update.version)?;
 
         // Create handler to perform download from URL
-        let resp = self.client.get(&url).send().await?;
+        // TODO: Error out for 1XX/3XX responses
+        let resp = self.client.get(&url).send().await?.error_for_status()?;
         info!("Downloading from {} into {}", url, file_path);
         self.download(resp, file).await?;
 
@@ -279,7 +285,7 @@ impl OtaDownloader {
 /// Expected JSON format of data contained in the [`payload`] of an OTA [`Action`]
 ///
 /// [`payload`]: Action#structfield.payload
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct FirmwareUpdate {
     url: String,
     version: String,

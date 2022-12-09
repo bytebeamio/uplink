@@ -1,5 +1,4 @@
-use crate::base::{Buffer, Config, Package};
-use crate::{Point, Stream};
+use crate::{Config, Package, Point, Stream};
 
 use bytes::Bytes;
 use disk::Storage;
@@ -426,7 +425,8 @@ impl<C: MqttClient> Serializer<C> {
 
                 }
                 _ = interval.tick(), if self.metrics_stream.is_some() => {
-                    let metrics = self.metrics.next();
+                    let metrics = self.metrics.update();
+                    self.metrics.clear();
                     let stream = self.metrics_stream.as_mut().unwrap();
                     if let Err(e) = stream.fill(metrics).await {
                         error!("Couldn't write serializer metrics to stream: {}", e)
@@ -526,18 +526,18 @@ impl Metrics {
         self.errors.push_str(" | ");
     }
 
-    pub fn next(&mut self) -> Metrics {
+    pub fn update(&mut self) -> Metrics {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
         self.sequence += 1;
 
-        let metrics = self.clone();
+        self.clone()
+    }
 
+    pub fn clear(&mut self) {
         self.errors.clear();
         self.lost_segments = 0;
-
-        metrics
     }
 }
 
@@ -548,20 +548,6 @@ impl Point for Metrics {
 
     fn timestamp(&self) -> u64 {
         self.timestamp
-    }
-}
-
-impl Package for Buffer<Metrics> {
-    fn topic(&self) -> Arc<String> {
-        self.topic.clone()
-    }
-
-    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
-        serde_json::to_vec(&self.buffer)
-    }
-
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
     }
 }
 

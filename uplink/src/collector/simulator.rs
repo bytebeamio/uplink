@@ -10,9 +10,8 @@ use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
-use crate::base::SimulatorConfig;
-use crate::base::{actions::Action, Package, Stream};
-use crate::{ActionResponse, Payload};
+use crate::base::{Package, SimulatorConfig, Stream};
+use crate::{Action, ActionResponse, Payload};
 
 use rand::Rng;
 
@@ -62,7 +61,7 @@ pub struct DataEvent {
     sequence: u32,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ActionResponseEvent {
     timestamp: Instant,
     action_id: String,
@@ -131,7 +130,7 @@ impl Partitions {
         if let Err(e) = self
             .map
             .entry(payload.stream.clone())
-            .or_insert(Stream::new(&payload.stream, &payload.stream, 10, self.tx.clone()))
+            .or_insert_with(|| Stream::new(&payload.stream, &payload.stream, 10, self.tx.clone()))
             .fill(payload)
             .await
         {
@@ -144,7 +143,7 @@ impl Partitions {
         if let Err(e) = self
             .action_statuses
             .entry(stream.clone())
-            .or_insert(Stream::new(&stream, &stream, 1, self.tx.clone()))
+            .or_insert_with(|| Stream::new(&stream, &stream, 1, self.tx.clone()))
             .fill(response)
             .await
         {
@@ -160,12 +159,12 @@ pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
     let path_index = ((device.path_offset + sequence) % path_len) as usize;
     let position = device.path.get(path_index).unwrap();
 
-    return Payload {
+    Payload {
         timestamp,
         sequence,
         stream: format!("/tenants/demo/devices/{}/events/gps/jsonarray", device.device_id),
         payload: json!(position),
-    };
+    }
 }
 
 pub fn generate_float(start: f64, end: f64) -> f64 {
@@ -277,12 +276,12 @@ pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
         pack_status: 1,
     };
 
-    return Payload {
+    Payload {
         timestamp,
         sequence,
         stream: format!("/tenants/demo/devices/{}/events/bms/jsonarray", device.device_id),
         payload: json!(payload),
-    };
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -312,12 +311,12 @@ pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
         magz: generate_float(-45f64, -15f64),
     };
 
-    return Payload {
+    Payload {
         timestamp,
         sequence,
         stream: format!("/tenants/demo/devices/{}/events/imu/jsonarray", device.device_id),
         payload: json!(payload),
-    };
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -342,12 +341,12 @@ pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
         motor_rpm: generate_int(1000, 9000),
     };
 
-    return Payload {
+    Payload {
         timestamp,
         sequence,
         stream: format!("/tenants/demo/devices/{}/events/motor/jsonarray", device.device_id),
         payload: json!(payload),
-    };
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -377,12 +376,15 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Pay
         right_brake: generate_bool_string(0.1),
     };
 
-    return Payload {
+    Payload {
         timestamp,
         sequence,
-        stream: format!("/tenants/demo/devices/{}/events/peripheral_state/jsonarray", device.device_id),
+        stream: format!(
+            "/tenants/demo/devices/{}/events/peripheral_state/jsonarray",
+            device.device_id
+        ),
         payload: json!(payload),
-    };
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -409,7 +411,7 @@ pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payloa
         soc: generate_float(50f64, 90f64),
     };
 
-    return Payload {
+    Payload {
         timestamp,
         sequence,
         stream: format!(
@@ -417,7 +419,7 @@ pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payloa
             device.device_id
         ),
         payload: json!(payload),
-    };
+    }
 }
 
 pub fn read_gps_paths(paths_dir: &str) -> Vec<Arc<Vec<Location>>> {

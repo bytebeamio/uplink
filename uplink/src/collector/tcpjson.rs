@@ -1,8 +1,6 @@
 use flume::{Receiver, RecvError, Sender};
 use futures_util::SinkExt;
-use log::{debug, error, info};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use log::{error, info};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{Duration, Sleep};
@@ -10,12 +8,12 @@ use tokio::{select, time};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
-use std::{collections::HashMap, io, sync::Arc};
 use std::pin::Pin;
+use std::{io, sync::Arc};
 
-use super::util::DelayMap;
-use crate::base::actions::{Action, ActionResponse, Error as ActionsError};
-use crate::base::{Buffer, Config, Package, Point, Stream, StreamStatus};
+use super::util::Streams;
+use crate::base::middleware::Error as ActionsError;
+use crate::{Action, ActionResponse, Config, Package, Payload, Stream};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -91,17 +89,7 @@ impl Bridge {
         &mut self,
         mut client: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
-        let mut bridge_partitions = HashMap::new();
-        for (name, config) in &self.config.streams {
-            let stream = Stream::with_config(
-                name,
-                &self.config.project_id,
-                &self.config.device_id,
-                config,
-                self.data_tx.clone(),
-            );
-            bridge_partitions.insert(name.to_owned(), stream);
-        }
+        let mut streams = Streams::new(self.config.clone(), self.data_tx.clone());
 
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
         struct CurrentAction {
@@ -111,30 +99,16 @@ impl Bridge {
         // - set to None when
         // -- timeout ends
         // -- A response with status "Completed" is received
-        // -- A response with status "Failed" is received
-        // -- Bridge disconnects
         // - set to a value when
         // -- it is currently None and a new action is received
         // - timeout is updated
-        // -- when a non "Completed" | "Failed" action is received
+        // -- when a non "Completed" action is received
         let mut current_action_: Option<CurrentAction> = None;
-
-        let mut flush_handler = DelayMap::new();
 
         loop {
             select! {
                 line = client.next() => {
-                    let line = match line {
-                        None => {
-                            if let Some(action) = current_action_.take() {
-                                self.action_status.fill(ActionResponse::failure(action.id.as_str(), "bridge disconnected")).await?;
-                            }
-                            return Err(Error::StreamDone);
-                        }
-                        Some(lr) => {
-                            lr?
-                        }
-                    };
+                    let line = line.ok_or(Error::StreamDone)??;
                     info!("Received line = {:?}", line);
 
                     let data: Payload = match serde_json::from_str(&line) {
@@ -145,71 +119,37 @@ impl Bridge {
                         }
                     };
 
-                    // If incoming data is a response for an action, drop it if timeout is already sent to cloud
+                    // If incoming data is a response for an action, drop it
+                    // if timeout is already sent to cloud
                     if data.stream == "action_status" {
-                        if current_action_.is_some() {
-                            if let Some(response_id) = data.payload.as_object()
-                                .and_then(|payload| payload.get("action_id"))
-                                .and_then(|id| id.as_str()) {
-                                let action_id = current_action_.as_ref().unwrap().id.as_str();
-                                if action_id == response_id {
-                                    let state = data.payload.as_object().unwrap().get("state")
-                                        .and_then(|s| s.as_str());
-                                    match state {
-                                        Some("Completed") | Some("Failed") => {
-                                            current_action_ = None;
-                                        }
-                                        _ => {
-                                            current_action_.as_mut().unwrap().timeout = Box::pin(time::sleep(Duration::from_secs(30)));
-                                        }
-                                    }
-                                } else {
-                                    error!("action_id in action_status({response_id}) does not match that of active action ({action_id})");
-                                    continue;
-                                }
-                            } else {
-                                error!("No valid action_id in action_status stream payload");
+                        let (action_id, timeout) = match &mut current_action_ {
+                            Some(CurrentAction { id, timeout }) => (id, timeout),
+                            None => {
+                                error!("Action timed out already, ignoring response: {:?}", data);
                                 continue;
                             }
-                        } else {
-                            error!("Action timed out already, ignoring response: {:?}", data);
+                        };
+
+                        let (response_id, state) = match ActionResponse::from_payload(&data) {
+                            Ok(ActionResponse { id, state, .. }) => (id, state),
+                            Err(e) => {
+                                error!("Couldn't parse payload as an action response: {e:?}");
+                                continue;
+                            }
+                        };
+
+                        if *action_id != response_id {
+                            error!("action_id in action_status({response_id}) does not match that of active action ({action_id})");
                             continue;
                         }
-                    }
 
-                    let stream = match bridge_partitions.get_mut(&data.stream) {
-                        Some(partition) => partition,
-                        None => {
-                            if bridge_partitions.keys().len() > 20 {
-                                error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
-                                continue
-                            }
-
-                            let stream = Stream::dynamic(&data.stream, &self.config.project_id, &self.config.device_id, self.data_tx.clone());
-                            bridge_partitions.entry(data.stream.clone()).or_insert(stream)
+                        if state == "Completed" {
+                            current_action_ = None;
+                        } else {
+                            *timeout = Box::pin(time::sleep(Duration::from_secs(10)));
                         }
-                    };
-
-                    let max_stream_size = stream.max_buffer_size;
-                    let state = match stream.fill(data).await {
-                        Ok(s) => s,
-                        Err(e) => {
-                            error!("Failed to send data. Error = {:?}", e.to_string());
-                            continue
-                        }
-                    };
-
-                    // Remove timeout from flush_handler for selected stream if stream state is flushed,
-                    // do nothing if stream state is partial. Insert a new timeout if initial fill.
-                    // Warn in case stream flushed stream was not in the queue.
-                    if max_stream_size > 1 {
-                        match state {
-                            StreamStatus::Flushed(name) => flush_handler.remove(name),
-                            StreamStatus::Init(name, flush_period) => flush_handler.insert(name, flush_period),
-                            StreamStatus::Partial(l) => {
-                                debug!("Stream contains {} elements", l);
-                            }
-                        }
+                    } else {
+                        streams.forward(data).await
                     }
                 }
 
@@ -221,7 +161,7 @@ impl Bridge {
                         Ok(data) => {
                             current_action_ = Some(CurrentAction {
                                 id: action.action_id.clone(),
-                                timeout: Box::pin(time::sleep(Duration::from_secs(30))),
+                                timeout: Box::pin(time::sleep(Duration::from_secs(10))),
                             });
                             client.send(data).await?;
                         },
@@ -244,54 +184,9 @@ impl Bridge {
                 }
 
                 // Flush stream/partitions that timeout
-                Some(stream) = flush_handler.next(), if !flush_handler.is_empty() => {
-                    let stream = bridge_partitions.get_mut(&stream).unwrap();
-                    stream.flush().await?;
-                }
+                _ = streams.flush(), if streams.is_flushable() => {}
 
             }
         }
-    }
-}
-
-// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
-// TODO which cloud will double deserialize (Batch 1st and messages next)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Payload {
-    #[serde(skip_serializing)]
-    pub stream: String,
-    pub sequence: u32,
-    pub timestamp: u64,
-    #[serde(flatten)]
-    pub payload: Value,
-}
-
-impl Payload {
-    pub fn from_string<S: Into<String>>(input: S) -> Result<Self, Error> {
-        Ok(serde_json::from_str(&input.into())?)
-    }
-}
-
-impl Point for Payload {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-}
-
-impl Package for Buffer<Payload> {
-    fn topic(&self) -> Arc<String> {
-        self.topic.clone()
-    }
-
-    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
-        serde_json::to_vec(&self.buffer)
-    }
-
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
     }
 }
