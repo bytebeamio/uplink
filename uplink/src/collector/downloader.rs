@@ -311,7 +311,7 @@ mod test {
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path = Some(downloader_cfg.path + "/update_firmware/1.0/logo.png");
+        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/1.0/logo.png");
         let download_action = Action {
             device_id: Default::default(),
             action_id: "1".to_string(),
@@ -359,7 +359,7 @@ mod test {
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path = Some(downloader_cfg.path + "/update_firmware/1.0/logo.png");
+        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/1.0/logo.png");
         let download_action = Action {
             device_id: Default::default(),
             action_id: "1".to_string(),
