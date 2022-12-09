@@ -168,6 +168,8 @@ impl Bridge {
                     let action = action?;
                     info!("Received action: {:?}", action);
 
+                    self.action_status.fill(ActionResponse::progress(&action.action_id, "Received", 0)).await?;
+
                     match serde_json::to_string(&action) {
                         Ok(data) => {
                             current_action_ = Some(CurrentAction {
