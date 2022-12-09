@@ -108,7 +108,17 @@ impl Bridge {
         loop {
             select! {
                 line = client.next() => {
-                    let line = line.ok_or(Error::StreamDone)??;
+                    let line = match line {
+                        None => {
+                            if let Some(action) = current_action_.take() {
+                                self.action_status.fill(ActionResponse::failure(action.id.as_str(), "bridge disconnected")).await?;
+                            }
+                            return Err(Error::StreamDone);
+                        }
+                        Some(lr) => {
+                            lr?
+                        }
+                    };
                     info!("Received line = {:?}", line);
 
                     let data: Payload = match serde_json::from_str(&line) {
