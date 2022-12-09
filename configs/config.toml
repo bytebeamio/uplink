@@ -63,17 +63,24 @@ flush_period = 30
 topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
 buf_size = 1
 
-# The location in file system where uplink will download and store files from the URLs
-# mentioned in the "send_file" or "update_firmware" actions, over HTTP(S). If left
-# unconfigured, downloader will be disabled.
-download_path = "/var/tmp/ota-file"
+# Configurations for uplink's built-in file downloader, including the actions that can trigger
+# a download, the location in file system where uplink will download and store files from the
+# provided URL in the payload of download file actions, over HTTP(S). 
+# If left unconfigured, downloader will be disabled.
+#
+# Required Parameters
+# - actions: List of actions names that can trigger the downloader
+# - path: Location in fs where the files are downloaded into
+[downloader]
+actions ["firmware_update", "send_file"]
+path = "/var/tmp/ota-file"
 
 # Configurations associated with the system stats module of uplink, if enabled
 # system stats such as memory in use and CPU usage will be published onto special.
 #
 # Required Parameters
 # - enabled: A boolean to determine if the feature must be enabled
-# - process_names: List of processes which are to be tracked in system stats
+# - process_names: List of process names that are to be tracked with system stats
 # - update_period: Time in seconds between each collection/publish of system stats
 [stats]
 enabled = false

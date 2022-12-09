@@ -1,10 +1,10 @@
-//! Contains definitions necessary to download files such as OTA updates, as notified by a download [`Action`], i.e. with `name` `"update_firmware"` or `"send_file"`
+//! Contains definitions necessary to download files such as OTA updates, as notified by a download file [`Action`]
 //!
 //! The thread running [`Actions`] forwards the appropriate `Action`s to the [`FileDownloader`] with a _rendezvous channel_(A channel bounded to 0).
 //! The `Action` is sent only when a receiver is awaiting on the otherside and fails otherwise. This allows us to instantly recognize that another
 //! download is currently being performed.
 //!
-//! OTA `Action`s contain JSON formatted [`payload`] which can be deserialized into an object of type [`DownloadFile`].
+//! Download file `Action`s contain JSON formatted [`payload`] which can be deserialized into an object of type [`DownloadFile`].
 //! This object contains information such as the `url` where the download file is accessible from, the `version` number associated
 //! with the downloaded file and a field which must be updated with the location in file-system where the file is stored into.
 //!
@@ -83,7 +83,7 @@ impl From<flume::TrySendError<Action>> for Error {
     }
 }
 
-/// This struct contains the necessary components to download and store file as notified by a download
+/// This struct contains the necessary components to download and store file as notified by a download file
 /// [`Action`], while also sending periodic [`ActionResponse`]s to update progress and finally forwarding
 /// the download [`Action`], updated with information regarding where the file is stored in the file-system
 /// to the connected bridge application.
@@ -265,7 +265,7 @@ impl FileDownloader {
     }
 }
 
-/// Expected JSON format of data contained in the [`payload`] of a download [`Action`]
+/// Expected JSON format of data contained in the [`payload`] of a download file [`Action`]
 ///
 /// [`payload`]: Action#structfield.payload
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
