@@ -292,14 +292,14 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let download_path = format!("{}/download", DOWNLOAD_DIR);
+        let downloader_cfg = Downloader { actions: vec!["firmware_update".to_string()], path : format!("{}/download", DOWNLOAD_DIR) };
 
         // Create channels to forward and push action_status on
         let (stx, srx) = flume::bounded(1);
         let (btx, brx) = flume::bounded(1);
         let action_status = Stream::dynamic_with_size("actions_status", "", "", 1, stx);
         let (download_tx, downloader) =
-            FileDownloader::new(download_path.clone(), None, action_status, btx).unwrap();
+            FileDownloader::new(downloader_cfg.clone(), None, action_status, btx).unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start().unwrap());
@@ -311,7 +311,7 @@ mod test {
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path = Some(download_path + "/1.0/logo.png");
+        expected_forward.download_path = Some(downloader_cfg.path + "/update_firmware/1.0/logo.png");
         let download_action = Action {
             device_id: Default::default(),
             action_id: "1".to_string(),
@@ -340,14 +340,14 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let download_path = format!("{}/download", DOWNLOAD_DIR);
+        let downloader_cfg = Downloader { actions: vec!["firmware_update".to_string()], path : format!("{}/download", DOWNLOAD_DIR) };
 
         // Create channels to forward and push action_status on
         let (stx, _) = flume::bounded(1);
         let (btx, _) = flume::bounded(1);
         let action_status = Stream::dynamic_with_size("actions_status", "", "", 1, stx);
         let (download_tx, downloader) =
-            FileDownloader::new(download_path.clone(), None, action_status, btx).unwrap();
+            FileDownloader::new(downloader_cfg.clone(), None, action_status, btx).unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start().unwrap());
@@ -359,7 +359,7 @@ mod test {
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path = Some(download_path + "/1.0/logo.png");
+        expected_forward.download_path = Some(downloader_cfg.path + "/update_firmware/1.0/logo.png");
         let download_action = Action {
             device_id: Default::default(),
             action_id: "1".to_string(),
