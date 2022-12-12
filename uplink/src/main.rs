@@ -43,8 +43,8 @@ use std::fs;
 use std::sync::Arc;
 
 use anyhow::Error;
-use log::error;
-use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
+use log::{error, warn};
+use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode, ConfigBuilder};
 use structopt::StructOpt;
 
 use uplink::config::{initialize, CommandLine};
@@ -58,13 +58,20 @@ fn initialize_logging(commandline: &CommandLine) {
         _ => LevelFilter::Trace,
     };
 
-    let mut config = simplelog::ConfigBuilder::new();
+    let mut config = ConfigBuilder::new();
     config
         .set_location_level(LevelFilter::Off)
         .set_target_level(LevelFilter::Error)
         .set_thread_level(LevelFilter::Error)
-        .set_time_to_local(true)
         .set_level_padding(LevelPadding::Right);
+
+    match config.set_time_offset_to_local() {
+        Ok(_) => {}
+        Err(_) => {
+            warn!("failed to get time zone on this platform, logger will use IST");
+            config.set_time_offset(time::UtcOffset::from_hms(5, 30, 0).unwrap());
+        }
+    }
 
     if commandline.modules.is_empty() {
         config.add_filter_allow_str("uplink").add_filter_allow_str("disk");
