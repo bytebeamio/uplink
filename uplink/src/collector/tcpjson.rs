@@ -150,8 +150,8 @@ impl Bridge {
                             }
                         };
 
-                        if *action_id != response.id {
-                            error!("action_id in action_status({}) does not match that of active action ({})", response.id, action_id);
+                        if *action_id != response.action_id {
+                            error!("action_id in action_status({}) does not match that of active action ({})", response.action_id, action_id);
                             continue;
                         }
 
