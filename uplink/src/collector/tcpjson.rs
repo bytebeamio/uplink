@@ -40,6 +40,8 @@ pub struct Bridge {
     action_status: Stream<ActionResponse>,
 }
 
+const ACTION_TIMEOUT: Duration = Duration::from_secs(30);
+
 impl Bridge {
     pub fn new(
         config: Arc<Config>,
@@ -156,7 +158,7 @@ impl Bridge {
                         if &response.state == "Completed" || &response.state == "Failed" {
                             current_action_ = None;
                         } else {
-                            *timeout = Box::pin(time::sleep(Duration::from_secs(10)));
+                            *timeout = Box::pin(time::sleep(ACTION_TIMEOUT));
                         }
                         self.action_status.fill(response).await?;
                     } else {
@@ -174,7 +176,7 @@ impl Bridge {
                         Ok(data) => {
                             current_action_ = Some(CurrentAction {
                                 id: action.action_id.clone(),
-                                timeout: Box::pin(time::sleep(Duration::from_secs(10))),
+                                timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
                             });
                             client.send(data).await?;
                         },
