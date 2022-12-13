@@ -64,30 +64,21 @@ struct JournaldEntry {
 }
 
 impl LogEntry {
-    pub fn from_string(line: &str) -> Option<Self> {
-        let entry: Option<JournaldEntry> = match serde_json::from_str(line) {
-            Ok(entry) => entry,
-            Err(e) => {
-                log::error!("Failed to deserialize line . Error = {:?}", e);
-                None
-            }
-        };
+    pub fn from_string(line: &str) -> anyhow::Result<Self> {
+        let entry: JournaldEntry = serde_json::from_str(line)?;
 
-        match entry {
-            Some(entry) => Some(Self {
+        Ok(Self {
                 level: LogLevel::from_syslog_level(&entry.priority),
                 log_timestamp: entry.log_timestamp,
                 tag: entry.tag,
                 message: entry.message,
-                line: "".to_string(),
-            }),
-            None => None,
-        }
+            line: line.to_owned(),
+        })
     }
 
     pub fn to_payload(&self, sequence: u32) -> anyhow::Result<Payload> {
         let payload = serde_json::to_value(self)?;
-        let timestamp = self.log_timestamp.parse::<u64>().unwrap();
+        let timestamp = self.log_timestamp.parse::<u64>()?;
 
         Ok(Payload { stream: "logs".to_string(), sequence, timestamp, payload })
     }
