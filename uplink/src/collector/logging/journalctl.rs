@@ -68,17 +68,17 @@ impl LogEntry {
         let entry: JournaldEntry = serde_json::from_str(line)?;
 
         Ok(Self {
-                level: LogLevel::from_syslog_level(&entry.priority),
-                log_timestamp: entry.log_timestamp,
-                tag: entry.tag,
-                message: entry.message,
+            level: LogLevel::from_syslog_level(&entry.priority),
+            log_timestamp: entry.log_timestamp,
+            tag: entry.tag,
+            message: entry.message,
             line: line.to_owned(),
         })
     }
 
     pub fn to_payload(&self, sequence: u32) -> anyhow::Result<Payload> {
         let payload = serde_json::to_value(self)?;
-        let timestamp = self.log_timestamp.parse::<u64>()?;
+        let timestamp = self.log_timestamp.parse::<u64>()? / 1000;
 
         Ok(Payload { stream: "logs".to_string(), sequence, timestamp, payload })
     }
