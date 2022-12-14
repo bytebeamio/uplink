@@ -1,41 +1,41 @@
 //! uplink is a utility/library to interact with the Bytebeam platform. It's internal architecture is described in the diagram below.
 //! We use [`rumqttc`], which implements the MQTT protocol, to communicate with the platform. Communication is handled separately as ingress and egress
-//! by [`Mqtt`] and [`Serializer`] respectively. [`Action`]s are received and forwarded by Mqtt to the [`Actions`] module, where it is handled depending
-//! on it's type and purpose, forwarding it to either the [`Bridge`](collector::tcpjson::Bridge), [`Process`](base::actions::process::Process),
-//! [`OtaDownloader`](base::actions::ota::OtaDownloader) or [`TunshellSession`](base::actions::tunshell::TunshellSession). Bridge forwards received Actions
-//! to devices connected to it through the `bridge_port` and collects response data from these devices, to forward to the platform.
+//! by [`Mqtt`](uplink::Mqtt) and [`Serializer`](uplink::Serializer) respectively. [`Action`](uplink::Action)s are received and forwarded by Mqtt to the
+//! [`Middleware`](uplink::Middleware) module, where it is handled depending on its type and purpose, forwarding it to either the [`Bridge`](uplink::Bridge),
+//! `Process`, [`FileDownloader`](uplink::FileDownloader) or [`TunshellSession`](uplink::TunshellSession). Bridge forwards received Actions to the devices
+//! connected to it through the `bridge_port` and collects response data from these devices, to forward to the platform.
 //!
-//! Response data can be of multiple types, of interest to us are [`ActionResponse`](base::actions::response::ActionResponse)s, which are forwarded to Actions
+//! Response data can be of multiple types, of interest to us are [`ActionResponse`](uplink::ActionResponse)s, which are forwarded to Actions
 //! and then to Serializer where depending on the network, it may be stored onto disk with [`Storage`](disk::Storage) to ensure packets aren't lost.
 //!
 //!```text
-//!                                                                                 ┌────────────┐
-//!                                                                                 │MQTT backend│
-//!                                                                                 └─────┐▲─────┘
-//!                                                                                       ││
-//!                                                                                Action ││ ActionResponse
-//!                                                                                       ││ / Data
-//!                                                                           Action    ┌─▼└─┐
-//!                                                                       ┌─────────────┤Mqtt◄───────────┐
-//!                                                                       │             └────┘           │ ActionResponse
-//!                                                                       │                              │ / Data
-//!                                                                       │                              │
-//!                                                                   ┌───▼───┐   ActionResponse    ┌────┴─────┐
-//!                                                  ┌────────────────►Actions├─────────────────────►Serializer│
-//!                                                  │                └┬─┬─┬─┬┘                     └────▲─────┘
-//!                                                  │                 │ │ │ │                           │
-//!                                                  │                 │ │ │ └───────────────────┐       │Data
-//!                                                  │     Tunshell Key│ │ │ Action              │    ┌──┴───┐   Action       ┌───────────┐
-//!                                                  │        ┌────────┘ │ └───────────┐         ├────►Bridge◄────────────────►Application│
-//!                                                  │  ------│----------│-------------│-------- │    └──┬───┘ ActionResponse │ / Device  │
-//!                                                  │  '     │          │             │       ' │       │       / Data       └───────────┘
-//!                                                  │  '┌────▼───┐  ┌───▼───┐  ┌──────▼──────┐' │       │
-//!                                                  │  '│Tunshell│  │Process│  │OtaDownloader├──┘       │
-//!                                                  │  '└────┬───┘  └───┬───┘  └──────┬──────┘'         │
-//!                                                  │  '     │          │             │       '         │
-//!                                                  │  ------│----------│-------------│--------         │
-//!                                                  │        │          │             │                 │
-//!                                                  └────────┴──────────┴─────────────┴─────────────────┘
+//!                                                                                  ┌────────────┐
+//!                                                                                  │MQTT backend│
+//!                                                                                  └─────┐▲─────┘
+//!                                                                                        ││
+//!                                                                                 Action ││ ActionResponse
+//!                                                                                        ││ / Data
+//!                                                                            Action    ┌─▼└─┐
+//!                                                                        ┌─────────────┤Mqtt◄──────────────┐
+//!                                                                        │             └────┘              │ ActionResponse
+//!                                                                        │                                 │ / Data
+//!                                                                        │                                 │
+//!                                                                   ┌────▼─────┐   ActionResponse     ┌────┴─────┐
+//!                                                  ┌────────────────►Middleware├──────────────────────►Serializer│
+//!                                                  │                └┬──┬──┬──┬┘                      └────▲─────┘
+//!                                                  │                 │  │  │  │                            │
+//!                                                  │                 │  │  │  └────────────────────┐       │Data
+//!                                                  │     Tunshell Key│  │  │ Action                │    ┌──┴───┐   Action       ┌───────────┐
+//!                                                  │        ┌────────┘  │  └───────────┐           ├────►Bridge◄────────────────►Application│
+//!                                                  │  ------│-----------│--------------│---------- │    └──┬───┘ ActionResponse │ / Device  │
+//!                                                  │  '     │           │              │         ' │       │       / Data       └───────────┘
+//!                                                  │  '┌────▼───┐   ┌───▼───┐   ┌──────▼───────┐ ' │       │
+//!                                                  │  '│Tunshell│   │Process│   │FileDownloader├───┘       │
+//!                                                  │  '└────┬───┘   └───┬───┘   └──────┬───────┘ '         │
+//!                                                  │  '     │           │              │         '         │
+//!                                                  │  ------│-----------│--------------│----------         │
+//!                                                  │        │           │              │                   │
+//!                                                  └────────┴───────────┴──────────────┴───────────────────┘
 //!                                                                      ActionResponse
 //!```
 
@@ -108,8 +108,8 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
         println!("    persistence_max_segment_size: {}", persistence.max_file_size);
         println!("    persistence_max_segment_count: {}", persistence.max_file_count);
     }
-    if config.ota.enabled {
-        println!("    ota_path: {}", config.ota.path);
+    if let Some(downloader_cfg) = &config.downloader {
+        println!("    download_path: {}", downloader_cfg.path);
     }
     if config.stats.enabled {
         println!("    processes: {:?}", config.stats.process_names);
@@ -144,8 +144,8 @@ async fn main() -> Result<(), Error> {
 
     if let Some(simulator_config) = &config.simulator {
         if let Err(e) =
-        simulator::start(uplink.bridge_data_tx(), uplink.bridge_action_rx(), simulator_config)
-            .await
+            simulator::start(uplink.bridge_data_tx(), uplink.bridge_action_rx(), simulator_config)
+                .await
         {
             error!("Error while running simulator: {}", e)
         }
@@ -155,8 +155,8 @@ async fn main() -> Result<(), Error> {
         uplink.bridge_action_rx(),
         uplink.action_status(),
     )
-        .start()
-        .await
+    .start()
+    .await
     {
         error!("Bridge stopped!! Error = {:?}", e);
     }
