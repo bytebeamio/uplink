@@ -142,7 +142,7 @@ An example success response to an action with the id `"123"`, would look like:
 uplink has a built-in feature that enables it to download OTA firmware updates, this can be enabled by setting the following field in the `config.toml` and using the `-c` option while starting uplink:
 ```toml
 [downloader]
-actions = ["firmware_update"]
+actions = ["update_firmware"]
 path = "/path/to/directory" # Where you want the update file to be downloaded
 ```
 ```sh

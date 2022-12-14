@@ -72,7 +72,7 @@ buf_size = 1
 # - actions: List of actions names that can trigger the downloader
 # - path: Location in fs where the files are downloaded into
 [downloader]
-actions = ["firmware_update", "send_file"]
+actions = ["update_firmware", "send_file"]
 path = "/var/tmp/ota-file"
 
 # Configurations associated with the system stats module of uplink, if enabled
