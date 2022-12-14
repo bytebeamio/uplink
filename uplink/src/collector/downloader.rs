@@ -51,6 +51,7 @@ use serde::{Deserialize, Serialize};
 
 use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf};
+use std::time::Duration;
 
 use crate::base::{Authentication, Downloader};
 use crate::{Action, ActionResponse, Stream};
