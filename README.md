@@ -138,11 +138,11 @@ An example success response to an action with the id `"123"`, would look like:
 }
 ```
 
-#### Downloading OTA updates
-uplink has a built-in feature that enables it to download OTA firmware updates, this can be enabled by setting the following fields in the `config.toml` and using the `-c` option while starting uplink:
+#### Downloading OTA updates and other files
+uplink has a built-in feature that enables it to download OTA firmware updates, this can be enabled by setting the following field in the `config.toml` and using the `-c` option while starting uplink:
 ```toml
-[ota]
-enabled = true
+[downloader]
+actions = ["update_firmware"]
 path = "/path/to/directory" # Where you want the update file to be downloaded
 ```
 ```sh
@@ -169,7 +169,7 @@ Once downloded, the payload JSON is updated with the file's on device path, as s
     "name": "update_firmware",
     "payload": "{
         \"url\": \"https://example.com/file\",
-        \"ota_path\": \"/path/to/directory\",
+        \"download_path\": \"/path/to/directory\",
         \"version\":\"1.0\"
     }"
 }

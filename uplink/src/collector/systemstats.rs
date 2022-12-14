@@ -558,7 +558,7 @@ impl StatCollector {
             let temperature = std::fs::read_to_string(path).unwrap().trim().parse::<f32>().unwrap();
             let comp_data = Component { label, temperature, ..Default::default() };
             if let Err(e) = self.components.push_custom(comp_data, timestamp) {
-                error!("Couldn't send component stats: {}", e);
+                error!("Couldn't send temperature stats: {}", e);
             }
         }
 

@@ -51,8 +51,18 @@ impl LoggerInstance {
         data_tx: Sender<Box<dyn Package>>,
         log_rx: Receiver<Action>,
     ) -> Self {
-        let log_stream =
-            Stream::dynamic_with_size("logs", &config.project_id, &config.device_id, 32, data_tx);
+        #[cfg(target_os = "linux")]
+        let buf_size = config.journalctl.as_ref().and_then(|c| c.stream_size).unwrap_or(32);
+        #[cfg(not(target_os = "linux"))]
+        let buf_size = 32;
+
+        let log_stream = Stream::dynamic_with_size(
+            "logs",
+            &config.project_id,
+            &config.device_id,
+            buf_size,
+            data_tx,
+        );
         let kill_switch = Arc::new(Mutex::new(true));
 
         Self { config, log_stream, kill_switch, log_rx }
@@ -63,7 +73,7 @@ impl LoggerInstance {
     /// this object is dropped. On any other system, it's a noop.
     pub fn start(mut self) -> Result<(), Error> {
         #[cfg(target_os = "linux")]
-        if let Some(JournalctlConfig { priority, tags }) = &self.config.journalctl {
+        if let Some(JournalctlConfig { priority, tags, stream_size: _ }) = &self.config.journalctl {
             let config = LoggingConfig { tags: tags.clone(), min_level: *priority };
             self.spawn_logger(new_journalctl(&config));
         }
@@ -77,7 +87,7 @@ impl LoggerInstance {
         loop {
             let action = self.log_rx.recv()?;
             let mut config = serde_json::from_str::<LoggingConfig>(action.payload.as_str())?;
-            config.tags = config.tags.into_iter().filter(|tag| !tag.is_empty()).collect();
+            config.tags.retain(|tag| !tag.is_empty());
             log::info!("restarting journalctl with following config: {:?}", config);
 
             // Ensure any logger child process created earlier gets killed
@@ -134,9 +144,9 @@ impl LoggerInstance {
 
                 let next_line = next_line.trim();
                 let entry = match LogEntry::from_string(next_line) {
-                    Some(entry) => entry,
-                    _ => {
-                        log::warn!("log line in unknown format: {:?}", next_line);
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        log::warn!("log line: {} couldn't be parsed due to: {}", next_line, e);
                         continue;
                     }
                 };

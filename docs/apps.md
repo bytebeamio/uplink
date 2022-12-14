@@ -2,7 +2,7 @@
 uplink handles device data, `Action`s and `ActionResponse`s. An action is received from the broker and sent to user apps that can also send either user data or action responses, containing status of actions in execution.
 
 ## Action
-An `Action` is the term used to refer to messages that carry commands and other information that can be used by uplink or apps connected to it. Some common Actions include the `firmware_update` and `config_update` actions which when executed by the target device will lead to the initiation of an OTA update. A firmware update `Action` messages in JSON would be structured as follows:
+An `Action` is the term used to refer to messages that carry commands and other information that can be used by uplink or apps connected to it. Some common Actions include the `update_firmware` and `config_update` actions which when executed by the target device will lead to the initiation of an OTA update. A firmware update `Action` messages in JSON would be structured as follows:
 ```js
 {
     "action_id": "...", // An integer value that can be used to maintain indempotence

@@ -74,7 +74,7 @@ func createAction(name string) *Action {
 	id := generateID(10)
 	fmt.Println("action =", name, "id =", id)
 	switch name {
-	case "ota":
+	case "update_firmware":
 		kind := "process"
 		command := "tools/ota"
 		payload := `{"hello": "world"}`

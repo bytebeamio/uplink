@@ -25,7 +25,7 @@ pub struct Action {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
-    pub id: String,
+    pub action_id: String,
     // sequence number
     pub sequence: u32,
     // timestamp
@@ -46,7 +46,7 @@ impl ActionResponse {
             .as_millis() as u64;
 
         ActionResponse {
-            id: id.to_owned(),
+            action_id: id.to_owned(),
             sequence: 0,
             timestamp,
             state: state.to_owned(),
@@ -95,7 +95,7 @@ impl From<&ActionResponse> for Payload {
             sequence: resp.sequence,
             timestamp: resp.timestamp,
             payload: json!({
-                "id": resp.id,
+                "id": resp.action_id,
                 "state": resp.state,
                 "progress": resp.progress,
                 "errors": resp.errors

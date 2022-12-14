@@ -19,8 +19,14 @@ use std::sync::Arc;
 pub enum Error {
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
-    #[error("Serde error {0}")]
-    ActionForward(#[from] TrySendError<Action>),
+    #[error("TrySend error {0}")]
+    TrySend(Box<TrySendError<Action>>),
+}
+
+impl From<flume::TrySendError<Action>> for Error {
+    fn from(e: flume::TrySendError<Action>) -> Self {
+        Self::TrySend(Box::new(e))
+    }
 }
 
 /// Interface implementing MQTT protocol to communicate with broker
