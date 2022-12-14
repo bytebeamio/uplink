@@ -78,6 +78,7 @@ impl LogEntry {
 
     pub fn to_payload(&self, sequence: u32) -> anyhow::Result<Payload> {
         let payload = serde_json::to_value(self)?;
+        // Convert from microseconds to milliseconds
         let timestamp = self.log_timestamp.parse::<u64>()? / 1000;
 
         Ok(Payload { stream: "logs".to_string(), sequence, timestamp, payload })
