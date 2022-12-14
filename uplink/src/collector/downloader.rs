@@ -51,7 +51,6 @@ use serde::{Deserialize, Serialize};
 
 use std::fs::{create_dir_all, File};
 use std::{io::Write, path::PathBuf};
-use std::time::Duration;
 
 use crate::base::{Authentication, Downloader};
 use crate::{Action, ActionResponse, Stream};
@@ -120,7 +119,7 @@ impl FileDownloader {
             }
             None => client_builder,
         }
-            .build()?;
+        .build()?;
 
         // Create rendezvous channel with flume
         let (download_tx, download_rx) = flume::bounded(0);
@@ -150,27 +149,10 @@ impl FileDownloader {
             let action = self.download_rx.recv()?;
             self.action_id = action.action_id.clone();
 
-            let mut error = None;
-            for _ in 0..3 {
-                match self.run(action.clone()).await {
-                    Ok(_) => {
-                        error = None;
-                        break;
-                    }
-                    Err(e) => {
-                        error!("Download failed: {e}\nretrying");
-                        error = Some(e);
-                    }
-                }
-                tokio::time::sleep(Duration::from_secs(30)).await;
-            }
-            match error {
-                None => {}
-                Some(e) => {
-                    let status = ActionResponse::failure(&self.action_id, e.to_string())
-                        .set_sequence(self.sequence());
-                    self.send_status(status).await;
-                }
+            if let Err(e) = self.run(action).await {
+                let status = ActionResponse::failure(&self.action_id, e.to_string())
+                    .set_sequence(self.sequence());
+                self.send_status(status).await;
             }
         }
     }
@@ -253,9 +235,9 @@ impl FileDownloader {
                 // Calculate percentage on the basis of content_length if available,
                 // else increment 0..100 till task is completed.
                 let percentage = match content_length {
-                    Some(content_length) => 100 * downloaded / content_length,
+                    Some(content_length) => (50 * downloaded / content_length) % 101,
                     None => {
-                        downloaded = (downloaded + 1) % 101;
+                        downloaded = (downloaded + 1) % 50;
                         downloaded
                     }
                 };
