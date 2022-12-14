@@ -144,9 +144,9 @@ impl LoggerInstance {
 
                 let next_line = next_line.trim();
                 let entry = match LogEntry::from_string(next_line) {
-                    Some(entry) => entry,
-                    _ => {
-                        log::warn!("log line in unknown format: {:?}", next_line);
+                    Ok(entry) => entry,
+                    Err(e) => {
+                        log::warn!("log line: {} couldn't be parsed due to: {}", next_line, e);
                         continue;
                     }
                 };

@@ -60,6 +60,20 @@ impl LogLevel {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Couldn't parse logline")]
+    Parse,
+    #[error("Couldn't parse timestamp")]
+    Timestamp,
+    #[error("Couldn't parse level")]
+    Level,
+    #[error("Couldn't parse tag")]
+    Tag,
+    #[error("Couldn't parse message")]
+    Msg,
+}
+
 #[derive(Debug, Serialize)]
 pub struct LogEntry {
     level: LogLevel,
@@ -88,19 +102,20 @@ pub fn parse_logcat_time(s: &str) -> Option<u64> {
 }
 
 impl LogEntry {
-    pub fn from_string(line: &str) -> Option<Self> {
-        let matches = LOGCAT_RE.captures(line)?;
-        let log_timestamp = matches.get(1)?.as_str().to_string();
-        let level = LogLevel::from_str(matches.get(2)?.as_str())?;
-        let tag = matches.get(3)?.as_str().to_string();
-        let message = matches.get(4)?.as_str().to_string();
+    pub fn from_string(line: &str) -> anyhow::Result<Self> {
+        let matches = LOGCAT_RE.captures(line).ok_or(Error::Parse)?;
+        let log_timestamp = matches.get(1).ok_or(Error::Timestamp)?.as_str().to_string();
+        let level =
+            LogLevel::from_str(matches.get(2).ok_or(Error::Level)?.as_str()).ok_or(Error::Level)?;
+        let tag = matches.get(3).ok_or(Error::Tag)?.as_str().to_string();
+        let message = matches.get(4).ok_or(Error::Msg)?.as_str().to_string();
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_millis() as u64;
         let timestamp = parse_logcat_time(line).unwrap_or(timestamp);
 
-        Some(Self { level, log_timestamp, tag, message, line: line.to_string(), timestamp })
+        Ok(Self { level, log_timestamp, tag, message, line: line.to_string(), timestamp })
     }
 
     pub fn to_payload(&self, sequence: u32) -> anyhow::Result<Payload> {
