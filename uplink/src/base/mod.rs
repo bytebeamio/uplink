@@ -88,7 +88,6 @@ pub struct Config {
     pub max_inflight: u16,
     pub actions: Vec<String>,
     pub persistence: Option<Persistence>,
-    pub log_dir: Option<String>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
     pub serializer_metrics: Option<StreamConfig>,
