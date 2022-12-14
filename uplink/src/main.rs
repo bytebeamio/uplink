@@ -43,8 +43,8 @@ use std::fs;
 use std::sync::Arc;
 
 use anyhow::Error;
-use log::error;
-use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode};
+use log::{error, warn};
+use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode, ConfigBuilder};
 use structopt::StructOpt;
 
 use uplink::config::{initialize, CommandLine};
@@ -58,12 +58,20 @@ fn initialize_logging(commandline: &CommandLine) {
         _ => LevelFilter::Trace,
     };
 
-    let mut config = simplelog::ConfigBuilder::new();
+    let mut config = ConfigBuilder::new();
     config
         .set_location_level(LevelFilter::Off)
         .set_target_level(LevelFilter::Error)
         .set_thread_level(LevelFilter::Error)
         .set_level_padding(LevelPadding::Right);
+
+    match config.set_time_offset_to_local() {
+        Ok(_) => {}
+        Err(_) => {
+            warn!("failed to get time zone on this platform, logger will use IST");
+            config.set_time_offset(time::UtcOffset::from_hms(5, 30, 0).unwrap());
+        }
+    }
 
     if commandline.modules.is_empty() {
         config.add_filter_allow_str("uplink").add_filter_allow_str("disk");
@@ -111,6 +119,11 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
+    if std::env::args().find(|a| a == "--sha").is_some() {
+        println!("{}", &env!("VERGEN_GIT_SHA")[0..8]);
+        return Ok(());
+    }
+
     let commandline: CommandLine = StructOpt::from_args();
 
     initialize_logging(&commandline);
@@ -124,16 +137,6 @@ async fn main() -> Result<(), Error> {
             .as_str(),
     )?);
 
-    let _log_guards = config.log_dir.as_ref().map(|log_dir| {
-        std::fs::create_dir_all(log_dir).unwrap();
-        let out_path = format!("{}/{}", log_dir, "stdout.log");
-        let err_path = format!("{}/{}", log_dir, "stderr.log");
-        let _ = std::fs::remove_file(out_path.as_str());
-        let _ = std::fs::remove_file(err_path.as_str());
-        let _out_guard = stdio_override::StdoutOverride::override_file(out_path).unwrap();
-        let _err_guard = stdio_override::StderrOverride::override_file(err_path).unwrap();
-        (_out_guard, _err_guard)
-    });
     banner(&commandline, &config);
 
     let mut uplink = Uplink::new(config.clone())?;

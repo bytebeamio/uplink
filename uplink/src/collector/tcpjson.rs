@@ -40,6 +40,8 @@ pub struct Bridge {
     action_status: Stream<ActionResponse>,
 }
 
+const ACTION_TIMEOUT: Duration = Duration::from_secs(30);
+
 impl Bridge {
     pub fn new(
         config: Arc<Config>,
@@ -108,7 +110,17 @@ impl Bridge {
         loop {
             select! {
                 line = client.next() => {
-                    let line = line.ok_or(Error::StreamDone)??;
+                    let line = match line {
+                        None => {
+                            if let Some(action) = current_action_.take() {
+                                self.action_status.fill(ActionResponse::failure(action.id.as_str(), "bridge disconnected")).await?;
+                            }
+                            return Err(Error::StreamDone);
+                        }
+                        Some(lr) => {
+                            lr?
+                        }
+                    };
                     info!("Received line = {:?}", line);
 
                     let data: Payload = match serde_json::from_str(&line) {
@@ -130,24 +142,25 @@ impl Bridge {
                             }
                         };
 
-                        let (response_id, state) = match ActionResponse::from_payload(&data) {
-                            Ok(ActionResponse { id, state, .. }) => (id, state),
+                        let response = match ActionResponse::from_payload(&data) {
+                            Ok(response) => response,
                             Err(e) => {
                                 error!("Couldn't parse payload as an action response: {e:?}");
                                 continue;
                             }
                         };
 
-                        if *action_id != response_id {
-                            error!("action_id in action_status({response_id}) does not match that of active action ({action_id})");
+                        if *action_id != response.action_id {
+                            error!("action_id in action_status({}) does not match that of active action ({})", response.action_id, action_id);
                             continue;
                         }
 
-                        if state == "Completed" {
+                        if &response.state == "Completed" || &response.state == "Failed" {
                             current_action_ = None;
                         } else {
-                            *timeout = Box::pin(time::sleep(Duration::from_secs(10)));
+                            *timeout = Box::pin(time::sleep(ACTION_TIMEOUT));
                         }
+                        self.action_status.fill(response).await?;
                     } else {
                         streams.forward(data).await
                     }
@@ -157,11 +170,13 @@ impl Bridge {
                     let action = action?;
                     info!("Received action: {:?}", action);
 
+                    self.action_status.fill(ActionResponse::progress(&action.action_id, "Received", 0)).await?;
+
                     match serde_json::to_string(&action) {
                         Ok(data) => {
                             current_action_ = Some(CurrentAction {
                                 id: action.action_id.clone(),
-                                timeout: Box::pin(time::sleep(Duration::from_secs(10))),
+                                timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
                             });
                             client.send(data).await?;
                         },
