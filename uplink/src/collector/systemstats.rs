@@ -19,6 +19,12 @@ use crate::{Config, Package, Point, Stream};
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] std::io::Error),
+    #[error("Pattern error {0}")]
+    Pattern(#[from] glob::PatternError),
+    #[error("Glob error {0}")]
+    Glob(#[from] glob::GlobError),
+    #[error("Parse float error {0}")]
+    ParseFloat(#[from] std::num::ParseFloatError),
 }
 
 type Pid = u32;
@@ -272,8 +278,8 @@ impl Component {
         Component { label, ..Default::default() }
     }
 
-    fn update(&mut self, proc: &sysinfo::Component, timestamp: u64, sequence: u32) {
-        self.temperature = proc.temperature();
+    fn update(&mut self, comp: &sysinfo::Component, timestamp: u64, sequence: u32) {
+        self.temperature = comp.temperature();
         self.timestamp = timestamp;
         self.sequence = sequence;
     }
@@ -303,6 +309,15 @@ impl ComponentStats {
             self.map.entry(comp_label.clone()).or_insert_with(|| Component::init(comp_label));
         comp.update(comp_data, timestamp, self.sequence);
         self.stream.push(comp.clone())?;
+
+        Ok(())
+    }
+
+    fn push_custom(&mut self, mut comp_data: Component, timestamp: u64) -> Result<(), base::Error> {
+        self.sequence += 1;
+        comp_data.timestamp = timestamp;
+        comp_data.sequence = self.sequence;
+        self.stream.push(comp_data)?;
 
         Ok(())
     }
@@ -538,6 +553,18 @@ impl StatCollector {
         for comp_data in self.sys.components().iter() {
             if let Err(e) = self.components.push(comp_data, timestamp) {
                 error!("Couldn't send component stats: {}", e);
+            }
+        }
+        let files = glob::glob("/sys/devices/virtual/thermal/thermal_zone*/temp")?;
+        for thermal_zone in files {
+            let path = thermal_zone?;
+            let mut label = path.as_os_str().to_str().unwrap_or("temp_component").to_string();
+            label.retain(|c| c.is_numeric());
+            let label = "thermal_zone".to_owned() + &label;
+            let temperature = std::fs::read_to_string(path)?.trim().parse::<f32>()?;
+            let comp_data = Component { label, temperature, ..Default::default() };
+            if let Err(e) = self.components.push_custom(comp_data, timestamp) {
+                error!("Couldn't send temperature stats: {}", e);
             }
         }
 
