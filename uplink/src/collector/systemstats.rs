@@ -19,6 +19,12 @@ use crate::{Config, Package, Point, Stream};
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] std::io::Error),
+    #[error("Pattern error {0}")]
+    Pattern(#[from] glob::PatternError),
+    #[error("Glob error {0}")]
+    Glob(#[from] glob::GlobError),
+    #[error("Parse float error {0}")]
+    ParseFloat(#[from] std::num::ParseFloatError),
 }
 
 type Pid = u32;
@@ -549,13 +555,13 @@ impl StatCollector {
                 error!("Couldn't send component stats: {}", e);
             }
         }
-        let files = glob::glob("/sys/devices/virtual/thermal/thermal_zone*/temp").unwrap();
+        let files = glob::glob("/sys/devices/virtual/thermal/thermal_zone*/temp")?;
         for thermal_zone in files {
-            let path = thermal_zone.unwrap();
-            let mut label = path.as_os_str().to_str().unwrap().to_string();
+            let path = thermal_zone?;
+            let mut label = path.as_os_str().to_str().unwrap_or("temp_component").to_string();
             label.retain(|c| c.is_numeric());
             let label = "thermal_zone".to_owned() + &label;
-            let temperature = std::fs::read_to_string(path).unwrap().trim().parse::<f32>().unwrap();
+            let temperature = std::fs::read_to_string(path)?.trim().parse::<f32>()?;
             let comp_data = Component { label, temperature, ..Default::default() };
             if let Err(e) = self.components.push_custom(comp_data, timestamp) {
                 error!("Couldn't send temperature stats: {}", e);
