@@ -3,6 +3,7 @@ use futures_util::SinkExt;
 use log::{error, info};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::broadcast::{channel, Receiver as BRx, Sender as BTx};
 use tokio::time::{Duration, Sleep};
 use tokio::{select, time};
 use tokio_stream::StreamExt;
@@ -31,12 +32,15 @@ pub enum Error {
     Actions(#[from] ActionsError),
     #[error("Couldn't fill stream")]
     Stream(#[from] crate::base::Error),
+    #[error("Broadcast receiver error {0}")]
+    BRecv(#[from] tokio::sync::broadcast::error::RecvError),
 }
 
 pub struct Bridge {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
     actions_rx: Receiver<Action>,
+    actions_tx: BTx<Action>,
     action_status: Stream<ActionResponse>,
 }
 
@@ -49,7 +53,8 @@ impl Bridge {
         actions_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
     ) -> Bridge {
-        Bridge { config, data_tx, actions_rx, action_status }
+        let (actions_tx, _) = channel(10);
+        Bridge { action_status: action_status.clone(), data_tx, config, actions_rx, actions_tx }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -57,11 +62,14 @@ impl Bridge {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
             let listener = TcpListener::bind(&addr).await?;
 
-            let (stream, addr) = loop {
+            loop {
                 select! {
                     v = listener.accept() =>  {
                         match v {
-                            Ok(s) => break s,
+                            Ok((stream, addr)) => {
+                                info!("Accepted new connection from {:?}", addr);
+                                self.spawn_collector(stream).await
+                            },
                             Err(e) => {
                                 error!("Tcp connection accept error = {:?}", e);
                                 continue;
@@ -70,29 +78,46 @@ impl Bridge {
                     }
                     action = self.actions_rx.recv_async() => {
                         let action = action?;
-                        error!("Bridge down!! Action ID = {}", action.action_id);
-                        let status = ActionResponse::failure(&action.action_id, "Bridge down");
-                        if let Err(e) = self.action_status.fill(status).await {
-                            error!("Failed to send busy status. Error = {:?}", e);
+                        let action_id = action.action_id.clone();
+                        if self.actions_tx.send(action).is_err() {
+                            error!("Bridge down!! Action ID = {}", action_id);
+                            let status = ActionResponse::failure(&action_id, "Bridge down");
+                            if let Err(e) = self.action_status.fill(status).await {
+                                error!("Failed to send busy status. Error = {:?}", e);
+                            }
                         }
                     }
                 }
-            };
-
-            info!("Accepted new connection from {:?}", addr);
-            let framed = Framed::new(stream, LinesCodec::new());
-            if let Err(e) = self.collect(framed).await {
-                error!("Bridge failed. Error = {:?}", e);
             }
         }
     }
 
+    async fn spawn_collector(&self, stream: TcpStream) {
+        let framed = Framed::new(stream, LinesCodec::new());
+        let mut tcp_json = TcpJson {
+            action_status: self.action_status.clone(),
+            streams: Streams::new(self.config.clone(), self.data_tx.clone()),
+            actions_rx: self.actions_tx.subscribe(),
+        };
+        tokio::task::spawn(async move {
+            if let Err(e) = tcp_json.collect(framed).await {
+                error!("Bridge failed. Error = {:?}", e);
+            }
+        });
+    }
+}
+
+struct TcpJson {
+    streams: Streams,
+    action_status: Stream<ActionResponse>,
+    actions_rx: BRx<Action>,
+}
+
+impl TcpJson {
     pub async fn collect(
         &mut self,
         mut client: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
-        let mut streams = Streams::new(self.config.clone(), self.data_tx.clone());
-
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
         struct CurrentAction {
             id: String,
@@ -161,11 +186,11 @@ impl Bridge {
                         }
                         self.action_status.fill(response).await?;
                     } else {
-                        streams.forward(data).await
+                        self.streams.forward(data).await
                     }
                 }
 
-                action = self.actions_rx.recv_async(), if current_action_.is_none() => {
+                action = self.actions_rx.recv(), if current_action_.is_none() => {
                     let action = action?;
                     info!("Received action: {:?}", action);
 
@@ -198,7 +223,7 @@ impl Bridge {
                 }
 
                 // Flush stream/partitions that timeout
-                _ = streams.flush(), if streams.is_flushable() => {}
+                _ = self.streams.flush(), if self.streams.is_flushable() => {}
 
             }
         }
