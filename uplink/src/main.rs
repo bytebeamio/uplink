@@ -44,7 +44,9 @@ use std::sync::Arc;
 
 use anyhow::Error;
 use log::{error, warn};
-use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode, ConfigBuilder};
+use simplelog::{
+    ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, LevelPadding, TermLogger, TerminalMode,
+};
 use structopt::StructOpt;
 
 use uplink::config::{initialize, CommandLine};
@@ -119,7 +121,7 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
-    if std::env::args().find(|a| a == "--sha").is_some() {
+    if std::env::args().any(|a| a == "--sha") {
         println!("{}", &env!("VERGEN_GIT_SHA")[0..8]);
         return Ok(());
     }

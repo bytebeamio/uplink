@@ -1,9 +1,9 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures_util::SinkExt;
+use serde::Serialize;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 use tokio_util::codec::{Framed, LinesCodec};
-use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 struct SquarePayload {
@@ -15,7 +15,7 @@ struct SquarePayload {
 
 #[tokio::main]
 async fn main() {
-    let port = std::env::args().nth(2).unwrap_or("127.0.0.1:5555".to_string());
+    let port = std::env::args().nth(2).unwrap_or_else(|| "127.0.0.1:5555".to_string());
     let mut framed = Framed::new(TcpStream::connect(port).await.unwrap(), LinesCodec::new());
     let mut idx = 0;
     loop {
