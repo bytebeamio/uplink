@@ -74,12 +74,9 @@ impl Middleware {
 
             let action_id = action.action_id.clone();
             let action_name = action.name.clone();
-            let error = match self.handle(action).await {
-                Ok(_) => continue,
-                Err(e) => e,
-            };
-
-            self.forward_action_error(&action_id, &action_name, error).await;
+            if let Err(error) = self.handle(action).await {
+                self.forward_action_error(&action_id, &action_name, error).await;
+            }
         }
     }
 

@@ -50,8 +50,8 @@ use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
 use std::fs::{create_dir_all, File};
-use std::{io::Write, path::PathBuf};
 use std::time::Duration;
+use std::{io::Write, path::PathBuf};
 
 use crate::base::{Authentication, Downloader};
 use crate::{Action, ActionResponse, Stream};
@@ -120,7 +120,7 @@ impl FileDownloader {
             }
             None => client_builder,
         }
-            .build()?;
+        .build()?;
 
         // Create rendezvous channel with flume
         let (download_tx, download_rx) = flume::bounded(0);
@@ -164,13 +164,10 @@ impl FileDownloader {
                 }
                 tokio::time::sleep(Duration::from_secs(30)).await;
             }
-            match error {
-                None => {}
-                Some(e) => {
-                    let status = ActionResponse::failure(&self.action_id, e.to_string())
-                        .set_sequence(self.sequence());
-                    self.send_status(status).await;
-                }
+            if let Some(e) = error {
+                let status = ActionResponse::failure(&self.action_id, e.to_string())
+                    .set_sequence(self.sequence());
+                self.send_status(status).await;
             }
         }
     }
@@ -310,7 +307,10 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let downloader_cfg = Downloader { actions: vec!["firmware_update".to_string()], path : format!("{}/download", DOWNLOAD_DIR) };
+        let downloader_cfg = Downloader {
+            actions: vec!["firmware_update".to_string()],
+            path: format!("{}/download", DOWNLOAD_DIR),
+        };
 
         // Create channels to forward and push action_status on
         let (stx, srx) = flume::bounded(1);
@@ -329,7 +329,8 @@ mod test {
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/1.0/logo.png");
+        expected_forward.download_path =
+            Some(downloader_cfg.path + "/firmware_update/1.0/logo.png");
         let download_action = Action {
             device_id: Default::default(),
             action_id: "1".to_string(),
@@ -358,7 +359,10 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let downloader_cfg = Downloader { actions: vec!["firmware_update".to_string()], path : format!("{}/download", DOWNLOAD_DIR) };
+        let downloader_cfg = Downloader {
+            actions: vec!["firmware_update".to_string()],
+            path: format!("{}/download", DOWNLOAD_DIR),
+        };
 
         // Create channels to forward and push action_status on
         let (stx, _) = flume::bounded(1);
@@ -377,7 +381,8 @@ mod test {
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/1.0/logo.png");
+        expected_forward.download_path =
+            Some(downloader_cfg.path + "/firmware_update/1.0/logo.png");
         let download_action = Action {
             device_id: Default::default(),
             action_id: "1".to_string(),
