@@ -61,6 +61,8 @@ An example success response to an action with the id `"123"`, would look like:
 }
 ```
 
+> **NOTE:** Uplink broadcasts actions to all connected applications and expects the applications to handle the action appropriately. There is a timeout mechanism which on being triggered will send a ***Failure*** response to platform and stop forwarding any *Progress* responses from the connected applications. In order to not trigger this timeout, an application must keep sending timely *Progress* responses(faster than once every 30 seconds) until a final ***Failure*** or ***Completion*** response is made to uplink.
+
 ## Demonstration
 We have provided examples written in python and golang to demonstrate how you can receive Actions and reply back with either data or responses. You can checkout the examples provided in the `demo/` directory and execute them as such:
 1. Ensure uplink is running on device and connected to relevant broker.
