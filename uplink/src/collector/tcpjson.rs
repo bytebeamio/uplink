@@ -114,6 +114,8 @@ struct TcpJson {
 }
 
 impl TcpJson {
+    /// NOTE: We only expect one action to be processed over uplink's bridge at a time,
+    /// which is what current_action achieves
     pub async fn collect(
         &mut self,
         mut client: Framed<TcpStream, LinesCodec>,
