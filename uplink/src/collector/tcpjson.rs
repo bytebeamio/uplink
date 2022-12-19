@@ -1,4 +1,4 @@
-use flume::{Receiver, RecvError, Sender};
+use flume::{bounded, Receiver, RecvError, SendError, Sender};
 use futures_util::SinkExt;
 use log::{error, info};
 use thiserror::Error;
@@ -22,6 +22,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Receiver error {0}")]
     Recv(#[from] RecvError),
+    #[error("Sender error {0}")]
+    Send(#[from] SendError<ActionResponse>),
     #[error("Stream done")]
     StreamDone,
     #[error("Lines codec error {0}")]
@@ -42,6 +44,8 @@ pub struct Bridge {
     actions_rx: Receiver<Action>,
     actions_tx: BTx<Action>,
     action_status: Stream<ActionResponse>,
+    status_tx: Sender<ActionResponse>,
+    status_rx: Receiver<ActionResponse>,
 }
 
 const ACTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -54,7 +58,9 @@ impl Bridge {
         action_status: Stream<ActionResponse>,
     ) -> Bridge {
         let (actions_tx, _) = channel(10);
-        Bridge { action_status: action_status.clone(), data_tx, config, actions_rx, actions_tx }
+        let (status_tx, status_rx) = bounded(10);
+
+        Bridge { action_status, data_tx, config, actions_rx, actions_tx, status_tx, status_rx }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -62,7 +68,37 @@ impl Bridge {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
             let listener = TcpListener::bind(&addr).await?;
 
+            let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
+
+            /// NOTE: We only expect one action to be processed over uplink's bridge at a time
+            struct CurrentAction {
+                id: String,
+                timeout: Pin<Box<Sleep>>,
+            }
+
+            // - set to None when
+            // -- timeout ends
+            // -- A response with status "Completed" is received
+            // - set to a value when
+            // -- it is currently None and a new action is received
+            // - timeout is updated
+            // -- when a non "Completed" action is received
+            let mut current_action_: Option<CurrentAction> = None;
+
             loop {
+                // Update action_status for current action
+                if self.actions_tx.receiver_count() == 0 && current_action_.is_some() {
+                    if let Err(e) = self
+                        .action_status
+                        .fill(ActionResponse::failure(
+                            current_action_.take().unwrap().id.as_str(),
+                            "bridge disconnected",
+                        ))
+                        .await
+                    {
+                        error!("Failed to fill. Error = {:?}", e);
+                    }
+                }
                 select! {
                     v = listener.accept() =>  {
                         match v {
@@ -76,9 +112,19 @@ impl Bridge {
                             }
                         }
                     }
-                    action = self.actions_rx.recv_async() => {
+
+                    action = self.actions_rx.recv_async(), if current_action_.is_none() => {
                         let action = action?;
                         let action_id = action.action_id.clone();
+
+                        info!("Received action: {:?}", action);
+                        self.action_status.fill(ActionResponse::progress(&action.action_id, "Received", 0)).await?;
+
+                        current_action_ = Some(CurrentAction {
+                            id: action.action_id.clone(),
+                            timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
+                        });
+
                         if self.actions_tx.send(action).is_err() {
                             error!("Bridge down!! Action ID = {}", action_id);
                             let status = ActionResponse::failure(&action_id, "Bridge down");
@@ -87,91 +133,13 @@ impl Bridge {
                             }
                         }
                     }
-                }
-            }
-        }
-    }
 
-    async fn spawn_collector(&self, stream: TcpStream) {
-        let framed = Framed::new(stream, LinesCodec::new());
-        let mut tcp_json = TcpJson {
-            action_status: self.action_status.clone(),
-            streams: Streams::new(self.config.clone(), self.data_tx.clone()),
-            actions_rx: self.actions_tx.subscribe(),
-        };
-        tokio::task::spawn(async move {
-            if let Err(e) = tcp_json.collect(framed).await {
-                error!("Bridge failed. Error = {:?}", e);
-            }
-        });
-    }
-}
-
-struct TcpJson {
-    streams: Streams,
-    action_status: Stream<ActionResponse>,
-    actions_rx: BRx<Action>,
-}
-
-impl TcpJson {
-    /// NOTE: We only expect one action to be processed over uplink's bridge at a time,
-    /// which is what current_action achieves
-    pub async fn collect(
-        &mut self,
-        mut client: Framed<TcpStream, LinesCodec>,
-    ) -> Result<(), Error> {
-        let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
-        struct CurrentAction {
-            id: String,
-            timeout: Pin<Box<Sleep>>,
-        }
-        // - set to None when
-        // -- timeout ends
-        // -- A response with status "Completed" is received
-        // - set to a value when
-        // -- it is currently None and a new action is received
-        // - timeout is updated
-        // -- when a non "Completed" action is received
-        let mut current_action_: Option<CurrentAction> = None;
-
-        loop {
-            select! {
-                line = client.next() => {
-                    // Update action_status for current action
-                    if line.is_none() && current_action_.is_some() {
-                        self.action_status
-                            .fill(ActionResponse::failure(
-                                current_action_.take().unwrap().id.as_str(),
-                                "bridge disconnected",
-                            ))
-                            .await?;
-                    }
-                    let line = line.ok_or(Error::StreamDone)??;
-                    info!("Received line = {:?}", line);
-
-                    let data: Payload = match serde_json::from_str(&line) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            error!("Deserialization error = {:?}", e);
-                            continue
-                        }
-                    };
-
-                    // If incoming data is a response for an action, drop it
-                    // if timeout is already sent to cloud
-                    if data.stream == "action_status" {
+                    response = self.status_rx.recv_async() => {
+                        let response = response?;
                         let (action_id, timeout) = match &mut current_action_ {
                             Some(CurrentAction { id, timeout }) => (id, timeout),
                             None => {
-                                error!("Action timed out already, ignoring response: {:?}", data);
-                                continue;
-                            }
-                        };
-
-                        let response = match ActionResponse::from_payload(&data) {
-                            Ok(response) => response,
-                            Err(e) => {
-                                error!("Couldn't parse payload as an action response: {e:?}");
+                                error!("Action timed out already, ignoring response: {:?}", response);
                                 continue;
                             }
                         };
@@ -186,41 +154,90 @@ impl TcpJson {
                         } else {
                             *timeout = Box::pin(time::sleep(ACTION_TIMEOUT));
                         }
-                        self.action_status.fill(response).await?;
+                        if let Err(e) = self.action_status.fill(response).await {
+                            error!("Failed to fill. Error = {:?}", e);
+                        }
+                    }
+
+                    _ = &mut current_action_.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
+                        let action = current_action_.take().unwrap();
+                        error!("Timeout waiting for action response. Action ID = {}", action.id);
+
+                        // Send failure response to cloud
+                        let status = ActionResponse::failure(&action.id, "Action timed out");
+                        if let Err(e) = self.action_status.fill(status).await {
+                            error!("Failed to fill. Error = {:?}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn spawn_collector(&self, stream: TcpStream) {
+        let framed = Framed::new(stream, LinesCodec::new());
+        let mut tcp_json = TcpJson {
+            status_tx: self.status_tx.clone(),
+            streams: Streams::new(self.config.clone(), self.data_tx.clone()),
+            actions_rx: self.actions_tx.subscribe(),
+        };
+        tokio::task::spawn(async move {
+            if let Err(e) = tcp_json.collect(framed).await {
+                error!("Bridge failed. Error = {:?}", e);
+            }
+        });
+    }
+}
+
+struct TcpJson {
+    streams: Streams,
+    status_tx: Sender<ActionResponse>,
+    actions_rx: BRx<Action>,
+}
+
+impl TcpJson {
+    pub async fn collect(
+        &mut self,
+        mut client: Framed<TcpStream, LinesCodec>,
+    ) -> Result<(), Error> {
+        loop {
+            select! {
+                line = client.next() => {
+                    let line = line.ok_or(Error::StreamDone)??;
+                    info!("Received line = {:?}", line);
+
+                    let data: Payload = match serde_json::from_str(&line) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            error!("Deserialization error = {:?}", e);
+                            continue
+                        }
+                    };
+
+                    // If incoming data is a response for an action, drop it
+                    // if timeout is already sent to cloud
+                    if data.stream == "action_status" {
+                        let response = match ActionResponse::from_payload(&data) {
+                            Ok(response) => response,
+                            Err(e) => {
+                                error!("Couldn't parse payload as an action response: {e:?}");
+                                continue;
+                            }
+                        };
+                        self.status_tx.send_async(response).await?;
                     } else {
                         self.streams.forward(data).await
                     }
                 }
 
-                action = self.actions_rx.recv(), if current_action_.is_none() => {
+                action = self.actions_rx.recv() => {
                     let action = action?;
-                    info!("Received action: {:?}", action);
-
-                    self.action_status.fill(ActionResponse::progress(&action.action_id, "Received", 0)).await?;
-
                     match serde_json::to_string(&action) {
-                        Ok(data) => {
-                            current_action_ = Some(CurrentAction {
-                                id: action.action_id.clone(),
-                                timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
-                            });
-                            client.send(data).await?;
-                        },
+                        Ok(data) => client.send(data).await?,
                         Err(e) => {
                             error!("Serialization error = {:?}", e);
                             continue
                         }
-                    };
-                }
-
-                _ = &mut current_action_.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
-                    let action = current_action_.take().unwrap();
-                    error!("Timeout waiting for action response. Action ID = {}", action.id);
-
-                    // Send failure response to cloud
-                    let status = ActionResponse::failure(&action.id, "Action timed out");
-                    if let Err(e) = self.action_status.fill(status).await {
-                        error!("Failed to fill. Error = {:?}", e);
                     }
                 }
 
