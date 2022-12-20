@@ -32,12 +32,7 @@ impl TunshellSession {
         tunshell_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
     ) -> Self {
-        Self {
-            _config: config,
-            echo_stdout,
-            actions_rx: tunshell_rx,
-            action_status,
-        }
+        Self { _config: config, echo_stdout, actions_rx: tunshell_rx, action_status }
     }
 
     fn config(&self, keys: Keys) -> Config {

@@ -1,6 +1,6 @@
-use std::time::{SystemTime, UNIX_EPOCH};
 use futures_util::SinkExt;
 use serde_json::{json, Value};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
 use tokio_util::codec::{Framed, LinesCodec};
 
@@ -30,8 +30,7 @@ fn argv_to_payload(pairs: &[String]) -> Value {
     for idx in 0..k_count {
         let k = pairs.get(1 + idx * 2).unwrap();
         let v = pairs.get(1 + idx * 2 + 1).unwrap();
-        payload.as_object_mut().unwrap()
-            .insert(k.clone(), Value::String(v.clone()));
+        payload.as_object_mut().unwrap().insert(k.clone(), Value::String(v.clone()));
     }
     payload
 }
