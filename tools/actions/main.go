@@ -13,7 +13,7 @@ import (
 )
 
 type Action struct {
-	ID      string `json:"id"`
+	ID      string `json:"action_id"`
 	Kind    string `json:"kind"`
 	Command string `json:"name"`
 	Payload string `json:"payload"`
