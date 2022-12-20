@@ -25,6 +25,7 @@ pub struct Action {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionResponse {
+    #[serde(alias = "id")]
     pub action_id: String,
     // sequence number
     pub sequence: u32,
