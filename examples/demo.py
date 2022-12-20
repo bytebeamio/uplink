@@ -24,7 +24,7 @@ def action_complete(id):
         "stream": "action_status",
         "sequence": 0,
         "timestamp": int(time.time()*1000000),
-        "id": id,
+        "action_id": id,
         "state": "Completed",
         "progress": 100,
         "errors": []
