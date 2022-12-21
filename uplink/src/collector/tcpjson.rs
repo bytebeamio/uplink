@@ -86,19 +86,6 @@ impl Bridge {
             let mut current_action_: Option<CurrentAction> = None;
 
             loop {
-                // Update action_status for current action
-                if self.actions_tx.receiver_count() == 0 && current_action_.is_some() {
-                    if let Err(e) = self
-                        .action_status
-                        .fill(ActionResponse::failure(
-                            current_action_.take().unwrap().id.as_str(),
-                            "bridge disconnected",
-                        ))
-                        .await
-                    {
-                        error!("Failed to fill. Error = {:?}", e);
-                    }
-                }
                 select! {
                     v = listener.accept() =>  {
                         match v {
