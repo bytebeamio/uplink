@@ -70,10 +70,14 @@ impl Bridge {
                     }
                     action = self.actions_rx.recv_async() => {
                         let action = action?;
-                        error!("Bridge down!! Action ID = {}", action.action_id);
-                        let status = ActionResponse::failure(&action.action_id, "Bridge down");
-                        if let Err(e) = self.action_status.fill(status).await {
-                            error!("Failed to send busy status. Error = {:?}", e);
+                        if self.config.ignore_actions_if_no_clients.unwrap_or(false) {
+                            error!("No clients connected, ignoring action = {:?}", action);
+                        } else {
+                            error!("No clients connected, Action ID = {}", action.action_id);
+                            let status = ActionResponse::failure(&action.action_id, "Bridge down");
+                            if let Err(e) = self.action_status.fill(status).await {
+                                error!("Failed to send busy status. Error = {:?}", e);
+                            }
                         }
                     }
                 }
