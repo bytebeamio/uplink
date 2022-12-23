@@ -9,6 +9,8 @@ case "${ARCH}, ${OS}" in
         ;;
     "armv7, GNU/Linux") TARGET="armv7-unknown-linux-gnueabihf"
         ;;
+    "armv71, GNU/Linux") TARGET="armv7-unknown-linux-gnueabihf"
+        ;;
     *) echo "Unknown target, no uplink binary available. Open an issue to add support for your platform."
        echo "https://github.com/bytebeamio/uplink/issues/new?labels=new-target&title=Add+support+for+${OS}+on+${ARCH}"; exit
         ;;
