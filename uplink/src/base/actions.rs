@@ -23,7 +23,7 @@ pub struct Action {
     pub payload: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ActionResponse {
     pub action_id: String,
     // sequence number

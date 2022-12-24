@@ -1,6 +1,8 @@
 use flume::{bounded, Receiver, RecvError, SendError, Sender};
 use futures_util::SinkExt;
 use log::{error, info};
+use serde::Serialize;
+use serde_json::json;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{channel, Receiver as BRx, Sender as BTx};
@@ -10,6 +12,7 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::pin::Pin;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{io, sync::Arc};
 
 use super::util::Streams;
@@ -167,10 +170,13 @@ impl Bridge {
             status_tx: self.status_tx.clone(),
             streams: Streams::new(self.config.clone(), self.data_tx.clone()),
             actions_rx: self.actions_tx.subscribe(),
+            app_stats: AppStats::new(),
         };
         tokio::task::spawn(async move {
             if let Err(e) = tcp_json.collect(framed).await {
                 error!("Bridge failed. Error = {:?}", e);
+                tcp_json.app_stats.disconnect();
+                tcp_json.update_app_stats().await;
             }
         });
     }
@@ -180,6 +186,7 @@ struct TcpJson {
     streams: Streams,
     status_tx: Sender<ActionResponse>,
     actions_rx: BRx<Action>,
+    app_stats: AppStats,
 }
 
 impl TcpJson {
@@ -190,7 +197,13 @@ impl TcpJson {
         loop {
             select! {
                 line = client.next() => {
-                    let line = line.ok_or(Error::StreamDone)??;
+                    let line = match line.ok_or(Error::StreamDone)? {
+                        Ok(l) => l,
+                        Err(e) => {
+                            error!("Couldn't error = {:?}", e);
+                            continue
+                        }
+                    };
                     info!("Received line = {:?}", line);
 
                     let data: Payload = match serde_json::from_str(&line) {
@@ -211,7 +224,9 @@ impl TcpJson {
                                 continue;
                             }
                         };
+                        self.app_stats.capture_response(&response);
                         self.status_tx.send_async(response).await?;
+                        self.update_app_stats().await;
                     } else {
                         self.streams.forward(data).await
                     }
@@ -219,6 +234,7 @@ impl TcpJson {
 
                 action = self.actions_rx.recv() => {
                     let action = action?;
+                    self.app_stats.last_action = Some(action.action_id.to_owned());
                     match serde_json::to_string(&action) {
                         Ok(data) => client.send(data).await?,
                         Err(e) => {
@@ -226,12 +242,93 @@ impl TcpJson {
                             continue
                         }
                     }
+                    self.app_stats.capture_action(&action);
                 }
 
                 // Flush stream/partitions that timeout
                 _ = self.streams.flush(), if self.streams.is_flushable() => {}
 
             }
+        }
+    }
+
+    /// Update platform when a connected app sends a response or disconnects.
+    /// This can help us to keep track of an app that consumes an action and disconnects
+    /// before being able to send a response, thus triggering an action timeout.
+    async fn update_app_stats(&mut self) {
+        let payload = self.app_stats.capture_stats();
+        self.streams.forward(payload).await;
+    }
+}
+
+#[derive(Serialize, Clone, Default)]
+struct AppStats {
+    sequence: u32,
+    timestamp: u64,
+    connection_timestamp: u64,
+    actions_received: u32,
+    last_action: Option<String>,
+    actions_responded: u32,
+    last_response: Option<ActionResponse>,
+    connected: bool,
+}
+
+impl AppStats {
+    fn new() -> Self {
+        Self {
+            connection_timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
+                as u64,
+            connected: true,
+            ..Default::default()
+        }
+    }
+
+    fn capture_response(&mut self, response: &ActionResponse) {
+        self.last_response = Some(response.clone());
+        self.actions_responded += 1;
+    }
+
+    fn capture_action(&mut self, action: &Action) {
+        self.last_action = Some(action.action_id.clone());
+        self.actions_received += 1;
+    }
+
+    fn capture_stats(&mut self) -> Payload {
+        self.sequence += 1;
+        self.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+
+        Payload::from(self.clone())
+    }
+
+    fn disconnect(&mut self) {
+        self.connected = false;
+    }
+}
+
+impl From<AppStats> for Payload {
+    fn from(stats: AppStats) -> Self {
+        let AppStats {
+            sequence,
+            timestamp,
+            connection_timestamp,
+            actions_received,
+            last_action,
+            actions_responded,
+            last_response,
+            connected,
+        } = stats;
+        Payload {
+            stream: "uplink_app_stats".to_string(),
+            sequence,
+            timestamp,
+            payload: json! ({
+                "connection_timestamp": connection_timestamp,
+                "connected": connected,
+                "actions_received":actions_received,
+                "last_action":last_action,
+                "actions_responded":actions_responded,
+                "last_response":last_response
+            }),
         }
     }
 }
