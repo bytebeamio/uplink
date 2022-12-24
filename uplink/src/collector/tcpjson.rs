@@ -175,7 +175,7 @@ impl Bridge {
         tokio::task::spawn(async move {
             if let Err(e) = tcp_json.collect(framed).await {
                 error!("Bridge failed. Error = {:?}", e);
-                tcp_json.app_stats.disconnect();
+                tcp_json.app_stats.disconnect(e.to_string());
                 tcp_json.update_app_stats().await;
             }
         });
@@ -201,6 +201,8 @@ impl TcpJson {
                         Ok(l) => l,
                         Err(e) => {
                             error!("Couldn't error = {:?}", e);
+                            self.app_stats.capture_error(e.to_string());
+                            self.update_app_stats().await;
                             continue
                         }
                     };
@@ -210,6 +212,8 @@ impl TcpJson {
                         Ok(d) => d,
                         Err(e) => {
                             error!("Deserialization error = {:?}", e);
+                            self.app_stats.capture_error(e.to_string());
+                            self.update_app_stats().await;
                             continue
                         }
                     };
@@ -221,6 +225,8 @@ impl TcpJson {
                             Ok(response) => response,
                             Err(e) => {
                                 error!("Couldn't parse payload as an action response: {e:?}");
+                                self.app_stats.capture_error(e.to_string());
+                                self.update_app_stats().await;
                                 continue;
                             }
                         };
@@ -239,6 +245,8 @@ impl TcpJson {
                         Ok(data) => client.send(data).await?,
                         Err(e) => {
                             error!("Serialization error = {:?}", e);
+                            self.app_stats.capture_error(e.to_string());
+                            self.update_app_stats().await;
                             continue
                         }
                     }
@@ -256,8 +264,9 @@ impl TcpJson {
     /// This can help us to keep track of an app that consumes an action and disconnects
     /// before being able to send a response, thus triggering an action timeout.
     async fn update_app_stats(&mut self) {
-        let payload = self.app_stats.capture_stats();
+        let payload = self.app_stats.as_payload();
         self.streams.forward(payload).await;
+        self.app_stats.reset();
     }
 }
 
@@ -270,6 +279,7 @@ struct AppStats {
     last_action: Option<String>,
     actions_responded: u32,
     last_response: Option<ActionResponse>,
+    error: Option<String>,
     connected: bool,
 }
 
@@ -293,15 +303,26 @@ impl AppStats {
         self.actions_received += 1;
     }
 
-    fn capture_stats(&mut self) -> Payload {
+    fn capture_error(&mut self, error: String) {
+        self.error = Some(error);
+    }
+
+    fn as_payload(&mut self) -> Payload {
         self.sequence += 1;
         self.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
         Payload::from(self.clone())
     }
 
-    fn disconnect(&mut self) {
+    fn disconnect(&mut self, error: String) {
         self.connected = false;
+        self.capture_error(error);
+    }
+
+    fn reset(&mut self) {
+        self.error = None;
+        self.last_action = None;
+        self.last_response = None;
     }
 }
 
@@ -315,6 +336,7 @@ impl From<AppStats> for Payload {
             last_action,
             actions_responded,
             last_response,
+            error,
             connected,
         } = stats;
         Payload {
@@ -322,6 +344,7 @@ impl From<AppStats> for Payload {
             sequence,
             timestamp,
             payload: json! ({
+                "error": error,
                 "connection_timestamp": connection_timestamp,
                 "connected": connected,
                 "actions_received":actions_received,
