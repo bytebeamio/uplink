@@ -199,13 +199,14 @@ impl Bridge {
         }
     }
 
-    async fn spawn_collector(&self, stream: TcpStream) {
+    async fn spawn_collector(&mut self, stream: TcpStream) {
         let framed = Framed::new(stream, LinesCodec::new());
+        let id = self.bridge_stats.accept();
         let mut tcp_json = TcpJson {
             status_tx: self.status_tx.clone(),
             streams: Streams::new(self.config.clone(), self.data_tx.clone()),
             actions_rx: self.actions_tx.subscribe(),
-            app_stats: AppStats::new(),
+            app_stats: AppStats::new(id),
         };
         tokio::task::spawn(async move {
             if let Err(e) = tcp_json.collect(framed).await {
@@ -244,6 +245,7 @@ impl Bridge {
 #[derive(Serialize, Default, Clone, Debug)]
 struct BridgeStats {
     app_count: usize,
+    total_connections: usize,
     sequence: u32,
     timestamp: u64,
     actions_received: u32,
@@ -267,6 +269,11 @@ impl BridgeStats {
         self.app_count = app_count;
 
         self.clone()
+    }
+
+    fn accept(&mut self) -> usize {
+        self.total_connections += 1;
+        self.total_connections
     }
 
     fn reset_error(&mut self) {
@@ -374,6 +381,7 @@ impl TcpJson {
 
 #[derive(Serialize, Clone, Default)]
 struct AppStats {
+    app_id: usize,
     sequence: u32,
     timestamp: u64,
     connection_timestamp: u64,
@@ -386,11 +394,12 @@ struct AppStats {
 }
 
 impl AppStats {
-    fn new() -> Self {
+    fn new(app_id: usize) -> Self {
         Self {
             connection_timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
                 as u64,
             connected: true,
+            app_id,
             ..Default::default()
         }
     }
@@ -431,6 +440,7 @@ impl AppStats {
 impl From<AppStats> for Payload {
     fn from(stats: AppStats) -> Self {
         let AppStats {
+            app_id,
             sequence,
             timestamp,
             connection_timestamp,
@@ -446,6 +456,7 @@ impl From<AppStats> for Payload {
             sequence,
             timestamp,
             payload: json! ({
+                "app_id": app_id,
                 "error": error,
                 "connection_timestamp": connection_timestamp,
                 "connected": connected,
