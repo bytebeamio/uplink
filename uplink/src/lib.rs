@@ -52,6 +52,7 @@ pub mod config {
     run_logcat = true
     max_packet_size = 102400
     max_inflight = 100
+    keep_alive = 60
 
     # Whitelist of binaries which uplink can spawn as a process
     # This makes sure that user is protected against random actions
