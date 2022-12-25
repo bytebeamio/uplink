@@ -41,6 +41,14 @@ pub enum Error {
     BRecv(#[from] tokio::sync::broadcast::error::RecvError),
 }
 
+/// Keep track of actions in execution, ensure they are timed out when there is no
+/// response within the designated time period.
+/// NOTE: We only expect one action to be processed over uplink's bridge at a time
+struct CurrentAction {
+    id: String,
+    timeout: Pin<Box<Sleep>>,
+}
+
 pub struct Bridge {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
@@ -49,6 +57,14 @@ pub struct Bridge {
     action_status: Stream<ActionResponse>,
     status_tx: Sender<ActionResponse>,
     status_rx: Receiver<ActionResponse>,
+    // - set to None when
+    // -- timeout ends
+    // -- A response with status "Completed" is received
+    // - set to a value when
+    // -- it is currently None and a new action is received
+    // - timeout is updated
+    // -- when a non "Completed" action is received
+    current_action: Option<CurrentAction>,
 }
 
 const ACTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -63,7 +79,16 @@ impl Bridge {
         let (actions_tx, _) = channel(10);
         let (status_tx, status_rx) = bounded(10);
 
-        Bridge { action_status, data_tx, config, actions_rx, actions_tx, status_tx, status_rx }
+        Bridge {
+            action_status,
+            data_tx,
+            config,
+            actions_rx,
+            actions_tx,
+            status_tx,
+            status_rx,
+            current_action: None,
+        }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -72,21 +97,6 @@ impl Bridge {
             let listener = TcpListener::bind(&addr).await?;
 
             let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
-
-            /// NOTE: We only expect one action to be processed over uplink's bridge at a time
-            struct CurrentAction {
-                id: String,
-                timeout: Pin<Box<Sleep>>,
-            }
-
-            // - set to None when
-            // -- timeout ends
-            // -- A response with status "Completed" is received
-            // - set to a value when
-            // -- it is currently None and a new action is received
-            // - timeout is updated
-            // -- when a non "Completed" action is received
-            let mut current_action_: Option<CurrentAction> = None;
 
             loop {
                 select! {
@@ -103,20 +113,19 @@ impl Bridge {
                         }
                     }
 
-                    action = self.actions_rx.recv_async(), if current_action_.is_none() => {
+                    action = self.actions_rx.recv_async(), if self.current_action.is_none() => {
                         let action = action?;
                         let action_id = action.action_id.clone();
 
                         info!("Received action: {:?}", action);
                         self.action_status.fill(ActionResponse::progress(&action.action_id, "Received", 0)).await?;
 
-                        current_action_ = Some(CurrentAction {
-                            id: action.action_id.clone(),
-                            timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
-                        });
+                        self.capture_action(&action);
 
                         if self.actions_tx.send(action).is_err() {
-                            error!("Bridge down!! Action ID = {}", action_id);
+                            error!("Bridge down!! Action ID = {action_id}");
+                            self.reset_action();
+
                             let status = ActionResponse::failure(&action_id, "Bridge down");
                             if let Err(e) = self.action_status.fill(status).await {
                                 error!("Failed to send busy status. Error = {:?}", e);
@@ -126,7 +135,7 @@ impl Bridge {
 
                     response = self.status_rx.recv_async() => {
                         let response = response?;
-                        let (action_id, timeout) = match &mut current_action_ {
+                        let (action_id, timeout) = match &mut self.current_action {
                             Some(CurrentAction { id, timeout }) => (id, timeout),
                             None => {
                                 error!("Action timed out already, ignoring response: {:?}", response);
@@ -140,7 +149,7 @@ impl Bridge {
                         }
 
                         if &response.state == "Completed" || &response.state == "Failed" {
-                            current_action_ = None;
+                            self.reset_action();
                         } else {
                             *timeout = Box::pin(time::sleep(ACTION_TIMEOUT));
                         }
@@ -149,12 +158,13 @@ impl Bridge {
                         }
                     }
 
-                    _ = &mut current_action_.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
-                        let action = current_action_.take().unwrap();
-                        error!("Timeout waiting for action response. Action ID = {}", action.id);
+                    _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
+                        let action = self.reset_action();
+                        let action_id = action.id;
+                        error!("Timeout waiting for action response. Action ID = {action_id}");
 
                         // Send failure response to cloud
-                        let status = ActionResponse::failure(&action.id, "Action timed out");
+                        let status = ActionResponse::failure(&action_id, "Action timed out");
                         if let Err(e) = self.action_status.fill(status).await {
                             error!("Failed to fill. Error = {:?}", e);
                         }
@@ -179,6 +189,17 @@ impl Bridge {
                 tcp_json.update_app_stats().await;
             }
         });
+    }
+
+    fn capture_action(&mut self, action: &Action) {
+        self.current_action = Some(CurrentAction {
+            id: action.action_id.clone(),
+            timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
+        });
+    }
+
+    fn reset_action(&mut self) -> CurrentAction {
+        self.current_action.take().unwrap()
     }
 }
 
