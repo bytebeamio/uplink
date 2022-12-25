@@ -17,7 +17,7 @@ use std::{io, sync::Arc};
 
 use super::util::Streams;
 use crate::base::middleware::Error as ActionsError;
-use crate::{Action, ActionResponse, Config, Package, Payload, Stream};
+use crate::{Action, ActionResponse, Config, Package, Payload, Point, Stream};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -57,6 +57,8 @@ pub struct Bridge {
     action_status: Stream<ActionResponse>,
     status_tx: Sender<ActionResponse>,
     status_rx: Receiver<ActionResponse>,
+    bridge_stats: BridgeStats,
+    stat_stream: Stream<BridgeStats>,
     // - set to None when
     // -- timeout ends
     // -- A response with status "Completed" is received
@@ -78,6 +80,13 @@ impl Bridge {
     ) -> Bridge {
         let (actions_tx, _) = channel(10);
         let (status_tx, status_rx) = bounded(10);
+        let stat_stream = Stream::dynamic_with_size(
+            "uplink_bridge_stats",
+            &config.project_id,
+            &config.device_id,
+            1,
+            data_tx.clone(),
+        );
 
         Bridge {
             action_status,
@@ -87,6 +96,8 @@ impl Bridge {
             actions_tx,
             status_tx,
             status_rx,
+            bridge_stats: BridgeStats::new(),
+            stat_stream,
             current_action: None,
         }
     }
@@ -123,7 +134,9 @@ impl Bridge {
                         self.capture_action(&action);
 
                         if self.actions_tx.send(action).is_err() {
-                            error!("Bridge down!! Action ID = {action_id}");
+                            let error_str = format!("Bridge down!! Action ID = {action_id}");
+                            error!("{error_str}");
+                            self.bridge_stats.capture_error(error_str);
                             self.reset_action();
 
                             let status = ActionResponse::failure(&action_id, "Bridge down");
@@ -131,6 +144,9 @@ impl Bridge {
                                 error!("Failed to send busy status. Error = {:?}", e);
                             }
                         }
+
+                        self.update_bridge_stats().await;
+                        self.bridge_stats.reset_error();
                     }
 
                     response = self.status_rx.recv_async() => {
@@ -138,7 +154,11 @@ impl Bridge {
                         let (action_id, timeout) = match &mut self.current_action {
                             Some(CurrentAction { id, timeout }) => (id, timeout),
                             None => {
-                                error!("Action timed out already, ignoring response: {:?}", response);
+                                let error_str = format!("Action timed out already, ignoring response: {response:?}");
+                                error!("{error_str}");
+                                self.bridge_stats.capture_error(error_str);
+                                self.update_bridge_stats().await;
+                                self.bridge_stats.reset_error();
                                 continue;
                             }
                         };
@@ -161,13 +181,18 @@ impl Bridge {
                     _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
                         let action = self.reset_action();
                         let action_id = action.id;
-                        error!("Timeout waiting for action response. Action ID = {action_id}");
+                        let error_str = format!("Timeout waiting for action response. Action ID = {action_id}");
+                        error!("{error_str}");
 
                         // Send failure response to cloud
                         let status = ActionResponse::failure(&action_id, "Action timed out");
                         if let Err(e) = self.action_status.fill(status).await {
                             error!("Failed to fill. Error = {:?}", e);
                         }
+
+                        self.bridge_stats.capture_error(error_str);
+                        self.update_bridge_stats().await;
+                        self.bridge_stats.reset_error();
                     }
                 }
             }
@@ -192,6 +217,7 @@ impl Bridge {
     }
 
     fn capture_action(&mut self, action: &Action) {
+        self.bridge_stats.current_action = Some(action.action_id.clone());
         self.current_action = Some(CurrentAction {
             id: action.action_id.clone(),
             timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
@@ -199,7 +225,62 @@ impl Bridge {
     }
 
     fn reset_action(&mut self) -> CurrentAction {
+        self.bridge_stats.current_action = None;
         self.current_action.take().unwrap()
+    }
+
+    /// Update platform when an action is accepted, timeout is triggered or an error occurs.
+    /// This can help us to keep track of the status of  that consumes an action and disconnects
+    /// before being able to send a response, thus triggering an action timeout.
+    async fn update_bridge_stats(&mut self) {
+        let app_count = self.actions_tx.receiver_count();
+        let bridge_stats = self.bridge_stats.next(app_count);
+        if let Err(e) = self.stat_stream.fill(bridge_stats).await {
+            error!("Failed to send data. Error = {:?}", e);
+        }
+    }
+}
+
+#[derive(Serialize, Default, Clone, Debug)]
+struct BridgeStats {
+    app_count: usize,
+    sequence: u32,
+    timestamp: u64,
+    actions_received: u32,
+    current_action: Option<String>,
+    error: Option<String>,
+    connected: bool,
+}
+
+impl BridgeStats {
+    fn new() -> Self {
+        Self { connected: false, ..Default::default() }
+    }
+
+    fn capture_error(&mut self, error: String) {
+        self.error = Some(error);
+    }
+
+    fn next(&mut self, app_count: usize) -> Self {
+        self.sequence += 1;
+        self.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        self.app_count = app_count;
+
+        self.clone()
+    }
+
+    fn reset_error(&mut self) {
+        self.error = None;
+    }
+}
+
+impl Point for BridgeStats {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
     }
 }
 
