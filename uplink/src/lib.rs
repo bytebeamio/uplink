@@ -63,8 +63,8 @@ pub mod config {
     max_file_size = 104857600 # 100MB
     max_file_count = 3
 
-    # Create empty streams map
-    [streams]
+    [streams.uplink_app_stats]
+    buf_size = 1 # ensure this stream flushes immediately
 
     # [serializer_metrics] is left disabled by default
 
