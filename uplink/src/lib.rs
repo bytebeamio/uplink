@@ -58,11 +58,6 @@ pub mod config {
     # triggered from cloud.
     actions = ["tunshell"]
 
-    [persistence]
-    path = "/tmp/uplink"
-    max_file_size = 104857600 # 100MB
-    max_file_count = 3
-
     # Create empty streams map
     [streams]
 
