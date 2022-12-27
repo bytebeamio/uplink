@@ -70,7 +70,7 @@ impl Bridge {
                     }
                     action = self.actions_rx.recv_async() => {
                         let action = action?;
-                        if self.config.ignore_actions_if_no_clients.unwrap_or(false) {
+                        if self.config.ignore_actions_if_no_clients {
                             error!("No clients connected, ignoring action = {:?}", action);
                         } else {
                             error!("No clients connected, Action ID = {}", action.action_id);

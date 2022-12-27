@@ -94,7 +94,8 @@ pub struct Config {
     pub downloader: Option<Downloader>,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
-    pub ignore_actions_if_no_clients: Option<bool>,
+    #[serde(default)]
+    pub ignore_actions_if_no_clients: bool,
     #[cfg(target_os = "linux")]
     pub journalctl: Option<JournalctlConfig>,
     #[cfg(target_os = "android")]
