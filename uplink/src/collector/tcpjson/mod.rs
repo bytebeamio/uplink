@@ -1,7 +1,6 @@
 use flume::{bounded, Receiver, RecvError, SendError, Sender};
 use futures_util::SinkExt;
 use log::{error, info};
-use serde::Serialize;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{channel, Receiver as BRx, Sender as BTx};
@@ -11,12 +10,15 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::pin::Pin;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::{io, sync::Arc};
+
+mod stats;
+
+use self::stats::{AppStatsHandler, BridgeStatsHandler};
 
 use super::util::Streams;
 use crate::base::middleware::Error as ActionsError;
-use crate::{Action, ActionResponse, Config, Package, Payload, Point, Stream};
+use crate::{Action, ActionResponse, Config, Package, Payload, Stream};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -56,8 +58,7 @@ pub struct Bridge {
     action_status: Stream<ActionResponse>,
     status_tx: Sender<ActionResponse>,
     status_rx: Receiver<ActionResponse>,
-    bridge_stats: BridgeStats,
-    stat_stream: Option<Stream<BridgeStats>>,
+    bridge_stats: BridgeStatsHandler,
     // - set to None when
     // -- timeout ends
     // -- A response with status "Completed" is received
@@ -79,15 +80,7 @@ impl Bridge {
     ) -> Bridge {
         let (actions_tx, _) = channel(10);
         let (status_tx, status_rx) = bounded(10);
-        let stat_stream = config.bridge_stats.as_ref().map(|stat_config| {
-            Stream::with_config(
-                &"uplink_bridge_stats".to_string(),
-                &config.project_id,
-                &config.device_id,
-                &stat_config,
-                data_tx.clone(),
-            )
-        });
+        let bridge_stats = BridgeStatsHandler::new(config.clone(), data_tx.clone());
 
         Bridge {
             action_status,
@@ -97,8 +90,7 @@ impl Bridge {
             actions_tx,
             status_tx,
             status_rx,
-            bridge_stats: BridgeStats::new(),
-            stat_stream,
+            bridge_stats,
             current_action: None,
         }
     }
@@ -221,7 +213,7 @@ impl Bridge {
     }
 
     fn capture_action(&mut self, action: &Action) {
-        self.bridge_stats.current_action = Some(action.action_id.clone());
+        self.bridge_stats.capture_action(action.action_id.clone());
         self.current_action = Some(CurrentAction {
             id: action.action_id.clone(),
             timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
@@ -229,7 +221,7 @@ impl Bridge {
     }
 
     fn reset_action(&mut self) -> CurrentAction {
-        self.bridge_stats.current_action = None;
+        self.bridge_stats.reset_action();
         self.current_action.take().unwrap()
     }
 
@@ -237,65 +229,8 @@ impl Bridge {
     /// This can help us to keep track of the status of  that consumes an action and disconnects
     /// before being able to send a response, thus triggering an action timeout.
     async fn update_bridge_stats(&mut self) {
-        let stat_stream = match &mut self.stat_stream {
-            Some(s) => s,
-            _ => return,
-        };
-
         let app_count = self.actions_tx.receiver_count();
-        let bridge_stats = self.bridge_stats.next(app_count);
-        if let Err(e) = stat_stream.fill(bridge_stats).await {
-            error!("Failed to send data. Error = {:?}", e);
-        }
-    }
-}
-
-#[derive(Serialize, Default, Clone, Debug)]
-struct BridgeStats {
-    app_count: usize,
-    total_connections: usize,
-    sequence: u32,
-    timestamp: u64,
-    actions_received: u32,
-    current_action: Option<String>,
-    error: Option<String>,
-    connected: bool,
-}
-
-impl BridgeStats {
-    fn new() -> Self {
-        Self { connected: false, ..Default::default() }
-    }
-
-    fn capture_error(&mut self, error: String) {
-        self.error = Some(error);
-    }
-
-    fn next(&mut self, app_count: usize) -> Self {
-        self.sequence += 1;
-        self.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-        self.app_count = app_count;
-
-        self.clone()
-    }
-
-    fn accept(&mut self) -> usize {
-        self.total_connections += 1;
-        self.total_connections
-    }
-
-    fn reset_error(&mut self) {
-        self.error = None;
-    }
-}
-
-impl Point for BridgeStats {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
+        self.bridge_stats.update(app_count).await;
     }
 }
 
@@ -303,8 +238,7 @@ struct TcpJson {
     streams: Streams,
     status_tx: Sender<ActionResponse>,
     actions_rx: BRx<Action>,
-    app_stats: AppStats,
-    stat_stream: Option<Stream<AppStats>>,
+    app_stats: AppStatsHandler,
 }
 
 impl TcpJson {
@@ -315,23 +249,9 @@ impl TcpJson {
         status_tx: Sender<ActionResponse>,
         actions_rx: BRx<Action>,
     ) -> Self {
-        let stat_stream = config.app_stats.as_ref().map(|stat_config| {
-            Stream::with_config(
-                &"uplink_app_stats".to_string(),
-                &config.project_id,
-                &config.device_id,
-                &stat_config,
-                data_tx.clone(),
-            )
-        });
+        let app_stats = AppStatsHandler::new(id, config.clone(), data_tx.clone());
 
-        Self {
-            status_tx,
-            streams: Streams::new(config, data_tx),
-            actions_rx,
-            app_stats: AppStats::new(id),
-            stat_stream,
-        }
+        Self { status_tx, streams: Streams::new(config, data_tx), actions_rx, app_stats }
     }
 
     pub async fn collect(
@@ -384,7 +304,7 @@ impl TcpJson {
 
                 action = self.actions_rx.recv() => {
                     let action = action?;
-                    self.app_stats.last_action = Some(action.action_id.to_owned());
+                    self.app_stats.capture_action(&action);
                     match serde_json::to_string(&action) {
                         Ok(data) => client.send(data).await?,
                         Err(e) => {
@@ -408,83 +328,7 @@ impl TcpJson {
     /// This can help us to keep track of an app that consumes an action and disconnects
     /// before being able to send a response, thus triggering an action timeout.
     async fn update_app_stats(&mut self) {
-        let stat_stream = match &mut self.stat_stream {
-            Some(s) => s,
-            _ => return,
-        };
-
-        let app_stats = self.app_stats.next();
-        if let Err(e) = stat_stream.fill(app_stats).await {
-            error!("Failed to send data. Error = {:?}", e);
-        }
+        self.app_stats.update().await;
         self.app_stats.reset();
-    }
-}
-
-#[derive(Serialize, Clone, Default, Debug)]
-struct AppStats {
-    app_id: usize,
-    sequence: u32,
-    timestamp: u64,
-    connection_timestamp: u64,
-    actions_received: u32,
-    last_action: Option<String>,
-    actions_responded: u32,
-    last_response: Option<ActionResponse>,
-    error: Option<String>,
-    connected: bool,
-}
-
-impl AppStats {
-    fn new(app_id: usize) -> Self {
-        Self {
-            connection_timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
-                as u64,
-            connected: true,
-            app_id,
-            ..Default::default()
-        }
-    }
-
-    fn capture_response(&mut self, response: &ActionResponse) {
-        self.last_response = Some(response.clone());
-        self.actions_responded += 1;
-    }
-
-    fn capture_action(&mut self, action: &Action) {
-        self.last_action = Some(action.action_id.clone());
-        self.actions_received += 1;
-    }
-
-    fn capture_error(&mut self, error: String) {
-        self.error = Some(error);
-    }
-
-    fn next(&mut self) -> Self {
-        self.sequence += 1;
-        self.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-
-        self.clone()
-    }
-
-    fn disconnect(&mut self, error: String) {
-        self.connected = false;
-        self.capture_error(error);
-    }
-
-    fn reset(&mut self) {
-        self.error = None;
-        self.last_action = None;
-        self.last_response = None;
-    }
-}
-
-impl Point for AppStats {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
     }
 }
