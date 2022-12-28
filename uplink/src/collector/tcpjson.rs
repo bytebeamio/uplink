@@ -57,7 +57,7 @@ pub struct Bridge {
     status_tx: Sender<ActionResponse>,
     status_rx: Receiver<ActionResponse>,
     bridge_stats: BridgeStats,
-    stat_stream: Stream<BridgeStats>,
+    stat_stream: Option<Stream<BridgeStats>>,
     // - set to None when
     // -- timeout ends
     // -- A response with status "Completed" is received
@@ -79,13 +79,15 @@ impl Bridge {
     ) -> Bridge {
         let (actions_tx, _) = channel(10);
         let (status_tx, status_rx) = bounded(10);
-        let stat_stream = Stream::dynamic_with_size(
-            "uplink_bridge_stats",
-            &config.project_id,
-            &config.device_id,
-            1,
-            data_tx.clone(),
-        );
+        let stat_stream = config.bridge_stats.as_ref().map(|stat_config| {
+            Stream::with_config(
+                &"uplink_bridge_stats".to_string(),
+                &config.project_id,
+                &config.device_id,
+                &stat_config,
+                data_tx.clone(),
+            )
+        });
 
         Bridge {
             action_status,
@@ -235,9 +237,14 @@ impl Bridge {
     /// This can help us to keep track of the status of  that consumes an action and disconnects
     /// before being able to send a response, thus triggering an action timeout.
     async fn update_bridge_stats(&mut self) {
+        let stat_stream = match &mut self.stat_stream {
+            Some(s) => s,
+            _ => return,
+        };
+
         let app_count = self.actions_tx.receiver_count();
         let bridge_stats = self.bridge_stats.next(app_count);
-        if let Err(e) = self.stat_stream.fill(bridge_stats).await {
+        if let Err(e) = stat_stream.fill(bridge_stats).await {
             error!("Failed to send data. Error = {:?}", e);
         }
     }
@@ -297,7 +304,7 @@ struct TcpJson {
     status_tx: Sender<ActionResponse>,
     actions_rx: BRx<Action>,
     app_stats: AppStats,
-    stat_stream: Stream<AppStats>,
+    stat_stream: Option<Stream<AppStats>>,
 }
 
 impl TcpJson {
@@ -308,13 +315,15 @@ impl TcpJson {
         status_tx: Sender<ActionResponse>,
         actions_rx: BRx<Action>,
     ) -> Self {
-        let stat_stream = Stream::dynamic_with_size(
-            "uplink_app_stats",
-            &config.project_id,
-            &config.device_id,
-            1,
-            data_tx.clone(),
-        );
+        let stat_stream = config.app_stats.as_ref().map(|stat_config| {
+            Stream::with_config(
+                &"uplink_app_stats".to_string(),
+                &config.project_id,
+                &config.device_id,
+                &stat_config,
+                data_tx.clone(),
+            )
+        });
 
         Self {
             status_tx,
@@ -324,6 +333,7 @@ impl TcpJson {
             stat_stream,
         }
     }
+
     pub async fn collect(
         &mut self,
         mut client: Framed<TcpStream, LinesCodec>,
@@ -398,8 +408,13 @@ impl TcpJson {
     /// This can help us to keep track of an app that consumes an action and disconnects
     /// before being able to send a response, thus triggering an action timeout.
     async fn update_app_stats(&mut self) {
+        let stat_stream = match &mut self.stat_stream {
+            Some(s) => s,
+            _ => return,
+        };
+
         let app_stats = self.app_stats.next();
-        if let Err(e) = self.stat_stream.fill(app_stats).await {
+        if let Err(e) = stat_stream.fill(app_stats).await {
             error!("Failed to send data. Error = {:?}", e);
         }
         self.app_stats.reset();
@@ -467,7 +482,7 @@ impl AppStats {
 impl Point for AppStats {
     fn sequence(&self) -> u32 {
         self.sequence
-        }
+    }
 
     fn timestamp(&self) -> u64 {
         self.timestamp

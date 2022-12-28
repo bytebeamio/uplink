@@ -91,6 +91,8 @@ pub struct Config {
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
     pub serializer_metrics: Option<StreamConfig>,
+    pub bridge_stats: Option<StreamConfig>,
+    pub app_stats: Option<StreamConfig>,
     pub downloader: Option<Downloader>,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
