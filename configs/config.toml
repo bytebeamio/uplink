@@ -54,6 +54,18 @@ buf_size = 1
 buf_size = 10
 flush_period = 30
 
+# Bridge stats such as number of actions and responses that have been handled, the id of action
+# currently being handled, etc. This is an optional config, and will disable the stream if left
+# unconfigured.
+[bridge_stats]
+buf_size = 10
+
+# App stats such as number of actions and responses that have been forwarded to the connected
+# app, the id of action currently that was last forwarded, timestamp at app's connection, etc. 
+# This is also an optional config, and will disable the stream if left unconfigured.
+[app_stats]
+buf_size = 10
+
 # The action_status stream is used to push progress of Actions in execution.
 # This configuration is required or will lead to fallback to default config.
 #
