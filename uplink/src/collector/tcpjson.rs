@@ -2,7 +2,6 @@ use flume::{bounded, Receiver, RecvError, SendError, Sender};
 use futures_util::SinkExt;
 use log::{error, info};
 use serde::Serialize;
-use serde_json::json;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{channel, Receiver as BRx, Sender as BTx};
@@ -202,12 +201,14 @@ impl Bridge {
     async fn spawn_collector(&mut self, stream: TcpStream) {
         let framed = Framed::new(stream, LinesCodec::new());
         let id = self.bridge_stats.accept();
-        let mut tcp_json = TcpJson {
-            status_tx: self.status_tx.clone(),
-            streams: Streams::new(self.config.clone(), self.data_tx.clone()),
-            actions_rx: self.actions_tx.subscribe(),
-            app_stats: AppStats::new(id),
-        };
+        let mut tcp_json = TcpJson::new(
+            id,
+            self.config.clone(),
+            self.data_tx.clone(),
+            self.status_tx.clone(),
+            self.actions_tx.subscribe(),
+        );
+
         tokio::task::spawn(async move {
             if let Err(e) = tcp_json.collect(framed).await {
                 error!("Bridge failed. Error = {:?}", e);
@@ -296,9 +297,33 @@ struct TcpJson {
     status_tx: Sender<ActionResponse>,
     actions_rx: BRx<Action>,
     app_stats: AppStats,
+    stat_stream: Stream<AppStats>,
 }
 
 impl TcpJson {
+    fn new(
+        id: usize,
+        config: Arc<Config>,
+        data_tx: Sender<Box<dyn Package>>,
+        status_tx: Sender<ActionResponse>,
+        actions_rx: BRx<Action>,
+    ) -> Self {
+        let stat_stream = Stream::dynamic_with_size(
+            "uplink_app_stats",
+            &config.project_id,
+            &config.device_id,
+            1,
+            data_tx.clone(),
+        );
+
+        Self {
+            status_tx,
+            streams: Streams::new(config, data_tx),
+            actions_rx,
+            app_stats: AppStats::new(id),
+            stat_stream,
+        }
+    }
     pub async fn collect(
         &mut self,
         mut client: Framed<TcpStream, LinesCodec>,
@@ -373,13 +398,15 @@ impl TcpJson {
     /// This can help us to keep track of an app that consumes an action and disconnects
     /// before being able to send a response, thus triggering an action timeout.
     async fn update_app_stats(&mut self) {
-        let payload = self.app_stats.as_payload();
-        self.streams.forward(payload).await;
+        let app_stats = self.app_stats.next();
+        if let Err(e) = self.stat_stream.fill(app_stats).await {
+            error!("Failed to send data. Error = {:?}", e);
+        }
         self.app_stats.reset();
     }
 }
 
-#[derive(Serialize, Clone, Default)]
+#[derive(Serialize, Clone, Default, Debug)]
 struct AppStats {
     app_id: usize,
     sequence: u32,
@@ -418,11 +445,11 @@ impl AppStats {
         self.error = Some(error);
     }
 
-    fn as_payload(&mut self) -> Payload {
+    fn next(&mut self) -> Self {
         self.sequence += 1;
         self.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
-        Payload::from(self.clone())
+        self.clone()
     }
 
     fn disconnect(&mut self, error: String) {
@@ -437,34 +464,12 @@ impl AppStats {
     }
 }
 
-impl From<AppStats> for Payload {
-    fn from(stats: AppStats) -> Self {
-        let AppStats {
-            app_id,
-            sequence,
-            timestamp,
-            connection_timestamp,
-            actions_received,
-            last_action,
-            actions_responded,
-            last_response,
-            error,
-            connected,
-        } = stats;
-        Payload {
-            stream: "uplink_app_stats".to_string(),
-            sequence,
-            timestamp,
-            payload: json! ({
-                "app_id": app_id,
-                "error": error,
-                "connection_timestamp": connection_timestamp,
-                "connected": connected,
-                "actions_received":actions_received,
-                "last_action":last_action,
-                "actions_responded":actions_responded,
-                "last_response":last_response
-            }),
+impl Point for AppStats {
+    fn sequence(&self) -> u32 {
+        self.sequence
         }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
     }
 }
