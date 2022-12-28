@@ -86,6 +86,7 @@ pub struct Config {
     pub bridge_port: u16,
     pub max_packet_size: usize,
     pub max_inflight: u16,
+    pub keep_alive: u64,
     pub actions: Vec<String>,
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
