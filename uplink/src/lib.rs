@@ -52,16 +52,12 @@ pub mod config {
     run_logcat = true
     max_packet_size = 102400
     max_inflight = 100
+    keep_alive = 60
 
     # Whitelist of binaries which uplink can spawn as a process
     # This makes sure that user is protected against random actions
     # triggered from cloud.
     actions = ["tunshell"]
-
-    [persistence]
-    path = "/tmp/uplink"
-    max_file_size = 104857600 # 100MB
-    max_file_count = 3
 
     # Create empty streams map
     [streams]

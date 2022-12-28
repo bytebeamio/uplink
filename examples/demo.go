@@ -11,7 +11,7 @@ type ActionStatus struct {
 	Stream    string   `json:"stream"`
 	Sequence  int32    `json:"sequence"`
 	Timestamp int64    `json:"timestamp"`
-	Id        string   `json:"id"`
+	Id        string   `json:"action_id"`
 	State     string   `json:"state"`
 	Progress  int8     `json:"progress"`
 	Errors    []string `json:"errors"`

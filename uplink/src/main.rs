@@ -44,7 +44,9 @@ use std::sync::Arc;
 
 use anyhow::Error;
 use log::{error, warn};
-use simplelog::{ColorChoice, CombinedLogger, LevelFilter, LevelPadding, TermLogger, TerminalMode, ConfigBuilder};
+use simplelog::{
+    ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, LevelPadding, TermLogger, TerminalMode,
+};
 use structopt::StructOpt;
 
 use uplink::config::{initialize, CommandLine};
@@ -74,7 +76,9 @@ fn initialize_logging(commandline: &CommandLine) {
     }
 
     if commandline.modules.is_empty() {
-        config.add_filter_allow_str("uplink").add_filter_allow_str("disk");
+        for module in ["uplink", "disk"] {
+            config.add_filter_allow(module.to_string());
+        }
     } else {
         for module in commandline.modules.iter() {
             config.add_filter_allow(module.to_string());
@@ -100,9 +104,11 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    project_id: {}", config.project_id);
     println!("    device_id: {}", config.device_id);
     println!("    remote: {}:{}", config.broker, config.port);
+    println!("    bridge_port: {}", config.bridge_port);
     println!("    secure_transport: {}", config.authentication.is_some());
     println!("    max_packet_size: {}", config.max_packet_size);
     println!("    max_inflight_messages: {}", config.max_inflight);
+    println!("    keep_alive_timeout: {}", config.keep_alive);
     if let Some(persistence) = &config.persistence {
         println!("    persistence_dir: {}", persistence.path);
         println!("    persistence_max_segment_size: {}", persistence.max_file_size);
@@ -119,7 +125,7 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<(), Error> {
-    if std::env::args().find(|a| a == "--sha").is_some() {
+    if std::env::args().any(|a| a == "--sha") {
         println!("{}", &env!("VERGEN_GIT_SHA")[0..8]);
         return Ok(());
     }

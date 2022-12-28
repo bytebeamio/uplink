@@ -121,17 +121,25 @@ impl Bridge {
                         self.action_status.fill(ActionResponse::progress(&action.action_id, "Received", 0)).await?;
 
                         current_action_ = Some(CurrentAction {
-                            id: action.action_id.clone(),
+                            id: action_id.clone(),
                             timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
                         });
 
-                        if self.actions_tx.send(action).is_err() {
+                        if self.actions_tx.send(action).is_ok() {
+                            continue;
+                        }
+
+                        if self.config.ignore_actions_if_no_clients {
+                            error!("No clients connected, ignoring action = {:?}", action_id);
+                        } else {
                             error!("Bridge down!! Action ID = {}", action_id);
                             let status = ActionResponse::failure(&action_id, "Bridge down");
                             if let Err(e) = self.action_status.fill(status).await {
                                 error!("Failed to send busy status. Error = {:?}", e);
                             }
                         }
+
+                        current_action_.take().unwrap();
                     }
 
                     response = self.status_rx.recv_async() => {

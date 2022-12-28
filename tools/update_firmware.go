@@ -9,7 +9,7 @@ import (
 )
 
 type ActionStatus struct {
-	Id       string   `json:"id"`
+	Id       string   `json:"action_id"`
 	Timestamp int64   `json:"timestamp"`
 	State    string   `json:"state"`
 	Progress string   `json:"progress"`
