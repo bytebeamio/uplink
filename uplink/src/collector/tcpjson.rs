@@ -175,11 +175,14 @@ impl Bridge {
             status_tx: self.status_tx.clone(),
             streams: Streams::new(self.config.clone(), self.data_tx.clone()),
             actions_rx: self.actions_tx.subscribe(),
+            in_execution: None,
         };
         tokio::task::spawn(async move {
             if let Err(e) = tcp_json.collect(framed).await {
                 error!("Bridge failed. Error = {:?}", e);
             }
+
+            tcp_json.close().await;
         });
     }
 }
@@ -188,6 +191,7 @@ struct TcpJson {
     streams: Streams,
     status_tx: Sender<ActionResponse>,
     actions_rx: BRx<Action>,
+    in_execution: Option<String>,
 }
 
 impl TcpJson {
@@ -219,6 +223,12 @@ impl TcpJson {
                                 continue;
                             }
                         };
+
+                        if &response.state == "Completed" || &response.state == "Failed" {
+                            self.in_execution.take();
+                        } else if self.in_execution.is_none() {
+                            self.in_execution = Some(response.action_id.clone());
+                        }
                         self.status_tx.send_async(response).await?;
                     } else {
                         self.streams.forward(data).await
@@ -239,6 +249,16 @@ impl TcpJson {
                 // Flush stream/partitions that timeout
                 _ = self.streams.flush(), if self.streams.is_flushable() => {}
 
+            }
+        }
+    }
+
+    /// Send a failure response if current action was not completed before connection closure
+    async fn close(&mut self) {
+        if let Some(action_id) = self.in_execution.take() {
+            let status = ActionResponse::failure(&action_id, "Bridge disconnected");
+            if let Err(e) = self.status_tx.send_async(status).await {
+                error!("Failed to send failure response. Error = {:?}", e);
             }
         }
     }
