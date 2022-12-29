@@ -117,9 +117,9 @@ pub trait Package: Send + Debug {
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
     fn len(&self) -> usize;
-    fn first_timestamp(&self) -> Option<u64>;
-    fn last_timestamp(&self) -> Option<u64>;
-    fn batch_latency(&self) -> Option<u64>;
+    fn first_timestamp(&self) -> u64;
+    fn last_timestamp(&self) -> u64;
+    fn batch_latency(&self) -> u64;
 }
 
 /// Signals status of stream buffer
@@ -393,19 +393,19 @@ where
         self.buffer.len()
     }
 
-    fn first_timestamp(&self) -> Option<u64> {
-        self.buffer.first().map(|p| p.timestamp())
+    fn first_timestamp(&self) -> u64 {
+        self.buffer.first().expect("Zero Points in Package!").timestamp()
     }
 
-    fn last_timestamp(&self) -> Option<u64> {
-        self.buffer.last().map(|p| p.timestamp())
+    fn last_timestamp(&self) -> u64 {
+        self.buffer.last().expect("Zero Points in Package!").timestamp()
     }
 
-    fn batch_latency(&self) -> Option<u64> {
-        let first_timestamp = self.first_timestamp()?;
-        let last_timestamp = self.last_timestamp()?;
+    fn batch_latency(&self) -> u64 {
+        let first_timestamp = self.first_timestamp();
+        let last_timestamp = self.last_timestamp();
 
-        Some(last_timestamp - first_timestamp)
+        last_timestamp - first_timestamp
     }
 }
 
