@@ -1,4 +1,5 @@
-use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{collections::HashMap, fmt::Debug, mem, sync::Arc};
 
 use flume::{SendError, Sender};
 use log::{debug, trace};
@@ -111,6 +112,7 @@ pub struct Config {
 pub trait Point: Send + Debug {
     fn sequence(&self) -> u32;
     fn timestamp(&self) -> u64;
+    fn collection_timestamp(&self) -> u64;
 }
 
 pub trait Package: Send + Debug {
@@ -121,6 +123,9 @@ pub trait Package: Send + Debug {
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
     fn len(&self) -> usize;
+    fn first_timestamp(&self) -> u64;
+    fn last_timestamp(&self) -> u64;
+    fn batch_latency(&self) -> u64;
 }
 
 /// Signals status of stream buffer
@@ -371,7 +376,7 @@ impl<T> Buffer<T> {
 
 impl<T> Package for Buffer<T>
 where
-    T: Debug + Send,
+    T: Debug + Send + Point,
     Vec<T>: Serialize,
 {
     fn topic(&self) -> Arc<String> {
@@ -392,6 +397,21 @@ where
 
     fn len(&self) -> usize {
         self.buffer.len()
+    }
+
+    fn first_timestamp(&self) -> u64 {
+        self.buffer.first().expect("Zero Points in Package!").timestamp()
+    }
+
+    fn last_timestamp(&self) -> u64 {
+        self.buffer.last().expect("Zero Points in Package!").timestamp()
+    }
+
+    fn batch_latency(&self) -> u64 {
+        let first_timestamp = self.first_timestamp();
+        let last_timestamp = self.last_timestamp();
+
+        last_timestamp - first_timestamp
     }
 }
 
@@ -420,6 +440,18 @@ pub struct Payload {
     pub timestamp: u64,
     #[serde(flatten)]
     pub payload: Value,
+    #[serde(skip)]
+    pub collection_timestamp: u64,
+}
+
+impl Payload {
+    /// Sets collection_timestamp for Payload
+    pub fn set_collection_timestamp(mut self) -> Self {
+        self.collection_timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+
+        self
+    }
 }
 
 impl Point for Payload {
@@ -429,5 +461,9 @@ impl Point for Payload {
 
     fn timestamp(&self) -> u64 {
         self.timestamp
+    }
+
+    fn collection_timestamp(&self) -> u64 {
+        self.collection_timestamp
     }
 }

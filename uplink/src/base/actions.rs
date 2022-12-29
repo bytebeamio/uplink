@@ -37,6 +37,9 @@ pub struct ActionResponse {
     pub progress: u8,
     // list of error
     pub errors: Vec<String>,
+    // timestamp at creation
+    #[serde(skip)]
+    pub collection_timestamp: u64,
 }
 
 impl ActionResponse {
@@ -45,6 +48,7 @@ impl ActionResponse {
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_millis() as u64;
+        let collection_timestamp = timestamp;
 
         ActionResponse {
             action_id: id.to_owned(),
@@ -53,6 +57,7 @@ impl ActionResponse {
             state: state.to_owned(),
             progress,
             errors,
+            collection_timestamp,
         }
     }
 
@@ -95,6 +100,7 @@ impl From<&ActionResponse> for Payload {
             stream: "action_status".to_owned(),
             sequence: resp.sequence,
             timestamp: resp.timestamp,
+            collection_timestamp: resp.collection_timestamp,
             payload: json!({
                 "id": resp.action_id,
                 "state": resp.state,
@@ -112,5 +118,9 @@ impl Point for ActionResponse {
 
     fn timestamp(&self) -> u64 {
         self.timestamp
+    }
+
+    fn collection_timestamp(&self) -> u64 {
+        self.collection_timestamp
     }
 }
