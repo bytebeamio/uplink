@@ -1,4 +1,5 @@
-use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{collections::HashMap, fmt::Debug, mem, sync::Arc};
 
 use flume::{SendError, Sender};
 use log::{debug, trace};
@@ -436,6 +437,16 @@ pub struct Payload {
     pub payload: Value,
     #[serde(skip)]
     pub collection_timestamp: u64,
+}
+
+impl Payload {
+    /// Sets collection_timestamp for Payload
+    pub fn set_collection_timestamp(mut self) -> Self {
+        self.collection_timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+
+        self
+    }
 }
 
 impl Point for Payload {
