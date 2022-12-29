@@ -126,6 +126,10 @@ pub trait Package: Send + Debug {
     fn first_timestamp(&self) -> u64;
     fn last_timestamp(&self) -> u64;
     fn batch_latency(&self) -> u64;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Signals status of stream buffer
