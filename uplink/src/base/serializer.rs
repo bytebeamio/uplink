@@ -14,6 +14,8 @@ mod metrics;
 use crate::{Config, Package};
 use metrics::SerializerMetrics;
 
+use self::metrics::StreamMetricsHandler;
+
 #[derive(thiserror::Error, Debug)]
 pub enum MqttError {
     #[error("SendError(..)")]
@@ -164,7 +166,8 @@ pub struct Serializer<C: MqttClient> {
     collector_rx: Receiver<Box<dyn Package>>,
     client: C,
     storage: Option<Storage>,
-    metrics: Option<SerializerMetrics>,
+    serializer_metrics: Option<SerializerMetrics>,
+    stream_metrics: Option<StreamMetricsHandler>,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -185,9 +188,10 @@ impl<C: MqttClient> Serializer<C> {
             None => None,
         };
 
-        let metrics = SerializerMetrics::new(config.clone());
+        let serializer_metrics = SerializerMetrics::new(config.clone());
+        let stream_metrics = StreamMetricsHandler::new(config.clone());
 
-        Ok(Serializer { config, collector_rx, client, storage, metrics })
+        Ok(Serializer { config, collector_rx, client, storage, serializer_metrics, stream_metrics })
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -212,10 +216,13 @@ impl<C: MqttClient> Serializer<C> {
             let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
             let payload = data.serialize()?;
-            let stream = data.stream();
-            let msg_count = data.len();
+            let stream = data.stream().as_ref().to_owned();
+            let point_count = data.len();
             let batch_latency = data.batch_latency();
-            info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
+            info!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+            if let Some(handler) = self.stream_metrics.as_mut() {
+                handler.update(stream, point_count, batch_latency);
+            }
 
             let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
             publish.pkid = 1;
@@ -254,7 +261,7 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     let data = data?;
-                    if let Some(metrics) = self.metrics.as_mut(){
+                    if let Some(metrics) = self.serializer_metrics.as_mut() {
                         if let Some((errors, count)) = data.anomalies() {
                             metrics.add_errors(errors, count);
                         }
@@ -262,17 +269,20 @@ impl<C: MqttClient> Serializer<C> {
 
                     let topic = data.topic();
                     let payload = data.serialize()?;
-                    let stream = data.stream();
-                    let msg_count = data.len();
+                    let stream = data.stream().as_ref().to_owned();
+                    let point_count = data.len();
                     let batch_latency = data.batch_latency();
-                    info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
+                    info!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+                    if let Some(handler) = self.stream_metrics.as_mut() {
+                        handler.update(stream, point_count, batch_latency);
+                    }
 
                     let payload_size = payload.len();
                     let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                     publish.pkid = 1;
 
                     match publish.write(storage.writer()) {
-                        Ok(_) => if let Some(metrics) = self.metrics.as_mut(){
+                        Ok(_) => if let Some(metrics) = self.serializer_metrics.as_mut(){
                             metrics.add_total_disk_size(payload_size)
                         },
                         Err(e) => {
@@ -282,7 +292,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                     match storage.flush_on_overflow() {
-                        Ok(deleted) => if let Some(metrics) = self.metrics.as_mut() {
+                        Ok(deleted) => if let Some(metrics) = self.serializer_metrics.as_mut() {
                             if deleted.is_some() {
                                 metrics.increment_lost_segments();
                             }
@@ -340,7 +350,7 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    if let Some(metrics) = self.metrics.as_mut() {
+                    if let Some(metrics) = self.serializer_metrics.as_mut() {
                         if let Some((errors, count)) = data.anomalies() {
                             metrics.add_errors(errors, count);
                         }
@@ -348,17 +358,20 @@ impl<C: MqttClient> Serializer<C> {
 
                     let topic = data.topic();
                     let payload = data.serialize()?;
-                    let stream = data.stream();
-                    let msg_count = data.len();
+                    let stream = data.stream().as_ref().to_owned();
+                    let point_count = data.len();
                     let batch_latency = data.batch_latency();
-                    info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
+                    info!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+                    if let Some(handler) = self.stream_metrics.as_mut() {
+                        handler.update(stream, point_count, batch_latency);
+                    }
 
                     let payload_size = payload.len();
                     let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
                     publish.pkid = 1;
 
                     match publish.write(storage.writer()) {
-                        Ok(_) => if let Some(metrics) = self.metrics.as_mut() {
+                        Ok(_) => if let Some(metrics) = self.serializer_metrics.as_mut() {
                             metrics.add_total_disk_size(payload_size)
                         },
                         Err(e) => {
@@ -368,7 +381,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                     match storage.flush_on_overflow() {
-                        Ok(deleted) => if let Some(metrics) = self.metrics.as_mut() {
+                        Ok(deleted) => if let Some(metrics) = self.serializer_metrics.as_mut() {
                             if deleted.is_some() {
                                 metrics.increment_lost_segments();
                             }
@@ -410,7 +423,7 @@ impl<C: MqttClient> Serializer<C> {
 
                     let payload = publish.payload;
                     let payload_size = payload.len();
-                    if let Some(metrics) = self.metrics.as_mut() {
+                    if let Some(metrics) = self.serializer_metrics.as_mut() {
                         metrics.sub_total_disk_size(payload_size);
                         metrics.add_total_sent_size(payload_size);
                     }
@@ -423,6 +436,7 @@ impl<C: MqttClient> Serializer<C> {
     async fn normal(&mut self) -> Result<Status, Error> {
         info!("Switching to normal mode!!");
         let mut interval = time::interval(time::Duration::from_secs(10));
+        let metrics_enabled = self.serializer_metrics.is_some() || self.stream_metrics.is_some();
 
         loop {
             select! {
@@ -430,7 +444,7 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
 
                     // Extract anomalies detected by package during collection
-                    if let Some(metrics) = self.metrics.as_mut() {
+                    if let Some(metrics) = self.serializer_metrics.as_mut() {
                         if let Some((errors, count)) = data.anomalies() {
                             metrics.add_errors(errors, count);
                         }
@@ -438,14 +452,17 @@ impl<C: MqttClient> Serializer<C> {
 
                     let topic = data.topic();
                     let payload = data.serialize()?;
-                    let stream = data.stream();
-                    let msg_count = data.len();
+                    let stream = data.stream().as_ref().to_owned();
+                    let point_count = data.len();
                     let batch_latency = data.batch_latency();
-                    info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
+                    info!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+                    if let Some(handler) = self.stream_metrics.as_mut() {
+                        handler.update(stream, point_count, batch_latency);
+                    }
 
                     let payload_size = payload.len();
                     match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
-                        Ok(_) => if let Some(metrics) = self.metrics.as_mut() {
+                        Ok(_) => if let Some(metrics) = self.serializer_metrics.as_mut() {
                             metrics.add_total_sent_size(payload_size);
                             continue;
                         }
@@ -454,13 +471,22 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                 }
-                _ = interval.tick(), if self.metrics.is_some() => {
-                    info!("Publishing serializer metrics to broker");
-                    let metrics = self.metrics.as_mut().unwrap();
-                    let payload = serde_json::to_vec(&vec![metrics.update()])?;
-                    metrics.clear();
-                    if let Err(e) = self.client.try_publish(&metrics.topic, QoS::AtLeastOnce, false, payload) {
-                        error!("Couldn't publish serializer metrics to broker: {}", e)
+                _ = interval.tick(), if metrics_enabled => {
+                    if let Some(metrics) = self.serializer_metrics.as_mut() {
+                        info!("Publishing serializer metrics to broker");
+                        let payload = serde_json::to_vec(&vec![metrics.update()])?;
+                        metrics.clear();
+                        if let Err(e) = self.client.try_publish(&metrics.topic, QoS::AtLeastOnce, false, payload) {
+                            error!("Couldn't publish serializer metrics to broker: {}", e)
+                        }
+                    }
+
+                    if let Some(metrics) = self.stream_metrics.as_mut() {
+                        info!("Publishing stream metrics to broker");
+                        let payload = serde_json::to_vec(&metrics.collect_metrics())?;
+                        if let Err(e) = self.client.try_publish(&metrics.topic, QoS::AtLeastOnce, false, payload) {
+                            error!("Couldn't publish serializer metrics to broker: {}", e)
+                        }
                     }
                 }
             }
