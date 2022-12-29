@@ -213,8 +213,7 @@ impl TcpJson {
                         }
                     };
 
-                    // If incoming data is a response for an action, drop it
-                    // if timeout is already sent to cloud
+                    // If incoming data is a response for an action, set in_execution and forward
                     if data.stream == "action_status" {
                         let response = match ActionResponse::from_payload(&data) {
                             Ok(response) => response,
