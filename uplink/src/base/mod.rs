@@ -117,6 +117,9 @@ pub trait Package: Send + Debug {
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
     fn len(&self) -> usize;
+    fn first_timestamp(&self) -> Option<u64>;
+    fn last_timestamp(&self) -> Option<u64>;
+    fn batch_latency(&self) -> Option<u64>;
 }
 
 /// Signals status of stream buffer
@@ -367,7 +370,7 @@ impl<T> Buffer<T> {
 
 impl<T> Package for Buffer<T>
 where
-    T: Debug + Send,
+    T: Debug + Send + Point,
     Vec<T>: Serialize,
 {
     fn topic(&self) -> Arc<String> {
@@ -388,6 +391,21 @@ where
 
     fn len(&self) -> usize {
         self.buffer.len()
+    }
+
+    fn first_timestamp(&self) -> Option<u64> {
+        self.buffer.first().map(|p| p.timestamp())
+    }
+
+    fn last_timestamp(&self) -> Option<u64> {
+        self.buffer.last().map(|p| p.timestamp())
+    }
+
+    fn batch_latency(&self) -> Option<u64> {
+        let first_timestamp = self.first_timestamp()?;
+        let last_timestamp = self.last_timestamp()?;
+
+        Some(last_timestamp - first_timestamp)
     }
 }
 
