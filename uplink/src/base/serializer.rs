@@ -219,7 +219,8 @@ impl<C: MqttClient> Serializer<C> {
             let payload = data.serialize()?;
             let stream = data.stream();
             let msg_count = data.len();
-            info!("Data received on stream: {stream}; message count = {msg_count}");
+            let batch_latency = data.batch_latency();
+            info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
 
             let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
             publish.pkid = 1;
@@ -266,7 +267,8 @@ impl<C: MqttClient> Serializer<C> {
                       let payload = data.serialize()?;
                       let stream = data.stream();
                       let msg_count = data.len();
-                      info!("Data received on stream: {stream}; message count = {msg_count}");
+                      let batch_latency = data.batch_latency();
+                      info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
 
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
@@ -345,7 +347,8 @@ impl<C: MqttClient> Serializer<C> {
                       let payload = data.serialize()?;
                       let stream = data.stream();
                       let msg_count = data.len();
-                      info!("Data received on stream: {stream}; message count = {msg_count}");
+                      let batch_latency = data.batch_latency();
+                      info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
 
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
@@ -426,7 +429,8 @@ impl<C: MqttClient> Serializer<C> {
                     let payload = data.serialize()?;
                     let stream = data.stream();
                     let msg_count = data.len();
-                    info!("Data received on stream: {stream}; message count = {msg_count}");
+                    let batch_latency = data.batch_latency();
+                    info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
 
                     let payload_size = payload.len();
                     match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
@@ -562,6 +566,10 @@ impl Point for Metrics {
     }
 
     fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    fn collection_timestamp(&self) -> u64 {
         self.timestamp
     }
 }
@@ -715,6 +723,7 @@ mod test {
                 stream: "hello".to_owned(),
                 sequence: i,
                 timestamp: 0,
+                collection_timestamp: 0,
                 payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,
             };
             self.stream.push(payload)?;
