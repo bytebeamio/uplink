@@ -15,6 +15,15 @@ max_inflight = 100
 # triggered from cloud.
 actions = ["tunshell"]
 
+# Serializer Metrics module publishes associated stats, to keep track of 
+# serializer performance. By default it is disabled and metrics will not
+# be forwarded to platform. 
+# Parameters
+# - topic(optional): One can configure to push stats to a specific topic,
+#   different from the default by configuring it with this field.
+[serializer_metrics]
+topic = "/tenants/{tenant_id}/devices/{device_id}/metrics/jsonarray"
+
 # Configuration details associated with uplink's persistent storage module
 # which writes publish packets to disk in case of slow or crashed network.
 # 
@@ -45,17 +54,9 @@ max_file_count = 3
 [streams.device_shadow]
 buf_size = 1
 
-# Built-in streams: Serializer metrics and action status are special cases and need to be
-# separately configured outside of the streams map. The metrics stream is one to which the
-# Serializer Metrics module publishes associated stats, to keep track of serializer performance.
-# If not configured, serializer metrics will not be forwarded to platform. In this example we
-# are enabling and publishing on reaching 10 elements or flushing on 30 seconds timeouts.
-[serializer_metrics]
-buf_size = 10
-flush_period = 30
-
-# The action_status stream is used to push progress of Actions in execution.
-# This configuration is required or will lead to fallback to default config.
+# Built-in streams: action status is a special case of stream and should be configured separately,
+# outside of the streams map. The action_status stream is used to push progress of Actions in
+# execution. This configuration is required or will lead to fallback to default config.
 #
 # NOTE: Action statuses are expected on a specifc topic as configured in example below.
 # This also means that we require a topic to be configured or uplink will error out.

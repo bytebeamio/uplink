@@ -77,6 +77,11 @@ pub struct Downloader {
     pub path: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct MetricsConfig {
+    pub topic: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
@@ -92,7 +97,7 @@ pub struct Config {
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
-    pub serializer_metrics: Option<StreamConfig>,
+    pub serializer_metrics: Option<MetricsConfig>,
     pub downloader: Option<Downloader>,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,

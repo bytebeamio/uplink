@@ -1,4 +1,4 @@
-use crate::{Config, Package, Point, Stream};
+use crate::{Config, Package, Point};
 
 use bytes::Bytes;
 use disk::Storage;
@@ -162,15 +162,13 @@ pub struct Serializer<C: MqttClient> {
     collector_rx: Receiver<Box<dyn Package>>,
     client: C,
     storage: Option<Storage>,
-    metrics: Metrics,
-    metrics_stream: Option<Stream<Metrics>>,
+    metrics: Option<Metrics>,
 }
 
 impl<C: MqttClient> Serializer<C> {
     pub fn new(
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
-        metrics_stream: Option<Stream<Metrics>>,
         client: C,
     ) -> Result<Serializer<C>, Error> {
         let storage = match &config.persistence {
@@ -185,14 +183,9 @@ impl<C: MqttClient> Serializer<C> {
             None => None,
         };
 
-        Ok(Serializer {
-            config,
-            collector_rx,
-            client,
-            storage,
-            metrics: Metrics::new(),
-            metrics_stream,
-        })
+        let metrics = Metrics::new(config.clone());
+
+        Ok(Serializer { config, collector_rx, client, storage, metrics })
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -258,39 +251,45 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     };
 
-                      let data = data?;
-                      if let Some((errors, count)) = data.anomalies() {
-                        self.metrics.add_errors(errors, count);
-                      }
+                    let data = data?;
+                    if let Some(metrics) = self.metrics.as_mut(){
+                        if let Some((errors, count)) = data.anomalies() {
+                            metrics.add_errors(errors, count);
+                        }
+                    }
 
-                      let topic = data.topic();
-                      let payload = data.serialize()?;
-                      let stream = data.stream();
-                      let msg_count = data.len();
-                      let batch_latency = data.batch_latency();
-                      info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
+                    let topic = data.topic();
+                    let payload = data.serialize()?;
+                    let stream = data.stream();
+                    let msg_count = data.len();
+                    let batch_latency = data.batch_latency();
+                    info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
 
-                      let payload_size = payload.len();
-                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
-                      publish.pkid = 1;
+                    let payload_size = payload.len();
+                    let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                    publish.pkid = 1;
 
-                      match publish.write(storage.writer()) {
-                           Ok(_) => self.metrics.add_total_disk_size(payload_size),
-                           Err(e) => {
-                               error!("Failed to fill disk buffer. Error = {:?}", e);
-                               continue
-                           }
-                      }
+                    match publish.write(storage.writer()) {
+                        Ok(_) => if let Some(metrics) = self.metrics.as_mut(){
+                            metrics.add_total_disk_size(payload_size)
+                        },
+                        Err(e) => {
+                            error!("Failed to fill disk buffer. Error = {:?}", e);
+                            continue
+                        }
+                    }
 
-                      match storage.flush_on_overflow() {
-                            Ok(deleted) => if deleted.is_some() {
-                                self.metrics.increment_lost_segments();
-                            },
-                            Err(e) => {
-                                error!("Failed to flush disk buffer. Error = {:?}", e);
-                                continue
+                    match storage.flush_on_overflow() {
+                        Ok(deleted) => if let Some(metrics) = self.metrics.as_mut() {
+                            if deleted.is_some() {
+                                metrics.increment_lost_segments();
                             }
-                      }
+                        },
+                        Err(e) => {
+                            error!("Failed to flush disk buffer. Error = {:?}", e);
+                            continue
+                        }
+                    }
                 }
                 o = &mut publish => match o {
                     Ok(_) => return Ok(Status::EventLoopReady),
@@ -338,39 +337,45 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             select! {
                 data = self.collector_rx.recv_async() => {
-                      let data = data?;
-                      if let Some((errors, count)) = data.anomalies() {
-                        self.metrics.add_errors(errors, count);
-                      }
+                    let data = data?;
+                    if let Some(metrics) = self.metrics.as_mut() {
+                        if let Some((errors, count)) = data.anomalies() {
+                            metrics.add_errors(errors, count);
+                        }
+                    }
 
-                      let topic = data.topic();
-                      let payload = data.serialize()?;
-                      let stream = data.stream();
-                      let msg_count = data.len();
-                      let batch_latency = data.batch_latency();
-                      info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
+                    let topic = data.topic();
+                    let payload = data.serialize()?;
+                    let stream = data.stream();
+                    let msg_count = data.len();
+                    let batch_latency = data.batch_latency();
+                    info!("Data received on stream: {stream}; message count = {msg_count}; batching latency = {batch_latency}");
 
-                      let payload_size = payload.len();
-                      let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
-                      publish.pkid = 1;
+                    let payload_size = payload.len();
+                    let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+                    publish.pkid = 1;
 
-                      match publish.write(storage.writer()) {
-                           Ok(_) => self.metrics.add_total_disk_size(payload_size),
-                           Err(e) => {
-                               error!("Failed to fill disk buffer. Error = {:?}", e);
-                               continue
-                           }
-                      }
+                    match publish.write(storage.writer()) {
+                        Ok(_) => if let Some(metrics) = self.metrics.as_mut() {
+                            metrics.add_total_disk_size(payload_size)
+                        },
+                        Err(e) => {
+                            error!("Failed to fill disk buffer. Error = {:?}", e);
+                            continue
+                        }
+                    }
 
-                      match storage.flush_on_overflow() {
-                            Ok(deleted) => if deleted.is_some() {
-                                self.metrics.increment_lost_segments();
-                            },
-                            Err(e) => {
-                                error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
-                                continue
+                    match storage.flush_on_overflow() {
+                        Ok(deleted) => if let Some(metrics) = self.metrics.as_mut() {
+                            if deleted.is_some() {
+                                metrics.increment_lost_segments();
                             }
-                      }
+                        },
+                        Err(e) => {
+                            error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
+                            continue
+                        }
+                    }
                 }
                 o = &mut send => {
                     // Send failure implies eventloop crash. Switch state to
@@ -403,8 +408,10 @@ impl<C: MqttClient> Serializer<C> {
 
                     let payload = publish.payload;
                     let payload_size = payload.len();
-                    self.metrics.sub_total_disk_size(payload_size);
-                    self.metrics.add_total_sent_size(payload_size);
+                    if let Some(metrics) = self.metrics.as_mut() {
+                        metrics.sub_total_disk_size(payload_size);
+                        metrics.add_total_sent_size(payload_size);
+                    }
                     send.set(send_publish(client, publish.topic, payload));
                 }
             }
@@ -421,8 +428,10 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
 
                     // Extract anomalies detected by package during collection
-                    if let Some((errors, count)) = data.anomalies() {
-                        self.metrics.add_errors(errors, count);
+                    if let Some(metrics) = self.metrics.as_mut() {
+                        if let Some((errors, count)) = data.anomalies() {
+                            metrics.add_errors(errors, count);
+                        }
                     }
 
                     let topic = data.topic();
@@ -434,8 +443,8 @@ impl<C: MqttClient> Serializer<C> {
 
                     let payload_size = payload.len();
                     match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
-                        Ok(_) => {
-                            self.metrics.add_total_sent_size(payload_size);
+                        Ok(_) => if let Some(metrics) = self.metrics.as_mut() {
+                            metrics.add_total_sent_size(payload_size);
                             continue;
                         }
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
@@ -443,12 +452,13 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                 }
-                _ = interval.tick(), if self.metrics_stream.is_some() => {
-                    let metrics = self.metrics.update();
-                    self.metrics.clear();
-                    let stream = self.metrics_stream.as_mut().unwrap();
-                    if let Err(e) = stream.fill(metrics).await {
-                        error!("Couldn't write serializer metrics to stream: {}", e)
+                _ = interval.tick(), if self.metrics.is_some() => {
+                    info!("Publishing serializer metrics to broker");
+                    let metrics = self.metrics.as_mut().unwrap();
+                    let payload = serde_json::to_vec(&vec![metrics.update()])?;
+                    metrics.clear();
+                    if let Err(e) = self.client.try_publish(&metrics.topic, QoS::AtLeastOnce, false, payload) {
+                        error!("Couldn't publish serializer metrics to broker: {}", e)
                     }
                 }
             }
@@ -495,6 +505,8 @@ async fn send_publish<C: MqttClient>(
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct Metrics {
+    #[serde(skip)]
+    topic: String,
     sequence: u32,
     timestamp: u64,
     total_sent_size: usize,
@@ -505,8 +517,21 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    pub fn new() -> Metrics {
-        Metrics { errors: String::with_capacity(1024), ..Default::default() }
+    pub fn new(config: Arc<Config>) -> Option<Metrics> {
+        let topic = match &config.serializer_metrics.as_ref()?.topic {
+            Some(topic) => topic.to_owned(),
+            _ => {
+                String::from("/tenants/")
+                    + &config.project_id
+                    + "/devices/"
+                    + &config.device_id
+                    + "/events/"
+                    + &"metrics"
+                    + "/jsonarray"
+            }
+        };
+
+        Some(Metrics { topic, errors: String::with_capacity(1024), ..Default::default() })
     }
 
     pub fn add_total_sent_size(&mut self, size: usize) {
@@ -698,7 +723,7 @@ mod test {
         let (net_tx, net_rx) = flume::bounded(1);
         let client = MockClient { net_tx };
 
-        (Serializer::new(config, data_rx, None, client).unwrap(), data_tx, net_rx)
+        (Serializer::new(config, data_rx, client).unwrap(), data_tx, net_rx)
     }
 
     #[derive(Error, Debug)]
