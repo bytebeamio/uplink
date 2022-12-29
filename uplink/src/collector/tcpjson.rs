@@ -46,8 +46,6 @@ pub struct Bridge {
     action_status: Stream<ActionResponse>,
     status_tx: Sender<ActionResponse>,
     status_rx: Receiver<ActionResponse>,
-    close_tx: Sender<()>,
-    close_rx: Receiver<()>,
 }
 
 const ACTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -61,19 +59,8 @@ impl Bridge {
     ) -> Bridge {
         let (actions_tx, _) = channel(10);
         let (status_tx, status_rx) = bounded(10);
-        let (close_tx, close_rx) = bounded(1);
 
-        Bridge {
-            action_status,
-            data_tx,
-            config,
-            actions_rx,
-            actions_tx,
-            status_tx,
-            status_rx,
-            close_tx,
-            close_rx,
-        }
+        Bridge { action_status, data_tx, config, actions_rx, actions_tx, status_tx, status_rx }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -177,17 +164,6 @@ impl Bridge {
                             error!("Failed to fill. Error = {:?}", e);
                         }
                     }
-
-                    // In case one of the connected applications drops, check to see if all apps are down.
-                    // In which case send a failure response with the message "Bridge disconnected".
-                    _ = self.close_rx.recv_async() =>  {
-                        if self.actions_tx.receiver_count() == 0 && current_action_.is_some(){
-                            let status = ActionResponse::failure(&current_action_.take().unwrap().id, "Bridge disconnected");
-                            if let Err(e) = self.action_status.fill(status).await {
-                                error!("Failed to fill. Error = {:?}", e);
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -199,15 +175,10 @@ impl Bridge {
             status_tx: self.status_tx.clone(),
             streams: Streams::new(self.config.clone(), self.data_tx.clone()),
             actions_rx: self.actions_tx.subscribe(),
-            close_tx: self.close_tx.clone(),
         };
         tokio::task::spawn(async move {
             if let Err(e) = tcp_json.collect(framed).await {
                 error!("Bridge failed. Error = {:?}", e);
-            }
-
-            if let Err(e) = tcp_json.close_tx.send_async(()).await {
-                error!("Failed to send close message. Error = {:?}", e);
             }
         });
     }
@@ -217,7 +188,6 @@ struct TcpJson {
     streams: Streams,
     status_tx: Sender<ActionResponse>,
     actions_rx: BRx<Action>,
-    close_tx: Sender<()>,
 }
 
 impl TcpJson {
