@@ -104,7 +104,11 @@ pub mod config {
         replace_topic_placeholders(&mut config.action_status, tenant_id, device_id);
 
         if let Some(config) = &mut config.serializer_metrics {
-            replace_topic_placeholders(config, tenant_id, device_id);
+            if let Some(topic) = &config.topic {
+                let topic = topic.replace("{tenant_id}", tenant_id);
+                let topic = topic.replace("{device_id}", device_id);
+                config.topic = Some(topic);
+            }
         }
 
         Ok(config)
