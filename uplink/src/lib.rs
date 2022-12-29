@@ -203,22 +203,7 @@ impl Uplink {
         let (raw_action_tx, raw_action_rx) = bounded(10);
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
 
-        let metrics_stream = self.config.serializer_metrics.as_ref().map(|metrics_config| {
-            Stream::with_config(
-                &"metrics".to_owned(),
-                &self.config.project_id,
-                &self.config.device_id,
-                metrics_config,
-                self.bridge_data_tx(),
-            )
-        });
-
-        let serializer = Serializer::new(
-            self.config.clone(),
-            self.data_rx.clone(),
-            metrics_stream,
-            mqtt.client(),
-        )?;
+        let serializer = Serializer::new(self.config.clone(), self.data_rx.clone(), mqtt.client())?;
 
         let actions = Middleware::new(
             self.config.clone(),
