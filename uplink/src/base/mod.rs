@@ -114,6 +114,7 @@ pub trait Package: Send + Debug {
     // around custom serialization error types.
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
+    fn len(&self) -> usize;
 }
 
 /// Signals status of stream buffer
@@ -377,6 +378,10 @@ where
 
     fn anomalies(&self) -> Option<(String, usize)> {
         self.anomalies()
+    }
+
+    fn len(&self) -> usize {
+        self.buffer.len()
     }
 }
 
