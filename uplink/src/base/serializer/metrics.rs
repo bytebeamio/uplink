@@ -1,7 +1,5 @@
-use std::{
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{collections::HashMap, sync::Arc};
 
 use serde::Serialize;
 
@@ -84,5 +82,73 @@ impl SerializerMetrics {
     pub fn clear(&mut self) {
         self.errors.clear();
         self.lost_segments = 0;
+    }
+}
+
+#[derive(Debug, Default, Serialize, Clone)]
+pub struct StreamMetrics {
+    timestamp: u64,
+    sequence: u32,
+    stream: String,
+    point_count: usize,
+    batch_count: usize,
+    average_latency: f64,
+    min_latency: u64,
+    max_latency: u64,
+}
+
+pub struct StreamMetricsHandler {
+    pub topic: String,
+    map: HashMap<String, StreamMetrics>,
+}
+
+impl StreamMetricsHandler {
+    pub fn new(config: Arc<Config>) -> Option<Self> {
+        let topic = match &config.stream_metrics.as_ref()?.topic {
+            Some(topic) => topic.to_owned(),
+            _ => {
+                String::from("/tenants/")
+                    + &config.project_id
+                    + "/devices/"
+                    + &config.device_id
+                    + "/events/stream_metrics/jsonarray"
+            }
+        };
+
+        Some(Self { topic, map: Default::default() })
+    }
+
+    pub fn update(&mut self, stream: String, point_count: usize, batch_latency: u64) {
+        // Init stream metrics max/min values with opposite extreme values to ensure first latency value is accepted
+        let metrics = self.map.entry(stream.clone()).or_insert(StreamMetrics {
+            stream,
+            min_latency: u64::MAX,
+            max_latency: u64::MIN,
+            ..Default::default()
+        });
+
+        metrics.max_latency = metrics.max_latency.max(batch_latency);
+        metrics.min_latency = metrics.min_latency.min(batch_latency);
+        let total_latency =
+            (metrics.average_latency * metrics.batch_count as f64) + batch_latency as f64;
+
+        metrics.batch_count += 1;
+        metrics.point_count += point_count;
+        metrics.average_latency = total_latency / metrics.batch_count as f64;
+    }
+
+    pub fn collect_metrics(&mut self) -> Vec<StreamMetrics> {
+        let mut collection = vec![];
+        for metrics in self.map.values_mut() {
+            metrics.sequence += 1;
+            metrics.timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_millis() as u64;
+
+            collection.push(metrics.clone())
+        }
+
+        collection
     }
 }
