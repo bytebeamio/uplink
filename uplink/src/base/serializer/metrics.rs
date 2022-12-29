@@ -1,3 +1,4 @@
+use std::collections::hash_map::ValuesMut;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, sync::Arc};
 
@@ -70,13 +71,11 @@ impl SerializerMetrics {
         self.errors.push_str(" | ");
     }
 
-    pub fn update(&mut self) -> Self {
+    pub fn update(&mut self) {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
         self.timestamp = timestamp.as_millis() as u64;
         self.sequence += 1;
-
-        self.clone()
     }
 
     pub fn clear(&mut self) {
@@ -137,18 +136,26 @@ impl StreamMetricsHandler {
         metrics.average_latency = total_latency / metrics.batch_count as f64;
     }
 
-    pub fn collect_metrics(&mut self) -> Vec<StreamMetrics> {
-        let mut collection = vec![];
-        for metrics in self.map.values_mut() {
-            metrics.sequence += 1;
-            metrics.timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or(Duration::from_secs(0))
-                .as_millis() as u64;
+    pub fn streams(&mut self) -> Streams {
+        Streams { values: self.map.values_mut() }
+    }
+}
 
-            collection.push(metrics.clone())
-        }
+pub struct Streams<'a> {
+    values: ValuesMut<'a, String, StreamMetrics>,
+}
 
-        collection
+impl<'a> Iterator for Streams<'a> {
+    type Item = &'a mut StreamMetrics;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let metrics = self.values.next()?;
+        metrics.sequence += 1;
+        metrics.timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_millis() as u64;
+
+        Some(metrics)
     }
 }

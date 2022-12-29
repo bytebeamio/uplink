@@ -11,7 +11,7 @@ use tokio::{select, time};
 
 mod metrics;
 
-use crate::{Config, Package};
+use crate::{base::serializer::metrics::StreamMetrics, Config, Package};
 use metrics::SerializerMetrics;
 
 use self::metrics::StreamMetricsHandler;
@@ -474,7 +474,9 @@ impl<C: MqttClient> Serializer<C> {
                 _ = interval.tick(), if metrics_enabled => {
                     if let Some(metrics) = self.serializer_metrics.as_mut() {
                         info!("Publishing serializer metrics to broker");
-                        let payload = serde_json::to_vec(&vec![metrics.update()])?;
+                        metrics.update();
+                        let data = vec![&metrics];
+                        let payload = serde_json::to_vec(&data)?;
                         metrics.clear();
                         if let Err(e) = self.client.try_publish(&metrics.topic, QoS::AtLeastOnce, false, payload) {
                             error!("Couldn't publish serializer metrics to broker: {}", e)
@@ -483,9 +485,10 @@ impl<C: MqttClient> Serializer<C> {
 
                     if let Some(metrics) = self.stream_metrics.as_mut() {
                         info!("Publishing stream metrics to broker");
-                        let payload = serde_json::to_vec(&metrics.collect_metrics())?;
+                        let data: Vec<&mut StreamMetrics> = metrics.streams().collect();
+                        let payload = serde_json::to_vec(&data)?;
                         if let Err(e) = self.client.try_publish(&metrics.topic, QoS::AtLeastOnce, false, payload) {
-                            error!("Couldn't publish serializer metrics to broker: {}", e)
+                            error!("Couldn't publish stream metrics to broker: {}", e)
                         }
                     }
                 }
