@@ -217,8 +217,9 @@ impl<C: MqttClient> Serializer<C> {
             let data = self.collector_rx.recv_async().await?;
             let topic = data.topic();
             let payload = data.serialize()?;
+            let stream = data.stream();
             let msg_count = data.len();
-            info!("Data received on stream: {topic}; message count = {msg_count}");
+            info!("Data received on stream: {stream}; message count = {msg_count}");
 
             let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
             publish.pkid = 1;
@@ -263,8 +264,9 @@ impl<C: MqttClient> Serializer<C> {
 
                       let topic = data.topic();
                       let payload = data.serialize()?;
+                      let stream = data.stream();
                       let msg_count = data.len();
-                      info!("Data received on stream: {topic}; message count = {msg_count}");
+                      info!("Data received on stream: {stream}; message count = {msg_count}");
 
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
@@ -341,8 +343,9 @@ impl<C: MqttClient> Serializer<C> {
 
                       let topic = data.topic();
                       let payload = data.serialize()?;
+                      let stream = data.stream();
                       let msg_count = data.len();
-                      info!("Data received on stream: {topic}; message count = {msg_count}");
+                      info!("Data received on stream: {stream}; message count = {msg_count}");
 
                       let payload_size = payload.len();
                       let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
@@ -421,8 +424,9 @@ impl<C: MqttClient> Serializer<C> {
 
                     let topic = data.topic();
                     let payload = data.serialize()?;
+                    let stream = data.stream();
                     let msg_count = data.len();
-                    info!("Data received on stream: {topic}; message count = {msg_count}");
+                    info!("Data received on stream: {stream}; message count = {msg_count}");
 
                     let payload_size = payload.len();
                     match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
