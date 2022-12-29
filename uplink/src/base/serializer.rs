@@ -564,6 +564,10 @@ impl Point for Metrics {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
+
+    fn collection_timestamp(&self) -> u64 {
+        self.timestamp
+    }
 }
 
 #[cfg(test)]
@@ -715,6 +719,7 @@ mod test {
                 stream: "hello".to_owned(),
                 sequence: i,
                 timestamp: 0,
+                collection_timestamp: 0,
                 payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,
             };
             self.stream.push(payload)?;

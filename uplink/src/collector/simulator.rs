@@ -154,7 +154,7 @@ impl Partitions {
 
 pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-
+    let collection_timestamp = timestamp;
     let path_len = device.path.len() as u32;
     let path_index = ((device.path_offset + sequence) % path_len) as usize;
     let position = device.path.get(path_index).unwrap();
@@ -164,6 +164,7 @@ pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
         sequence,
         stream: format!("/tenants/demo/devices/{}/events/gps/jsonarray", device.device_id),
         payload: json!(position),
+        collection_timestamp,
     }
 }
 
@@ -232,6 +233,7 @@ struct Bms {
 
 pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let collection_timestamp = timestamp;
     let payload = Bms {
         periodicity_ms: 250,
         mosfet_temperature: generate_float(40f64, 45f64),
@@ -281,6 +283,7 @@ pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
         sequence,
         stream: format!("/tenants/demo/devices/{}/events/bms/jsonarray", device.device_id),
         payload: json!(payload),
+        collection_timestamp,
     }
 }
 
@@ -299,6 +302,7 @@ struct Imu {
 
 pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let collection_timestamp = timestamp;
     let payload = Imu {
         ax: generate_float(1f64, 2.8f64),
         ay: generate_float(1f64, 2.8f64),
@@ -316,6 +320,7 @@ pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
         sequence,
         stream: format!("/tenants/demo/devices/{}/events/imu/jsonarray", device.device_id),
         payload: json!(payload),
+        collection_timestamp,
     }
 }
 
@@ -331,6 +336,7 @@ struct Motor {
 
 pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let collection_timestamp = timestamp;
     let payload = Motor {
         motor_temperature1: generate_float(40f64, 45f64),
         motor_temperature2: generate_float(40f64, 45f64),
@@ -346,6 +352,7 @@ pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
         sequence,
         stream: format!("/tenants/demo/devices/{}/events/motor/jsonarray", device.device_id),
         payload: json!(payload),
+        collection_timestamp,
     }
 }
 
@@ -364,6 +371,7 @@ struct PeripheralState {
 
 pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let collection_timestamp = timestamp;
     let payload = PeripheralState {
         gps_status: generate_bool_string(0.99),
         gsm_status: generate_bool_string(0.99),
@@ -384,6 +392,7 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Pay
             device.device_id
         ),
         payload: json!(payload),
+        collection_timestamp,
     }
 }
 
@@ -401,6 +410,7 @@ struct DeviceShadow {
 
 pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let collection_timestamp = timestamp;
     let payload = DeviceShadow {
         mode: "economy".to_owned(),
         status: "Locked".to_owned(),
@@ -419,6 +429,7 @@ pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payloa
             device.device_id
         ),
         payload: json!(payload),
+        collection_timestamp,
     }
 }
 

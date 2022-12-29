@@ -106,6 +106,7 @@ pub struct Config {
 pub trait Point: Send + Debug {
     fn sequence(&self) -> u32;
     fn timestamp(&self) -> u64;
+    fn collection_timestamp(&self) -> u64;
 }
 
 pub trait Package: Send + Debug {
@@ -415,6 +416,8 @@ pub struct Payload {
     pub timestamp: u64,
     #[serde(flatten)]
     pub payload: Value,
+    #[serde(skip)]
+    pub collection_timestamp: u64,
 }
 
 impl Point for Payload {
@@ -424,5 +427,9 @@ impl Point for Payload {
 
     fn timestamp(&self) -> u64 {
         self.timestamp
+    }
+
+    fn collection_timestamp(&self) -> u64 {
+        self.collection_timestamp
     }
 }
