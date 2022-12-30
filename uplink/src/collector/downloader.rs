@@ -164,13 +164,10 @@ impl FileDownloader {
                 }
                 tokio::time::sleep(Duration::from_secs(30)).await;
             }
-            match error {
-                None => {}
-                Some(e) => {
-                    let status = ActionResponse::failure(&self.action_id, e.to_string())
-                        .set_sequence(self.sequence());
-                    self.send_status(status).await;
-                }
+            if let Some(e) = error {
+                let status = ActionResponse::failure(&self.action_id, e.to_string())
+                    .set_sequence(self.sequence());
+                self.send_status(status).await;
             }
         }
     }
