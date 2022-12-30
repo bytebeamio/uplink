@@ -79,6 +79,7 @@ pub struct Downloader {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct MetricsConfig {
+    pub enabled: bool,
     pub topic: Option<String>,
 }
 
@@ -97,7 +98,8 @@ pub struct Config {
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
-    pub serializer_metrics: Option<MetricsConfig>,
+    pub serializer_metrics: MetricsConfig,
+    pub stream_metrics: MetricsConfig,
     pub downloader: Option<Downloader>,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
@@ -126,6 +128,10 @@ pub trait Package: Send + Debug {
     fn first_timestamp(&self) -> u64;
     fn last_timestamp(&self) -> u64;
     fn batch_latency(&self) -> u64;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Signals status of stream buffer

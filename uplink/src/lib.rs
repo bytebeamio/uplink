@@ -62,7 +62,11 @@ pub mod config {
     # Create empty streams map
     [streams]
 
-    # [serializer_metrics] is left disabled by default
+    [serializer_metrics]
+    enabled = false
+
+    [stream_metrics]
+    enabled = false
 
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
@@ -103,7 +107,7 @@ pub mod config {
 
         replace_topic_placeholders(&mut config.action_status, tenant_id, device_id);
 
-        if let Some(config) = &mut config.serializer_metrics {
+        for config in [&mut config.serializer_metrics, &mut config.stream_metrics] {
             if let Some(topic) = &config.topic {
                 let topic = topic.replace("{tenant_id}", tenant_id);
                 let topic = topic.replace("{device_id}", device_id);

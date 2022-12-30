@@ -15,14 +15,24 @@ max_inflight = 100
 # triggered from cloud.
 actions = ["tunshell"]
 
-# Serializer Metrics module publishes associated stats, to keep track of 
-# serializer performance. By default it is disabled and metrics will not
-# be forwarded to platform. 
+# Metrics configurations are available for serializer and streams. By default 
+# they are disabled and no metrics will be forwarded to platform. 
 # Parameters
 # - topic(optional): One can configure to push stats to a specific topic,
 #   different from the default by configuring it with this field.
+#
+# Serializer module can publish associated metrics, to keep track of 
+# serializer performance. 
 [serializer_metrics]
+enabled = true
 topic = "/tenants/{tenant_id}/devices/{device_id}/metrics/jsonarray"
+
+# Serializer module can also publishe stream metrics, to keep track of latencies 
+# and batch sizes on a per-stream basis.
+# NOTE: Leaving this configuration empty like the following tells uplink to enable
+# sending metrics, but with default topic string.
+[stream_metrics]
+enabled = true
 
 # Configuration details associated with uplink's persistent storage module
 # which writes publish packets to disk in case of slow or crashed network.
