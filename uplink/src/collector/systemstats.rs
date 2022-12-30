@@ -81,6 +81,10 @@ impl Point for System {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
+
+    fn collection_timestamp(&self) -> u64 {
+        self.timestamp
+    }
 }
 
 struct SystemStats {
@@ -136,6 +140,10 @@ impl Point for Network {
     }
 
     fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    fn collection_timestamp(&self) -> u64 {
         self.timestamp
     }
 }
@@ -194,6 +202,10 @@ impl Point for Disk {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
+
+    fn collection_timestamp(&self) -> u64 {
+        self.timestamp
+    }
 }
 
 struct DiskStats {
@@ -245,6 +257,10 @@ impl Point for Processor {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
+
+    fn collection_timestamp(&self) -> u64 {
+        self.timestamp
+    }
 }
 
 struct ProcessorStats {
@@ -291,6 +307,10 @@ impl Point for Component {
     }
 
     fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    fn collection_timestamp(&self) -> u64 {
         self.timestamp
     }
 }
@@ -363,6 +383,10 @@ impl Point for Process {
     }
 
     fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    fn collection_timestamp(&self) -> u64 {
         self.timestamp
     }
 }

@@ -62,7 +62,11 @@ pub mod config {
     # Create empty streams map
     [streams]
 
-    # [serializer_metrics] is left disabled by default
+    [serializer_metrics]
+    enabled = false
+
+    [stream_metrics]
+    enabled = false
 
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
@@ -103,8 +107,12 @@ pub mod config {
 
         replace_topic_placeholders(&mut config.action_status, tenant_id, device_id);
 
-        if let Some(config) = &mut config.serializer_metrics {
-            replace_topic_placeholders(config, tenant_id, device_id);
+        for config in [&mut config.serializer_metrics, &mut config.stream_metrics] {
+            if let Some(topic) = &config.topic {
+                let topic = topic.replace("{tenant_id}", tenant_id);
+                let topic = topic.replace("{device_id}", device_id);
+                config.topic = Some(topic);
+            }
         }
 
         Ok(config)
@@ -203,22 +211,7 @@ impl Uplink {
         let (raw_action_tx, raw_action_rx) = bounded(10);
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
 
-        let metrics_stream = self.config.serializer_metrics.as_ref().map(|metrics_config| {
-            Stream::with_config(
-                &"metrics".to_owned(),
-                &self.config.project_id,
-                &self.config.device_id,
-                metrics_config,
-                self.bridge_data_tx(),
-            )
-        });
-
-        let serializer = Serializer::new(
-            self.config.clone(),
-            self.data_rx.clone(),
-            metrics_stream,
-            mqtt.client(),
-        )?;
+        let serializer = Serializer::new(self.config.clone(), self.data_rx.clone(), mqtt.client())?;
 
         let actions = Middleware::new(
             self.config.clone(),

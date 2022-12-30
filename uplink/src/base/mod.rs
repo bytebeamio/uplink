@@ -1,4 +1,5 @@
-use std::{collections::HashMap, fmt::Debug, mem, sync::Arc, time::Duration};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{collections::HashMap, fmt::Debug, mem, sync::Arc};
 
 use flume::{SendError, Sender};
 use log::{debug, trace};
@@ -76,6 +77,12 @@ pub struct Downloader {
     pub path: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct MetricsConfig {
+    pub enabled: bool,
+    pub topic: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
@@ -91,7 +98,8 @@ pub struct Config {
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
-    pub serializer_metrics: Option<StreamConfig>,
+    pub serializer_metrics: MetricsConfig,
+    pub stream_metrics: MetricsConfig,
     pub downloader: Option<Downloader>,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
@@ -106,14 +114,24 @@ pub struct Config {
 pub trait Point: Send + Debug {
     fn sequence(&self) -> u32;
     fn timestamp(&self) -> u64;
+    fn collection_timestamp(&self) -> u64;
 }
 
 pub trait Package: Send + Debug {
     fn topic(&self) -> Arc<String>;
+    fn stream(&self) -> Arc<String>;
     // TODO: Implement a generic Return type that can wrap
     // around custom serialization error types.
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
+    fn len(&self) -> usize;
+    fn first_timestamp(&self) -> u64;
+    fn last_timestamp(&self) -> u64;
+    fn batch_latency(&self) -> u64;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Signals status of stream buffer
@@ -364,11 +382,15 @@ impl<T> Buffer<T> {
 
 impl<T> Package for Buffer<T>
 where
-    T: Debug + Send,
+    T: Debug + Send + Point,
     Vec<T>: Serialize,
 {
     fn topic(&self) -> Arc<String> {
         self.topic.clone()
+    }
+
+    fn stream(&self) -> Arc<String> {
+        self.stream.clone()
     }
 
     fn serialize(&self) -> serde_json::Result<Vec<u8>> {
@@ -377,6 +399,25 @@ where
 
     fn anomalies(&self) -> Option<(String, usize)> {
         self.anomalies()
+    }
+
+    fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    fn first_timestamp(&self) -> u64 {
+        self.buffer.first().expect("Zero Points in Package!").timestamp()
+    }
+
+    fn last_timestamp(&self) -> u64 {
+        self.buffer.last().expect("Zero Points in Package!").timestamp()
+    }
+
+    fn batch_latency(&self) -> u64 {
+        let first_timestamp = self.first_timestamp();
+        let last_timestamp = self.last_timestamp();
+
+        last_timestamp - first_timestamp
     }
 }
 
@@ -405,6 +446,18 @@ pub struct Payload {
     pub timestamp: u64,
     #[serde(flatten)]
     pub payload: Value,
+    #[serde(skip)]
+    pub collection_timestamp: u64,
+}
+
+impl Payload {
+    /// Sets collection_timestamp for Payload
+    pub fn set_collection_timestamp(mut self) -> Self {
+        self.collection_timestamp =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+
+        self
+    }
 }
 
 impl Point for Payload {
@@ -414,5 +467,9 @@ impl Point for Payload {
 
     fn timestamp(&self) -> u64 {
         self.timestamp
+    }
+
+    fn collection_timestamp(&self) -> u64 {
+        self.collection_timestamp
     }
 }

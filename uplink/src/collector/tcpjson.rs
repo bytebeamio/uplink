@@ -205,8 +205,8 @@ impl TcpJson {
                     let line = line.ok_or(Error::StreamDone)??;
                     info!("Received line = {:?}", line);
 
-                    let data: Payload = match serde_json::from_str(&line) {
-                        Ok(d) => d,
+                    let data = match serde_json::from_str::<Payload>(&line) {
+                        Ok(d) => d.set_collection_timestamp(),
                         Err(e) => {
                             error!("Deserialization error = {:?}", e);
                             continue
