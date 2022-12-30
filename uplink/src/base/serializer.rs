@@ -471,18 +471,23 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 _ = interval.tick(), if metrics_enabled => {
                     if let Some(handler) = self.serializer_metrics.as_mut() {
-                        info!("Publishing serializer metrics to broker");
                         let data = handler.update();
                         let payload = serde_json::to_vec(&vec![data])?;
                         handler.clear();
+
+                        info!("Publishing serializer metrics to broker");
                         if let Err(e) = self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
                             error!("Couldn't publish serializer metrics to broker: {}", e)
                         }
                     }
 
                     if let Some(handler) = self.stream_metrics.as_mut() {
-                        info!("Publishing stream metrics to broker");
                         let data: Vec<StreamMetrics> = handler.flush().collect();
+                        if data.is_empty() {
+                            continue;
+                        }
+
+                        info!("Publishing stream metrics to broker");
                         let payload = serde_json::to_vec(&data)?;
                         if let Err(e) = self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
                             error!("Couldn't publish stream metrics to broker: {}", e)
