@@ -11,10 +11,8 @@ use tokio::{select, time};
 
 mod metrics;
 
-use crate::{base::serializer::metrics::StreamMetrics, Config, Package};
-use metrics::SerializerMetrics;
-
-use self::metrics::StreamMetricsHandler;
+use self::metrics::{SerializerMetricsHandler, StreamMetrics, StreamMetricsHandler};
+use crate::{Config, Package};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MqttError {
@@ -166,7 +164,7 @@ pub struct Serializer<C: MqttClient> {
     collector_rx: Receiver<Box<dyn Package>>,
     client: C,
     storage: Option<Storage>,
-    serializer_metrics: Option<SerializerMetrics>,
+    serializer_metrics: Option<SerializerMetricsHandler>,
     stream_metrics: Option<StreamMetricsHandler>,
 }
 
@@ -188,7 +186,7 @@ impl<C: MqttClient> Serializer<C> {
             None => None,
         };
 
-        let serializer_metrics = SerializerMetrics::new(config.clone());
+        let serializer_metrics = SerializerMetricsHandler::new(config.clone());
         let stream_metrics = StreamMetricsHandler::new(config.clone());
 
         Ok(Serializer { config, collector_rx, client, storage, serializer_metrics, stream_metrics })
@@ -261,9 +259,9 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     let data = data?;
-                    if let Some(metrics) = self.serializer_metrics.as_mut() {
+                    if let Some(handler) = self.serializer_metrics.as_mut() {
                         if let Some((errors, count)) = data.anomalies() {
-                            metrics.add_errors(errors, count);
+                            handler.add_errors(errors, count);
                         }
                     }
 
@@ -282,8 +280,8 @@ impl<C: MqttClient> Serializer<C> {
                     publish.pkid = 1;
 
                     match publish.write(storage.writer()) {
-                        Ok(_) => if let Some(metrics) = self.serializer_metrics.as_mut(){
-                            metrics.add_total_disk_size(payload_size)
+                        Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut(){
+                            handler.add_total_disk_size(payload_size)
                         },
                         Err(e) => {
                             error!("Failed to fill disk buffer. Error = {:?}", e);
@@ -292,9 +290,9 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                     match storage.flush_on_overflow() {
-                        Ok(deleted) => if let Some(metrics) = self.serializer_metrics.as_mut() {
+                        Ok(deleted) => if let Some(handler) = self.serializer_metrics.as_mut() {
                             if deleted.is_some() {
-                                metrics.increment_lost_segments();
+                                handler.increment_lost_segments();
                             }
                         },
                         Err(e) => {
@@ -350,9 +348,9 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    if let Some(metrics) = self.serializer_metrics.as_mut() {
+                    if let Some(handler) = self.serializer_metrics.as_mut() {
                         if let Some((errors, count)) = data.anomalies() {
-                            metrics.add_errors(errors, count);
+                            handler.add_errors(errors, count);
                         }
                     }
 
@@ -371,8 +369,8 @@ impl<C: MqttClient> Serializer<C> {
                     publish.pkid = 1;
 
                     match publish.write(storage.writer()) {
-                        Ok(_) => if let Some(metrics) = self.serializer_metrics.as_mut() {
-                            metrics.add_total_disk_size(payload_size)
+                        Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut() {
+                            handler.add_total_disk_size(payload_size)
                         },
                         Err(e) => {
                             error!("Failed to fill disk buffer. Error = {:?}", e);
@@ -381,9 +379,9 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                     match storage.flush_on_overflow() {
-                        Ok(deleted) => if let Some(metrics) = self.serializer_metrics.as_mut() {
+                        Ok(deleted) => if let Some(handler) = self.serializer_metrics.as_mut() {
                             if deleted.is_some() {
-                                metrics.increment_lost_segments();
+                                handler.increment_lost_segments();
                             }
                         },
                         Err(e) => {
@@ -423,9 +421,9 @@ impl<C: MqttClient> Serializer<C> {
 
                     let payload = publish.payload;
                     let payload_size = payload.len();
-                    if let Some(metrics) = self.serializer_metrics.as_mut() {
-                        metrics.sub_total_disk_size(payload_size);
-                        metrics.add_total_sent_size(payload_size);
+                    if let Some(handler) = self.serializer_metrics.as_mut() {
+                        handler.sub_total_disk_size(payload_size);
+                        handler.add_total_sent_size(payload_size);
                     }
                     send.set(send_publish(client, publish.topic, payload));
                 }
@@ -444,9 +442,9 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
 
                     // Extract anomalies detected by package during collection
-                    if let Some(metrics) = self.serializer_metrics.as_mut() {
+                    if let Some(handler) = self.serializer_metrics.as_mut() {
                         if let Some((errors, count)) = data.anomalies() {
-                            metrics.add_errors(errors, count);
+                            handler.add_errors(errors, count);
                         }
                     }
 
@@ -462,8 +460,8 @@ impl<C: MqttClient> Serializer<C> {
 
                     let payload_size = payload.len();
                     match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
-                        Ok(_) => if let Some(metrics) = self.serializer_metrics.as_mut() {
-                            metrics.add_total_sent_size(payload_size);
+                        Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut() {
+                            handler.add_total_sent_size(payload_size);
                             continue;
                         }
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
@@ -472,22 +470,21 @@ impl<C: MqttClient> Serializer<C> {
 
                 }
                 _ = interval.tick(), if metrics_enabled => {
-                    if let Some(metrics) = self.serializer_metrics.as_mut() {
+                    if let Some(handler) = self.serializer_metrics.as_mut() {
                         info!("Publishing serializer metrics to broker");
-                        metrics.update();
-                        let data = vec![&metrics];
-                        let payload = serde_json::to_vec(&data)?;
-                        metrics.clear();
-                        if let Err(e) = self.client.try_publish(&metrics.topic, QoS::AtLeastOnce, false, payload) {
+                        let data = handler.update();
+                        let payload = serde_json::to_vec(&vec![data])?;
+                        handler.clear();
+                        if let Err(e) = self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
                             error!("Couldn't publish serializer metrics to broker: {}", e)
                         }
                     }
 
-                    if let Some(metrics) = self.stream_metrics.as_mut() {
+                    if let Some(handler) = self.stream_metrics.as_mut() {
                         info!("Publishing stream metrics to broker");
-                        let data: Vec<&mut StreamMetrics> = metrics.streams().collect();
+                        let data: Vec<&mut StreamMetrics> = handler.streams().collect();
                         let payload = serde_json::to_vec(&data)?;
-                        if let Err(e) = self.client.try_publish(&metrics.topic, QoS::AtLeastOnce, false, payload) {
+                        if let Err(e) = self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
                             error!("Couldn't publish stream metrics to broker: {}", e)
                         }
                     }
