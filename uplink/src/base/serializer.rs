@@ -664,7 +664,7 @@ mod test {
         let (mut serializer, _, _) = defaults(config);
         let mut storage = serializer.storage.take().unwrap();
 
-        let publish = Publish::new(
+        let mut publish = Publish::new(
             "hello/world",
             QoS::AtLeastOnce,
             "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
@@ -673,6 +673,8 @@ mod test {
 
         let stored_publish = read_from_storage(&mut storage, serializer.config.max_packet_size);
 
+        // Ensure publish.pkid is 1, as written to disk
+        publish.pkid = 1;
         assert_eq!(publish, stored_publish);
     }
 
