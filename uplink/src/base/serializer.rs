@@ -4,7 +4,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use disk::Storage;
 use flume::{Receiver, RecvError};
-use log::{error, info};
+use log::{error, info, trace};
 use rumqttc::*;
 use thiserror::Error;
 use tokio::{select, time};
@@ -217,7 +217,7 @@ impl<C: MqttClient> Serializer<C> {
             let stream = data.stream().as_ref().to_owned();
             let point_count = data.len();
             let batch_latency = data.batch_latency();
-            info!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+            trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
             if let Some(handler) = self.stream_metrics.as_mut() {
                 handler.update(stream, point_count, batch_latency);
             }
@@ -270,7 +270,7 @@ impl<C: MqttClient> Serializer<C> {
                     let stream = data.stream().as_ref().to_owned();
                     let point_count = data.len();
                     let batch_latency = data.batch_latency();
-                    info!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+                    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
                     if let Some(handler) = self.stream_metrics.as_mut() {
                         handler.update(stream, point_count, batch_latency);
                     }
@@ -359,7 +359,7 @@ impl<C: MqttClient> Serializer<C> {
                     let stream = data.stream().as_ref().to_owned();
                     let point_count = data.len();
                     let batch_latency = data.batch_latency();
-                    info!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+                    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
                     if let Some(handler) = self.stream_metrics.as_mut() {
                         handler.update(stream, point_count, batch_latency);
                     }
@@ -453,7 +453,7 @@ impl<C: MqttClient> Serializer<C> {
                     let stream = data.stream().as_ref().to_owned();
                     let point_count = data.len();
                     let batch_latency = data.batch_latency();
-                    info!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+                    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
                     if let Some(handler) = self.stream_metrics.as_mut() {
                         handler.update(stream, point_count, batch_latency);
                     }
