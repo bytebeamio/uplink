@@ -20,6 +20,10 @@ jobs:
             os: macos-latest
             rust: stable
             target: x86_64-apple-darwin
+          - build: macos-m1
+            os: macos-latest
+            rust: stable
+            target: aarch64-apple-darwin
           - build: linux-arm-gnu
             os: ubuntu-latest
             rust: stable
@@ -55,7 +59,7 @@ jobs:
         run: cross build --verbose --release ${{ env.TARGET_FLAGS }}
 
       - name: Strip release binary (linux and macos)
-        if: matrix.build == 'linux' || matrix.build == 'macos'
+        if: matrix.build == 'linux' || matrix.build == 'macos' || matrix.build == 'macos-m1'
         run: strip "target/${{ matrix.target }}/release/uplink"
 
       - name: Strip release binary (armv7)
