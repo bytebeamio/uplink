@@ -98,8 +98,8 @@ pub struct StreamMetrics {
     sequence: u32,
     stream: String,
     point_count: usize,
-    batch_count: usize,
-    average_latency: f64,
+    batch_count: u64,
+    average_latency: u64,
     min_latency: u64,
     max_latency: u64,
 }
@@ -136,12 +136,11 @@ impl StreamMetricsHandler {
 
         metrics.max_latency = metrics.max_latency.max(batch_latency);
         metrics.min_latency = metrics.min_latency.min(batch_latency);
-        let total_latency =
-            (metrics.average_latency * metrics.batch_count as f64) + batch_latency as f64;
+        let total_latency = (metrics.average_latency * metrics.batch_count) + batch_latency;
 
         metrics.batch_count += 1;
         metrics.point_count += point_count;
-        metrics.average_latency = total_latency / metrics.batch_count as f64;
+        metrics.average_latency = total_latency / metrics.batch_count;
     }
 
     pub fn streams(&mut self) -> Streams {
