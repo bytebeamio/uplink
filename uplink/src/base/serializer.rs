@@ -212,19 +212,7 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             // Collect next data packet to write to disk
             let data = self.collector_rx.recv_async().await?;
-            let topic = data.topic();
-            let payload = data.serialize()?;
-            let stream = data.stream().as_ref().to_owned();
-            let point_count = data.len();
-            let batch_latency = data.batch_latency();
-            trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
-            if let Some(handler) = self.stream_metrics.as_mut() {
-                handler.update(stream, point_count, batch_latency);
-            }
-
-            let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
-            publish.pkid = 1;
-
+            let (publish, _) = construct_publish(&mut self.stream_metrics, data)?;
             if let Err(e) = publish.write(storage.writer()) {
                 error!("Failed to fill write buffer during bad network. Error = {:?}", e);
                 continue;
@@ -265,20 +253,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let topic = data.topic();
-                    let payload = data.serialize()?;
-                    let stream = data.stream().as_ref().to_owned();
-                    let point_count = data.len();
-                    let batch_latency = data.batch_latency();
-                    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
-                    if let Some(handler) = self.stream_metrics.as_mut() {
-                        handler.update(stream, point_count, batch_latency);
-                    }
-
-                    let payload_size = payload.len();
-                    let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
-                    publish.pkid = 1;
-
+                    let (publish, payload_size) = construct_publish(&mut self.stream_metrics, data)?;
                     match publish.write(storage.writer()) {
                         Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut(){
                             handler.add_total_disk_size(payload_size)
@@ -354,20 +329,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let topic = data.topic();
-                    let payload = data.serialize()?;
-                    let stream = data.stream().as_ref().to_owned();
-                    let point_count = data.len();
-                    let batch_latency = data.batch_latency();
-                    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
-                    if let Some(handler) = self.stream_metrics.as_mut() {
-                        handler.update(stream, point_count, batch_latency);
-                    }
-
-                    let payload_size = payload.len();
-                    let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
-                    publish.pkid = 1;
-
+                    let (publish, payload_size) = construct_publish(&mut self.stream_metrics, data)?;
                     match publish.write(storage.writer()) {
                         Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut() {
                             handler.add_total_disk_size(payload_size)
@@ -448,20 +410,10 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let topic = data.topic();
-                    let payload = data.serialize()?;
-                    let stream = data.stream().as_ref().to_owned();
-                    let point_count = data.len();
-                    let batch_latency = data.batch_latency();
-                    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
-                    if let Some(handler) = self.stream_metrics.as_mut() {
-                        handler.update(stream, point_count, batch_latency);
-                    }
-
-                    let payload_size = payload.len();
-                    match self.client.try_publish(topic.as_ref(), QoS::AtLeastOnce, false, payload) {
-                        Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut() {
-                            handler.add_total_sent_size(payload_size);
+                    let (publish, payload_size) = construct_publish(&mut self.stream_metrics, data)?;
+                    match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, publish.payload) {
+                        Ok(_) => if let Some(metrics) = self.serializer_metrics.as_mut() {
+                            metrics.add_total_sent_size(payload_size);
                             continue;
                         }
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
@@ -529,6 +481,28 @@ async fn send_publish<C: MqttClient>(
 ) -> Result<C, MqttError> {
     client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
+}
+
+fn construct_publish(
+    stream_metrics: &mut Option<StreamMetricsHandler>,
+    data: Box<dyn Package>,
+) -> Result<(Publish, usize), Error> {
+    let stream = data.stream().as_ref().to_owned();
+    let point_count = data.len();
+    let batch_latency = data.batch_latency();
+    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+    if let Some(handler) = stream_metrics {
+        handler.update(stream, point_count, batch_latency);
+    }
+
+    let topic = data.topic();
+    let payload = data.serialize()?;
+    let payload_size = payload.len();
+
+    let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+    publish.pkid = 1;
+
+    Ok((publish, payload_size))
 }
 
 #[cfg(test)]
