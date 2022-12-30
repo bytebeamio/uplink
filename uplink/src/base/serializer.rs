@@ -193,35 +193,19 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     /// Write all data received, from here-on, to disk only.
-    async fn crash(&mut self, mut publish: Publish) -> Result<Status, Error> {
+    async fn crash(&mut self, publish: Publish) -> Result<Status, Error> {
         let storage = match &mut self.storage {
             Some(s) => s,
             None => return Err(Error::MissingPersistence),
         };
-        // Write failed publish to disk first
-        publish.pkid = 1;
-
-        if let Err(e) = publish.write(storage.writer()) {
-            error!("Failed to fill write buffer during bad network. Error = {:?}", e);
-        }
-
-        if let Err(e) = storage.flush_on_overflow() {
-            error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
-        }
+        // Write failed publish to disk first, metrics don't matter
+        write_to_disk(publish, storage, &mut None);
 
         loop {
             // Collect next data packet to write to disk
             let data = self.collector_rx.recv_async().await?;
-            let (publish, _) = construct_publish(&mut self.stream_metrics, data)?;
-            if let Err(e) = publish.write(storage.writer()) {
-                error!("Failed to fill write buffer during bad network. Error = {:?}", e);
-                continue;
-            }
-
-            if let Err(e) = storage.flush_on_overflow() {
-                error!("Failed to flush write buffer to disk during bad network. Error = {:?}", e);
-                continue;
-            }
+            let publish = construct_publish(&mut self.stream_metrics, data)?;
+            write_to_disk(publish, storage, &mut None);
         }
     }
 
@@ -253,28 +237,8 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let (publish, payload_size) = construct_publish(&mut self.stream_metrics, data)?;
-                    match publish.write(storage.writer()) {
-                        Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut(){
-                            handler.add_total_disk_size(payload_size)
-                        },
-                        Err(e) => {
-                            error!("Failed to fill disk buffer. Error = {:?}", e);
-                            continue
-                        }
-                    }
-
-                    match storage.flush_on_overflow() {
-                        Ok(deleted) => if let Some(handler) = self.serializer_metrics.as_mut() {
-                            if deleted.is_some() {
-                                handler.increment_lost_segments();
-                            }
-                        },
-                        Err(e) => {
-                            error!("Failed to flush disk buffer. Error = {:?}", e);
-                            continue
-                        }
-                    }
+                    let publish = construct_publish(&mut self.stream_metrics, data)?;
+                    write_to_disk(publish, storage, &mut self.serializer_metrics);
                 }
                 o = &mut publish => match o {
                     Ok(_) => return Ok(Status::EventLoopReady),
@@ -329,28 +293,8 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let (publish, payload_size) = construct_publish(&mut self.stream_metrics, data)?;
-                    match publish.write(storage.writer()) {
-                        Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut() {
-                            handler.add_total_disk_size(payload_size)
-                        },
-                        Err(e) => {
-                            error!("Failed to fill disk buffer. Error = {:?}", e);
-                            continue
-                        }
-                    }
-
-                    match storage.flush_on_overflow() {
-                        Ok(deleted) => if let Some(handler) = self.serializer_metrics.as_mut() {
-                            if deleted.is_some() {
-                                handler.increment_lost_segments();
-                            }
-                        },
-                        Err(e) => {
-                            error!("Failed to flush write buffer to disk during catchup. Error = {:?}", e);
-                            continue
-                        }
-                    }
+                    let publish = construct_publish(&mut self.stream_metrics, data)?;
+                    write_to_disk(publish, storage, &mut self.serializer_metrics);
                 }
                 o = &mut send => {
                     // Send failure implies eventloop crash. Switch state to
@@ -410,10 +354,11 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let (publish, payload_size) = construct_publish(&mut self.stream_metrics, data)?;
+                    let publish = construct_publish(&mut self.stream_metrics, data)?;
+                    let payload_size = publish.payload.len();
                     match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, publish.payload) {
-                        Ok(_) => if let Some(metrics) = self.serializer_metrics.as_mut() {
-                            metrics.add_total_sent_size(payload_size);
+                        Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut() {
+                            handler.add_total_sent_size(payload_size);
                             continue;
                         }
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
@@ -486,7 +431,7 @@ async fn send_publish<C: MqttClient>(
 fn construct_publish(
     stream_metrics: &mut Option<StreamMetricsHandler>,
     data: Box<dyn Package>,
-) -> Result<(Publish, usize), Error> {
+) -> Result<Publish, Error> {
     let stream = data.stream().as_ref().to_owned();
     let point_count = data.len();
     let batch_latency = data.batch_latency();
@@ -497,12 +442,39 @@ fn construct_publish(
 
     let topic = data.topic();
     let payload = data.serialize()?;
-    let payload_size = payload.len();
 
-    let mut publish = Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload);
+    Ok(Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload))
+}
+
+fn write_to_disk(
+    mut publish: Publish,
+    storage: &mut Storage,
+    serializer_metrics: &mut Option<SerializerMetricsHandler>,
+) {
     publish.pkid = 1;
+    let payload_size = publish.payload.len();
+    if let Err(e) = publish.write(storage.writer()) {
+        error!("Failed to fill disk buffer. Error = {:?}", e);
+        return;
+    }
 
-    Ok((publish, payload_size))
+    if let Some(handler) = serializer_metrics {
+        handler.add_total_disk_size(payload_size)
+    }
+
+    let deleted = match storage.flush_on_overflow() {
+        Ok(d) => d,
+        Err(e) => {
+            error!("Failed to flush disk buffer. Error = {:?}", e);
+            return;
+        }
+    };
+
+    if let Some(handler) = serializer_metrics {
+        if deleted.is_some() {
+            handler.increment_lost_segments();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -573,16 +545,6 @@ mod test {
             let publish = Request::Publish(publish);
             self.net_tx.send_async(publish).await.map_err(|e| MqttError::Send(e.into_inner()))?;
             Ok(())
-        }
-    }
-
-    fn write_to_storage(storage: &mut Storage, publish: &Publish) {
-        if let Err(e) = publish.write(storage.writer()) {
-            panic!("Failed to fill write buffer. Error = {:?}", e);
-        }
-
-        if let Err(e) = storage.flush_on_overflow() {
-            panic!("Failed to flush write buffer to disk. Error = {:?}", e);
         }
     }
 
@@ -702,14 +664,12 @@ mod test {
         let (mut serializer, _, _) = defaults(config);
         let mut storage = serializer.storage.take().unwrap();
 
-        let mut publish = Publish::new(
+        let publish = Publish::new(
             "hello/world",
             QoS::AtLeastOnce,
             "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        publish.pkid = 1;
-
-        write_to_storage(&mut storage, &publish);
+        write_to_disk(publish.clone(), &mut storage, &mut None);
 
         let stored_publish = read_from_storage(&mut storage, serializer.config.max_packet_size);
 
@@ -829,14 +789,12 @@ mod test {
         });
 
         // Force write a publish into storage
-        let mut publish = Publish::new(
+        let publish = Publish::new(
             "hello/world",
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        publish.pkid = 1;
-
-        write_to_storage(&mut storage, &publish);
+        write_to_disk(publish.clone(), &mut storage, &mut None);
 
         // Replace storage into serializer
         serializer.storage = Some(storage);
@@ -865,14 +823,12 @@ mod test {
         });
 
         // Force write a publish into storage
-        let mut publish = Publish::new(
+        let publish = Publish::new(
             "hello/world",
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        publish.pkid = 1;
-
-        write_to_storage(&mut storage, &publish);
+        write_to_disk(publish.clone(), &mut storage, &mut None);
 
         // Replace storage into serializer
         serializer.storage = Some(storage);
