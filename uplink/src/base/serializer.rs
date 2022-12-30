@@ -366,6 +366,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                 }
+                // On a regular interval, forwards metrics information to network
                 _ = interval.tick(), if metrics_enabled => {
                     if let Some(handler) = self.serializer_metrics.as_mut() {
                         info!("Publishing serializer metrics to broker");
@@ -428,6 +429,7 @@ async fn send_publish<C: MqttClient>(
     Ok(client)
 }
 
+// Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
 fn construct_publish(
     stream_metrics: &mut Option<StreamMetricsHandler>,
     data: Box<dyn Package>,
@@ -446,6 +448,8 @@ fn construct_publish(
     Ok(Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload))
 }
 
+// Writes the provided publish packet to disk with [Storage], after setting its pkid to 1.
+// Updates serializer metrics with appropriate values on success, if asked to do so.
 fn write_to_disk(
     mut publish: Publish,
     storage: &mut Storage,

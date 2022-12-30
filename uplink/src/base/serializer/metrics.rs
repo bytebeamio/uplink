@@ -79,6 +79,7 @@ impl SerializerMetricsHandler {
         self.metrics.errors.push_str(" | ");
     }
 
+    // Retrieve metrics to send on network
     pub fn update(&mut self) -> &SerializerMetrics {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
@@ -128,6 +129,8 @@ impl StreamMetricsHandler {
         Some(Self { topic, map: Default::default() })
     }
 
+    /// Updates the metrics for a stream as deemed necessary with the count of points in batch
+    /// and the difference between first and last elements timestamp as latency being inputs.
     pub fn update(&mut self, stream: String, point_count: usize, batch_latency: u64) {
         // Init stream metrics max/min values with opposite extreme values to ensure first latency value is accepted
         let metrics = self.map.entry(stream.clone()).or_insert(StreamMetrics {
@@ -139,6 +142,7 @@ impl StreamMetricsHandler {
 
         metrics.max_latency = metrics.max_latency.max(batch_latency);
         metrics.min_latency = metrics.min_latency.min(batch_latency);
+        // NOTE: Average latency is calculated in a slightly lossy fashion,
         let total_latency = (metrics.average_latency * metrics.batch_count) + batch_latency;
 
         metrics.batch_count += 1;
