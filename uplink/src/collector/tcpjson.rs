@@ -104,15 +104,14 @@ impl Bridge {
                         let action = action?;
                         let action_id = action.action_id.clone();
 
-                        info!("Received action: {:?}", action);
-                        self.action_status.fill(ActionResponse::progress(&action.action_id, "Received", 0)).await?;
-
                         current_action_ = Some(CurrentAction {
                             id: action_id.clone(),
                             timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
                         });
 
                         if self.actions_tx.send(action).is_ok() {
+                            info!("Received action: {:?}", action_id);
+                            self.action_status.fill(ActionResponse::progress(&action_id, "Received", 0)).await?;
                             continue;
                         }
 
