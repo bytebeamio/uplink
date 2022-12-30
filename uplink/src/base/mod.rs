@@ -79,6 +79,7 @@ pub struct Downloader {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct MetricsConfig {
+    pub enabled: bool,
     pub topic: Option<String>,
 }
 
@@ -97,8 +98,8 @@ pub struct Config {
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
-    pub serializer_metrics: Option<MetricsConfig>,
-    pub stream_metrics: Option<MetricsConfig>,
+    pub serializer_metrics: MetricsConfig,
+    pub stream_metrics: MetricsConfig,
     pub downloader: Option<Downloader>,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,

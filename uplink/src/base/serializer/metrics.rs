@@ -4,6 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use serde::Serialize;
 
+use crate::base::MetricsConfig;
 use crate::Config;
 
 #[derive(Debug, Default, Serialize, Clone)]
@@ -24,14 +25,15 @@ pub struct SerializerMetricsHandler {
 
 impl SerializerMetricsHandler {
     pub fn new(config: Arc<Config>) -> Option<Self> {
-        let topic = match &config.serializer_metrics.as_ref()?.topic {
-            Some(topic) => topic.to_owned(),
+        let topic = match &config.serializer_metrics {
+            MetricsConfig { enabled: false, .. } => return None,
+            MetricsConfig { topic: Some(topic), .. } => topic.to_owned(),
             _ => {
                 String::from("/tenants/")
                     + &config.project_id
                     + "/devices/"
                     + &config.device_id
-                    + "/events/metrics/jsonarray"
+                    + "/events/serializer_metrics/jsonarray"
             }
         };
 
@@ -111,8 +113,9 @@ pub struct StreamMetricsHandler {
 
 impl StreamMetricsHandler {
     pub fn new(config: Arc<Config>) -> Option<Self> {
-        let topic = match &config.stream_metrics.as_ref()?.topic {
-            Some(topic) => topic.to_owned(),
+        let topic = match &config.stream_metrics {
+            MetricsConfig { enabled: false, .. } => return None,
+            MetricsConfig { topic: Some(topic), .. } => topic.to_owned(),
             _ => {
                 String::from("/tenants/")
                     + &config.project_id
