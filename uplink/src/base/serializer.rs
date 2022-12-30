@@ -482,7 +482,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                     if let Some(handler) = self.stream_metrics.as_mut() {
-                        let data: Vec<StreamMetrics> = handler.flush().collect();
+                        let data: Vec<&mut StreamMetrics> = handler.streams().collect();
                         if data.is_empty() {
                             continue;
                         }
