@@ -476,8 +476,9 @@ impl<C: MqttClient> Serializer<C> {
                         handler.clear();
 
                         info!("Publishing serializer metrics to broker");
-                        if let Err(e) = self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
-                            error!("Couldn't publish serializer metrics to broker: {}", e)
+                        match self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
+                            Err(e) => error!("Couldn't publish serializer metrics to broker: {e}"),
+                            _ => handler.clear(),
                         }
                     }
 
@@ -486,11 +487,12 @@ impl<C: MqttClient> Serializer<C> {
                         if data.is_empty() {
                             continue;
                         }
+                        let payload = serde_json::to_vec(&data)?;
 
                         info!("Publishing stream metrics to broker");
-                        let payload = serde_json::to_vec(&data)?;
-                        if let Err(e) = self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
-                            error!("Couldn't publish stream metrics to broker: {}", e)
+                        match self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
+                            Err(e) => error!("Couldn't publish stream metrics to broker: {e}"),
+                            _ => handler.clear(),
                         }
                     }
                 }

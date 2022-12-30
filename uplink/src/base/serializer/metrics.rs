@@ -149,6 +149,10 @@ impl StreamMetricsHandler {
     pub fn streams(&mut self) -> Streams {
         Streams { values: self.map.values_mut() }
     }
+
+    pub fn clear(&mut self) {
+        self.map.clear();
+    }
 }
 
 pub struct Streams<'a> {
