@@ -1,4 +1,4 @@
-use std::collections::hash_map::ValuesMut;
+use std::collections::hash_map::Drain;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, sync::Arc};
 
@@ -146,20 +146,20 @@ impl StreamMetricsHandler {
         metrics.average_latency = total_latency / metrics.batch_count;
     }
 
-    pub fn streams(&mut self) -> Streams {
-        Streams { values: self.map.values_mut() }
+    pub fn flush(&mut self) -> Streams {
+        Streams { map: self.map.drain() }
     }
 }
 
 pub struct Streams<'a> {
-    values: ValuesMut<'a, String, StreamMetrics>,
+    map: Drain<'a, String, StreamMetrics>,
 }
 
 impl<'a> Iterator for Streams<'a> {
-    type Item = &'a mut StreamMetrics;
+    type Item = StreamMetrics;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let metrics = self.values.next()?;
+        let (_, mut metrics) = self.map.next()?;
         metrics.sequence += 1;
         metrics.timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
