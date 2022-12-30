@@ -136,7 +136,7 @@ use base::mqtt::Mqtt;
 use base::serializer::Serializer;
 pub use base::{Config, Package, Payload, Point, Stream};
 use collector::downloader::FileDownloader;
-use collector::{logging::LoggerInstance, systemstats::StatCollector};
+use collector::systemstats::StatCollector;
 pub use collector::{simulator, tcpjson::Bridge};
 pub use disk::Storage;
 
@@ -201,12 +201,19 @@ impl Uplink {
 
         let (log_tx, log_rx) = bounded(10);
         // Launch log collector thread
-        let logger = LoggerInstance::new(self.config.clone(), self.data_tx.clone(), log_rx);
-        thread::spawn(|| {
-            if let Err(e) = logger.start() {
-                error!("Error running logger: {}", e);
-            }
-        });
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            let logger = collector::logging::LoggerInstance::new(
+                self.config.clone(),
+                self.data_tx.clone(),
+                log_rx,
+            );
+            thread::spawn(|| {
+                if let Err(e) = logger.start() {
+                    error!("Error running logger: {}", e);
+                }
+            });
+        }
 
         let (raw_action_tx, raw_action_rx) = bounded(10);
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
