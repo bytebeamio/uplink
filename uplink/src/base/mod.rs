@@ -125,8 +125,8 @@ pub trait Package: Send + Debug {
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
     fn anomalies(&self) -> Option<(String, usize)>;
     fn len(&self) -> usize;
-    fn first_timestamp(&self) -> u64;
-    fn last_timestamp(&self) -> u64;
+    fn first_collection(&self) -> u64;
+    fn last_collection(&self) -> u64;
     fn batch_latency(&self) -> u64;
 
     fn is_empty(&self) -> bool {
@@ -405,17 +405,19 @@ where
         self.buffer.len()
     }
 
-    fn first_timestamp(&self) -> u64 {
-        self.buffer.first().expect("Zero Points in Package!").timestamp()
+    /// Timestamp at collection of first [Point] within [Package]
+    fn first_collection(&self) -> u64 {
+        self.buffer.first().expect("Zero Points in Package!").collection_timestamp()
     }
 
-    fn last_timestamp(&self) -> u64 {
-        self.buffer.last().expect("Zero Points in Package!").timestamp()
+    /// Timestamp at collection of last [Point] within [Package]
+    fn last_collection(&self) -> u64 {
+        self.buffer.last().expect("Zero Points in Package!").collection_timestamp()
     }
 
     fn batch_latency(&self) -> u64 {
-        let first_timestamp = self.first_timestamp();
-        let last_timestamp = self.last_timestamp();
+        let first_timestamp = self.first_collection();
+        let last_timestamp = self.last_collection();
 
         last_timestamp - first_timestamp
     }
