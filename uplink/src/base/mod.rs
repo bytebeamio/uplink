@@ -332,7 +332,7 @@ pub struct Buffer<T> {
     pub stream: Arc<String>,
     pub topic: Arc<String>,
     pub buffer: Vec<T>,
-    pub anomalies: String,
+    pub anomalies: Vec<String>,
     pub anomaly_count: usize,
 }
 
@@ -342,41 +342,29 @@ impl<T> Buffer<T> {
             stream,
             topic,
             buffer: vec![],
-            anomalies: String::with_capacity(100),
+            anomalies: Vec::with_capacity(10),
             anomaly_count: 0,
         }
     }
 
     pub fn add_sequence_anomaly(&mut self, last: u32, current: u32) {
         self.anomaly_count += 1;
-        if self.anomalies.len() >= 100 {
+        if self.anomalies.len() >= 10 {
             return;
         }
 
-        let error = String::from(self.stream.as_ref())
-            + ".sequence: "
-            + &last.to_string()
-            + ", "
-            + &current.to_string();
-        self.anomalies.push_str(&error)
+        let error = format!("s: {{{last}, {current}}}");
+        self.anomalies.push(error)
     }
 
     pub fn add_timestamp_anomaly(&mut self, last: u64, current: u64) {
         self.anomaly_count += 1;
-        if self.anomalies.len() >= 100 {
+        if self.anomalies.len() >= 10 {
             return;
         }
 
-        let error = "timestamp: ".to_owned() + &last.to_string() + ", " + &current.to_string();
-        self.anomalies.push_str(&error)
-    }
-
-    pub fn anomalies(&self) -> Option<(String, usize)> {
-        if self.anomalies.is_empty() {
-            return None;
-        }
-
-        Some((self.anomalies.clone(), self.anomaly_count))
+        let error = format!("t: {{{last}, {current}}}");
+        self.anomalies.push(error)
     }
 }
 
@@ -398,7 +386,13 @@ where
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
+        if self.anomalies.is_empty() {
+            return None;
+        }
+
+        let anomalies = self.anomalies.join(", ");
+
+        Some((anomalies, self.anomaly_count))
     }
 
     fn len(&self) -> usize {
