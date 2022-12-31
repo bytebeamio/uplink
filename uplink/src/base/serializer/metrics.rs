@@ -131,7 +131,7 @@ impl StreamMetricsHandler {
     }
 
     pub fn clear(&mut self) {
-        self.sequence = self.map.len() as u32;
+        self.sequence += self.map.len() as u32;
         self.map.clear();
     }
 }
@@ -207,7 +207,7 @@ impl StreamAnomaliesHandler {
     }
 
     pub fn clear(&mut self) {
-        self.sequence = self.map.len() as u32;
+        self.sequence += self.map.len() as u32;
         self.map.clear();
     }
 }
