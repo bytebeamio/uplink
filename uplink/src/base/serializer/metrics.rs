@@ -83,6 +83,8 @@ pub struct StreamMetrics {
 
 pub struct StreamMetricsHandler {
     pub topic: String,
+    // Used to set sequence number for stream_metrics messages
+    sequence: u32,
     map: HashMap<String, StreamMetrics>,
 }
 
@@ -100,7 +102,7 @@ impl StreamMetricsHandler {
             }
         };
 
-        Some(Self { topic, map: Default::default() })
+        Some(Self { topic, map: Default::default(), sequence: 0 })
     }
 
     /// Updates the metrics for a stream as deemed necessary with the count of points in batch
@@ -125,15 +127,17 @@ impl StreamMetricsHandler {
     }
 
     pub fn streams(&mut self) -> Metrics {
-        Metrics { values: self.map.values_mut() }
+        Metrics { sequence: self.sequence, values: self.map.values_mut() }
     }
 
     pub fn clear(&mut self) {
+        self.sequence = self.map.len() as u32;
         self.map.clear();
     }
 }
 
 pub struct Metrics<'a> {
+    sequence: u32,
     values: ValuesMut<'a, String, StreamMetrics>,
 }
 
@@ -142,7 +146,8 @@ impl<'a> Iterator for Metrics<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let metrics = self.values.next()?;
-        metrics.sequence += 1;
+        self.sequence += 1;
+        metrics.sequence = self.sequence;
         metrics.timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
@@ -163,6 +168,8 @@ pub struct StreamAnomalies {
 
 pub struct StreamAnomaliesHandler {
     pub topic: String,
+    // Used to set sequence number for stream_anomalies messages
+    sequence: u32,
     map: HashMap<String, StreamAnomalies>,
 }
 
@@ -180,7 +187,7 @@ impl StreamAnomaliesHandler {
             }
         };
 
-        Some(Self { topic, map: Default::default() })
+        Some(Self { topic, map: Default::default(), sequence: 0 })
     }
 
     pub fn update(&mut self, stream: String, anomalies: String, anomaly_count: usize) {
@@ -195,15 +202,18 @@ impl StreamAnomaliesHandler {
     }
 
     pub fn streams(&mut self) -> Anomalies {
-        Anomalies { values: self.map.values_mut() }
+        let sequence = self.sequence;
+        Anomalies { sequence, values: self.map.values_mut() }
     }
 
     pub fn clear(&mut self) {
+        self.sequence = self.map.len() as u32;
         self.map.clear();
     }
 }
 
 pub struct Anomalies<'a> {
+    sequence: u32,
     values: ValuesMut<'a, String, StreamAnomalies>,
 }
 
@@ -212,6 +222,8 @@ impl<'a> Iterator for Anomalies<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let anomalies = self.values.next()?;
+        self.sequence += 1;
+        anomalies.sequence = self.sequence;
         anomalies.timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
