@@ -371,7 +371,6 @@ impl<C: MqttClient> Serializer<C> {
                     if let Some(handler) = self.serializer_metrics.as_mut() {
                         let data = handler.update();
                         let payload = serde_json::to_vec(&vec![data])?;
-                        handler.clear();
 
                         info!("Publishing serializer metrics to broker");
                         match self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
