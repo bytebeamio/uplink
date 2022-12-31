@@ -14,8 +14,6 @@ pub struct SerializerMetrics {
     total_sent_size: usize,
     total_disk_size: usize,
     lost_segments: usize,
-    errors: String,
-    error_count: usize,
 }
 
 pub struct SerializerMetricsHandler {
@@ -37,10 +35,7 @@ impl SerializerMetricsHandler {
             }
         };
 
-        let metrics =
-            SerializerMetrics { errors: String::with_capacity(1024), ..Default::default() };
-
-        Some(Self { topic, metrics })
+        Some(Self { topic, metrics: Default::default() })
     }
 
     pub fn add_total_sent_size(&mut self, size: usize) {
@@ -59,26 +54,6 @@ impl SerializerMetricsHandler {
         self.metrics.lost_segments += 1;
     }
 
-    // pub fn add_error<S: Into<String>>(&mut self, error: S) {
-    //     self.error_count += 1;
-    //     if self.errors.len() > 1024 {
-    //         return;
-    //     }
-    //
-    //     self.errors.push_str(", ");
-    //     self.errors.push_str(&error.into());
-    // }
-
-    pub fn add_errors<S: Into<String>>(&mut self, error: S, count: usize) {
-        self.metrics.error_count += count;
-        if self.metrics.errors.len() > 1024 {
-            return;
-        }
-
-        self.metrics.errors.push_str(&error.into());
-        self.metrics.errors.push_str(" | ");
-    }
-
     // Retrieve metrics to send on network
     pub fn update(&mut self) -> &SerializerMetrics {
         let timestamp =
@@ -90,7 +65,6 @@ impl SerializerMetricsHandler {
     }
 
     pub fn clear(&mut self) {
-        self.metrics.errors.clear();
         self.metrics.lost_segments = 0;
     }
 }
@@ -175,5 +149,74 @@ impl<'a> Iterator for Metrics<'a> {
             .as_millis() as u64;
 
         Some(metrics)
+    }
+}
+
+#[derive(Debug, Default, Serialize, Clone)]
+pub struct StreamAnomalies {
+    sequence: u32,
+    timestamp: u64,
+    stream: String,
+    anomalies: String,
+    anomaly_count: usize,
+}
+
+pub struct StreamAnomaliesHandler {
+    pub topic: String,
+    map: HashMap<String, StreamAnomalies>,
+}
+
+impl StreamAnomaliesHandler {
+    pub fn new(config: Arc<Config>) -> Option<Self> {
+        let topic = match &config.stream_anomalies {
+            MetricsConfig { enabled: false, .. } => return None,
+            MetricsConfig { topic: Some(topic), .. } => topic.to_owned(),
+            _ => {
+                String::from("/tenants/")
+                    + &config.project_id
+                    + "/devices/"
+                    + &config.device_id
+                    + "/events/stream_anomalies/jsonarray"
+            }
+        };
+
+        Some(Self { topic, map: Default::default() })
+    }
+
+    pub fn update(&mut self, stream: String, anomalies: String, anomaly_count: usize) {
+        let entry = self
+            .map
+            .entry(stream.clone())
+            .or_insert(StreamAnomalies { stream, ..Default::default() });
+
+        entry.anomaly_count += anomaly_count;
+        let suffix = anomalies + ", ";
+        entry.anomalies.push_str(&suffix);
+    }
+
+    pub fn streams(&mut self) -> Anomalies {
+        Anomalies { values: self.map.values_mut() }
+    }
+
+    pub fn clear(&mut self) {
+        self.map.clear();
+    }
+}
+
+pub struct Anomalies<'a> {
+    values: ValuesMut<'a, String, StreamAnomalies>,
+}
+
+impl<'a> Iterator for Anomalies<'a> {
+    type Item = &'a mut StreamAnomalies;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let anomalies = self.values.next()?;
+        anomalies.timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_millis() as u64;
+
+        Some(anomalies)
     }
 }
