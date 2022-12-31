@@ -202,9 +202,9 @@ impl<C: MqttClient> Serializer<C> {
         write_to_disk(publish, storage, &mut None);
 
         loop {
-            // Collect next data packet to write to disk
+            // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
-            let publish = construct_publish(&mut self.stream_metrics, data)?;
+            let publish = construct_publish(&mut None, data)?;
             write_to_disk(publish, storage, &mut None);
         }
     }
