@@ -150,8 +150,8 @@ impl StreamMetricsHandler {
         metrics.average_latency = total_latency / metrics.batch_count;
     }
 
-    pub fn streams(&mut self) -> Streams {
-        Streams { values: self.map.values_mut() }
+    pub fn streams(&mut self) -> Metrics {
+        Metrics { values: self.map.values_mut() }
     }
 
     pub fn clear(&mut self) {
@@ -159,11 +159,11 @@ impl StreamMetricsHandler {
     }
 }
 
-pub struct Streams<'a> {
+pub struct Metrics<'a> {
     values: ValuesMut<'a, String, StreamMetrics>,
 }
 
-impl<'a> Iterator for Streams<'a> {
+impl<'a> Iterator for Metrics<'a> {
     type Item = &'a mut StreamMetrics;
 
     fn next(&mut self) -> Option<Self::Item> {
