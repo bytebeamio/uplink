@@ -1,5 +1,5 @@
-use std::io;
 use std::sync::Arc;
+use std::{fmt::Display, io};
 
 use bytes::Bytes;
 use disk::Storage;
@@ -46,11 +46,26 @@ pub enum Error {
 }
 
 #[derive(Debug, PartialEq)]
-enum Status {
+pub enum Status {
     Normal,
     SlowEventloop(Publish),
     EventLoopReady,
     EventLoopCrash(Publish),
+}
+
+impl Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Normal => f.write_fmt(format_args!("Normal")),
+            Self::SlowEventloop(p) => {
+                f.write_fmt(format_args!("Slow Eventloop (pkid: {}; topic: {})", p.pkid, p.topic))
+            }
+            Self::EventLoopReady => f.write_fmt(format_args!("Eventloop Ready")),
+            Self::EventLoopCrash(p) => {
+                f.write_fmt(format_args!("Slow Eventloop (pkid: {}; topic: {})", p.pkid, p.topic))
+            }
+        }
+    }
 }
 
 #[async_trait::async_trait]
