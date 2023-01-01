@@ -91,6 +91,7 @@ pub struct Config {
     pub port: u16,
     pub authentication: Option<Authentication>,
     pub bridge_port: u16,
+    pub status_port: Option<u16>,
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub keep_alive: u64,

@@ -49,6 +49,8 @@ use simplelog::{
 };
 use structopt::StructOpt;
 
+use tokio::task;
+use uplink::collector::tcpstatus::TcpStatus;
 use uplink::config::{initialize, CommandLine};
 use uplink::{simulator, Bridge, Config, Uplink};
 
@@ -147,6 +149,9 @@ async fn main() -> Result<(), Error> {
 
     let mut uplink = Uplink::new(config.clone())?;
     uplink.spawn()?;
+
+    let mut tcp_status = TcpStatus::new(config.clone(), uplink.status.clone());
+    task::spawn(async move { tcp_status.start().await });
 
     if let Some(simulator_config) = &config.simulator {
         if let Err(e) =

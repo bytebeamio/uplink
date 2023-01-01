@@ -4,4 +4,5 @@ pub mod logging;
 pub mod simulator;
 pub mod systemstats;
 pub mod tcpjson;
+pub mod tcpstatus;
 mod util;
