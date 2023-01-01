@@ -59,14 +59,16 @@ pub enum Status {
 
 impl Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let prefix = "{ \"status\": \"";
+        let suffix = "\" }";
         match self {
-            Self::Normal => f.write_fmt(format_args!("Normal")),
+            Self::Normal => f.write_fmt(format_args!("{prefix}Normal{suffix}")),
             Self::SlowEventloop(p) => {
-                f.write_fmt(format_args!("Slow Eventloop (pkid: {}; topic: {})", p.pkid, p.topic))
+                f.write_fmt(format_args!("{prefix}Slow Eventloop (pkid: {}; topic: {}){suffix}", p.pkid, p.topic))
             }
-            Self::EventLoopReady => f.write_fmt(format_args!("Eventloop Ready")),
+            Self::EventLoopReady => f.write_fmt(format_args!("{prefix}Eventloop Ready{suffix}")),
             Self::EventLoopCrash(p) => {
-                f.write_fmt(format_args!("Slow Eventloop (pkid: {}; topic: {})", p.pkid, p.topic))
+                f.write_fmt(format_args!("{prefix}Slow Eventloop (pkid: {}; topic: {}){suffix}", p.pkid, p.topic))
             }
         }
     }

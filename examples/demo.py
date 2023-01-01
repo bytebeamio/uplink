@@ -54,9 +54,10 @@ threading.Thread(target=recv_actions).start()
 
 def query_status():
     while True:
+        # Queries are performed with transient TCP connections
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(("localhost", 6666))
-        status = str(s.recv(2048))
+        status = json.loads(s.recv(2048))
         print(status)
         time.sleep(5)
 

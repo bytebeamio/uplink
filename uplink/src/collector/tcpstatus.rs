@@ -2,7 +2,7 @@ use futures_util::SinkExt;
 use log::{error, info};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::{io::AsyncWriteExt, sync::RwLock};
+use tokio::sync::RwLock;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::{io, sync::Arc};
@@ -63,9 +63,6 @@ impl TcpStatus {
             let status = status.read().await.to_string();
             if let Err(e) = framed.send(status).await {
                 error!("Error sending line = {:?}", e);
-            }
-            if let Err(e) = framed.into_inner().shutdown().await {
-                error!("Error shutting down TCP stream = {:?}", e);
             }
         });
     }
