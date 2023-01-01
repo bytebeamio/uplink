@@ -476,3 +476,14 @@ impl Point for Payload {
         self.collection_timestamp
     }
 }
+
+#[derive(Debug, Serialize)]
+pub struct SerializerState {
+    status: String,
+}
+
+impl Default for SerializerState {
+    fn default() -> Self {
+        Self { status: "Serializer has not started yet".to_string() }
+    }
+}

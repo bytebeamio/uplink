@@ -12,7 +12,7 @@ use tokio::{select, sync::RwLock, time};
 mod metrics;
 
 use self::metrics::{SerializerMetricsHandler, StreamMetrics, StreamMetricsHandler};
-use crate::{Config, Package};
+use crate::{Config, Package, SerializerState};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MqttError {
@@ -50,7 +50,7 @@ pub enum Error {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Status {
+enum Status {
     Normal,
     SlowEventloop(Publish),
     EventLoopReady,
@@ -59,16 +59,14 @@ pub enum Status {
 
 impl Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let prefix = "{ \"status\": \"";
-        let suffix = "\" }";
         match self {
-            Self::Normal => f.write_fmt(format_args!("{prefix}Normal{suffix}")),
+            Self::Normal => f.write_fmt(format_args!("Normal")),
             Self::SlowEventloop(p) => {
-                f.write_fmt(format_args!("{prefix}Slow Eventloop (pkid: {}; topic: {}){suffix}", p.pkid, p.topic))
+                f.write_fmt(format_args!("Slow Eventloop (pkid: {}; topic: {})", p.pkid, p.topic))
             }
-            Self::EventLoopReady => f.write_fmt(format_args!("{prefix}Eventloop Ready{suffix}")),
+            Self::EventLoopReady => f.write_fmt(format_args!("Eventloop Ready")),
             Self::EventLoopCrash(p) => {
-                f.write_fmt(format_args!("{prefix}Slow Eventloop (pkid: {}; topic: {}){suffix}", p.pkid, p.topic))
+                f.write_fmt(format_args!("Slow Eventloop (pkid: {}; topic: {})", p.pkid, p.topic))
             }
         }
     }
@@ -186,8 +184,8 @@ pub struct Serializer<C: MqttClient> {
     client: C,
     storage: Option<Storage>,
     serializer_metrics: Option<SerializerMetricsHandler>,
+    serializer_state: Arc<RwLock<SerializerState>>,
     stream_metrics: Option<StreamMetricsHandler>,
-    status: Arc<RwLock<Status>>,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -195,7 +193,7 @@ impl<C: MqttClient> Serializer<C> {
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
         client: C,
-        status: Arc<RwLock<Status>>,
+        serializer_state: Arc<RwLock<SerializerState>>,
     ) -> Result<Serializer<C>, Error> {
         let storage = match &config.persistence {
             Some(persistence) => {
@@ -219,7 +217,7 @@ impl<C: MqttClient> Serializer<C> {
             storage,
             serializer_metrics,
             stream_metrics,
-            status,
+            serializer_state,
         })
     }
 
@@ -442,16 +440,20 @@ impl<C: MqttClient> Serializer<C> {
     /// [slow mode]: Serializer::slow
     /// [crash mode]: Serializer::crash
     pub async fn start(mut self) -> Result<(), Error> {
+        let mut status = Status::EventLoopReady;
         loop {
-            let status = self.status.read().await.clone();
+            let mut state = self.serializer_state.write().await;
+            state.status = status.to_string();
+            drop(state);
+
             let next_status = match status {
                 Status::Normal => self.normal().await?,
                 Status::SlowEventloop(publish) => self.slow(publish).await?,
                 Status::EventLoopReady => self.catchup().await?,
                 Status::EventLoopCrash(publish) => self.crash(publish).await?,
             };
-            let mut status = self.status.write().await;
-            *status = next_status;
+
+            status = next_status;
         }
     }
 }
@@ -630,9 +632,9 @@ mod test {
         let (data_tx, data_rx) = flume::bounded(1);
         let (net_tx, net_rx) = flume::bounded(1);
         let client = MockClient { net_tx };
-        let status = Arc::new(RwLock::new(Status::EventLoopReady));
+        let state = Arc::new(RwLock::new(Default::default()));
 
-        (Serializer::new(config, data_rx, client, status).unwrap(), data_tx, net_rx)
+        (Serializer::new(config, data_rx, client, state).unwrap(), data_tx, net_rx)
     }
 
     #[derive(Error, Debug)]

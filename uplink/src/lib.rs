@@ -134,8 +134,8 @@ pub use base::middleware;
 use base::middleware::tunshell::TunshellSession;
 use base::middleware::Middleware;
 use base::mqtt::Mqtt;
-use base::serializer::{Serializer, Status};
-pub use base::{Config, Package, Payload, Point, Stream};
+use base::serializer::Serializer;
+pub use base::{Config, Package, Payload, Point, SerializerState, Stream};
 use collector::downloader::FileDownloader;
 use collector::systemstats::StatCollector;
 pub use collector::{simulator, tcpjson::Bridge};
@@ -148,7 +148,7 @@ pub struct Uplink {
     data_rx: Receiver<Box<dyn Package>>,
     data_tx: Sender<Box<dyn Package>>,
     action_status: Stream<ActionResponse>,
-    pub status: Arc<RwLock<Status>>,
+    pub serializer_state: Arc<RwLock<SerializerState>>,
 }
 
 impl Uplink {
@@ -162,9 +162,17 @@ impl Uplink {
             .as_ref()
             .ok_or_else(|| Error::msg("Action status topic missing from config"))?;
         let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
-        let status = Arc::new(RwLock::new(Status::EventLoopReady));
+        let serializer_state = Arc::new(RwLock::new(Default::default()));
 
-        Ok(Uplink { config, action_rx, action_tx, data_rx, data_tx, action_status, status })
+        Ok(Uplink {
+            config,
+            action_rx,
+            action_tx,
+            data_rx,
+            data_tx,
+            action_status,
+            serializer_state,
+        })
     }
 
     pub fn spawn(&mut self) -> Result<(), Error> {
@@ -225,7 +233,7 @@ impl Uplink {
             self.config.clone(),
             self.data_rx.clone(),
             mqtt.client(),
-            self.status.clone(),
+            self.serializer_state.clone(),
         )?;
 
         let actions = Middleware::new(

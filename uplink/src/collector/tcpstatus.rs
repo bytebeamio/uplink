@@ -1,16 +1,14 @@
 use futures_util::SinkExt;
 use log::{error, info};
-use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::{io, sync::Arc};
 
-use crate::base::serializer::Status;
-use crate::Config;
+use crate::{Config, SerializerState};
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] io::Error),
@@ -24,12 +22,12 @@ pub enum Error {
 
 pub struct TcpStatus {
     config: Arc<Config>,
-    status: Arc<RwLock<Status>>,
+    serializer_state: Arc<RwLock<SerializerState>>,
 }
 
 impl TcpStatus {
-    pub fn new(config: Arc<Config>, status: Arc<RwLock<Status>>) -> Self {
-        Self { config, status }
+    pub fn new(config: Arc<Config>, serializer_state: Arc<RwLock<SerializerState>>) -> Self {
+        Self { config, serializer_state }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -57,13 +55,24 @@ impl TcpStatus {
     }
 
     async fn spawn_to_respond(&self, stream: TcpStream) {
-        let mut framed = Framed::new(stream, LinesCodec::new());
-        let status = self.status.clone();
+        let framed = Framed::new(stream, LinesCodec::new());
+        let serializer_state = self.serializer_state.clone();
+
         tokio::task::spawn(async move {
-            let status = status.read().await.to_string();
-            if let Err(e) = framed.send(status).await {
-                error!("Error sending line = {:?}", e);
+            if let Err(e) = write_status(serializer_state, framed).await {
+                error!("Error writing status = {:?}", e);
             }
         });
     }
+}
+
+async fn write_status(
+    serializer_state: Arc<RwLock<SerializerState>>,
+    mut framed: Framed<TcpStream, LinesCodec>,
+) -> Result<(), Error> {
+    let serializer_state = &*serializer_state.read().await;
+    let status = serde_json::to_string(serializer_state)?;
+    framed.send(status).await?;
+
+    Ok(())
 }

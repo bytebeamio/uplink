@@ -150,7 +150,7 @@ async fn main() -> Result<(), Error> {
     let mut uplink = Uplink::new(config.clone())?;
     uplink.spawn()?;
 
-    let mut tcp_status = TcpStatus::new(config.clone(), uplink.status.clone());
+    let mut tcp_status = TcpStatus::new(config.clone(), uplink.serializer_state.clone());
     task::spawn(async move { tcp_status.start().await });
 
     if let Some(simulator_config) = &config.simulator {
