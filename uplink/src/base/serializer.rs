@@ -7,7 +7,7 @@ use flume::{Receiver, RecvError};
 use log::{error, info, trace};
 use rumqttc::*;
 use thiserror::Error;
-use tokio::{select, time};
+use tokio::{select, sync::RwLock, time};
 
 mod metrics;
 
@@ -43,9 +43,13 @@ pub enum Error {
     Client(#[from] MqttError),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
+    #[error("Couldn't procure read lock")]
+    ReadLock,
+    #[error("Couldn't procure write lock")]
+    WriteLock,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Status {
     Normal,
     SlowEventloop(Publish),
@@ -181,6 +185,7 @@ pub struct Serializer<C: MqttClient> {
     storage: Option<Storage>,
     serializer_metrics: Option<SerializerMetricsHandler>,
     stream_metrics: Option<StreamMetricsHandler>,
+    status: Arc<RwLock<Status>>,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -188,6 +193,7 @@ impl<C: MqttClient> Serializer<C> {
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
         client: C,
+        status: Arc<RwLock<Status>>,
     ) -> Result<Serializer<C>, Error> {
         let storage = match &config.persistence {
             Some(persistence) => {
@@ -204,7 +210,15 @@ impl<C: MqttClient> Serializer<C> {
         let serializer_metrics = SerializerMetricsHandler::new(config.clone());
         let stream_metrics = StreamMetricsHandler::new(config.clone());
 
-        Ok(Serializer { config, collector_rx, client, storage, serializer_metrics, stream_metrics })
+        Ok(Serializer {
+            config,
+            collector_rx,
+            client,
+            storage,
+            serializer_metrics,
+            stream_metrics,
+            status,
+        })
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -426,17 +440,16 @@ impl<C: MqttClient> Serializer<C> {
     /// [slow mode]: Serializer::slow
     /// [crash mode]: Serializer::crash
     pub async fn start(mut self) -> Result<(), Error> {
-        let mut status = Status::EventLoopReady;
-
         loop {
+            let status = self.status.read().await.clone();
             let next_status = match status {
                 Status::Normal => self.normal().await?,
                 Status::SlowEventloop(publish) => self.slow(publish).await?,
                 Status::EventLoopReady => self.catchup().await?,
                 Status::EventLoopCrash(publish) => self.crash(publish).await?,
             };
-
-            status = next_status;
+            let mut status = self.status.write().await;
+            *status = next_status;
         }
     }
 }
@@ -615,8 +628,9 @@ mod test {
         let (data_tx, data_rx) = flume::bounded(1);
         let (net_tx, net_rx) = flume::bounded(1);
         let client = MockClient { net_tx };
+        let status = Arc::new(RwLock::new(Status::EventLoopReady));
 
-        (Serializer::new(config, data_rx, client).unwrap(), data_tx, net_rx)
+        (Serializer::new(config, data_rx, client, status).unwrap(), data_tx, net_rx)
     }
 
     #[derive(Error, Debug)]

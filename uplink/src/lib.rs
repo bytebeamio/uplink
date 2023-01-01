@@ -6,6 +6,7 @@ use anyhow::Error;
 
 use flume::{bounded, Receiver, Sender};
 use log::error;
+use tokio::sync::RwLock;
 use tokio::task;
 
 pub mod base;
@@ -133,7 +134,7 @@ pub use base::middleware;
 use base::middleware::tunshell::TunshellSession;
 use base::middleware::Middleware;
 use base::mqtt::Mqtt;
-use base::serializer::Serializer;
+use base::serializer::{Serializer, Status};
 pub use base::{Config, Package, Payload, Point, Stream};
 use collector::downloader::FileDownloader;
 use collector::systemstats::StatCollector;
@@ -147,6 +148,7 @@ pub struct Uplink {
     data_rx: Receiver<Box<dyn Package>>,
     data_tx: Sender<Box<dyn Package>>,
     action_status: Stream<ActionResponse>,
+    pub status: Arc<RwLock<Status>>,
 }
 
 impl Uplink {
@@ -160,8 +162,9 @@ impl Uplink {
             .as_ref()
             .ok_or_else(|| Error::msg("Action status topic missing from config"))?;
         let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
+        let status = Arc::new(RwLock::new(Status::EventLoopReady));
 
-        Ok(Uplink { config, action_rx, action_tx, data_rx, data_tx, action_status })
+        Ok(Uplink { config, action_rx, action_tx, data_rx, data_tx, action_status, status })
     }
 
     pub fn spawn(&mut self) -> Result<(), Error> {
@@ -218,7 +221,12 @@ impl Uplink {
         let (raw_action_tx, raw_action_rx) = bounded(10);
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
 
-        let serializer = Serializer::new(self.config.clone(), self.data_rx.clone(), mqtt.client())?;
+        let serializer = Serializer::new(
+            self.config.clone(),
+            self.data_rx.clone(),
+            mqtt.client(),
+            self.status.clone(),
+        )?;
 
         let actions = Middleware::new(
             self.config.clone(),
