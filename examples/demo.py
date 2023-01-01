@@ -52,6 +52,17 @@ def recv_actions():
 print("Starting Uplink Bridge App")
 threading.Thread(target=recv_actions).start()
 
+def query_status():
+    while True:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(("localhost", 6666))
+        status = str(s.recv(2048))
+        print(status)
+        time.sleep(5)
+
+print("Starting Uplink Status querying")
+threading.Thread(target=query_status).start()
+
 def send_device_shadow(s, sequence):
     t = int(time.time()*1000)
     payload = {
