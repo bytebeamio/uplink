@@ -1,6 +1,9 @@
 # TCP Port to connect your applications with uplink
 bridge_port = 5555
 
+# TCP Port to query what uplink's serializer status is
+status_port = 6666
+
 # MQTT client configuration
 # 
 # Required Parameters
