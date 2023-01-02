@@ -326,9 +326,7 @@ impl<C: MqttClient> Serializer<C> {
     async fn normal(&mut self) -> Result<Status, Error> {
         info!("Switching to normal mode!!");
         let mut interval = time::interval(time::Duration::from_secs(10));
-        let metrics_enabled = self.serializer_metrics.is_some()
-            || self.stream_metrics.is_some()
-            || self.stream_anomalies.is_some();
+        let metrics_enabled = self.serializer_metrics.is_some() || self.stream_metrics.is_some();
 
         loop {
             select! {
