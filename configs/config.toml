@@ -34,11 +34,6 @@ topic = "/tenants/{tenant_id}/devices/{device_id}/metrics/jsonarray"
 [stream_metrics]
 enabled = true
 
-# Similarly, any anomalies found when handling streams can also be reported to 
-# platform with the following config that enables the stream_anomalies handler.
-[stream_anomalies]
-enabled = true
-
 # Configuration details associated with uplink's persistent storage module
 # which writes publish packets to disk in case of slow or crashed network.
 # 

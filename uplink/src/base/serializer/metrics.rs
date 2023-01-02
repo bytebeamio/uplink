@@ -79,6 +79,8 @@ pub struct StreamMetrics {
     average_latency: u64,
     min_latency: u64,
     max_latency: u64,
+    anomalies: String,
+    anomaly_count: usize,
 }
 
 pub struct StreamMetricsHandler {
@@ -105,25 +107,38 @@ impl StreamMetricsHandler {
         Some(Self { topic, map: Default::default(), sequence: 0 })
     }
 
-    /// Updates the metrics for a stream as deemed necessary with the count of points in batch
-    /// and the difference between first and last elements timestamp as latency being inputs.
-    pub fn update(&mut self, stream: String, point_count: usize, batch_latency: u64) {
+    /// Updates the metrics for a stream as deemed necessary with the count of points in batch,
+    /// the difference between first and last elements timestamp as latency, details of anomalies
+    /// detected at collection, being the inputs.
+    pub fn update(
+        &mut self,
+        stream: String,
+        point_count: usize,
+        batch_latency: u64,
+        anomalies: Option<(String, usize)>,
+    ) {
         // Init stream metrics max/min values with opposite extreme values to ensure first latency value is accepted
-        let metrics = self.map.entry(stream.clone()).or_insert(StreamMetrics {
+        let entry = self.map.entry(stream.clone()).or_insert(StreamMetrics {
             stream,
             min_latency: u64::MAX,
             max_latency: u64::MIN,
             ..Default::default()
         });
 
-        metrics.max_latency = metrics.max_latency.max(batch_latency);
-        metrics.min_latency = metrics.min_latency.min(batch_latency);
+        entry.max_latency = entry.max_latency.max(batch_latency);
+        entry.min_latency = entry.min_latency.min(batch_latency);
         // NOTE: Average latency is calculated in a slightly lossy fashion,
-        let total_latency = (metrics.average_latency * metrics.batch_count) + batch_latency;
+        let total_latency = (entry.average_latency * entry.batch_count) + batch_latency;
 
-        metrics.batch_count += 1;
-        metrics.point_count += point_count;
-        metrics.average_latency = total_latency / metrics.batch_count;
+        entry.batch_count += 1;
+        entry.point_count += point_count;
+        entry.average_latency = total_latency / entry.batch_count;
+
+        if let Some((anomalies, anomaly_count)) = anomalies {
+            entry.anomaly_count += anomaly_count;
+            let suffix = anomalies + ", ";
+            entry.anomalies.push_str(&suffix);
+        }
     }
 
     pub fn streams(&mut self) -> Metrics {
@@ -154,81 +169,5 @@ impl<'a> Iterator for Metrics<'a> {
             .as_millis() as u64;
 
         Some(metrics)
-    }
-}
-
-#[derive(Debug, Default, Serialize, Clone)]
-pub struct StreamAnomalies {
-    sequence: u32,
-    timestamp: u64,
-    stream: String,
-    anomalies: String,
-    anomaly_count: usize,
-}
-
-pub struct StreamAnomaliesHandler {
-    pub topic: String,
-    // Used to set sequence number for stream_anomalies messages
-    sequence: u32,
-    map: HashMap<String, StreamAnomalies>,
-}
-
-impl StreamAnomaliesHandler {
-    pub fn new(config: Arc<Config>) -> Option<Self> {
-        let topic = match &config.stream_anomalies {
-            MetricsConfig { enabled: false, .. } => return None,
-            MetricsConfig { topic: Some(topic), .. } => topic.to_owned(),
-            _ => {
-                String::from("/tenants/")
-                    + &config.project_id
-                    + "/devices/"
-                    + &config.device_id
-                    + "/events/stream_anomalies/jsonarray"
-            }
-        };
-
-        Some(Self { topic, map: Default::default(), sequence: 0 })
-    }
-
-    pub fn update(&mut self, stream: String, anomalies: String, anomaly_count: usize) {
-        let entry = self
-            .map
-            .entry(stream.clone())
-            .or_insert(StreamAnomalies { stream, ..Default::default() });
-
-        entry.anomaly_count += anomaly_count;
-        let suffix = anomalies + ", ";
-        entry.anomalies.push_str(&suffix);
-    }
-
-    pub fn streams(&mut self) -> Anomalies {
-        let sequence = self.sequence;
-        Anomalies { sequence, values: self.map.values_mut() }
-    }
-
-    pub fn clear(&mut self) {
-        self.sequence += self.map.len() as u32;
-        self.map.clear();
-    }
-}
-
-pub struct Anomalies<'a> {
-    sequence: u32,
-    values: ValuesMut<'a, String, StreamAnomalies>,
-}
-
-impl<'a> Iterator for Anomalies<'a> {
-    type Item = &'a mut StreamAnomalies;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let anomalies = self.values.next()?;
-        self.sequence += 1;
-        anomalies.sequence = self.sequence;
-        anomalies.timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::from_secs(0))
-            .as_millis() as u64;
-
-        Some(anomalies)
     }
 }

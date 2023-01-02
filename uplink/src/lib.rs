@@ -68,9 +68,6 @@ pub mod config {
     [stream_metrics]
     enabled = false
 
-    [stream_anomalies]
-    enabled = false
-
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     buf_size = 1

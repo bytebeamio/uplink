@@ -100,7 +100,6 @@ pub struct Config {
     pub action_status: StreamConfig,
     pub serializer_metrics: MetricsConfig,
     pub stream_metrics: MetricsConfig,
-    pub stream_anomalies: MetricsConfig,
     pub downloader: Option<Downloader>,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
