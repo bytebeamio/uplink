@@ -33,7 +33,7 @@ impl SerializerMetricsHandler {
                     + &config.project_id
                     + "/devices/"
                     + &config.device_id
-                    + "/events/serializer_metrics/jsonarray"
+                    + "/events/uplink_serializer_metrics/jsonarray"
             }
         };
 
@@ -122,7 +122,7 @@ impl StreamMetricsHandler {
                     + &config.project_id
                     + "/devices/"
                     + &config.device_id
-                    + "/events/stream_metrics/jsonarray"
+                    + "/events/uplink_stream_metrics/jsonarray"
             }
         };
 
