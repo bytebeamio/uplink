@@ -1,6 +1,6 @@
 use flume::{bounded, Receiver, RecvError, SendError, Sender};
 use futures_util::SinkExt;
-use log::{error, info};
+use log::{debug, error, info, trace};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{channel, Receiver as BRx, Sender as BTx};
@@ -92,6 +92,7 @@ impl Bridge {
             // -- when a non "Completed" action is received
             let mut current_action_: Option<CurrentAction> = None;
 
+            info!("Listening for new connection on {:?}", addr);
             loop {
                 select! {
                     v = listener.accept() =>  {
@@ -205,7 +206,7 @@ impl ClientConnection {
             select! {
                 line = client.next() => {
                     let line = line.ok_or(Error::StreamDone)??;
-                    info!("Received line = {:?}", line);
+                    debug!("Received line = {:?}", line);
 
                     let data = match serde_json::from_str::<Payload>(&line) {
                         Ok(d) => d.set_collection_timestamp(),

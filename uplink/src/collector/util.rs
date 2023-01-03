@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
 use flume::Sender;
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use tokio_stream::StreamExt;
 use tokio_util::time::{delay_queue::Key, DelayQueue};
 
@@ -120,7 +120,7 @@ impl Streams {
                     self.flush_handler.insert(name, flush_period)
                 }
                 StreamStatus::Partial(l) => {
-                    debug!("Stream contains {} elements", l);
+                    info!("Flushing stream {} with {} elements", stream.name, l);
                 }
             }
         }

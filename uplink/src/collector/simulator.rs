@@ -1,5 +1,5 @@
 use flume::{Receiver, Sender};
-use log::{error, info};
+use log::{error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
@@ -662,9 +662,9 @@ pub async fn start(
                 let timestamp = event_timestamp(event);
 
                 if current_time > timestamp {
-                    info!("Time delta {:?} {:?} {:?}", num_devices, current_time - timestamp, i);
+                    trace!("Time delta {:?} {:?} {:?}", num_devices, current_time - timestamp, i);
                 } else {
-                    info!("Time delta {:?} -{:?} {:?}", num_devices, timestamp - current_time, i);
+                    warn!("Time delta {:?} -{:?} {:?}", num_devices, timestamp - current_time, i);
                 }
 
                 i += 1;

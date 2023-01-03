@@ -154,7 +154,7 @@ pub enum StreamStatus<'a> {
 
 #[derive(Debug)]
 pub struct Stream<T> {
-    name: Arc<String>,
+    pub name: Arc<String>,
     topic: Arc<String>,
     last_sequence: u32,
     last_timestamp: u64,
