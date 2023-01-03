@@ -129,7 +129,7 @@ impl StreamMetricsHandler {
 
         Some(Self {
             topic,
-            black_list: config.stream_metrics.black_list.clone(),
+            black_list: config.bypass_streams.clone(),
             map: Default::default(),
         })
     }
