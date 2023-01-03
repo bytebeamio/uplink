@@ -34,10 +34,20 @@ pub struct StreamConfig {
     pub flush_period: u64,
 }
 
+fn default_file_size() -> usize {
+    104857600 // 100MB
+}
+
+fn default_file_count() -> usize {
+    3
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Persistence {
     pub path: String,
+    #[serde(default = "default_file_size")]
     pub max_file_size: usize,
+    #[serde(default = "default_file_count")]
     pub max_file_count: usize,
 }
 
