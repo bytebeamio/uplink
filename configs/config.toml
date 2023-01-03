@@ -34,6 +34,11 @@ topic = "/tenants/{tenant_id}/devices/{device_id}/metrics/jsonarray"
 [stream_metrics]
 enabled = true
 
+# Some streams the user might want to not include when measuring uplink's metrics,
+# or even for batching. Mentioned streams if not otherwise configured will also be
+# flushed on a single point entering, ensuring instant forwarding to platform.
+bypass_streams = ["mainapp_metrics"]
+
 # Configuration details associated with uplink's persistent storage module
 # which writes publish packets to disk in case of slow or crashed network.
 # 
