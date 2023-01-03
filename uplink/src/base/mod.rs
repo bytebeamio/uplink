@@ -87,27 +87,12 @@ pub struct Downloader {
     pub path: String,
 }
 
-fn default_black_list() -> Vec<String> {
-    vec![
-        "mainapp_metrics",
-        "uplink_disk_stats",
-        "uplink_network_stats",
-        "uplink_processor_stats",
-        "uplink_process_stats",
-        "uplink_component_stats",
-        "uplink_system_stats",
-    ]
-    .iter()
-    .map(|x| x.to_string())
-    .collect()
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct MetricsConfig {
     pub enabled: bool,
     pub topic: Option<String>,
     /// List of streams that are to be ignored by uplink's stat collector
-    #[serde(default = "default_black_list")]
+    #[serde(default)]
     pub black_list: Vec<String>,
 }
 
