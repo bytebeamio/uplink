@@ -91,7 +91,7 @@ impl Streams {
                     return;
                 }
 
-               let stream = Stream::dynamic(
+                let stream = Stream::dynamic(
                     &data.stream,
                     &self.config.project_id,
                     &self.config.device_id,
