@@ -318,6 +318,10 @@ impl<C: MqttClient> Serializer<C> {
                     let publish = match read(storage.reader(), max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
                         Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+                        Err(rumqttc::Error::InsufficientBytes(n)) => {
+                            error!("Failed to read {n} bytes from storage, required to construct a packet, ignoring rest of file.");
+                            continue;
+                        },
                         Err(e) => {
                             error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
                             return Ok(Status::Normal)
