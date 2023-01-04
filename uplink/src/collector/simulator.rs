@@ -1,5 +1,5 @@
 use flume::{Receiver, Sender};
-use log::{error, info};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
@@ -14,6 +14,8 @@ use crate::base::{Package, SimulatorConfig, Stream};
 use crate::{Action, ActionResponse, Payload};
 
 use rand::Rng;
+
+const MAX_COUNT: usize = 5000;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -51,6 +53,71 @@ pub enum DataEventType {
     GeneratePeripheralData,
     GenerateMotor,
     GenerateBMS,
+}
+
+#[derive(Default)]
+pub struct DataEventCounts {
+    gps: usize,
+    imu: usize,
+    vehicle_data: usize,
+    peripheral_data: usize,
+    motor: usize,
+    bms: usize,
+}
+
+impl DataEventCounts {
+    fn check(&mut self, event_type: &DataEventType) -> bool {
+        match event_type {
+            DataEventType::GenerateGPS => {
+                if self.gps > MAX_COUNT {
+                    true
+                } else {
+                    self.gps += 1;
+                    false
+                }
+            }
+            DataEventType::GenerateIMU => {
+                if self.imu > MAX_COUNT {
+                    true
+                } else {
+                    self.imu += 1;
+                    false
+                }
+            }
+            DataEventType::GenerateVehicleData => {
+                if self.vehicle_data > MAX_COUNT {
+                    true
+                } else {
+                    self.vehicle_data += 1;
+                    false
+                }
+            }
+            DataEventType::GeneratePeripheralData => {
+                if self.peripheral_data > MAX_COUNT {
+                    true
+                } else {
+                    self.peripheral_data += 1;
+                    false
+                }
+            }
+            DataEventType::GenerateMotor => {
+                if self.motor > MAX_COUNT {
+                    true
+                } else {
+                    self.motor += 1;
+                    false
+                }
+            }
+            DataEventType::GenerateBMS => {
+                if self.bms > MAX_COUNT {
+                    true
+                } else {
+                    self.bms += 1;
+                    false
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -546,7 +613,11 @@ pub async fn process_data_event(
     event: &DataEvent,
     events: &mut BinaryHeap<Event>,
     partitions: &mut Partitions,
-) {
+    counts: &mut DataEventCounts,
+) -> bool {
+    if counts.check(&event.event_type) {
+        return true;
+    }
     let data = match event.event_type {
         DataEventType::GenerateGPS => generate_gps_data(&event.device, event.sequence),
         DataEventType::GenerateIMU => generate_imu_data(&event.device, event.sequence),
@@ -570,6 +641,8 @@ pub async fn process_data_event(
         device: event.device.clone(),
         event_type: event.event_type,
     }));
+
+    false
 }
 
 async fn process_action_response_event(event: &ActionResponseEvent, partitions: &mut Partitions) {
@@ -585,7 +658,11 @@ async fn process_action_response_event(event: &ActionResponseEvent, partitions: 
     info!("Successfully sent action response");
 }
 
-pub async fn process_events(events: &mut BinaryHeap<Event>, partitions: &mut Partitions) {
+pub async fn process_events(
+    events: &mut BinaryHeap<Event>,
+    partitions: &mut Partitions,
+    counts: &mut DataEventCounts,
+) -> bool {
     if let Some(e) = events.pop() {
         let current_time = Instant::now();
         let timestamp = event_timestamp(&e);
@@ -600,7 +677,7 @@ pub async fn process_events(events: &mut BinaryHeap<Event>, partitions: &mut Par
 
         match e {
             Event::DataEvent(event) => {
-                process_data_event(&event, events, partitions).await;
+                return process_data_event(&event, events, partitions, counts).await;
             }
 
             Event::ActionResponseEvent(event) => {
@@ -610,6 +687,8 @@ pub async fn process_events(events: &mut BinaryHeap<Event>, partitions: &mut Par
     } else {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+
+    false
 }
 
 pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
@@ -653,6 +732,7 @@ pub async fn start(
         Partitions { map: HashMap::new(), action_statuses: HashMap::new(), tx: data_tx };
     let mut time = Instant::now();
     let mut i = 0;
+    let mut counts = DataEventCounts::default();
 
     loop {
         let current_time = Instant::now();
@@ -678,7 +758,9 @@ pub async fn start(
                 generate_action_events(&action, &mut events);
             }
 
-            _ = process_events(&mut events, &mut partitions) => {
+            done = process_events(&mut events, &mut partitions, &mut counts) => if done {
+                warn!("Done processing {MAX_COUNT} messages in all streams, restart simulator!");
+                return Ok(());
             }
         }
     }

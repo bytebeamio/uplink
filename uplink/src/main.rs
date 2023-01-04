@@ -149,11 +149,17 @@ async fn main() -> Result<(), Error> {
     uplink.spawn()?;
 
     if let Some(simulator_config) = &config.simulator {
-        if let Err(e) =
-            simulator::start(uplink.bridge_data_tx(), uplink.bridge_action_rx(), simulator_config)
-                .await
-        {
-            error!("Error while running simulator: {}", e)
+        loop {
+            if let Err(e) = simulator::start(
+                uplink.bridge_data_tx(),
+                uplink.bridge_action_rx(),
+                simulator_config,
+            )
+            .await
+            {
+                error!("Error while running simulator: {}", e);
+                break;
+            }
         }
     } else if let Err(e) = Bridge::new(
         config,
