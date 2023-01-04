@@ -43,14 +43,15 @@ use std::fs;
 use std::sync::Arc;
 
 use anyhow::Error;
-use log::{error, warn};
+use log::{error, info, warn};
 use simplelog::{
     ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, LevelPadding, TermLogger, TerminalMode,
 };
 use structopt::StructOpt;
 
 use uplink::config::{initialize, CommandLine};
-use uplink::{simulator, Bridge, Config, Uplink};
+use uplink::simulator::{self, MAX_COUNT};
+use uplink::{Bridge, Config, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) {
     let level = match commandline.verbose {
@@ -120,6 +121,10 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     if config.stats.enabled {
         println!("    processes: {:?}", config.stats.process_names);
     }
+    if let Some(simulator_cfg) = &config.simulator {
+        println!("    simulator_device_count: {}", simulator_cfg.num_devices);
+        println!("    simulator_gps_paths: {}", simulator_cfg.gps_paths);
+    }
     println!("\n");
 }
 
@@ -150,15 +155,17 @@ async fn main() -> Result<(), Error> {
 
     if let Some(simulator_config) = &config.simulator {
         loop {
-            if let Err(e) = simulator::start(
+            match simulator::start(
                 uplink.bridge_data_tx(),
                 uplink.bridge_action_rx(),
                 simulator_config,
             )
-            .await
-            {
-                error!("Error while running simulator: {}", e);
-                break;
+            .await{
+                Ok(event_type) => info!("Done processing {MAX_COUNT} messages in fastest stream: {event_type:?}; restart simulator!"),
+                Err(e) =>{
+                    error!("Error while running simulator: {}", e);
+                    break;
+                }
             }
         }
     } else if let Err(e) = Bridge::new(
