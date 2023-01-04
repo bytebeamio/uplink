@@ -91,6 +91,9 @@ pub struct Downloader {
 pub struct MetricsConfig {
     pub enabled: bool,
     pub topic: Option<String>,
+    /// List of streams that are to be ignored by uplink's stat collector
+    #[serde(default)]
+    pub black_list: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
