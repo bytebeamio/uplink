@@ -742,7 +742,7 @@ pub async fn start(
                 generate_action_events(&action, &mut events);
             }
 
-            Some(event_type) = process_events(&mut events, &mut partitions, &mut counts) => {
+            event = process_events(&mut events, &mut partitions, &mut counts) => if let Some(event_type) = event{
                 return Ok(event_type);
             }
         }
