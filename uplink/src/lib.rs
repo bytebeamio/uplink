@@ -113,17 +113,17 @@ pub mod config {
                 let topic = topic.replace("{device_id}", device_id);
                 config.topic = Some(topic);
             }
+        }
 
-            for stat in [
-                "disk_stats",
-                "network_stats",
-                "processor_stats",
-                "process_stats",
-                "component_stats",
-                "system_stats",
-            ] {
-                config.black_list.push("uplink_".to_string() + stat);
-            }
+        for stat in [
+            "disk_stats",
+            "network_stats",
+            "processor_stats",
+            "process_stats",
+            "component_stats",
+            "system_stats",
+        ] {
+            config.bypass_streams.push("uplink_".to_string() + stat);
         }
 
         Ok(config)
