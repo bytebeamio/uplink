@@ -91,22 +91,12 @@ impl Streams {
                     return;
                 }
 
-                let stream = if self.config.bypass_streams.contains(&data.stream) {
-                    Stream::dynamic_with_size(
-                        &data.stream,
-                        &self.config.project_id,
-                        &self.config.device_id,
-                        1,
-                        self.data_tx.clone(),
-                    )
-                } else {
-                    Stream::dynamic(
-                        &data.stream,
-                        &self.config.project_id,
-                        &self.config.device_id,
-                        self.data_tx.clone(),
-                    )
-                };
+               let stream = Stream::dynamic(
+                    &data.stream,
+                    &self.config.project_id,
+                    &self.config.device_id,
+                    self.data_tx.clone(),
+                );
                 self.map.entry(data.stream.to_owned()).or_insert(stream)
             }
         };
