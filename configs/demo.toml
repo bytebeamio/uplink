@@ -6,3 +6,9 @@ gps_paths = "./paths/"
 path = "/tmp/uplink/"
 max_file_size = 104857600 # 100MB
 max_file_count = 3
+
+[stream_metrics]
+enabled = true
+
+[serializer_metrics]
+enabled = true
