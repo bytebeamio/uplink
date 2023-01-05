@@ -7,7 +7,7 @@ members = [
     "disk",
 ]
 
-exclude = ["tools/tunshell"]
+exclude = ["tools/tunshell", "tools/utils"]
 
 [profile.dev]
 opt-level = 1

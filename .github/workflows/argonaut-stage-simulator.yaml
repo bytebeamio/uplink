@@ -1,7 +1,7 @@
 name: "Deploy simulator - stage"
 
 on:
-  push:
+  workflow_dispatch:
     branches:
       - main
     paths:
@@ -11,7 +11,6 @@ on:
       - .art/argonaut-stage-stage-simulator.yaml
     tags:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
-  workflow_dispatch:
 
 
 
