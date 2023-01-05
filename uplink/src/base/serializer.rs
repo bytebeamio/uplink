@@ -599,13 +599,14 @@ mod test {
     }
 
     fn config_with_persistence(path: String) -> Config {
+        config_with_configurable_persistence(path, 10 * 1024 * 1024)
+    }
+
+    fn config_with_configurable_persistence(path: String, max_file_size: usize) -> Config {
         std::fs::create_dir_all(&path).unwrap();
         let mut config = default_config();
-        config.persistence = Some(Persistence {
-            path: path.clone(),
-            max_file_size: 10 * 1024 * 1024,
-            max_file_count: 3,
-        });
+        config.persistence =
+            Some(Persistence { path: path.clone(), max_file_size, max_file_count: 3 });
 
         config
     }
@@ -867,6 +868,48 @@ mod test {
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
             }
             s => unreachable!("Unexpected status: {:?}", s),
+        }
+    }
+
+    #[test]
+    // read from partially corrupted persistence
+    fn read_partially_corrupted() {
+        let max_packet_size = 1024;
+        let config = Arc::new(config_with_configurable_persistence(
+            format!("{}/corrupt", PERSIST_FOLDER),
+            max_packet_size * 2,
+        ));
+        std::fs::create_dir_all(&config.persistence.as_ref().unwrap().path).unwrap();
+
+        let (mut serializer, data_tx, _) = defaults(config);
+        let mut storage = serializer.storage.take().unwrap();
+
+        let mut collector = MockCollector::new(data_tx);
+        // Run a collector
+        std::thread::spawn(move || {
+            for i in 2..6 {
+                collector.send(i).unwrap();
+                std::thread::sleep(time::Duration::from_secs(10));
+            }
+        });
+
+        // Force write a publish into storage
+        let mut publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+        );
+        publish.pkid = 1;
+        write_to_disk(publish.clone(), &mut storage, &mut None);
+
+        // Emulate a partially corrupted file
+        storage.writer().write_str("asdlkfalskjdlfkal").unwrap();
+
+        for expected in [Read::Publish(publish), Read::Corrupted, Read::Done] {
+            assert_eq!(read_from_disk(&mut storage, 1024), expected);
+            if expected == Read::Corrupted {
+                storage.reload().unwrap();
+            }
         }
     }
 }
