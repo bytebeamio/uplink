@@ -599,7 +599,6 @@ pub async fn process_data_event(
     counts: &mut DataEventCounts,
 ) -> Option<DataEventType> {
     if counts.check(&event.event_type) {
-        dbg!(&counts);
         return Some(event.event_type);
     }
     let data = match event.event_type {
