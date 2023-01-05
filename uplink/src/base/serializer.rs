@@ -1,5 +1,4 @@
-use std::io;
-use std::sync::Arc;
+use std::{collections::HashMap, io, sync::Arc};
 
 use bytes::Bytes;
 use disk::Storage;
@@ -166,6 +165,8 @@ pub struct Serializer<C: MqttClient> {
     storage: Option<Storage>,
     serializer_metrics: Option<SerializerMetricsHandler>,
     stream_metrics: Option<StreamMetricsHandler>,
+    /// Track total number of points that have passed through a stream from uplink start
+    stream_counts: HashMap<String, usize>,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -189,7 +190,15 @@ impl<C: MqttClient> Serializer<C> {
         let serializer_metrics = SerializerMetricsHandler::new(config.clone());
         let stream_metrics = StreamMetricsHandler::new(config.clone());
 
-        Ok(Serializer { config, collector_rx, client, storage, serializer_metrics, stream_metrics })
+        Ok(Serializer {
+            config,
+            collector_rx,
+            client,
+            storage,
+            serializer_metrics,
+            stream_metrics,
+            stream_counts: HashMap::new(),
+        })
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -204,7 +213,7 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
-            let publish = construct_publish(&mut None, data)?;
+            let publish = construct_publish(&mut self.stream_counts, &mut None, data)?;
             write_to_disk(publish, storage, &mut None);
         }
     }
@@ -237,7 +246,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let publish = construct_publish(&mut self.stream_metrics, data)?;
+                    let publish = construct_publish(&mut self.stream_counts,&mut self.stream_metrics, data)?;
                     write_to_disk(publish, storage, &mut self.serializer_metrics);
                 }
                 o = &mut publish => match o {
@@ -293,7 +302,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let publish = construct_publish(&mut self.stream_metrics, data)?;
+                    let publish = construct_publish(&mut self.stream_counts,&mut self.stream_metrics, data)?;
                     write_to_disk(publish, storage, &mut self.serializer_metrics);
                 }
                 o = &mut send => {
@@ -354,7 +363,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let publish = construct_publish(&mut self.stream_metrics, data)?;
+                    let publish = construct_publish(&mut self.stream_counts,&mut self.stream_metrics, data)?;
                     let payload_size = publish.payload.len();
                     match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, publish.payload) {
                         Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut() {
@@ -437,13 +446,16 @@ async fn send_publish<C: MqttClient>(
 
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
 fn construct_publish(
+    stream_counts: &mut HashMap<String, usize>,
     stream_metrics: &mut Option<StreamMetricsHandler>,
     data: Box<dyn Package>,
 ) -> Result<Publish, Error> {
     let stream = data.stream().as_ref().to_owned();
     let point_count = data.len();
     let batch_latency = data.batch_latency();
-    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+    let total_points = stream_counts.entry(stream.clone()).or_default();
+    *total_points += point_count;
+    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}; total points = {total_points}");
     if let Some(handler) = stream_metrics {
         handler.update(stream, point_count, batch_latency);
     }
