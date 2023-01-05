@@ -47,9 +47,9 @@ pub enum Error {
 #[derive(Debug, PartialEq)]
 enum Status {
     Normal,
-    SlowEventloop(Publish),
+    SlowEventloop(Publish, usize),
     EventLoopReady,
-    EventLoopCrash(Publish),
+    EventLoopCrash(Publish, usize),
 }
 
 impl Display for Status {
@@ -57,12 +57,12 @@ impl Display for Status {
         match self {
             Self::EventLoopReady => f.write_fmt(format_args!("Eventloop Ready")),
             Self::Normal => f.write_fmt(format_args!("Normal")),
-            Self::EventLoopCrash(p) => {
-                f.write_fmt(format_args!("Eventloop Crashed, Failed Publish = {p:?}"))
-            }
-            Self::SlowEventloop(p) => {
-                f.write_fmt(format_args!("Slow Eventloop, Failed Try Publish = {p:?}"))
-            }
+            Self::EventLoopCrash(p, c) => f.write_fmt(format_args!(
+                "Eventloop Crashed, Failed Publish = {p:?} with {c} messages"
+            )),
+            Self::SlowEventloop(p, c) => f.write_fmt(format_args!(
+                "Slow Eventloop, Failed Try Publish = {p:?} with {c} messages"
+            )),
         }
     }
 }
@@ -220,25 +220,25 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     /// Write all data received, from here-on, to disk only.
-    async fn crash(&mut self, publish: Publish) -> Result<Status, Error> {
+    async fn crash(&mut self, publish: Publish, per_publish: usize) -> Result<Status, Error> {
         let storage = match &mut self.storage {
             Some(s) => s,
             None => return Err(Error::MissingPersistence),
         };
         // Write failed publish to disk first, metrics don't matter
-        write_to_disk(publish, storage, &mut None);
+        write_to_disk(publish, per_publish, storage, &mut None);
 
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
-            let publish =
+            let (publish, per_publish) =
                 construct_publish(&mut self.stream_counts, &self.status, &mut None, data)?;
-            write_to_disk(publish, storage, &mut None);
+            write_to_disk(publish, per_publish, storage, &mut None);
         }
     }
 
     /// Write new data to disk until back pressure due to slow n/w is resolved
-    async fn slow(&mut self, publish: Publish) -> Result<Status, Error> {
+    async fn slow(&mut self, publish: Publish, per_publish: usize) -> Result<Status, Error> {
         info!("Switching to slow eventloop mode!!");
 
         // Note: self.client.publish() is executing code before await point
@@ -265,13 +265,13 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let publish = construct_publish(&mut self.stream_counts, &self.status, &mut self.stream_metrics, data)?;
-                    write_to_disk(publish, storage, &mut self.serializer_metrics);
+                    let (publish, per_publish) = construct_publish(&mut self.stream_counts, &self.status, &mut self.stream_metrics, data)?;
+                    write_to_disk(publish, per_publish, storage, &mut self.serializer_metrics);
                 }
                 o = &mut publish => match o {
                     Ok(_) => return Ok(Status::EventLoopReady),
                     Err(MqttError::Send(Request::Publish(publish))) =>{
-                        return Ok(Status::EventLoopCrash(publish))
+                        return Ok(Status::EventLoopCrash(publish, per_publish))
                     },
                     Err(e) => unreachable!("Unexpected error: {}", e),
                 }
@@ -307,6 +307,10 @@ impl<C: MqttClient> Serializer<C> {
                 return Ok(Status::Normal);
             }
         };
+        let per_publish = storage
+            .point_tracker
+            .read()
+            .expect("Unexpected None returned on trying to extract point_count from Storage");
 
         let send = send_publish(client, publish.topic, publish.payload);
         tokio::pin!(send);
@@ -321,15 +325,15 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let publish = construct_publish(&mut self.stream_counts, &self.status, &mut self.stream_metrics, data)?;
-                    write_to_disk(publish, storage, &mut self.serializer_metrics);
+                    let (publish, per_publish) = construct_publish(&mut self.stream_counts, &self.status, &mut self.stream_metrics, data)?;
+                    write_to_disk(publish, per_publish, storage, &mut self.serializer_metrics);
                 }
                 o = &mut send => {
                     // Send failure implies eventloop crash. Switch state to
                     // indefinitely write to disk to not loose data
                     let client = match o {
                         Ok(c) => c,
-                        Err(MqttError::Send(Request::Publish(publish))) => return Ok(Status::EventLoopCrash(publish)),
+                        Err(MqttError::Send(Request::Publish(publish))) => return Ok(Status::EventLoopCrash(publish, per_publish)),
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
@@ -382,14 +386,14 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let publish = construct_publish(&mut self.stream_counts, &self.status, &mut self.stream_metrics, data)?;
+                    let (publish, per_publish) = construct_publish(&mut self.stream_counts, &self.status, &mut self.stream_metrics, data)?;
                     let payload_size = publish.payload.len();
                     match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, publish.payload) {
                         Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut() {
                             handler.add_total_sent_size(payload_size);
                             continue;
                         }
-                        Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
+                        Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish, per_publish)),
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     }
 
@@ -442,9 +446,13 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             self.status = match self.status {
                 Status::Normal => self.normal().await?,
-                Status::SlowEventloop(ref publish) => self.slow(publish.clone()).await?,
+                Status::SlowEventloop(ref publish, per_publish) => {
+                    self.slow(publish.clone(), per_publish).await?
+                }
                 Status::EventLoopReady => self.catchup().await?,
-                Status::EventLoopCrash(ref publish) => self.crash(publish.clone()).await?,
+                Status::EventLoopCrash(ref publish, per_publish) => {
+                    self.crash(publish.clone(), per_publish).await?
+                }
             };
         }
     }
@@ -465,7 +473,7 @@ fn construct_publish(
     status: &Status,
     stream_metrics: &mut Option<StreamMetricsHandler>,
     data: Box<dyn Package>,
-) -> Result<Publish, Error> {
+) -> Result<(Publish, usize), Error> {
     let stream = data.stream().as_ref().to_owned();
     let point_count = data.len();
     let batch_latency = data.batch_latency();
@@ -479,13 +487,14 @@ fn construct_publish(
     let topic = data.topic();
     let payload = data.serialize()?;
 
-    Ok(Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload))
+    Ok((Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload), point_count))
 }
 
 // Writes the provided publish packet to disk with [Storage], after setting its pkid to 1.
 // Updates serializer metrics with appropriate values on success, if asked to do so.
 fn write_to_disk(
     mut publish: Publish,
+    per_publish: usize,
     storage: &mut Storage,
     serializer_metrics: &mut Option<SerializerMetricsHandler>,
 ) {
@@ -495,6 +504,7 @@ fn write_to_disk(
         error!("Failed to fill disk buffer. Error = {:?}", e);
         return;
     }
+    storage.point_tracker.write(per_publish);
 
     if let Some(handler) = serializer_metrics {
         handler.add_total_disk_size(payload_size)
@@ -683,7 +693,7 @@ mod test {
         });
 
         match tokio::runtime::Runtime::new().unwrap().block_on(serializer.normal()).unwrap() {
-            Status::SlowEventloop(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
+            Status::SlowEventloop(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }, _) => {
                 assert_eq!(topic, "hello/world");
                 let recvd: Value = serde_json::from_slice(&payload).unwrap();
                 let obj = &recvd.as_array().unwrap()[0];
@@ -707,7 +717,7 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage, &mut None);
+        write_to_disk(publish.clone(), 1, &mut storage, &mut None);
 
         let stored_publish = read_from_storage(&mut storage, serializer.config.max_packet_size);
 
@@ -744,7 +754,7 @@ mod test {
             "[{{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}}]".as_bytes(),
         );
         let status =
-            tokio::runtime::Runtime::new().unwrap().block_on(serializer.slow(publish)).unwrap();
+            tokio::runtime::Runtime::new().unwrap().block_on(serializer.slow(publish, 1)).unwrap();
 
         assert_eq!(status, Status::EventLoopReady);
     }
@@ -771,8 +781,9 @@ mod test {
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
 
-        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.slow(publish)).unwrap() {
-            Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
+        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.slow(publish, 1)).unwrap()
+        {
+            Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }, _) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
@@ -834,7 +845,7 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage, &mut None);
+        write_to_disk(publish.clone(), 1, &mut storage, &mut None);
 
         // Replace storage into serializer
         serializer.storage = Some(storage);
@@ -868,12 +879,12 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage, &mut None);
+        write_to_disk(publish.clone(), 1, &mut storage, &mut None);
 
         // Replace storage into serializer
         serializer.storage = Some(storage);
         match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
-            Status::EventLoopCrash(Publish { topic, payload, .. }) => {
+            Status::EventLoopCrash(Publish { topic, payload, .. }, _) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");

@@ -2,10 +2,78 @@
 extern crate log;
 
 use bytes::{Buf, BufMut, BytesMut};
+use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::{fs, io, mem};
+
+/// Keeps track of counts per file
+#[derive(Debug, Default)]
+pub struct CountTracker {
+    total: usize,
+    pub writing: Option<CountPerFile>,
+    pub reading: Option<CountPerFile>,
+    per_file: VecDeque<CountPerFile>,
+}
+
+impl CountTracker {
+    /// Updates writing
+    pub fn write(&mut self, per_publish: usize) {
+        let mut writing = self.writing.take().unwrap_or_default();
+        writing.push(per_publish);
+        self.writing = Some(writing);
+    }
+
+    /// Extracts number of points read from disk in
+    pub fn read(&mut self) -> Option<usize> {
+        self.reading.as_mut()?.pop()
+    }
+
+    // On swap of read and write buffers
+    fn read_write_swap(&mut self) {
+        self.reading = self.writing.take();
+    }
+
+    // On flush of write buffer
+    fn push(&mut self) {
+        if let Some(per_file) = self.writing.take() {
+            self.total += per_file.total;
+            self.per_file.push_back(per_file)
+        }
+    }
+
+    // On reload of read buffer
+    fn pop(&mut self) {
+        let per_file = match self.per_file.pop_front() {
+            Some(c) => c,
+            _ => return,
+        };
+        self.total -= per_file.total;
+
+        self.reading = Some(per_file)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct CountPerFile {
+    total: usize,
+    per_publish: VecDeque<usize>,
+}
+
+impl CountPerFile {
+    pub fn push(&mut self, point_count: usize) {
+        self.total += point_count;
+        self.per_publish.push_back(point_count)
+    }
+
+    pub fn pop(&mut self) -> Option<usize> {
+        let point_count = self.per_publish.pop_front()?;
+        self.total -= point_count;
+
+        Some(point_count)
+    }
+}
 
 pub struct Storage {
     /// list of backlog file ids. Mutated only be the serialization part of the sender
@@ -20,6 +88,9 @@ pub struct Storage {
     current_write_file: BytesMut,
     /// current_read_file
     current_read_file: BytesMut,
+
+    /// Keeps track of counts written to disk on a per stream and
+    pub point_tracker: CountTracker,
 }
 
 impl Storage {
@@ -38,6 +109,7 @@ impl Storage {
             max_file_count,
             current_write_file: BytesMut::with_capacity(max_file_size * 2),
             current_read_file: BytesMut::with_capacity(max_file_size * 2),
+            point_tracker: Default::default(),
         })
     }
 
@@ -100,6 +172,7 @@ impl Storage {
     /// exceeds configured size
     pub fn flush_on_overflow(&mut self) -> io::Result<Option<u64>> {
         if self.current_write_file.len() >= self.max_file_size {
+            self.point_tracker.push();
             return self.flush();
         }
 
@@ -112,6 +185,7 @@ impl Storage {
         // buffer when all the backlog disk files are done
         if self.backlog_file_ids.is_empty() {
             mem::swap(&mut self.current_read_file, &mut self.current_write_file);
+            self.point_tracker.read_write_swap();
 
             // If read buffer is 0 after swapping, all the data is caught up
             return if self.current_read_file.is_empty() { Ok(true) } else { Ok(false) };
@@ -142,6 +216,7 @@ impl Storage {
             return Ok(false);
         }
 
+        self.point_tracker.pop();
         self.reload()
     }
 }
@@ -203,6 +278,27 @@ mod test {
         }
 
         backup
+    }
+
+    #[test]
+    fn write_read_counts_without_flush() {
+        let mut count_tracker = CountTracker::default();
+        count_tracker.write(10);
+        count_tracker.read_write_swap();
+
+        assert_eq!(10, count_tracker.read().unwrap());
+    }
+
+    #[test]
+    fn write_read_counts_with_flush() {
+        let mut count_tracker = CountTracker::default();
+        count_tracker.write(10);
+        count_tracker.write(20);
+        count_tracker.push();
+        count_tracker.pop();
+
+        assert_eq!(10, count_tracker.read().unwrap());
+        assert_eq!(20, count_tracker.read().unwrap());
     }
 
     #[test]
