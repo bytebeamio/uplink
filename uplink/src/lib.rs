@@ -137,6 +137,33 @@ pub mod config {
             config.topic = Some(topic);
         }
     }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum ReadFileError {
+        #[error("Auth file not found at {0}")]
+        Auth(String),
+        #[error("Config file not found at {0}")]
+        Config(String),
+    }
+
+    fn read_file_contents(path: &str) -> Option<String> {
+        fs::read_to_string(path).ok()
+    }
+
+    pub fn get_configs(
+        commandline: &CommandLine,
+    ) -> Result<(String, Option<String>), ReadFileError> {
+        let auth = read_file_contents(&commandline.auth)
+            .ok_or(ReadFileError::Auth(commandline.auth.to_string()))?;
+        let config = match &commandline.config {
+            Some(path) => {
+                Some(read_file_contents(path).ok_or(ReadFileError::Config(path.to_string()))?)
+            }
+            None => None,
+        };
+
+        Ok((auth, config))
+    }
 }
 
 pub use base::actions::{Action, ActionResponse};
