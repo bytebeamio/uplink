@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, sync::Arc};
+use std::{collections::HashMap, fmt::Display, io, sync::Arc};
 
 use bytes::Bytes;
 use disk::Storage;
@@ -50,6 +50,21 @@ enum Status {
     SlowEventloop(Publish),
     EventLoopReady,
     EventLoopCrash(Publish),
+}
+
+impl Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EventLoopReady => f.write_fmt(format_args!("Eventloop Ready")),
+            Self::Normal => f.write_fmt(format_args!("Normal")),
+            Self::EventLoopCrash(p) => {
+                f.write_fmt(format_args!("Eventloop Crashed, Failed Publish = {p:?}"))
+            }
+            Self::SlowEventloop(p) => {
+                f.write_fmt(format_args!("Slow Eventloop, Failed Try Publish = {p:?}"))
+            }
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -167,6 +182,8 @@ pub struct Serializer<C: MqttClient> {
     stream_metrics: Option<StreamMetricsHandler>,
     /// Track total number of points that have passed through a stream from uplink start
     stream_counts: HashMap<String, usize>,
+    /// Current uplink state
+    status: Status,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -198,6 +215,7 @@ impl<C: MqttClient> Serializer<C> {
             serializer_metrics,
             stream_metrics,
             stream_counts: HashMap::new(),
+            status: Status::EventLoopReady,
         })
     }
 
@@ -213,7 +231,8 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
-            let publish = construct_publish(&mut self.stream_counts, &mut None, data)?;
+            let publish =
+                construct_publish(&mut self.stream_counts, &self.status, &mut None, data)?;
             write_to_disk(publish, storage, &mut None);
         }
     }
@@ -246,7 +265,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let publish = construct_publish(&mut self.stream_counts,&mut self.stream_metrics, data)?;
+                    let publish = construct_publish(&mut self.stream_counts, &self.status, &mut self.stream_metrics, data)?;
                     write_to_disk(publish, storage, &mut self.serializer_metrics);
                 }
                 o = &mut publish => match o {
@@ -302,7 +321,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let publish = construct_publish(&mut self.stream_counts,&mut self.stream_metrics, data)?;
+                    let publish = construct_publish(&mut self.stream_counts, &self.status, &mut self.stream_metrics, data)?;
                     write_to_disk(publish, storage, &mut self.serializer_metrics);
                 }
                 o = &mut send => {
@@ -363,7 +382,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     }
 
-                    let publish = construct_publish(&mut self.stream_counts,&mut self.stream_metrics, data)?;
+                    let publish = construct_publish(&mut self.stream_counts, &self.status, &mut self.stream_metrics, data)?;
                     let payload_size = publish.payload.len();
                     match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, publish.payload) {
                         Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut() {
@@ -420,17 +439,13 @@ impl<C: MqttClient> Serializer<C> {
     /// [slow mode]: Serializer::slow
     /// [crash mode]: Serializer::crash
     pub async fn start(mut self) -> Result<(), Error> {
-        let mut status = Status::EventLoopReady;
-
         loop {
-            let next_status = match status {
+            self.status = match self.status {
                 Status::Normal => self.normal().await?,
-                Status::SlowEventloop(publish) => self.slow(publish).await?,
+                Status::SlowEventloop(ref publish) => self.slow(publish.clone()).await?,
                 Status::EventLoopReady => self.catchup().await?,
-                Status::EventLoopCrash(publish) => self.crash(publish).await?,
+                Status::EventLoopCrash(ref publish) => self.crash(publish.clone()).await?,
             };
-
-            status = next_status;
         }
     }
 }
@@ -447,6 +462,7 @@ async fn send_publish<C: MqttClient>(
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
 fn construct_publish(
     stream_counts: &mut HashMap<String, usize>,
+    status: &Status,
     stream_metrics: &mut Option<StreamMetricsHandler>,
     data: Box<dyn Package>,
 ) -> Result<Publish, Error> {
@@ -455,7 +471,7 @@ fn construct_publish(
     let batch_latency = data.batch_latency();
     let total_points = stream_counts.entry(stream.clone()).or_default();
     *total_points += point_count;
-    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}; total points = {total_points}");
+    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}; total points = {total_points}; serializer status: {status}");
     if let Some(handler) = stream_metrics {
         handler.update(stream, point_count, batch_latency);
     }
