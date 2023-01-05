@@ -266,17 +266,11 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.max_packet_size;
         let client = self.client.clone();
 
-        // Done reading all the pending files
-        if storage.reload_on_eof().unwrap() {
-            return Ok(Status::Normal);
-        }
-
-        let publish = match read(storage.reader(), max_packet_size) {
-            Ok(Packet::Publish(publish)) => publish,
-            Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
-            Err(e) => {
-                error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
-                return Ok(Status::Normal);
+        let publish = loop {
+            match read_from_disk(storage, max_packet_size) {
+                Read::Publish(p) => break p,
+                Read::Corrupted => continue,
+                Read::Done => return Ok(Status::Normal),
             }
         };
 
@@ -305,27 +299,10 @@ impl<C: MqttClient> Serializer<C> {
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
-                    match storage.reload_on_eof() {
-                        // Done reading all pending files
-                        Ok(true) => return Ok(Status::Normal),
-                        Ok(false) => {},
-                        Err(e) => {
-                            error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
-                            return Ok(Status::Normal)
-                        }
-                    }
-
-                    let publish = match read(storage.reader(), max_packet_size) {
-                        Ok(Packet::Publish(publish)) => publish,
-                        Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
-                        Err(rumqttc::Error::InsufficientBytes(n)) => {
-                            error!("Failed to read {n} bytes from storage, required to construct a packet, ignoring rest of file.");
-                            continue;
-                        },
-                        Err(e) => {
-                            error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
-                            return Ok(Status::Normal)
-                        }
+                    let publish = match read_from_disk(storage, max_packet_size) {
+                        Read::Publish(p) => p,
+                        Read::Corrupted => continue,
+                        Read::Done => return Ok(Status::Normal),
                     };
 
 
@@ -487,6 +464,41 @@ fn write_to_disk(
     if let Some(handler) = serializer_metrics {
         if deleted.is_some() {
             handler.increment_lost_segments();
+        }
+    }
+}
+
+enum Read {
+    // Read a [Publish] from file
+    Publish(Publish),
+    // File being read is corrupted
+    Corrupted,
+    // Done reading all the pending files
+    Done,
+}
+
+// Read publish packets from [Storage]
+fn read_from_disk(storage: &mut Storage, max_packet_size: usize) -> Read {
+    match storage.reload_on_eof() {
+        // Done reading all pending files
+        Ok(true) => return Read::Done,
+        Ok(false) => {}
+        Err(e) => {
+            error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
+            return Read::Done;
+        }
+    }
+
+    match read(storage.reader(), max_packet_size) {
+        Ok(Packet::Publish(publish)) => Read::Publish(publish),
+        Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+        Err(rumqttc::Error::InsufficientBytes(n)) => {
+            error!("Failed to read {n} bytes from storage, required to construct a packet, ignoring rest of file.");
+            Read::Corrupted
+        }
+        Err(e) => {
+            error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+            Read::Done
         }
     }
 }
