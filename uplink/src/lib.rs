@@ -154,11 +154,11 @@ pub mod config {
         commandline: &CommandLine,
     ) -> Result<(String, Option<String>), ReadFileError> {
         let auth = read_file_contents(&commandline.auth)
-            .ok_or(ReadFileError::Auth(commandline.auth.to_string()))?;
+            .ok_or_else(|| ReadFileError::Auth(commandline.auth.to_string()))?;
         let config = match &commandline.config {
-            Some(path) => {
-                Some(read_file_contents(path).ok_or(ReadFileError::Config(path.to_string()))?)
-            }
+            Some(path) => Some(
+                read_file_contents(path).ok_or_else(|| ReadFileError::Config(path.to_string()))?,
+            ),
             None => None,
         };
 
