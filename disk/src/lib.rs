@@ -5,7 +5,7 @@ use bytes::{Buf, BufMut, BytesMut};
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
-use std::{fs, io, mem};
+use std::{fs, io};
 
 pub struct Storage {
     /// list of backlog file ids. Mutated only be the serialization part of the sender
@@ -108,13 +108,13 @@ impl Storage {
 
     /// Reloads next buffer even if there is pending data in current buffer
     pub fn reload(&mut self) -> io::Result<bool> {
-        // Swap read buffer with write buffer to read data in inmemory write
-        // buffer when all the backlog disk files are done
+        // Take contents of write buffer and put it into read buffer to read data from
+        // inmemory write buffer when all the backlog disk files are done
         if self.backlog_file_ids.is_empty() {
-            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
+            self.current_read_file = self.current_write_file.split_off(0);
 
-            // If read buffer is 0 after swapping, all the data is caught up
-            return if self.current_read_file.is_empty() { Ok(true) } else { Ok(false) };
+            // If read buffer is still empty, all the data is caught up
+            return Ok(self.current_read_file.is_empty());
         }
 
         // Len always > 0 because of above if. Doesn't panic

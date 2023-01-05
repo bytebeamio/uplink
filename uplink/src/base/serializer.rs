@@ -468,6 +468,7 @@ fn write_to_disk(
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Read {
     // Read a [Publish] from file
     Publish(Publish),
@@ -490,17 +491,24 @@ fn read_from_disk(storage: &mut Storage, max_packet_size: usize) -> Read {
     }
 
     match read(storage.reader(), max_packet_size) {
-        Ok(Packet::Publish(publish)) => Read::Publish(publish),
+        Ok(Packet::Publish(publish)) => return Read::Publish(publish),
         Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
         Err(rumqttc::Error::InsufficientBytes(n)) => {
             error!("Failed to read {n} bytes from storage, required to construct a packet, ignoring rest of file.");
-            Read::Corrupted
         }
         Err(e) => {
             error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
-            Read::Done
+            return Read::Done;
         }
     }
+
+    // Force reload because of corruption
+    if let Err(e) = storage.reload() {
+        error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
+        return Read::Done;
+    }
+
+    Read::Corrupted
 }
 
 #[cfg(test)]
@@ -509,7 +517,7 @@ mod test {
 
     use super::*;
     use crate::{base::Stream, config::Persistence, Payload};
-    use std::collections::HashMap;
+    use std::{collections::HashMap, fmt::Write};
 
     #[derive(Clone)]
     pub struct MockClient {
