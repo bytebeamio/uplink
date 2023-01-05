@@ -18,6 +18,11 @@ max_inflight = 100
 # triggered from cloud.
 actions = ["tunshell"]
 
+# Some streams the user might want to not include when measuring uplink's metrics,
+# or even for batching. Mentioned streams if not otherwise configured will also be
+# flushed on a single point entering, ensuring instant forwarding to platform.
+bypass_streams = ["mainapp_metrics"]
+
 # Metrics configurations are available for serializer and streams. By default 
 # they are disabled and no metrics will be forwarded to platform. 
 # Parameters

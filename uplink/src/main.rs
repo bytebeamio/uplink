@@ -39,7 +39,6 @@
 //!                                                                      ActionResponse
 //!```
 
-use std::fs;
 use std::sync::Arc;
 
 use anyhow::Error;
@@ -51,7 +50,7 @@ use structopt::StructOpt;
 
 use tokio::task;
 use uplink::collector::tcpstatus::TcpStatus;
-use uplink::config::{initialize, CommandLine};
+use uplink::config::{initialize, CommandLine, get_configs};
 use uplink::{simulator, Bridge, Config, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) {
@@ -135,15 +134,8 @@ async fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
 
     initialize_logging(&commandline);
-    let config = Arc::new(initialize(
-        fs::read_to_string(&commandline.auth)?.as_str(),
-        commandline
-            .config
-            .as_ref()
-            .and_then(|path| fs::read_to_string(path).ok())
-            .unwrap_or_default()
-            .as_str(),
-    )?);
+    let (auth, config) = get_configs(&commandline)?;
+    let config = Arc::new(initialize(&auth, &config.unwrap_or_default())?);
 
     banner(&commandline, &config);
 

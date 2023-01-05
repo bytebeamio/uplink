@@ -34,10 +34,20 @@ pub struct StreamConfig {
     pub flush_period: u64,
 }
 
+fn default_file_size() -> usize {
+    104857600 // 100MB
+}
+
+fn default_file_count() -> usize {
+    3
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Persistence {
     pub path: String,
+    #[serde(default = "default_file_size")]
     pub max_file_size: usize,
+    #[serde(default = "default_file_count")]
     pub max_file_count: usize,
 }
 
@@ -101,6 +111,9 @@ pub struct Config {
     pub action_status: StreamConfig,
     pub serializer_metrics: MetricsConfig,
     pub stream_metrics: MetricsConfig,
+    /// List of streams that are to be ignored by uplink's internal metrics collectors
+    #[serde(default)]
+    pub bypass_streams: Vec<String>,
     pub downloader: Option<Downloader>,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,

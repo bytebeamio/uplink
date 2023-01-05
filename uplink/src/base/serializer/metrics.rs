@@ -33,7 +33,7 @@ impl SerializerMetricsHandler {
                     + &config.project_id
                     + "/devices/"
                     + &config.device_id
-                    + "/events/serializer_metrics/jsonarray"
+                    + "/events/uplink_serializer_metrics/jsonarray"
             }
         };
 
@@ -109,6 +109,7 @@ pub struct StreamMetrics {
 
 pub struct StreamMetricsHandler {
     pub topic: String,
+    black_list: Vec<String>,
     map: HashMap<String, StreamMetrics>,
 }
 
@@ -122,16 +123,23 @@ impl StreamMetricsHandler {
                     + &config.project_id
                     + "/devices/"
                     + &config.device_id
-                    + "/events/stream_metrics/jsonarray"
+                    + "/events/uplink_stream_metrics/jsonarray"
             }
         };
 
-        Some(Self { topic, map: Default::default() })
+        Some(Self {
+            topic,
+            black_list: config.bypass_streams.clone(),
+            map: Default::default(),
+        })
     }
 
     /// Updates the metrics for a stream as deemed necessary with the count of points in batch
     /// and the difference between first and last elements timestamp as latency being inputs.
     pub fn update(&mut self, stream: String, point_count: usize, batch_latency: u64) {
+        if self.black_list.contains(&stream) {
+            return;
+        }
         // Init stream metrics max/min values with opposite extreme values to ensure first latency value is accepted
         let metrics = self.map.entry(stream.clone()).or_insert(StreamMetrics {
             stream,

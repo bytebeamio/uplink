@@ -116,6 +116,17 @@ pub mod config {
             }
         }
 
+        for stat in [
+            "disk_stats",
+            "network_stats",
+            "processor_stats",
+            "process_stats",
+            "component_stats",
+            "system_stats",
+        ] {
+            config.bypass_streams.push("uplink_".to_string() + stat);
+        }
+
         Ok(config)
     }
 
@@ -126,6 +137,33 @@ pub mod config {
             let topic = topic.replace("{device_id}", device_id);
             config.topic = Some(topic);
         }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum ReadFileError {
+        #[error("Auth file not found at {0}")]
+        Auth(String),
+        #[error("Config file not found at {0}")]
+        Config(String),
+    }
+
+    fn read_file_contents(path: &str) -> Option<String> {
+        fs::read_to_string(path).ok()
+    }
+
+    pub fn get_configs(
+        commandline: &CommandLine,
+    ) -> Result<(String, Option<String>), ReadFileError> {
+        let auth = read_file_contents(&commandline.auth)
+            .ok_or_else(|| ReadFileError::Auth(commandline.auth.to_string()))?;
+        let config = match &commandline.config {
+            Some(path) => Some(
+                read_file_contents(path).ok_or_else(|| ReadFileError::Config(path.to_string()))?,
+            ),
+            None => None,
+        };
+
+        Ok((auth, config))
     }
 }
 

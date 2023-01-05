@@ -41,10 +41,17 @@ pub enum Error {
 pub struct Bridge {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
+
+    /// Actions incoming from backend
     actions_rx: Receiver<Action>,
-    actions_tx: BTx<Action>,
+    /// Action responses going to backend
     action_status: Stream<ActionResponse>,
+
+    /// Used to broadcast actions to all client connections
+    actions_tx: BTx<Action>,
+    /// Given to client connections for sending action responses
     status_tx: Sender<ActionResponse>,
+    /// Process action responses coming in from client connections
     status_rx: Receiver<ActionResponse>,
 }
 
@@ -104,18 +111,14 @@ impl Bridge {
                         let action = action?;
                         let action_id = action.action_id.clone();
 
-                        current_action_ = Some(CurrentAction {
-                            id: action_id.clone(),
-                            timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
-                        });
-
                         if self.actions_tx.send(action).is_ok() {
                             info!("Received action: {:?}", action_id);
+                            current_action_ = Some(CurrentAction {
+                                id: action_id.clone(),
+                                timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
+                            });
                             self.action_status.fill(ActionResponse::progress(&action_id, "Received", 0)).await?;
-                            continue;
-                        }
-
-                        if self.config.ignore_actions_if_no_clients {
+                        } else if self.config.ignore_actions_if_no_clients {
                             error!("No clients connected, ignoring action = {:?}", action_id);
                         } else {
                             error!("Bridge down!! Action ID = {}", action_id);
@@ -124,8 +127,6 @@ impl Bridge {
                                 error!("Failed to send busy status. Error = {:?}", e);
                             }
                         }
-
-                        current_action_.take().unwrap();
                     }
 
                     response = self.status_rx.recv_async() => {
@@ -170,7 +171,7 @@ impl Bridge {
 
     async fn spawn_collector(&self, stream: TcpStream) {
         let framed = Framed::new(stream, LinesCodec::new());
-        let mut tcp_json = TcpJson {
+        let mut tcp_json = ClientConnection {
             status_tx: self.status_tx.clone(),
             streams: Streams::new(self.config.clone(), self.data_tx.clone()),
             actions_rx: self.actions_tx.subscribe(),
@@ -186,14 +187,14 @@ impl Bridge {
     }
 }
 
-struct TcpJson {
+struct ClientConnection {
     streams: Streams,
     status_tx: Sender<ActionResponse>,
     actions_rx: BRx<Action>,
     in_execution: Option<String>,
 }
 
-impl TcpJson {
+impl ClientConnection {
     pub async fn collect(
         &mut self,
         mut client: Framed<TcpStream, LinesCodec>,
