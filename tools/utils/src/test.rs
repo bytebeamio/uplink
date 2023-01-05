@@ -3,7 +3,7 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() {
     let (t1, r1) = flume::bounded(1);
-    let (t2, r2) = flume::bounded(10);
+    let (t2, _) = flume::bounded(10);
     {
         let r1 = r1.clone();
         let t2 = t2.clone();
@@ -48,6 +48,6 @@ fn first_response(value: u32) {
     println!("first_response: {}", value);
 }
 
-fn second_response(value: u32) {
-    println!("second_response: {}", value);
-}
+// fn second_response(value: u32) {
+//     println!("second_response: {}", value);
+// }
