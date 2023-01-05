@@ -20,6 +20,8 @@ pub struct Storage {
     current_write_file: BytesMut,
     /// current_read_file
     current_read_file: BytesMut,
+
+    read_file_id: Option<u64>,
 }
 
 impl Storage {
@@ -38,6 +40,7 @@ impl Storage {
             max_file_count,
             current_write_file: BytesMut::with_capacity(max_file_size * 2),
             current_read_file: BytesMut::with_capacity(max_file_size * 2),
+            read_file_id: None,
         })
     }
 
@@ -107,7 +110,7 @@ impl Storage {
     }
 
     /// Reloads next buffer even if there is pending data in current buffer
-    pub fn reload(&mut self) -> io::Result<bool> {
+    fn reload(&mut self) -> io::Result<bool> {
         // Swap read buffer with write buffer to read data in inmemory write
         // buffer when all the backlog disk files are done
         if self.backlog_file_ids.is_empty() {
@@ -126,7 +129,7 @@ impl Storage {
         let metadata = fs::metadata(&next_file_path)?;
         self.prepare_current_read_buffer(metadata.len() as usize);
         file.read_exact(&mut self.current_read_file[..])?;
-        self.remove(id)?;
+        self.read_file_id = Some(id);
 
         Ok(false)
     }
@@ -140,6 +143,11 @@ impl Storage {
         // Don't reload if there is data in current read file
         if self.current_read_file.has_remaining() {
             return Ok(false);
+        }
+
+        // Remove last file on finishing read
+        if let Some(id) = self.read_file_id.take() {
+            self.remove(id)?;
         }
 
         self.reload()
