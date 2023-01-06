@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
 use flume::Sender;
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use tokio_stream::StreamExt;
 use tokio_util::time::{delay_queue::Key, DelayQueue};
 

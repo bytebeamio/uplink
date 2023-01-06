@@ -1,6 +1,6 @@
 use flume::{bounded, Receiver, RecvError, SendError, Sender};
 use futures_util::SinkExt;
-use log::{debug, error, info, trace};
+use log::{debug, error, info};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{channel, Receiver as BRx, Sender as BTx};
