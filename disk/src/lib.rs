@@ -309,4 +309,31 @@ mod test {
             assert_eq!(&publish.payload[..], vec![i as u8; 1024].as_slice());
         }
     }
+
+    #[test]
+    fn ensure_file_remove_on_read_completion_only() {
+        let backup = init_backup_folders();
+        let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
+
+        // 10 files on disk and partially filled current write buffer, 10 publishes per file
+        write_n_publishes(&mut storage, 105);
+
+        // Initially not on a read file
+        assert_eq!(storage.read_file_id, None);
+
+        // Successfully read 10 files with files still in storage after 10 reads
+        for i in 0..10 {
+            read_n_publishes(&mut storage, 10);
+            let file_id = storage.read_file_id.unwrap();
+            assert_eq!(file_id, i);
+            // Ensure file exists
+            let next_file_path =
+                storage.backup_path.join("backup@".to_owned() + &file_id.to_string());
+            assert!(Path::new(&next_file_path).exists());
+        }
+
+        // All read files should be deleted just after 1 more read
+        read_n_publishes(&mut storage, 1);
+        assert_eq!(storage.read_file_id, None);
+    }
 }
