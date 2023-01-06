@@ -48,7 +48,7 @@ use simplelog::{
 };
 use structopt::StructOpt;
 
-use uplink::config::{initialize, CommandLine, get_configs};
+use uplink::config::{get_configs, initialize, CommandLine};
 use uplink::{simulator, Bridge, Config, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) {
