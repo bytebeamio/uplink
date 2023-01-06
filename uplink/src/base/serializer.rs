@@ -9,7 +9,6 @@ use rumqttc::*;
 use thiserror::Error;
 use tokio::{select, time};
 
-use crate::base::metrics::{SerializerMetricsHandler, StreamMetrics, StreamMetricsHandler};
 use crate::{Config, Package};
 
 #[derive(thiserror::Error, Debug)]
@@ -162,8 +161,6 @@ pub struct Serializer<C: MqttClient> {
     collector_rx: Receiver<Box<dyn Package>>,
     client: C,
     storage: Option<Storage>,
-    serializer_metrics: Option<SerializerMetricsHandler>,
-    stream_metrics: Option<StreamMetricsHandler>,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -184,10 +181,7 @@ impl<C: MqttClient> Serializer<C> {
             None => None,
         };
 
-        let serializer_metrics = SerializerMetricsHandler::new(config.clone());
-        let stream_metrics = StreamMetricsHandler::new(config.clone());
-
-        Ok(Serializer { config, collector_rx, client, storage, serializer_metrics, stream_metrics })
+        Ok(Serializer { config, collector_rx, client, storage })
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -197,13 +191,13 @@ impl<C: MqttClient> Serializer<C> {
             None => return Err(Error::MissingPersistence),
         };
         // Write failed publish to disk first, metrics don't matter
-        write_to_disk(publish, storage, &mut None);
+        write_to_disk(publish, storage);
 
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
-            let publish = construct_publish(&mut None, data)?;
-            write_to_disk(publish, storage, &mut None);
+            let publish = construct_publish(data)?;
+            write_to_disk(publish, storage);
         }
     }
 
@@ -229,14 +223,8 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     let data = data?;
-                    if let Some(handler) = self.serializer_metrics.as_mut() {
-                        if let Some((errors, count)) = data.anomalies() {
-                            handler.add_errors(errors, count);
-                        }
-                    }
-
-                    let publish = construct_publish(&mut self.stream_metrics, data)?;
-                    write_to_disk(publish, storage, &mut self.serializer_metrics);
+                    let publish = construct_publish(data)?;
+                    write_to_disk(publish, storage);
                 }
                 o = &mut publish => match o {
                     Ok(_) => return Ok(Status::EventLoopReady),
@@ -285,14 +273,8 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    if let Some(handler) = self.serializer_metrics.as_mut() {
-                        if let Some((errors, count)) = data.anomalies() {
-                            handler.add_errors(errors, count);
-                        }
-                    }
-
-                    let publish = construct_publish(&mut self.stream_metrics, data)?;
-                    write_to_disk(publish, storage, &mut self.serializer_metrics);
+                    let publish = construct_publish(data)?;
+                    write_to_disk(publish, storage);
                 }
                 o = &mut send => {
                     // Send failure implies eventloop crash. Switch state to
@@ -325,10 +307,6 @@ impl<C: MqttClient> Serializer<C> {
 
                     let payload = publish.payload;
                     let payload_size = payload.len();
-                    if let Some(handler) = self.serializer_metrics.as_mut() {
-                        handler.sub_total_disk_size(payload_size);
-                        handler.add_total_sent_size(payload_size);
-                    }
                     send.set(send_publish(client, publish.topic, payload));
                 }
             }
@@ -338,25 +316,16 @@ impl<C: MqttClient> Serializer<C> {
     async fn normal(&mut self) -> Result<Status, Error> {
         info!("Switching to normal mode!!");
         let mut interval = time::interval(time::Duration::from_secs(10));
-        let metrics_enabled = self.serializer_metrics.is_some() || self.stream_metrics.is_some();
 
         loop {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
 
-                    // Extract anomalies detected by package during collection
-                    if let Some(handler) = self.serializer_metrics.as_mut() {
-                        if let Some((errors, count)) = data.anomalies() {
-                            handler.add_errors(errors, count);
-                        }
-                    }
-
-                    let publish = construct_publish(&mut self.stream_metrics, data)?;
+                    let publish = construct_publish(data)?;
                     let payload_size = publish.payload.len();
                     match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, publish.payload) {
-                        Ok(_) => if let Some(handler) = self.serializer_metrics.as_mut() {
-                            handler.add_total_sent_size(payload_size);
+                        Ok(_) => {
                             continue;
                         }
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
@@ -365,32 +334,7 @@ impl<C: MqttClient> Serializer<C> {
 
                 }
                 // On a regular interval, forwards metrics information to network
-                _ = interval.tick(), if metrics_enabled => {
-                    if let Some(handler) = self.serializer_metrics.as_mut() {
-                        let data = handler.update();
-                        let payload = serde_json::to_vec(&vec![data])?;
-
-                        info!("Publishing serializer metrics to broker");
-                        match self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
-                            Err(e) => error!("Couldn't publish serializer metrics to broker: {e}"),
-                            _ => handler.clear(),
-                        }
-                    }
-
-                    if let Some(handler) = self.stream_metrics.as_mut() {
-                        let data: Vec<&mut StreamMetrics> = handler.streams().collect();
-                        if data.is_empty() {
-                            continue;
-                        }
-                        let payload = serde_json::to_vec(&data)?;
-
-                        info!("Publishing stream metrics to broker");
-                        match self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
-                            Err(e) => error!("Couldn't publish stream metrics to broker: {e}"),
-                            _ => handler.clear(),
-                        }
-                    }
-                }
+                _ = interval.tick() => {}
             }
         }
     }
@@ -434,17 +378,11 @@ async fn send_publish<C: MqttClient>(
 }
 
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
-fn construct_publish(
-    stream_metrics: &mut Option<StreamMetricsHandler>,
-    data: Box<dyn Package>,
-) -> Result<Publish, Error> {
+fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
     let stream = data.stream().as_ref().to_owned();
     let point_count = data.len();
     let batch_latency = data.batch_latency();
     trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
-    if let Some(handler) = stream_metrics {
-        handler.update(stream, point_count, batch_latency);
-    }
 
     let topic = data.topic();
     let payload = data.serialize()?;
@@ -454,20 +392,12 @@ fn construct_publish(
 
 // Writes the provided publish packet to disk with [Storage], after setting its pkid to 1.
 // Updates serializer metrics with appropriate values on success, if asked to do so.
-fn write_to_disk(
-    mut publish: Publish,
-    storage: &mut Storage,
-    serializer_metrics: &mut Option<SerializerMetricsHandler>,
-) {
+fn write_to_disk(mut publish: Publish, storage: &mut Storage) {
     publish.pkid = 1;
     let payload_size = publish.payload.len();
     if let Err(e) = publish.write(storage.writer()) {
         error!("Failed to fill disk buffer. Error = {:?}", e);
         return;
-    }
-
-    if let Some(handler) = serializer_metrics {
-        handler.add_total_disk_size(payload_size)
     }
 
     let deleted = match storage.flush_on_overflow() {
@@ -477,12 +407,6 @@ fn write_to_disk(
             return;
         }
     };
-
-    if let Some(handler) = serializer_metrics {
-        if deleted.is_some() {
-            handler.increment_lost_segments();
-        }
-    }
 }
 
 #[cfg(test)]
@@ -677,7 +601,7 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage, &mut None);
+        write_to_disk(publish.clone(), &mut storage);
 
         let stored_publish = read_from_storage(&mut storage, serializer.config.max_packet_size);
 
@@ -804,7 +728,7 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage, &mut None);
+        write_to_disk(publish.clone(), &mut storage);
 
         // Replace storage into serializer
         serializer.storage = Some(storage);
@@ -838,7 +762,7 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage, &mut None);
+        write_to_disk(publish.clone(), &mut storage);
 
         // Replace storage into serializer
         serializer.storage = Some(storage);

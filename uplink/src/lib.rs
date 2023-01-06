@@ -107,13 +107,13 @@ pub mod config {
 
         replace_topic_placeholders(&mut config.action_status, tenant_id, device_id);
 
-        for config in [&mut config.serializer_metrics, &mut config.stream_metrics] {
-            if let Some(topic) = &config.topic {
-                let topic = topic.replace("{tenant_id}", tenant_id);
-                let topic = topic.replace("{device_id}", device_id);
-                config.topic = Some(topic);
-            }
-        }
+        // for config in [&mut config.serializer_metrics, &mut config.stream_metrics] {
+        //     if let Some(topic) = &config.topic {
+        //         let topic = topic.replace("{tenant_id}", tenant_id);
+        //         let topic = topic.replace("{device_id}", device_id);
+        //         config.topic = Some(topic);
+        //     }
+        // }
 
         for stat in [
             "disk_stats",

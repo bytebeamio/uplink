@@ -91,7 +91,7 @@ pub struct Downloader {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct MetricsConfig {
     pub enabled: bool,
-    pub topic: Option<String>,
+    pub blacklist: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
