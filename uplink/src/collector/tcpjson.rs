@@ -119,15 +119,13 @@ impl Bridge {
                                 timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
                             });
                             self.action_status.fill(ActionResponse::progress(&action_id, "Received", 0)).await?;
+                        } else if self.config.ignore_actions_if_no_clients {
+                            error!("No clients connected, ignoring action = {:?}", action_id);
                         } else {
-                            if self.config.ignore_actions_if_no_clients {
-                                error!("No clients connected, ignoring action = {:?}", action_id);
-                            } else {
-                                error!("Bridge down!! Action ID = {}", action_id);
-                                let status = ActionResponse::failure(&action_id, "Bridge down");
-                                if let Err(e) = self.action_status.fill(status).await {
-                                    error!("Failed to send busy status. Error = {:?}", e);
-                                }
+                            error!("Bridge down!! Action ID = {}", action_id);
+                            let status = ActionResponse::failure(&action_id, "Bridge down");
+                            if let Err(e) = self.action_status.fill(status).await {
+                                error!("Failed to send busy status. Error = {:?}", e);
                             }
                         }
                     }
