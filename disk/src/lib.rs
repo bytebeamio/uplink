@@ -213,6 +213,32 @@ mod test {
         backup
     }
 
+    fn write_n_publishes(storage: &mut Storage, n: u8) {
+        for i in 0..n {
+            let mut publish = Publish::new("hello", QoS::AtLeastOnce, vec![i; 1024]);
+            publish.pkid = 1;
+            publish.write(storage.writer()).unwrap();
+            storage.flush_on_overflow().unwrap();
+        }
+    }
+
+    fn read_n_publishes(storage: &mut Storage, n: usize) -> Vec<Publish> {
+        let mut publishes = vec![];
+        for _ in 0..n {
+            // Done reading all the pending files
+            if storage.reload_on_eof().unwrap() {
+                break;
+            }
+
+            match read(storage.reader(), 1048).unwrap() {
+                Packet::Publish(p) => publishes.push(p),
+                packet => unreachable!("{:?}", packet),
+            }
+        }
+
+        publishes
+    }
+
     #[test]
     fn flush_creates_new_file_after_size_limit() {
         // 1036 is the size of a publish message with topic = "hello", qos = 1, payload = 1024 bytes
@@ -220,12 +246,7 @@ mod test {
         let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
 
         // 2 files on disk and a partially filled in memory buffer
-        for _ in 0..101 {
-            let mut publish = Publish::new("hello", QoS::AtLeastOnce, vec![1; 1024]);
-            publish.pkid = 1;
-            publish.write(storage.writer()).unwrap();
-            storage.flush_on_overflow().unwrap();
-        }
+        write_n_publishes(&mut storage, 101);
 
         // 1 message in in memory writer
         assert_eq!(storage.writer().len(), 1036);
@@ -241,23 +262,13 @@ mod test {
         let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
 
         // 11 files created. 10 on disk
-        for _ in 0..110 {
-            let mut publish = Publish::new("hello", QoS::AtLeastOnce, vec![1; 1024]);
-            publish.pkid = 1;
-            publish.write(storage.writer()).unwrap();
-            storage.flush_on_overflow().unwrap();
-        }
+        write_n_publishes(&mut storage, 110);
 
         let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
         // 11 files created. 10 on disk
-        for _ in 0..10 {
-            let mut publish = Publish::new("hello", QoS::AtLeastOnce, vec![1; 1024]);
-            publish.pkid = 1;
-            publish.write(storage.writer()).unwrap();
-            storage.flush_on_overflow().unwrap();
-        }
+        write_n_publishes(&mut storage, 10);
 
         assert_eq!(storage.writer().len(), 0);
         let files = get_file_ids(&backup.path()).unwrap();
@@ -270,27 +281,10 @@ mod test {
         let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
 
         // 10 files on disk
-        for i in 0..100 {
-            let mut publish = Publish::new("hello", QoS::AtLeastOnce, vec![i; 1024]);
-            publish.pkid = 1;
-            publish.write(storage.writer()).unwrap();
-            storage.flush_on_overflow().unwrap();
-        }
-
-        let mut publishes = Vec::new();
+        write_n_publishes(&mut storage, 100);
 
         // breaks after 100th iteration due to `reload_on_eof` break
-        for _ in 0..1234 {
-            // Done reading all the pending files
-            if storage.reload_on_eof().unwrap() {
-                break;
-            }
-
-            match read(storage.reader(), 1048).unwrap() {
-                Packet::Publish(publish) => publishes.push(publish),
-                packet => unreachable!("{:?}", packet),
-            }
-        }
+        let publishes = read_n_publishes(&mut storage, 1234);
 
         assert_eq!(publishes.len(), 100);
         for (i, publish) in publishes.iter().enumerate() {
@@ -304,27 +298,10 @@ mod test {
         let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
 
         // 10 files on disk and partially filled current write buffer
-        for i in 0..105 {
-            let mut publish = Publish::new("hello", QoS::AtLeastOnce, vec![i; 1024]);
-            publish.pkid = 1;
-            publish.write(storage.writer()).unwrap();
-            storage.flush_on_overflow().unwrap();
-        }
-
-        let mut publishes = Vec::new();
+        write_n_publishes(&mut storage, 105);
 
         // breaks after 100th iteration due to `reload_on_eof` break
-        for _i in 0..12345 {
-            // Done reading all the pending files
-            if storage.reload_on_eof().unwrap() {
-                break;
-            }
-
-            match read(storage.reader(), 1048).unwrap() {
-                Packet::Publish(publish) => publishes.push(publish),
-                packet => unreachable!("{:?}", packet),
-            }
-        }
+        let publishes = read_n_publishes(&mut storage, 12345);
 
         assert_eq!(storage.current_write_file.len(), 0);
         assert_eq!(publishes.len(), 105);
