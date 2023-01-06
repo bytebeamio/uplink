@@ -48,8 +48,8 @@ pub struct DeviceData {
 pub enum DataEventType {
     GenerateGPS,
     GenerateIMU,
-    GenerateVehicleData,
-    GeneratePeripheralData,
+    GenerateDeviceShadow,
+    GeneratePeripheralState,
     GenerateMotor,
     GenerateBMS,
 }
@@ -467,14 +467,14 @@ pub fn generate_initial_events(
         }));
 
         events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateVehicleData,
+            event_type: DataEventType::GenerateDeviceShadow,
             device: device.clone(),
             timestamp,
             sequence: 1,
         }));
 
         events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GeneratePeripheralData,
+            event_type: DataEventType::GeneratePeripheralState,
             device: device.clone(),
             timestamp,
             sequence: 1,
@@ -524,8 +524,8 @@ pub fn next_event_duration(event_type: DataEventType) -> Duration {
     match event_type {
         DataEventType::GenerateGPS => Duration::from_millis(1000),
         DataEventType::GenerateIMU => Duration::from_millis(100),
-        DataEventType::GenerateVehicleData => Duration::from_millis(1000),
-        DataEventType::GeneratePeripheralData => Duration::from_millis(1000),
+        DataEventType::GenerateDeviceShadow => Duration::from_millis(1000),
+        DataEventType::GeneratePeripheralState => Duration::from_millis(1000),
         DataEventType::GenerateMotor => Duration::from_millis(250),
         DataEventType::GenerateBMS => Duration::from_millis(250),
     }
@@ -539,10 +539,10 @@ pub async fn process_data_event(
     let data = match event.event_type {
         DataEventType::GenerateGPS => generate_gps_data(&event.device, event.sequence),
         DataEventType::GenerateIMU => generate_imu_data(&event.device, event.sequence),
-        DataEventType::GenerateVehicleData => {
+        DataEventType::GenerateDeviceShadow => {
             generate_device_shadow_data(&event.device, event.sequence)
         }
-        DataEventType::GeneratePeripheralData => {
+        DataEventType::GeneratePeripheralState => {
             generate_peripheral_state_data(&event.device, event.sequence)
         }
         DataEventType::GenerateMotor => generate_motor_data(&event.device, event.sequence),
