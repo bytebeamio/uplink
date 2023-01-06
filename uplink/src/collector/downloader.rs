@@ -45,9 +45,9 @@
 use bytes::BytesMut;
 use flume::{Receiver, RecvError, Sender};
 use futures_util::StreamExt;
-use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
+use tracing::{error, info};
 
 use std::fs::{create_dir_all, File};
 use std::time::Duration;

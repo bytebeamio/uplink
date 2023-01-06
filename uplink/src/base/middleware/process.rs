@@ -1,9 +1,9 @@
 use flume::SendError;
-use log::{debug, error, info};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::{pin, select, task, time};
+use tracing::{debug, error, info};
 
 use crate::{ActionResponse, Package, Stream};
 

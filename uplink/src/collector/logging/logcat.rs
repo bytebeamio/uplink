@@ -135,7 +135,7 @@ pub fn new_logcat(logging_config: &LoggingConfig) -> Command {
         logcat_args.push(format!("{}:{}", tag, min_level.to_str()));
     }
 
-    log::info!("logcat args: {:?}", logcat_args);
+    tracing::info!("logcat args: {:?}", logcat_args);
     let mut logcat = Command::new("logcat");
     logcat.args(logcat_args).stdout(Stdio::piped());
 

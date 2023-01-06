@@ -4,10 +4,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use disk::Storage;
 use flume::{Receiver, RecvError};
-use log::{error, info, trace};
 use rumqttc::*;
 use thiserror::Error;
 use tokio::{select, time};
+use tracing::{error, info, trace};
 
 mod metrics;
 

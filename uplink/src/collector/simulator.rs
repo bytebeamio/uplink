@@ -1,10 +1,10 @@
 use flume::{Receiver, Sender};
-use log::{error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
 use tokio::select;
 use tokio_util::codec::LinesCodecError;
+use tracing::{error, info};
 
 use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};

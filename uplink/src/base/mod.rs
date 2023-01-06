@@ -2,9 +2,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug, mem, sync::Arc};
 
 use flume::{SendError, Sender};
-use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::{debug, trace};
 
 pub mod actions;
 pub mod middleware;

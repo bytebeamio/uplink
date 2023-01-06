@@ -5,8 +5,8 @@ use std::thread;
 use anyhow::Error;
 
 use flume::{bounded, Receiver, Sender};
-use log::error;
 use tokio::task;
+use tracing::error;
 
 pub mod base;
 pub mod collector;

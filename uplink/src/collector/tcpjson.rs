@@ -1,6 +1,5 @@
 use flume::{bounded, Receiver, RecvError, SendError, Sender};
 use futures_util::SinkExt;
-use log::{error, info};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{channel, Receiver as BRx, Sender as BTx};
@@ -8,6 +7,7 @@ use tokio::time::{Duration, Sleep};
 use tokio::{select, time};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
+use tracing::{error, info};
 
 use std::pin::Pin;
 use std::{io, sync::Arc};

@@ -1,6 +1,6 @@
 use flume::{Receiver, Sender, TrySendError};
-use log::{debug, error};
 use thiserror::Error;
+use tracing::{debug, error};
 
 use std::sync::Arc;
 

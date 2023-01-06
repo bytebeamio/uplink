@@ -7,8 +7,6 @@ edition = "2021"
 [dependencies]
 structopt = "0.3"
 config = { version = "0.13.2", default-features = false, features = ["toml", "json"] }
-log = "0.4"
-simplelog = "0.12.0"
 time = "0.3"
 disk = { path = "../disk" }
 tokio = { version = "1", features = ["full"] }
@@ -30,6 +28,8 @@ async-trait = "0.1"
 sysinfo = "0.26"
 lazy_static = "1.4.0"
 glob = "0.3"
+tracing = { version="0.1", features=["log"] }
+tracing-subscriber = { version="0.3.16", features=["env-filter"] }
 
 [build-dependencies]
 vergen = { version = "7", features = ["git", "build", "time"] }

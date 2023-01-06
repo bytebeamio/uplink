@@ -42,50 +42,32 @@
 use std::sync::Arc;
 
 use anyhow::Error;
-use log::{error, warn};
-use simplelog::{
-    ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, LevelPadding, TermLogger, TerminalMode,
-};
 use structopt::StructOpt;
+use tracing::error;
 
-use uplink::config::{initialize, CommandLine, get_configs};
+use uplink::config::{get_configs, initialize, CommandLine};
 use uplink::{simulator, Bridge, Config, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) {
     let level = match commandline.verbose {
-        0 => LevelFilter::Warn,
-        1 => LevelFilter::Info,
-        2 => LevelFilter::Debug,
-        _ => LevelFilter::Trace,
+        0 => "uplink=warn",
+        1 => "uplink=info",
+        2 => "uplink=debug",
+        _ => "uplink=trace",
     };
 
-    let mut config = ConfigBuilder::new();
-    config
-        .set_location_level(LevelFilter::Off)
-        .set_target_level(LevelFilter::Error)
-        .set_thread_level(LevelFilter::Error)
-        .set_level_padding(LevelPadding::Right);
+    let builder = tracing_subscriber::fmt()
+        .pretty()
+        .with_line_number(false)
+        .with_file(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_env_filter(level)
+        .with_filter_reloading();
 
-    match config.set_time_offset_to_local() {
-        Ok(_) => {}
-        Err(_) => {
-            warn!("failed to get time zone on this platform, logger will use IST");
-            config.set_time_offset(time::UtcOffset::from_hms(5, 30, 0).unwrap());
-        }
-    }
+    let _reload_handle = builder.reload_handle();
 
-    if commandline.modules.is_empty() {
-        for module in ["uplink", "disk"] {
-            config.add_filter_allow(module.to_string());
-        }
-    } else {
-        for module in commandline.modules.iter() {
-            config.add_filter_allow(module.to_string());
-        }
-    }
-
-    let loggers = TermLogger::new(level, config.build(), TerminalMode::Mixed, ColorChoice::Auto);
-    CombinedLogger::init(vec![loggers]).unwrap();
+    builder.try_init().expect("Couldn't succesfully initialize tracing subscriber");
 }
 
 fn banner(commandline: &CommandLine, config: &Arc<Config>) {

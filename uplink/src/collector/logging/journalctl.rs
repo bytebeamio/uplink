@@ -1,6 +1,7 @@
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use super::LoggingConfig;
 use crate::Payload;
@@ -103,7 +104,7 @@ pub fn new_journalctl(logging_config: &LoggingConfig) -> Command {
         journalctl_args.extend(tag_args);
     }
 
-    log::info!("journalctl args: {:?}", journalctl_args);
+    info!("journalctl args: {:?}", journalctl_args);
     let mut journalctl = Command::new("journalctl");
     journalctl.args(journalctl_args).stdout(Stdio::piped());
 

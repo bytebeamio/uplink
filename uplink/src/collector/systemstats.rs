@@ -1,10 +1,10 @@
 use flume::Sender;
-use log::error;
 use serde::Serialize;
 use sysinfo::{
     ComponentExt, CpuExt, DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, SystemExt,
 };
 use tokio::time::Instant;
+use tracing::error;
 
 use std::{
     collections::HashMap,

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use flume::Receiver;
-use log::error;
 use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
+use tracing::{error, info, warn};
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
 use crate::{
@@ -82,12 +82,12 @@ impl TunshellSession {
                             let response = ActionResponse::failure(&action_id, status.to_string());
                             status_tx.fill(response).await
                         } else {
-                            log::info!("tunshell exited with status: {}", status);
+                            info!("tunshell exited with status: {}", status);
                             status_tx.fill(ActionResponse::success(&action_id)).await
                         }
                     }
                     Err(e) => {
-                        log::warn!("tunshell client error: {}", e);
+                        warn!("tunshell client error: {}", e);
                         status_tx.fill(ActionResponse::failure(&action_id, e.to_string())).await
                     }
                 };

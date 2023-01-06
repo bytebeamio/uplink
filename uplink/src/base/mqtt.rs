@@ -1,8 +1,8 @@
 use flume::{Sender, TrySendError};
-use log::{debug, error, info};
 use thiserror::Error;
 use tokio::task;
 use tokio::time::Duration;
+use tracing::{debug, error, info};
 
 use std::fs::File;
 use std::io::Read;

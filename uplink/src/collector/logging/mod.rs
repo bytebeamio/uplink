@@ -2,6 +2,8 @@ use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::{process::Command, time::Duration};
 
+use tracing::{debug, error, info, warn};
+
 #[cfg(target_os = "linux")]
 mod journalctl;
 #[cfg(target_os = "android")]
@@ -88,7 +90,7 @@ impl LoggerInstance {
             let action = self.log_rx.recv()?;
             let mut config = serde_json::from_str::<LoggingConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
-            log::info!("restarting journalctl with following config: {:?}", config);
+            info!("restarting journalctl with following config: {:?}", config);
 
             // Ensure any logger child process created earlier gets killed
             self.kill_last();
@@ -118,7 +120,7 @@ impl LoggerInstance {
             let mut logger = match logger.spawn() {
                 Ok(logger) => logger,
                 Err(e) => {
-                    log::error!("failed to start logger: {}", e);
+                    error!("failed to start logger: {}", e);
                     return;
                 }
             };
@@ -132,11 +134,11 @@ impl LoggerInstance {
                 let mut next_line = String::new();
                 match buf_stdout.read_line(&mut next_line) {
                     Ok(0) => {
-                        log::info!("logger output has ended");
+                        info!("logger output has ended");
                         break;
                     }
                     Err(e) => {
-                        log::error!("error while reading logger output: {}", e);
+                        error!("error while reading logger output: {}", e);
                         break;
                     }
                     _ => (),
@@ -146,18 +148,18 @@ impl LoggerInstance {
                 let entry = match LogEntry::from_string(next_line) {
                     Ok(entry) => entry,
                     Err(e) => {
-                        log::warn!("log line: {} couldn't be parsed due to: {}", next_line, e);
+                        warn!("log line: {} couldn't be parsed due to: {}", next_line, e);
                         continue;
                     }
                 };
                 let payload = match entry.to_payload(log_index) {
                     Ok(p) => p,
                     Err(e) => {
-                        log::error!("Couldn't convert to payload: {:?}", e);
+                        error!("Couldn't convert to payload: {:?}", e);
                         continue;
                     }
                 };
-                log::debug!("Log entry {:?}", payload);
+                debug!("Log entry {:?}", payload);
                 log_stream.push(payload).unwrap();
                 log_index += 1;
             }

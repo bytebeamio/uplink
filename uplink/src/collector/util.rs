@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
 use flume::Sender;
-use log::{debug, error, warn};
 use tokio_stream::StreamExt;
 use tokio_util::time::{delay_queue::Key, DelayQueue};
+use tracing::{debug, error, warn};
 
 use crate::base::StreamStatus;
 use crate::{Config, Package, Payload, Stream};
