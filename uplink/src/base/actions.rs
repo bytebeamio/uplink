@@ -100,7 +100,6 @@ impl From<&ActionResponse> for Payload {
             stream: "action_status".to_owned(),
             sequence: resp.sequence,
             timestamp: resp.timestamp,
-            collection_timestamp: resp.collection_timestamp,
             payload: json!({
                 "id": resp.action_id,
                 "state": resp.state,
@@ -118,9 +117,5 @@ impl Point for ActionResponse {
 
     fn timestamp(&self) -> u64 {
         self.timestamp
-    }
-
-    fn collection_timestamp(&self) -> u64 {
-        self.collection_timestamp
     }
 }

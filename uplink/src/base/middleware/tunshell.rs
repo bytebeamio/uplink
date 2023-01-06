@@ -6,10 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
-use crate::{
-    base::{self, Stream},
-    Action, ActionResponse,
-};
+use crate::{base, collector::stream::Stream, Action, ActionResponse};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Keys {

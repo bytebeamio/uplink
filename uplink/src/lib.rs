@@ -4,6 +4,7 @@ use std::thread;
 
 use anyhow::Error;
 
+use base::monitor::Monitor;
 use flume::{bounded, Receiver, Sender};
 use log::error;
 use tokio::task;
@@ -64,6 +65,7 @@ pub mod config {
 
     [serializer_metrics]
     enabled = false
+    blacklist = []
 
     [stream_metrics]
     enabled = false
@@ -171,9 +173,10 @@ pub use base::middleware;
 use base::middleware::tunshell::TunshellSession;
 use base::middleware::Middleware;
 use base::mqtt::Mqtt;
-use base::serializer::Serializer;
-pub use base::{Config, Package, Payload, Point, Stream};
+use base::serializer::{Serializer, SerializerMetrics};
+pub use base::Config;
 use collector::downloader::FileDownloader;
+use collector::stream::{Package, Payload, Point, Stream, StreamMetrics};
 use collector::systemstats::StatCollector;
 pub use collector::{simulator, tcpjson::Bridge};
 pub use disk::Storage;
@@ -185,12 +188,18 @@ pub struct Uplink {
     data_rx: Receiver<Box<dyn Package>>,
     data_tx: Sender<Box<dyn Package>>,
     action_status: Stream<ActionResponse>,
+    stream_metrics_tx: Sender<StreamMetrics>,
+    stream_metrics_rx: Receiver<StreamMetrics>,
+    serializer_metrics_tx: Sender<SerializerMetrics>,
+    serializer_metrics_rx: Receiver<SerializerMetrics>,
 }
 
 impl Uplink {
     pub fn new(config: Arc<Config>) -> Result<Uplink, Error> {
         let (action_tx, action_rx) = bounded(10);
         let (data_tx, data_rx) = bounded(10);
+        let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
+        let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
 
         let action_status_topic = &config
             .action_status
@@ -199,7 +208,18 @@ impl Uplink {
             .ok_or_else(|| Error::msg("Action status topic missing from config"))?;
         let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
 
-        Ok(Uplink { config, action_rx, action_tx, data_rx, data_tx, action_status })
+        Ok(Uplink {
+            config,
+            action_rx,
+            action_tx,
+            data_rx,
+            data_tx,
+            action_status,
+            stream_metrics_tx,
+            stream_metrics_rx,
+            serializer_metrics_tx,
+            serializer_metrics_rx,
+        })
     }
 
     pub fn spawn(&mut self) -> Result<(), Error> {
@@ -212,6 +232,7 @@ impl Uplink {
             tunshell_keys_rx,
             self.action_status.clone(),
         );
+
         thread::spawn(move || tunshell_session.start());
 
         // Launch a thread to handle file downloads
@@ -255,6 +276,12 @@ impl Uplink {
 
         let (raw_action_tx, raw_action_rx) = bounded(10);
         let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
+        let monitor = Monitor::new(
+            self.config.clone(),
+            mqtt.client(),
+            self.stream_metrics_rx.clone(),
+            self.serializer_metrics_rx.clone(),
+        );
 
         let serializer = Serializer::new(self.config.clone(), self.data_rx.clone(), mqtt.client())?;
 
@@ -267,6 +294,21 @@ impl Uplink {
             self.action_status.clone(),
             self.action_tx.clone(),
         );
+
+        thread::spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .thread_name("monitor")
+                .build()
+                .unwrap();
+
+            rt.block_on(async {
+                task::spawn(async move {
+                    if let Err(e) = monitor.start().await {
+                        error!("Serializer stopped!! Error = {:?}", e);
+                    }
+                })
+            })
+        });
 
         // Launch a thread to handle incoming and outgoing MQTT packets
         let rt = tokio::runtime::Runtime::new()?;
@@ -298,6 +340,14 @@ impl Uplink {
 
     pub fn bridge_data_tx(&self) -> Sender<Box<dyn Package>> {
         self.data_tx.clone()
+    }
+
+    pub fn stream_metrics_tx(&self) -> Sender<StreamMetrics> {
+        self.stream_metrics_tx.clone()
+    }
+
+    pub fn serializer_metrics_tx(&self) -> Sender<SerializerMetrics> {
+        self.serializer_metrics_tx.clone()
     }
 
     pub fn action_status(&self) -> Stream<ActionResponse> {

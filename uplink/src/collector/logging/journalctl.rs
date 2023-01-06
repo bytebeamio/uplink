@@ -82,13 +82,7 @@ impl LogEntry {
         let timestamp = self.log_timestamp.parse::<u64>()? / 1000;
         let collection_timestamp = timestamp;
 
-        Ok(Payload {
-            stream: "logs".to_string(),
-            sequence,
-            timestamp,
-            payload,
-            collection_timestamp,
-        })
+        Ok(Payload { stream: "logs".to_string(), sequence, timestamp, payload })
     }
 }
 

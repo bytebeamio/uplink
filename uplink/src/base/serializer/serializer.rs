@@ -381,7 +381,7 @@ async fn send_publish<C: MqttClient>(
 fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
     let stream = data.stream().as_ref().to_owned();
     let point_count = data.len();
-    let batch_latency = data.batch_latency();
+    let batch_latency = data.latency();
     trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
 
     let topic = data.topic();
@@ -414,7 +414,8 @@ mod test {
     use serde_json::Value;
 
     use super::*;
-    use crate::{base::Stream, config::Persistence, Payload};
+    use crate::collector::stream::Stream;
+    use crate::{config::Persistence, Payload};
     use std::collections::HashMap;
 
     #[derive(Clone)]
@@ -531,7 +532,7 @@ mod test {
         #[error("Serde error {0}")]
         Serde(#[from] serde_json::Error),
         #[error("Stream error {0}")]
-        Base(#[from] crate::base::Error),
+        Base(#[from] crate::collector::stream::Error),
     }
 
     struct MockCollector {
@@ -548,7 +549,6 @@ mod test {
                 stream: "hello".to_owned(),
                 sequence: i,
                 timestamp: 0,
-                collection_timestamp: 0,
                 payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,
             };
             self.stream.push(payload)?;

@@ -12,8 +12,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::base;
 use crate::{Config, Package, Point, Stream};
+
+use super::stream;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -81,10 +82,6 @@ impl Point for System {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
-
-    fn collection_timestamp(&self) -> u64 {
-        self.timestamp
-    }
 }
 
 struct SystemStats {
@@ -93,10 +90,9 @@ struct SystemStats {
 }
 
 impl SystemStats {
-    fn push(&mut self, sys: &sysinfo::System, timestamp: u64) -> Result<(), base::Error> {
+    fn push(&mut self, sys: &sysinfo::System, timestamp: u64) -> Result<(), stream::Error> {
         self.stat.update(sys, timestamp);
         self.stream.push(self.stat.clone())?;
-
         Ok(())
     }
 }
@@ -142,10 +138,6 @@ impl Point for Network {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
-
-    fn collection_timestamp(&self) -> u64 {
-        self.timestamp
-    }
 }
 
 struct NetworkStats {
@@ -160,7 +152,7 @@ impl NetworkStats {
         net_name: String,
         net_data: &sysinfo::NetworkData,
         timestamp: u64,
-    ) -> Result<(), base::Error> {
+    ) -> Result<(), stream::Error> {
         self.sequence += 1;
         let net = self.map.entry(net_name.clone()).or_insert_with(|| Network::init(net_name));
         net.update(net_data, timestamp, self.sequence);
@@ -202,10 +194,6 @@ impl Point for Disk {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
-
-    fn collection_timestamp(&self) -> u64 {
-        self.timestamp
-    }
 }
 
 struct DiskStats {
@@ -215,7 +203,7 @@ struct DiskStats {
 }
 
 impl DiskStats {
-    fn push(&mut self, disk_data: &sysinfo::Disk, timestamp: u64) -> Result<(), base::Error> {
+    fn push(&mut self, disk_data: &sysinfo::Disk, timestamp: u64) -> Result<(), stream::Error> {
         self.sequence += 1;
         let disk_name = disk_data.name().to_string_lossy().to_string();
         let disk =
@@ -257,10 +245,6 @@ impl Point for Processor {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
-
-    fn collection_timestamp(&self) -> u64 {
-        self.timestamp
-    }
 }
 
 struct ProcessorStats {
@@ -270,7 +254,7 @@ struct ProcessorStats {
 }
 
 impl ProcessorStats {
-    fn push(&mut self, proc_data: &sysinfo::Cpu, timestamp: u64) -> Result<(), base::Error> {
+    fn push(&mut self, proc_data: &sysinfo::Cpu, timestamp: u64) -> Result<(), stream::Error> {
         let proc_name = proc_data.name().to_string();
         self.sequence += 1;
         let proc = self.map.entry(proc_name.clone()).or_insert_with(|| Processor::init(proc_name));
@@ -309,10 +293,6 @@ impl Point for Component {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
-
-    fn collection_timestamp(&self) -> u64 {
-        self.timestamp
-    }
 }
 
 struct ComponentStats {
@@ -322,7 +302,11 @@ struct ComponentStats {
 }
 
 impl ComponentStats {
-    fn push(&mut self, comp_data: &sysinfo::Component, timestamp: u64) -> Result<(), base::Error> {
+    fn push(
+        &mut self,
+        comp_data: &sysinfo::Component,
+        timestamp: u64,
+    ) -> Result<(), stream::Error> {
         let comp_label = comp_data.label().to_string();
         self.sequence += 1;
         let comp =
@@ -333,7 +317,11 @@ impl ComponentStats {
         Ok(())
     }
 
-    fn push_custom(&mut self, mut comp_data: Component, timestamp: u64) -> Result<(), base::Error> {
+    fn push_custom(
+        &mut self,
+        mut comp_data: Component,
+        timestamp: u64,
+    ) -> Result<(), stream::Error> {
         self.sequence += 1;
         comp_data.timestamp = timestamp;
         comp_data.sequence = self.sequence;
@@ -385,10 +373,6 @@ impl Point for Process {
     fn timestamp(&self) -> u64 {
         self.timestamp
     }
-
-    fn collection_timestamp(&self) -> u64 {
-        self.timestamp
-    }
 }
 
 struct ProcessStats {
@@ -404,7 +388,7 @@ impl ProcessStats {
         proc_data: &sysinfo::Process,
         name: String,
         timestamp: u64,
-    ) -> Result<(), base::Error> {
+    ) -> Result<(), stream::Error> {
         self.sequence += 1;
         let proc =
             self.map.entry(id).or_insert_with(|| Process::init(id, name, proc_data.start_time()));

@@ -33,7 +33,7 @@ pub enum Error {
     #[error("Download OTA error")]
     Actions(#[from] ActionsError),
     #[error("Couldn't fill stream")]
-    Stream(#[from] crate::base::Error),
+    Stream(#[from] crate::collector::stream::Error),
     #[error("Broadcast receiver error {0}")]
     BRecv(#[from] tokio::sync::broadcast::error::RecvError),
 }
@@ -207,7 +207,7 @@ impl ClientConnection {
                     debug!("Received line = {:?}", line);
 
                     let data = match serde_json::from_str::<Payload>(&line) {
-                        Ok(d) => d.set_collection_timestamp(),
+                        Ok(d) => d,
                         Err(e) => {
                             error!("Deserialization error = {:?}", e);
                             continue
