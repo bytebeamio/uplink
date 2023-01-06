@@ -150,8 +150,12 @@ pub trait Package: Send + Debug {
 /// Signals status of stream buffer
 #[derive(Debug)]
 pub enum StreamStatus {
+    /// The stream is partially filled, need not be flushed
     Partial(usize),
+    /// Stream was just flushed
     Flushed,
+    /// Stream buffer has received initial point and will be ready
+    /// to flush, even if partially filled after specified duration
     Init(Duration),
 }
 
