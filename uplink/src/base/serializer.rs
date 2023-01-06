@@ -9,9 +9,7 @@ use rumqttc::*;
 use thiserror::Error;
 use tokio::{select, time};
 
-mod metrics;
-
-use self::metrics::{SerializerMetricsHandler, StreamMetrics, StreamMetricsHandler};
+use crate::base::metrics::{SerializerMetricsHandler, StreamMetrics, StreamMetricsHandler};
 use crate::{Config, Package};
 
 #[derive(thiserror::Error, Debug)]

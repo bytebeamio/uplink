@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub mod actions;
+pub mod metrics;
 pub mod middleware;
 pub mod mqtt;
 pub mod serializer;
