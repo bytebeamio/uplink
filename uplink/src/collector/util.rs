@@ -6,7 +6,7 @@ use std::{collections::HashMap, time::Duration};
 use flume::Sender;
 use tokio_stream::StreamExt;
 use tokio_util::time::{delay_queue::Key, DelayQueue};
-use tracing::{debug, error, warn};
+use tracing::{error, info, warn};
 
 use crate::base::StreamStatus;
 use crate::{Config, Package, Payload, Stream};
@@ -120,7 +120,7 @@ impl Streams {
                     self.flush_handler.insert(name, flush_period)
                 }
                 StreamStatus::Partial(l) => {
-                    debug!("Stream contains {} elements", l);
+                    info!("Flushing stream {} with {} elements", stream.name, l);
                 }
             }
         }

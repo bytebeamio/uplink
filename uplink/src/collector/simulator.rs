@@ -4,7 +4,7 @@ use serde_json::json;
 use thiserror::Error;
 use tokio::select;
 use tokio_util::codec::LinesCodecError;
-use tracing::{error, info};
+use tracing::{error, info, trace, warn};
 
 use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -662,9 +662,9 @@ pub async fn start(
                 let timestamp = event_timestamp(event);
 
                 if current_time > timestamp {
-                    info!("Time delta {:?} {:?} {:?}", num_devices, current_time - timestamp, i);
+                    trace!("Time delta {:?} {:?} {:?}", num_devices, current_time - timestamp, i);
                 } else {
-                    info!("Time delta {:?} -{:?} {:?}", num_devices, timestamp - current_time, i);
+                    warn!("Time delta {:?} -{:?} {:?}", num_devices, timestamp - current_time, i);
                 }
 
                 i += 1;

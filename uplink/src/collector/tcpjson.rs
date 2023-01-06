@@ -7,7 +7,7 @@ use tokio::time::{Duration, Sleep};
 use tokio::{select, time};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use std::pin::Pin;
 use std::{io, sync::Arc};
@@ -92,6 +92,7 @@ impl Bridge {
             // -- when a non "Completed" action is received
             let mut current_action_: Option<CurrentAction> = None;
 
+            info!("Listening for new connection on {:?}", addr);
             loop {
                 select! {
                     v = listener.accept() =>  {
@@ -203,7 +204,7 @@ impl ClientConnection {
             select! {
                 line = client.next() => {
                     let line = line.ok_or(Error::StreamDone)??;
-                    info!("Received line = {:?}", line);
+                    debug!("Received line = {:?}", line);
 
                     let data = match serde_json::from_str::<Payload>(&line) {
                         Ok(d) => d.set_collection_timestamp(),
