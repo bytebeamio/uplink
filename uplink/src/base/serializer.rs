@@ -1,5 +1,4 @@
-use std::io;
-use std::sync::Arc;
+use std::{io, sync::Arc};
 
 use bytes::Bytes;
 use disk::Storage;
@@ -345,34 +344,52 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick(), if metrics_enabled => {
-                    if let Some(handler) = self.serializer_metrics.as_mut() {
-                        let data = handler.update();
-                        let payload = serde_json::to_vec(&vec![data])?;
-                        handler.clear();
-
-                        info!("Publishing serializer metrics to broker");
-                        match self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
-                            Err(e) => error!("Couldn't publish serializer metrics to broker: {e}"),
-                            _ => handler.clear(),
-                        }
+                    info!("Publishing serializer metrics to broker");
+                    if let Err(e) = self.publish_serializer_metrics() {
+                        error!("Couldn't publish serializer metrics to broker: {e}")
                     }
 
-                    if let Some(handler) = self.stream_metrics.as_mut() {
-                        let data: Vec<&mut StreamMetrics> = handler.streams().collect();
-                        if data.is_empty() {
-                            continue;
-                        }
-                        let payload = serde_json::to_vec(&data)?;
-
-                        info!("Publishing stream metrics to broker");
-                        match self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload) {
-                            Err(e) => error!("Couldn't publish stream metrics to broker: {e}"),
-                            _ => handler.clear(),
-                        }
+                    info!("Publishing stream metrics to broker");
+                    if let Err(e) = self.publish_stream_metrics() {
+                        error!("Couldn't publish stream metrics to broker: {e}")
                     }
                 }
             }
         }
+    }
+
+    fn publish_stream_metrics(&mut self) -> Result<(), Error> {
+        let handler = match &mut self.stream_metrics {
+            Some(h) => h,
+            _ => return Ok(()),
+        };
+        let data: Vec<&mut StreamMetrics> = handler.streams().collect();
+        if data.is_empty() {
+            return Ok(());
+        }
+        let payload = serde_json::to_vec(&data)?;
+
+        self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload)?;
+        handler.clear();
+
+        Ok(())
+    }
+
+    fn publish_serializer_metrics(&mut self) -> Result<(), Error> {
+        let handler = match &mut self.serializer_metrics {
+            Some(h) => h,
+            _ => return Ok(()),
+        };
+        let data = match handler.next() {
+            Some(d) => d,
+            _ => return Ok(()),
+        };
+        let payload = serde_json::to_vec(&vec![data])?;
+
+        self.client.try_publish(&handler.topic, QoS::AtLeastOnce, false, payload)?;
+        handler.clear();
+
+        Ok(())
     }
 
     /// The Serializer writes data directly to network in [normal mode] by [`try_publish()`]in on the MQTT client. In case

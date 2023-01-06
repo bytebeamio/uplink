@@ -54,18 +54,21 @@ impl SerializerMetricsHandler {
         self.metrics.lost_segments += 1;
     }
 
+    pub fn clear(&mut self) {
+        self.metrics.lost_segments = 0;
+    }
+}
+
+impl Iterator for SerializerMetricsHandler {
+    type Item = SerializerMetrics;
+
     // Retrieve metrics to send on network
-    pub fn update(&mut self) -> &SerializerMetrics {
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+    fn next(&mut self) -> Option<Self::Item> {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
         self.metrics.timestamp = timestamp.as_millis() as u64;
         self.metrics.sequence += 1;
 
-        &self.metrics
-    }
-
-    pub fn clear(&mut self) {
-        self.metrics.lost_segments = 0;
+        Some(self.metrics.clone())
     }
 }
 
