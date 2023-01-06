@@ -39,18 +39,21 @@ pub struct Mqtt {
     eventloop: EventLoop,
     /// Handles to channels between threads
     native_actions_tx: Sender<Action>,
-    /// Currently subscribed topic
-    actions_subscription: String,
+    /// List of currently subscribed topics
+    actions_subscriptions: Vec<String>,
 }
 
 impl Mqtt {
-    pub fn new(config: Arc<Config>, actions_tx: Sender<Action>) -> Mqtt {
+    pub fn new(
+        config: Arc<Config>,
+        actions_tx: Sender<Action>,
+    ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let (client, eventloop) = AsyncClient::new(options, 10);
-        let actions_subscription =
-            format!("/tenants/{}/devices/{}/actions", config.project_id, config.device_id);
-        Mqtt { config, client, eventloop, native_actions_tx: actions_tx, actions_subscription }
+        let actions_subscriptions = config.actions_subscriptions.clone();
+
+        Mqtt { config, client, eventloop, native_actions_tx: actions_tx, actions_subscriptions }
     }
 
     /// Returns a client handle to MQTT interface
@@ -63,15 +66,17 @@ impl Mqtt {
         loop {
             match self.eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::ConnAck(_))) => {
-                    let subscription = self.actions_subscription.clone();
+                    let subscriptions = self.actions_subscriptions.clone();
                     let client = self.client();
 
                     // This can potentially block when client from other threads
                     // have already filled the channel due to bad network. So we spawn
                     task::spawn(async move {
-                        match client.subscribe(subscription.clone(), QoS::AtLeastOnce).await {
-                            Ok(..) => info!("Subscribe -> {:?}", subscription),
-                            Err(e) => error!("Failed to send subscription. Error = {:?}", e),
+                        for subscription in subscriptions {
+                            match client.subscribe(&subscription, QoS::AtLeastOnce).await {
+                                Ok(..) => info!("Subscribe -> {:?}", subscription),
+                                Err(e) => error!("Failed to send subscription. Error = {:?}", e),
+                            }
                         }
                     });
                 }
@@ -92,7 +97,7 @@ impl Mqtt {
     }
 
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
-        if self.config.simulator.is_none() && publish.topic != self.actions_subscription {
+        if self.actions_subscriptions.contains(&publish.topic) {
             error!("Unsolicited publish on {}", publish.topic);
             return Ok(());
         }
