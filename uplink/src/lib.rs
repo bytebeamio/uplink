@@ -120,14 +120,14 @@ pub mod config {
         // }
 
         for stat in [
-            "disk_stats",
-            "network_stats",
-            "processor_stats",
-            "process_stats",
-            "component_stats",
-            "system_stats",
+            "uplink_disk_stats",
+            "uplink_network_stats",
+            "uplink_processor_stats",
+            "uplink_process_stats",
+            "uplink_component_stats",
+            "uplink_system_stats",
         ] {
-            config.bypass_streams.push("uplink_".to_string() + stat);
+            config.stream_metrics.blacklist.push(stat.to_owned());
         }
 
         Ok(config)

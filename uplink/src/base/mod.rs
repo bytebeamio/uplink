@@ -105,11 +105,8 @@ pub struct Config {
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
-    pub serializer_metrics: StreamMetricsConfig,
-    pub stream_metrics: SerializerMetricsConfig,
-    /// List of streams that are to be ignored by uplink's internal metrics collectors
-    #[serde(default)]
-    pub bypass_streams: Vec<String>,
+    pub stream_metrics: StreamMetricsConfig,
+    pub serializer_metrics: SerializerMetricsConfig,
     pub downloader: Option<Downloader>,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,

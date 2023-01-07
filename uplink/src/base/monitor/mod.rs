@@ -33,9 +33,11 @@ impl Monitor {
     }
 
     pub async fn start(&self) -> Result<(), Error> {
+        let stream_metrics_config = self.config.stream_metrics.clone();
+
         loop {
             select! {
-                o = self.serializer_metrics_rx.recv_async() => {
+                o = self.stream_metrics_rx.recv_async() => {
                     let o = o?;
                     println!("Received {:?}", o);
                 }
