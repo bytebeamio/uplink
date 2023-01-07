@@ -12,7 +12,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use std::pin::Pin;
 use std::{io, sync::Arc};
 
-use super::util::Streams;
+use super::utils::Streams;
 use crate::base::middleware::Error as ActionsError;
 use crate::{Action, ActionResponse, Config, Package, Payload, Stream};
 
