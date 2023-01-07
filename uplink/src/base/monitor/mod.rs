@@ -5,7 +5,7 @@ use flume::{Receiver, RecvError};
 use rumqttc::{AsyncClient, ClientError, Request};
 use tokio::select;
 
-use crate::collector::stream::StreamMetrics;
+use crate::base::stream::StreamMetrics;
 use crate::Config;
 
 use super::serializer::SerializerMetrics;

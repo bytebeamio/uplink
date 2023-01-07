@@ -414,7 +414,7 @@ mod test {
     use serde_json::Value;
 
     use super::*;
-    use crate::collector::stream::Stream;
+    use crate::base::stream::Stream;
     use crate::{config::Persistence, Payload};
     use std::collections::HashMap;
 
@@ -532,7 +532,7 @@ mod test {
         #[error("Serde error {0}")]
         Serde(#[from] serde_json::Error),
         #[error("Stream error {0}")]
-        Base(#[from] crate::collector::stream::Error),
+        Base(#[from] crate::base::stream::Error),
     }
 
     struct MockCollector {

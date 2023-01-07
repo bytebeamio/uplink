@@ -1,10 +1,9 @@
-use std::sync::Arc;
+mod metrics;
+mod stream;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-mod metrics;
-mod stream;
+use std::sync::Arc;
 
 pub use metrics::StreamMetrics;
 use std::fmt::Debug;

@@ -10,8 +10,8 @@ use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
+use crate::base::stream::{Package, Stream};
 use crate::base::SimulatorConfig;
-use crate::collector::stream::{Package, Stream};
 use crate::{Action, ActionResponse, Payload};
 
 use rand::Rng;

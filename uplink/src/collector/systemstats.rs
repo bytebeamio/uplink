@@ -14,7 +14,7 @@ use std::{
 
 use crate::{Config, Package, Point, Stream};
 
-use super::stream;
+use crate::base::stream;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

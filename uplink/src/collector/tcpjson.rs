@@ -33,7 +33,7 @@ pub enum Error {
     #[error("Download OTA error")]
     Actions(#[from] ActionsError),
     #[error("Couldn't fill stream")]
-    Stream(#[from] crate::collector::stream::Error),
+    Stream(#[from] crate::base::stream::Error),
     #[error("Broadcast receiver error {0}")]
     BRecv(#[from] tokio::sync::broadcast::error::RecvError),
 }
