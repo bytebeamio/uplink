@@ -51,7 +51,7 @@ impl<T: Eq + Hash + Clone + Display> DelayMap<T> {
     }
 
     // Check if queue is empty.
-    pub fn is_empty(&self) -> bool {
-        self.queue.is_empty()
+    pub fn has_pending(&self) -> bool {
+        !self.queue.is_empty()
     }
 }

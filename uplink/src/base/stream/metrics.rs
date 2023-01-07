@@ -13,7 +13,7 @@ pub struct StreamMetrics {
 }
 
 impl StreamMetrics {
-    pub fn new(topic: String, blacklist: Vec<String>) -> Self {
+    pub fn new() -> Self {
         StreamMetrics { ..Default::default() }
     }
 

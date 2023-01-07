@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use flume::Sender;
 use log::{error, info};
+use tokio::time::{interval, Interval};
 
-use crate::base::stream::{self, StreamStatus};
+use crate::base::stream::{self, StreamMetrics, StreamStatus};
 use crate::{Config, Package, Payload, Stream};
 
 use super::delaymap::DelayMap;
@@ -12,12 +14,19 @@ use super::delaymap::DelayMap;
 pub struct Streams {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
+    metrics_tx: Sender<StreamMetrics>,
     map: HashMap<String, Stream<Payload>>,
-    flush_handler: DelayMap<String>,
+    metrics: StreamMetrics,
+    pub stream_timeouts: DelayMap<String>,
+    pub metrics_timeout: Interval,
 }
 
 impl Streams {
-    pub fn new(config: Arc<Config>, data_tx: Sender<Box<dyn Package>>) -> Self {
+    pub fn new(
+        config: Arc<Config>,
+        data_tx: Sender<Box<dyn Package>>,
+        metrics_tx: Sender<StreamMetrics>,
+    ) -> Self {
         let mut map = HashMap::new();
         for (name, stream) in &config.streams {
             let stream = Stream::with_config(
@@ -30,9 +39,16 @@ impl Streams {
             map.insert(name.to_owned(), stream);
         }
 
-        let flush_handler = DelayMap::new();
-
-        Self { config, data_tx, map, flush_handler }
+        let metrics_timeout = interval(Duration::from_secs(config.stream_metrics.timeout));
+        Self {
+            config,
+            data_tx,
+            metrics_tx,
+            map,
+            metrics: StreamMetrics::new(),
+            stream_timeouts: DelayMap::new(),
+            metrics_timeout,
+        }
     }
 
     pub async fn forward(&mut self, data: Payload) {
@@ -50,6 +66,7 @@ impl Streams {
                     &self.config.device_id,
                     self.data_tx.clone(),
                 );
+
                 self.map.entry(data.stream.to_owned()).or_insert(stream)
             }
         };
@@ -68,9 +85,9 @@ impl Streams {
         // Warn in case stream flushed stream was not in the queue.
         if max_stream_size > 1 {
             match state {
-                StreamStatus::Flushed(name) => self.flush_handler.remove(name),
+                StreamStatus::Flushed(name) => self.stream_timeouts.remove(name),
                 StreamStatus::Init(name, flush_period) => {
-                    self.flush_handler.insert(name, flush_period)
+                    self.stream_timeouts.insert(name, flush_period)
                 }
                 StreamStatus::Partial(l) => {
                     info!("Flushing stream {} with {} elements", stream.name, l);
@@ -79,18 +96,17 @@ impl Streams {
         }
     }
 
-    pub fn is_flushable(&self) -> bool {
-        !self.flush_handler.is_empty()
-    }
-
-    pub async fn data_timeout(&mut self) -> String {
-        self.flush_handler.next().await.unwrap()
-    }
-
     // Flush stream/partitions that timeout
-    pub async fn flush(&mut self, stream: &str) -> Result<(), stream::Error> {
+    pub async fn flush_stream(&mut self, stream: &str) -> Result<(), stream::Error> {
         let stream = self.map.get_mut(stream).unwrap();
         stream.flush().await?;
+        Ok(())
+    }
+
+    // Flush metrics that timeout
+    pub fn flush_metrics(&mut self) -> Result<(), flume::TrySendError<StreamMetrics>> {
+        self.metrics_timeout.reset();
+        self.metrics_tx.try_send(self.metrics.clone())?;
         Ok(())
     }
 }

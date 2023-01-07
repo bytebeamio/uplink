@@ -14,6 +14,7 @@ use std::{io, sync::Arc};
 
 use super::utils::Streams;
 use crate::base::middleware::Error as ActionsError;
+use crate::base::stream::StreamMetrics;
 use crate::{Action, ActionResponse, Config, Package, Payload, Stream};
 
 #[derive(Error, Debug)]
@@ -41,7 +42,7 @@ pub enum Error {
 pub struct Bridge {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
-
+    metrics_tx: Sender<StreamMetrics>,
     /// Actions incoming from backend
     actions_rx: Receiver<Action>,
     /// Action responses going to backend
@@ -61,13 +62,23 @@ impl Bridge {
     pub fn new(
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
+        metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
     ) -> Bridge {
         let (actions_tx, _) = channel(10);
         let (status_tx, status_rx) = bounded(10);
 
-        Bridge { action_status, data_tx, config, actions_rx, actions_tx, status_tx, status_rx }
+        Bridge {
+            action_status,
+            data_tx,
+            metrics_tx,
+            config,
+            actions_rx,
+            actions_tx,
+            status_tx,
+            status_rx,
+        }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -174,7 +185,11 @@ impl Bridge {
         let framed = Framed::new(stream, LinesCodec::new());
         let mut tcp_json = ClientConnection {
             status_tx: self.status_tx.clone(),
-            streams: Streams::new(self.config.clone(), self.data_tx.clone()),
+            streams: Streams::new(
+                self.config.clone(),
+                self.data_tx.clone(),
+                self.metrics_tx.clone(),
+            ),
             actions_rx: self.actions_tx.subscribe(),
             in_execution: None,
         };
@@ -247,9 +262,16 @@ impl ClientConnection {
                 }
 
                 // Flush stream/partitions that timeout
-                timedout_stream = self.streams.data_timeout(), if self.streams.is_flushable() => {
-                    if let Err(e) = self.streams.flush(&timedout_stream).await {
-                        error!("Failed to flush steam = {}. Error = {}", timedout_stream, e);
+                Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
+                    if let Err(e) = self.streams.flush_stream(&timedout_stream).await {
+                        error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
+                    }
+                }
+
+                // Flush metrics when timed out
+                _ = self.streams.metrics_timeout.tick() => {
+                    if let Err(e) = self.streams.flush_metrics() {
+                        error!("Failed to flush stream metrics. Error = {}", e);
                     }
                 }
 

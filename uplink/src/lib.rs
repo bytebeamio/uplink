@@ -66,6 +66,7 @@ pub mod config {
     [stream_metrics]
     enabled = false
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
+    timeout = 10
 
     [serializer_metrics]
     enabled = false

@@ -83,6 +83,7 @@ pub struct Downloader {
 pub struct StreamMetricsConfig {
     pub enabled: bool,
     pub blacklist: Vec<String>,
+    pub timeout: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]

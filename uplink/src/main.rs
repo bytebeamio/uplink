@@ -150,6 +150,7 @@ async fn main() -> Result<(), Error> {
     } else if let Err(e) = Bridge::new(
         config,
         uplink.bridge_data_tx(),
+        uplink.stream_metrics_tx(),
         uplink.bridge_action_rx(),
         uplink.action_status(),
     )
