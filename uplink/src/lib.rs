@@ -63,12 +63,14 @@ pub mod config {
     # Create empty streams map
     [streams]
 
-    [serializer_metrics]
-    enabled = false
-    blacklist = []
-
     [stream_metrics]
     enabled = false
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
+
+    [serializer_metrics]
+    enabled = false
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_metrics/jsonarray"
+    blacklist = []
 
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"

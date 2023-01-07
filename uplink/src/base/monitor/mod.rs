@@ -29,26 +29,6 @@ impl Monitor {
         stream_metrics_rx: Receiver<StreamMetrics>,
         serializer_metrics_rx: Receiver<SerializerMetrics>,
     ) -> Monitor {
-        // let stream_metrics_handler = config.stream_metrics.enabled.then(|| {
-        //     let topic = String::from("/tenants/")
-        //         + &config.project_id
-        //         + "/devices/"
-        //         + &config.device_id
-        //         + "/events/uplink_stream_metrics/jsonarray";
-        //
-        //     StreamMetricsHandler::new(topic, config.stream_metrics.blacklist.clone())
-        // });
-        //
-        // let serializer_metrics_handler = config.serializer_metrics.enabled.then(|| {
-        //     let topic = String::from("/tenants/")
-        //         + &config.project_id
-        //         + "/devices/"
-        //         + &config.device_id
-        //         + "/events/uplink_serializer_metrics/jsonarray";
-        //
-        //     SerializerMetricsHandler::new(topic)
-        // });
-
         Monitor { config, client, stream_metrics_rx, serializer_metrics_rx }
     }
 
