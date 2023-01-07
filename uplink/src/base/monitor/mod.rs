@@ -10,8 +10,6 @@ use crate::Config;
 
 use super::serializer::SerializerMetrics;
 
-mod stream;
-
 /// Interface implementing MQTT protocol to communicate with broker
 pub struct Monitor {
     /// Uplink config
