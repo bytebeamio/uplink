@@ -247,7 +247,11 @@ impl ClientConnection {
                 }
 
                 // Flush stream/partitions that timeout
-                _ = self.streams.flush(), if self.streams.is_flushable() => {}
+                timedout_stream = self.streams.data_timeout(), if self.streams.is_flushable() => {
+                    if let Err(e) = self.streams.flush(&timedout_stream).await {
+                        error!("Failed to flush steam = {}. Error = {}", timedout_stream, e);
+                    }
+                }
 
             }
         }

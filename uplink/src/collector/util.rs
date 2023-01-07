@@ -3,12 +3,12 @@ use std::hash::Hash;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
-use flume::Sender;
+use flume::{SendError, Sender};
 use log::{error, info, warn};
 use tokio_stream::StreamExt;
 use tokio_util::time::{delay_queue::Key, DelayQueue};
 
-use crate::base::stream::StreamStatus;
+use crate::base::stream::{self, StreamStatus};
 use crate::{Config, Package, Payload, Stream};
 
 /// A map to store and retrieve delays from a DelayQueue.
@@ -130,12 +130,14 @@ impl Streams {
         !self.flush_handler.is_empty()
     }
 
+    pub async fn data_timeout(&mut self) -> String {
+        self.flush_handler.next().await.unwrap()
+    }
+
     // Flush stream/partitions that timeout
-    pub async fn flush(&mut self) {
-        let stream = self.flush_handler.next().await.unwrap();
-        let stream = self.map.get_mut(&stream).unwrap();
-        if let Err(e) = stream.flush().await {
-            error!("Failed to send data. Error = {:?}", e.to_string());
-        }
+    pub async fn flush(&mut self, stream: &str) -> Result<(), stream::Error> {
+        let stream = self.map.get_mut(stream).unwrap();
+        stream.flush().await?;
+        Ok(())
     }
 }
