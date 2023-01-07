@@ -13,8 +13,8 @@ use std::pin::Pin;
 use std::{io, sync::Arc};
 
 use super::utils::Streams;
+use crate::base::bridge::StreamMetrics;
 use crate::base::middleware::Error as ActionsError;
-use crate::base::stream::StreamMetrics;
 use crate::{Action, ActionResponse, Config, Package, Payload, Stream};
 
 #[derive(Error, Debug)]
@@ -34,7 +34,7 @@ pub enum Error {
     #[error("Download OTA error")]
     Actions(#[from] ActionsError),
     #[error("Couldn't fill stream")]
-    Stream(#[from] crate::base::stream::Error),
+    Stream(#[from] crate::base::bridge::Error),
     #[error("Broadcast receiver error {0}")]
     BRecv(#[from] tokio::sync::broadcast::error::RecvError),
 }

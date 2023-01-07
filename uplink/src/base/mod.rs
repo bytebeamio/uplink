@@ -3,11 +3,11 @@ use std::{collections::HashMap, fmt::Debug};
 use serde::{Deserialize, Serialize};
 
 pub mod actions;
+pub mod bridge;
 pub mod middleware;
 pub mod monitor;
 pub mod mqtt;
 pub mod serializer;
-pub mod stream;
 
 pub const DEFAULT_TIMEOUT: u64 = 60;
 

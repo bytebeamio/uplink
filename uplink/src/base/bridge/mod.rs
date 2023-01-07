@@ -23,7 +23,6 @@ pub trait Package: Send + Debug {
     fn anomalies(&self) -> Option<(String, usize)>;
     fn len(&self) -> usize;
     fn latency(&self) -> u64;
-
     fn is_empty(&self) -> bool {
         self.len() == 0
     }

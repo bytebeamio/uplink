@@ -6,7 +6,7 @@ use flume::Sender;
 use log::{error, info};
 use tokio::time::{interval, Interval};
 
-use crate::base::stream::{self, StreamMetrics, StreamStatus};
+use crate::base::bridge::{self, StreamMetrics, StreamStatus};
 use crate::{Config, Package, Payload, Stream};
 
 use super::delaymap::DelayMap;
@@ -97,7 +97,7 @@ impl Streams {
     }
 
     // Flush stream/partitions that timeout
-    pub async fn flush_stream(&mut self, stream: &str) -> Result<(), stream::Error> {
+    pub async fn flush_stream(&mut self, stream: &str) -> Result<(), bridge::Error> {
         let stream = self.map.get_mut(stream).unwrap();
         stream.flush().await?;
         Ok(())

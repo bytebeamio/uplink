@@ -172,12 +172,12 @@ pub mod config {
 }
 
 pub use base::actions::{Action, ActionResponse};
+use base::bridge::{Package, Payload, Point, Stream, StreamMetrics};
 pub use base::middleware;
 use base::middleware::tunshell::TunshellSession;
 use base::middleware::Middleware;
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
-use base::stream::{Package, Payload, Point, Stream, StreamMetrics};
 pub use base::Config;
 use collector::downloader::FileDownloader;
 use collector::systemstats::StatCollector;

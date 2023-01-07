@@ -14,7 +14,7 @@ use std::{
 
 use crate::{Config, Package, Point, Stream};
 
-use crate::base::stream;
+use crate::base::bridge;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -90,7 +90,7 @@ struct SystemStats {
 }
 
 impl SystemStats {
-    fn push(&mut self, sys: &sysinfo::System, timestamp: u64) -> Result<(), stream::Error> {
+    fn push(&mut self, sys: &sysinfo::System, timestamp: u64) -> Result<(), bridge::Error> {
         self.stat.update(sys, timestamp);
         self.stream.push(self.stat.clone())?;
         Ok(())
@@ -152,7 +152,7 @@ impl NetworkStats {
         net_name: String,
         net_data: &sysinfo::NetworkData,
         timestamp: u64,
-    ) -> Result<(), stream::Error> {
+    ) -> Result<(), bridge::Error> {
         self.sequence += 1;
         let net = self.map.entry(net_name.clone()).or_insert_with(|| Network::init(net_name));
         net.update(net_data, timestamp, self.sequence);
@@ -203,7 +203,7 @@ struct DiskStats {
 }
 
 impl DiskStats {
-    fn push(&mut self, disk_data: &sysinfo::Disk, timestamp: u64) -> Result<(), stream::Error> {
+    fn push(&mut self, disk_data: &sysinfo::Disk, timestamp: u64) -> Result<(), bridge::Error> {
         self.sequence += 1;
         let disk_name = disk_data.name().to_string_lossy().to_string();
         let disk =
@@ -254,7 +254,7 @@ struct ProcessorStats {
 }
 
 impl ProcessorStats {
-    fn push(&mut self, proc_data: &sysinfo::Cpu, timestamp: u64) -> Result<(), stream::Error> {
+    fn push(&mut self, proc_data: &sysinfo::Cpu, timestamp: u64) -> Result<(), bridge::Error> {
         let proc_name = proc_data.name().to_string();
         self.sequence += 1;
         let proc = self.map.entry(proc_name.clone()).or_insert_with(|| Processor::init(proc_name));
@@ -306,7 +306,7 @@ impl ComponentStats {
         &mut self,
         comp_data: &sysinfo::Component,
         timestamp: u64,
-    ) -> Result<(), stream::Error> {
+    ) -> Result<(), bridge::Error> {
         let comp_label = comp_data.label().to_string();
         self.sequence += 1;
         let comp =
@@ -321,7 +321,7 @@ impl ComponentStats {
         &mut self,
         mut comp_data: Component,
         timestamp: u64,
-    ) -> Result<(), stream::Error> {
+    ) -> Result<(), bridge::Error> {
         self.sequence += 1;
         comp_data.timestamp = timestamp;
         comp_data.sequence = self.sequence;
@@ -388,7 +388,7 @@ impl ProcessStats {
         proc_data: &sysinfo::Process,
         name: String,
         timestamp: u64,
-    ) -> Result<(), stream::Error> {
+    ) -> Result<(), bridge::Error> {
         self.sequence += 1;
         let proc =
             self.map.entry(id).or_insert_with(|| Process::init(id, name, proc_data.start_time()));

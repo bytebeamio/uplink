@@ -8,7 +8,7 @@ use log::{error, info, warn};
 use tokio_stream::StreamExt;
 use tokio_util::time::{delay_queue::Key, DelayQueue};
 
-use crate::base::stream::{self, StreamStatus};
+use crate::base::bridge::{self, StreamStatus};
 use crate::{Config, Package, Payload, Stream};
 
 /// A map to store and retrieve delays from a DelayQueue.
