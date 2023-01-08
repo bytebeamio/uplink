@@ -1,4 +1,3 @@
-use flume::{Receiver, Sender};
 use log::{error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -6,11 +5,11 @@ use thiserror::Error;
 use tokio::select;
 use tokio_util::codec::LinesCodecError;
 
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
-use crate::base::bridge::{Package, Stream};
+use crate::base::bridge::BridgeTx;
 use crate::base::SimulatorConfig;
 use crate::{Action, ActionResponse, Payload};
 
@@ -121,35 +120,16 @@ impl PartialOrd for Event {
 }
 
 pub struct Partitions {
-    map: HashMap<String, Stream<Payload>>,
-    action_statuses: HashMap<String, Stream<ActionResponse>>,
-    tx: Sender<Box<dyn Package>>,
+    bridge: BridgeTx,
 }
 
 impl Partitions {
     async fn send(&mut self, payload: Payload) {
-        if let Err(e) = self
-            .map
-            .entry(payload.stream.clone())
-            .or_insert_with(|| Stream::new(&payload.stream, &payload.stream, 10, self.tx.clone()))
-            .fill(payload)
-            .await
-        {
-            error!("Failed to send action result {:?}", e);
-        }
+        self.bridge.send_payload(payload).await;
     }
 
     async fn send_action_response(&mut self, device_id: &str, response: ActionResponse) {
-        let stream = format!("/tenants/demo/devices/{}/action/status", device_id);
-        if let Err(e) = self
-            .action_statuses
-            .entry(stream.clone())
-            .or_insert_with(|| Stream::new(&stream, &stream, 1, self.tx.clone()))
-            .fill(response)
-            .await
-        {
-            error!("Failed to send action result {:?}", e);
-        }
+        self.bridge.send_action_response(response).await;
     }
 }
 
@@ -624,22 +604,18 @@ pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
     }));
 }
 
-pub async fn start(
-    data_tx: Sender<Box<dyn Package>>,
-    actions_rx: Receiver<Action>,
-    simulator_config: &SimulatorConfig,
-) -> Result<(), Error> {
+#[tokio::main(flavor = "current_thread")]
+pub async fn start(simulator_config: &SimulatorConfig, bridge: BridgeTx) -> Result<(), Error> {
     let paths = read_gps_paths(&simulator_config.gps_paths);
     let num_devices = simulator_config.num_devices;
-
     let devices = (1..(num_devices + 1)).map(|i| new_device_data(i, &paths)).collect::<Vec<_>>();
 
     let mut events = BinaryHeap::new();
+    let actions_rx = bridge.register_app("simulator").await;
 
     generate_initial_events(&mut events, Instant::now(), &devices);
 
-    let mut partitions =
-        Partitions { map: HashMap::new(), action_statuses: HashMap::new(), tx: data_tx };
+    let mut partitions = Partitions { bridge };
     let mut time = Instant::now();
     let mut i = 0;
 

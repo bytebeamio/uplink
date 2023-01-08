@@ -40,6 +40,7 @@
 //!```
 
 use std::sync::Arc;
+use std::thread;
 
 use anyhow::Error;
 use log::{error, warn};
@@ -122,16 +123,15 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("\n");
 }
 
-#[tokio::main(worker_threads = 4)]
-async fn main() -> Result<(), Error> {
+fn main() -> Result<(), Error> {
     if std::env::args().any(|a| a == "--sha") {
         println!("{}", &env!("VERGEN_GIT_SHA")[0..8]);
         return Ok(());
     }
 
     let commandline: CommandLine = StructOpt::from_args();
-
     initialize_logging(&commandline);
+
     let (auth, config) = get_configs(&commandline)?;
     let config = Arc::new(initialize(&auth, &config.unwrap_or_default())?);
 
@@ -140,15 +140,16 @@ async fn main() -> Result<(), Error> {
     let mut uplink = Uplink::new(config.clone())?;
     let bridge = uplink.spawn()?;
 
-    if let Some(simulator_config) = &config.simulator {
-        if let Err(e) =
-            simulator::start(uplink.bridge_data_tx(), uplink.bridge_action_rx(), simulator_config)
-                .await
-        {
-            error!("Error while running simulator: {}", e)
-        }
+    if let Some(config) = config.simulator.clone() {
+        let bridge = bridge.clone();
+        thread::spawn(move || {
+            simulator::start(&config, bridge).unwrap();
+        });
     }
 
-    TcpJson::new(config, bridge).start().await.unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread().thread_name("tcpjson").build().unwrap();
+    rt.block_on(async {
+        TcpJson::new(config, bridge).start().await.unwrap();
+    });
     Ok(())
 }

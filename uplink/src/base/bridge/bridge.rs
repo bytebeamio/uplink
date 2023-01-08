@@ -206,7 +206,7 @@ pub struct BridgeTx {
 }
 
 impl BridgeTx {
-    pub async fn register_app(&mut self, name: &str) -> Receiver<Action> {
+    pub async fn register_app(&self, name: &str) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(1);
         let event = Event::RegisterApp(name.to_owned(), actions_tx);
 
