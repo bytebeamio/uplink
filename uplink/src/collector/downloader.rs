@@ -53,7 +53,7 @@ use std::fs::{create_dir_all, File};
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
 
-use crate::base::{Authentication, Downloader};
+use crate::config::{Authentication, Downloader};
 use crate::{Action, ActionResponse, Stream};
 
 #[derive(thiserror::Error, Debug)]

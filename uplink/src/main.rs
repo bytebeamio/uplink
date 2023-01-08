@@ -45,8 +45,8 @@ use anyhow::Error;
 use structopt::StructOpt;
 use tracing::error;
 
-use uplink::config::{get_configs, initialize, CommandLine};
-use uplink::{simulator, Bridge, Config, Uplink};
+use uplink::config::{get_configs, initialize, CommandLine, Config};
+use uplink::{simulator, Bridge, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) {
     let level = match commandline.verbose {

@@ -4,8 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use serde::Serialize;
 
-use crate::base::MetricsConfig;
-use crate::Config;
+use crate::config::{Config, MetricsConfig};
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct SerializerMetrics {

@@ -12,7 +12,7 @@ mod logcat;
 use flume::{Receiver, Sender};
 
 #[cfg(target_os = "linux")]
-use crate::base::JournalctlConfig;
+use crate::config::JournalctlConfig;
 use crate::{Action, Config, Package, Payload, Stream};
 #[cfg(target_os = "linux")]
 pub use journalctl::{new_journalctl, LogEntry};

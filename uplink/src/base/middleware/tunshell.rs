@@ -6,10 +6,7 @@ use tokio_compat_02::FutureExt;
 use tracing::{error, info, warn};
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
-use crate::{
-    base::{self, Stream},
-    Action, ActionResponse,
-};
+use crate::{base::Stream, config, Action, ActionResponse};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Keys {
@@ -19,7 +16,7 @@ pub struct Keys {
 }
 
 pub struct TunshellSession {
-    _config: Arc<base::Config>,
+    _config: Arc<config::Config>,
     echo_stdout: bool,
     actions_rx: Receiver<Action>,
     action_status: Stream<ActionResponse>,
@@ -27,7 +24,7 @@ pub struct TunshellSession {
 
 impl TunshellSession {
     pub fn new(
-        config: Arc<base::Config>,
+        config: Arc<config::Config>,
         echo_stdout: bool,
         tunshell_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
