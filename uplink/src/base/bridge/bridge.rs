@@ -11,8 +11,12 @@ use super::{stream, Package, Payload, Stream, StreamMetrics};
 use crate::{collector::utils::Streams, Action, ActionResponse, Config};
 
 pub enum Event {
+    /// App name and handle for brige to send actions to the app
     RegisterApp(String, Sender<Action>),
+    /// Data sent by the app
     Data(Payload),
+    /// Sometime apps can choose to directly send action response instead
+    /// sending in `Payload` form
     ActionResponse(ActionResponse),
 }
 
@@ -70,6 +74,10 @@ impl Bridge {
             apps: HashMap::with_capacity(10),
             streams,
         }
+    }
+
+    pub fn tx(&mut self) -> BridgeTx {
+        BridgeTx { events_tx: self.bridge_tx.clone() }
     }
 
     pub fn register_app(&mut self, name: &str) -> (Sender<Event>, Receiver<Action>) {
@@ -191,6 +199,33 @@ impl CurrentAction {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct BridgeTx {
+    // Handle for apps to send events to bridge
+    events_tx: Sender<Event>,
+}
+
+impl BridgeTx {
+    pub async fn register_app(&mut self, name: &str) -> Receiver<Action> {
+        let (actions_tx, actions_rx) = bounded(1);
+        let event = Event::RegisterApp(name.to_owned(), actions_tx);
+
+        // Bridge should always be up and hence unwrap is ok
+        self.events_tx.send_async(event).await.unwrap();
+        actions_rx
+    }
+
+    pub async fn send_payload(&self, payload: Payload) {
+        let event = Event::Data(payload);
+        self.events_tx.send_async(event).await.unwrap()
+    }
+
+    pub async fn send_action_response(&self, response: ActionResponse) {
+        let event = Event::ActionResponse(response);
+        self.events_tx.send_async(event).await.unwrap()
+    }
+}
+
 struct App {
     name: String,
     tx: Sender<Action>,
@@ -206,6 +241,4 @@ pub enum Error {
     StreamDone,
     #[error("Stream error")]
     Stream(#[from] stream::Error),
-    #[error("Broadcast receiver error {0}")]
-    BRecv(#[from] tokio::sync::broadcast::error::RecvError),
 }

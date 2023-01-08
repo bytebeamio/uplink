@@ -1,4 +1,4 @@
-use flume::{bounded, Receiver, RecvError, SendError, Sender};
+use flume::{RecvError, SendError};
 use futures_util::SinkExt;
 use log::{debug, error, info};
 use thiserror::Error;
@@ -9,9 +9,9 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::{io, sync::Arc};
 
-use crate::base::bridge::StreamMetrics;
+use crate::base::bridge::BridgeTx;
 use crate::base::middleware::Error as ActionsError;
-use crate::{Action, ActionResponse, Config, Package, Payload, Stream};
+use crate::{ActionResponse, Config, Payload};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -35,49 +35,23 @@ pub enum Error {
     BRecv(#[from] tokio::sync::broadcast::error::RecvError),
 }
 
-pub struct Bridge {
+pub struct TcpJson {
     config: Arc<Config>,
-    data_tx: Sender<Box<dyn Package>>,
-    metrics_tx: Sender<StreamMetrics>,
-    /// Actions incoming from backend
-    actions_rx: Receiver<Action>,
-    /// Action responses going to backend
-    action_status: Stream<ActionResponse>,
-    /// Used to broadcast actions to all client connections
-    actions_tx: Sender<Action>,
-    /// Given to client connections for sending action responses
-    status_tx: Sender<Payload>,
-    /// Process action responses coming in from client connections
-    status_rx: Receiver<Payload>,
+    /// Bridge handle to register apps
+    bridge: BridgeTx,
 }
 
-impl Bridge {
-    pub fn new(
-        config: Arc<Config>,
-        data_tx: Sender<Box<dyn Package>>,
-        metrics_tx: Sender<StreamMetrics>,
-        actions_rx: Receiver<Action>,
-        action_status: Stream<ActionResponse>,
-    ) -> Bridge {
-        let (actions_tx, _) = bounded(10);
-        let (status_tx, status_rx) = bounded(10);
-
-        Bridge {
-            action_status,
-            data_tx,
-            metrics_tx,
-            config,
-            actions_rx,
-            actions_tx,
-            status_tx,
-            status_rx,
-        }
+impl TcpJson {
+    pub fn new(config: Arc<Config>, bridge: BridgeTx) -> TcpJson {
+        // Note: We can register `TcpJson` itself as an app to direct actions to it
+        TcpJson { config, bridge }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
             let listener = TcpListener::bind(&addr).await?;
+            let mut count = 0;
 
             info!("Listening for new connection on {:?}", addr);
             loop {
@@ -86,7 +60,19 @@ impl Bridge {
                         match v {
                             Ok((stream, addr)) => {
                                 info!("Accepted new connection from {:?}", addr);
-                                self.spawn_collector(stream).await
+                                count += 1;
+
+                                let framed = Framed::new(stream, LinesCodec::new());
+                                let app = format!("tcp-json-client-{}", count);
+                                let mut tcp_json = ClientConnection::new(&app, self.bridge.clone());
+
+                                tokio::task::spawn(async move {
+                                    if let Err(e) = tcp_json.collect(framed).await {
+                                        error!("Bridge failed. Error = {:?}", e);
+                                    }
+
+                                    // tcp_json.close().await;
+                                });
                             },
                             Err(e) => {
                                 error!("Tcp connection accept error = {:?}", e);
@@ -98,34 +84,24 @@ impl Bridge {
             }
         }
     }
-
-    async fn spawn_collector(&self, stream: TcpStream) {
-        let framed = Framed::new(stream, LinesCodec::new());
-        let mut tcp_json = ClientConnection {
-            status_tx: self.status_tx.clone(),
-            actions_rx: self.actions_rx.clone(),
-        };
-
-        tokio::task::spawn(async move {
-            if let Err(e) = tcp_json.collect(framed).await {
-                error!("Bridge failed. Error = {:?}", e);
-            }
-
-            // tcp_json.close().await;
-        });
-    }
 }
 
 struct ClientConnection {
-    status_tx: Sender<Payload>,
-    actions_rx: Receiver<Action>,
+    name: String,
+    bridge: BridgeTx,
 }
 
 impl ClientConnection {
+    pub fn new(name: &str, bridge: BridgeTx) -> ClientConnection {
+        ClientConnection { name: name.to_owned(), bridge }
+    }
+
     pub async fn collect(
         &mut self,
         mut client: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
+        let actions_rx = self.bridge.register_app(&self.name).await;
+
         loop {
             select! {
                 line = client.next() => {
@@ -140,12 +116,10 @@ impl ClientConnection {
                         }
                     };
 
-                    if let Err(e) = self.status_tx.send_async(data).await {
-                        error!("Failed to send status to bridge!! Error = {:?}", e);
-                    }
+                    self.bridge.send_payload(data).await;
                 }
 
-                action = self.actions_rx.recv_async() => {
+                action = actions_rx.recv_async() => {
                     let action = action?;
                     match serde_json::to_string(&action) {
                         Ok(data) => client.send(data).await?,

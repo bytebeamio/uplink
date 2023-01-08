@@ -49,7 +49,7 @@ use simplelog::{
 use structopt::StructOpt;
 
 use uplink::config::{get_configs, initialize, CommandLine};
-use uplink::{simulator, Bridge, Config, Uplink};
+use uplink::{simulator, Config, TcpJson, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) {
     let level = match commandline.verbose {
@@ -138,7 +138,7 @@ async fn main() -> Result<(), Error> {
     banner(&commandline, &config);
 
     let mut uplink = Uplink::new(config.clone())?;
-    uplink.spawn()?;
+    let bridge = uplink.spawn()?;
 
     if let Some(simulator_config) = &config.simulator {
         if let Err(e) =
@@ -147,18 +147,8 @@ async fn main() -> Result<(), Error> {
         {
             error!("Error while running simulator: {}", e)
         }
-    } else if let Err(e) = Bridge::new(
-        config,
-        uplink.bridge_data_tx(),
-        uplink.stream_metrics_tx(),
-        uplink.bridge_action_rx(),
-        uplink.action_status(),
-    )
-    .start()
-    .await
-    {
-        error!("Bridge stopped!! Error = {:?}", e);
     }
 
+    TcpJson::new(config, bridge).start().await.unwrap();
     Ok(())
 }

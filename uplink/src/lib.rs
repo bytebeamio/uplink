@@ -172,16 +172,12 @@ pub mod config {
 }
 
 pub use base::actions::{Action, ActionResponse};
-use base::bridge::{Package, Payload, Point, Stream, StreamMetrics};
+use base::bridge::{self, Bridge, BridgeTx, Package, Payload, Point, Stream, StreamMetrics};
 pub use base::middleware;
-use base::middleware::tunshell::TunshellSession;
-use base::middleware::Middleware;
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::Config;
-use collector::downloader::FileDownloader;
-use collector::systemstats::StatCollector;
-pub use collector::{simulator, tcpjson::Bridge};
+pub use collector::{simulator, tcpjson::TcpJson};
 pub use disk::Storage;
 
 pub struct Uplink {
@@ -209,8 +205,8 @@ impl Uplink {
             .topic
             .as_ref()
             .ok_or_else(|| Error::msg("Action status topic missing from config"))?;
-        let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
 
+        let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
         Ok(Uplink {
             config,
             action_rx,
@@ -225,79 +221,73 @@ impl Uplink {
         })
     }
 
-    pub fn spawn(&mut self) -> Result<(), Error> {
-        // Launch a thread to handle tunshell access
-        let (tunshell_keys_tx, tunshell_keys_rx) = bounded(10);
-        let tunshell_config = self.config.clone();
-        let tunshell_session = TunshellSession::new(
-            tunshell_config,
-            false,
-            tunshell_keys_rx,
-            self.action_status.clone(),
+    pub fn spawn(&mut self) -> Result<BridgeTx, Error> {
+        let mut bridge = Bridge::new(
+            self.config.clone(),
+            self.data_tx.clone(),
+            self.stream_metrics_tx().clone(),
+            self.action_rx.clone(),
+            self.action_status(),
         );
 
-        thread::spawn(move || tunshell_session.start());
+        let bridge_tx = bridge.tx();
 
-        // Launch a thread to handle file downloads
-        let download_tx = if let Some(downloader_cfg) = self.config.downloader.clone() {
-            let (download_tx, file_downloader) = FileDownloader::new(
-                downloader_cfg,
-                self.config.authentication.clone(),
-                self.action_status.clone(),
-                self.action_tx.clone(),
-            )?;
-            thread::spawn(move || file_downloader.start());
+        // Bridge thread to batch data and redicet actions
+        thread::spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .thread_name("bridge")
+                .build()
+                .unwrap();
 
-            download_tx
-        } else {
-            let (tx, _) = bounded(10);
+            rt.block_on(async {
+                task::spawn(async move {
+                    if let Err(e) = bridge.start().await {
+                        error!("Bridge stopped!! Error = {:?}", e);
+                    }
+                })
+            })
+        });
 
-            tx
-        };
+        let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone());
+        let mqtt_client = mqtt.client();
 
-        // Launch a thread to collect system statistics
-        let stat_collector = StatCollector::new(self.config.clone(), self.data_tx.clone());
-        if self.config.stats.enabled {
-            thread::spawn(move || stat_collector.start());
-        }
+        let serializer =
+            Serializer::new(self.config.clone(), self.data_rx.clone(), mqtt_client.clone())?;
+        // Serializer thread to handle network conditions state machine
+        // and send data to mqtt thread
+        thread::spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .thread_name("serializer")
+                .build()
+                .unwrap();
 
-        let (log_tx, log_rx) = bounded(10);
-        // Launch log collector thread
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        {
-            let logger = collector::logging::LoggerInstance::new(
-                self.config.clone(),
-                self.data_tx.clone(),
-                log_rx,
-            );
-            thread::spawn(|| {
-                if let Err(e) = logger.start() {
-                    error!("Error running logger: {}", e);
+            rt.block_on(async {
+                if let Err(e) = serializer.start().await {
+                    error!("Serializer stopped!! Error = {:?}", e);
                 }
-            });
-        }
+            })
+        });
 
-        let (raw_action_tx, raw_action_rx) = bounded(10);
-        let mut mqtt = Mqtt::new(self.config.clone(), raw_action_tx);
+        // Mqtt thread to receive actions and send data
+        thread::spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .thread_name("mqttio")
+                .build()
+                .unwrap();
+
+            rt.block_on(async {
+                mqtt.start().await;
+            })
+        });
+
         let monitor = Monitor::new(
             self.config.clone(),
-            mqtt.client(),
+            mqtt_client.clone(),
             self.stream_metrics_rx.clone(),
             self.serializer_metrics_rx.clone(),
         );
 
-        let serializer = Serializer::new(self.config.clone(), self.data_rx.clone(), mqtt.client())?;
-
-        let actions = Middleware::new(
-            self.config.clone(),
-            raw_action_rx,
-            tunshell_keys_tx,
-            download_tx,
-            log_tx,
-            self.action_status.clone(),
-            self.action_tx.clone(),
-        );
-
+        // Metrics monitor thread
         thread::spawn(|| {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .thread_name("monitor")
@@ -307,34 +297,13 @@ impl Uplink {
             rt.block_on(async {
                 task::spawn(async move {
                     if let Err(e) = monitor.start().await {
-                        error!("Serializer stopped!! Error = {:?}", e);
+                        error!("Monitor stopped!! Error = {:?}", e);
                     }
                 })
             })
         });
 
-        // Launch a thread to handle incoming and outgoing MQTT packets
-        let rt = tokio::runtime::Runtime::new()?;
-        thread::spawn(move || {
-            rt.block_on(async {
-                // Collect and forward data from connected applications as MQTT packets
-                task::spawn(async move {
-                    if let Err(e) = serializer.start().await {
-                        error!("Serializer stopped!! Error = {:?}", e);
-                    }
-                });
-
-                // Receive [Action]s
-                task::spawn(async move {
-                    mqtt.start().await;
-                });
-
-                // Process and forward received [Action]s to connected applications
-                actions.start().await;
-            })
-        });
-
-        Ok(())
+        Ok(bridge_tx)
     }
 
     pub fn bridge_action_rx(&self) -> Receiver<Action> {

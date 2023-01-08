@@ -2,16 +2,14 @@ mod bridge;
 mod metrics;
 mod stream;
 
-use flume::Sender;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 
+pub use bridge::{Bridge, BridgeTx};
 pub use metrics::StreamMetrics;
 use std::fmt::Debug;
 pub use stream::{Error, Stream, StreamStatus};
-
-use crate::Action;
 
 pub trait Point: Send + Debug {
     fn sequence(&self) -> u32;
