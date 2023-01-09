@@ -297,12 +297,10 @@ impl Uplink {
                 .build()
                 .unwrap();
 
-            rt.block_on(async {
-                task::spawn(async move {
-                    if let Err(e) = monitor.start().await {
-                        error!("Monitor stopped!! Error = {:?}", e);
-                    }
-                })
+            rt.block_on(async move {
+                if let Err(e) = monitor.start().await {
+                    error!("Monitor stopped!! Error = {:?}", e);
+                }
             })
         });
 

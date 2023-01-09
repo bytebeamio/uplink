@@ -1,6 +1,6 @@
 use flume::{RecvError, SendError};
 use futures_util::SinkExt;
-use log::{debug, error, info};
+use log::{debug, error, info, trace};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
@@ -106,8 +106,7 @@ impl ClientConnection {
             select! {
                 line = client.next() => {
                     let line = line.ok_or(Error::StreamDone)??;
-                    debug!("Received line = {:?}", line);
-
+                    trace!("{}: Received line = {:?}", self.name, line);
                     let data = match serde_json::from_str::<Payload>(&line) {
                         Ok(d) => d,
                         Err(e) => {

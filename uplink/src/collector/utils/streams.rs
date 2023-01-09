@@ -52,6 +52,7 @@ impl Streams {
     }
 
     pub async fn forward(&mut self, data: Payload) {
+        // dbg!(&data);
         let stream = match self.map.get_mut(&data.stream) {
             Some(partition) => partition,
             None => {
@@ -89,9 +90,7 @@ impl Streams {
                 StreamStatus::Init(name, flush_period) => {
                     self.stream_timeouts.insert(name, flush_period)
                 }
-                StreamStatus::Partial(l) => {
-                    info!("Flushing stream {} with {} elements", stream.name, l);
-                }
+                StreamStatus::Partial(l) => {}
             }
         }
     }
