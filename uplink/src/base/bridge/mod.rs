@@ -1,6 +1,6 @@
 mod bridge;
 mod metrics;
-mod stream;
+pub(crate) mod stream;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

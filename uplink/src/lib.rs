@@ -236,15 +236,14 @@ impl Uplink {
         thread::spawn(|| {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .thread_name("bridge")
+                .enable_time()
                 .build()
                 .unwrap();
 
-            rt.block_on(async {
-                task::spawn(async move {
-                    if let Err(e) = bridge.start().await {
-                        error!("Bridge stopped!! Error = {:?}", e);
-                    }
-                })
+            rt.block_on(async move {
+                if let Err(e) = bridge.start().await {
+                    error!("Bridge stopped!! Error = {:?}", e);
+                }
             })
         });
 
@@ -258,6 +257,7 @@ impl Uplink {
         thread::spawn(|| {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .thread_name("serializer")
+                .enable_time()
                 .build()
                 .unwrap();
 
@@ -272,6 +272,8 @@ impl Uplink {
         thread::spawn(|| {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .thread_name("mqttio")
+                .enable_time()
+                .enable_io()
                 .build()
                 .unwrap();
 
@@ -291,6 +293,7 @@ impl Uplink {
         thread::spawn(|| {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .thread_name("monitor")
+                .enable_time()
                 .build()
                 .unwrap();
 

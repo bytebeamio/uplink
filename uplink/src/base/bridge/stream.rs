@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
 
-use super::{Package, Point};
+use super::{Package, Point, StreamMetrics};
 
 /// Signals status of stream buffer
 #[derive(Debug)]
@@ -25,13 +25,14 @@ pub enum Error {
 #[derive(Debug)]
 pub struct Stream<T> {
     pub name: Arc<String>,
+    pub max_buffer_size: usize,
+    pub flush_period: Duration,
     topic: Arc<String>,
     last_sequence: u32,
     last_timestamp: u64,
-    pub max_buffer_size: usize,
     buffer: Buffer<T>,
+    metrics: StreamMetrics,
     tx: Sender<Box<dyn Package>>,
-    pub flush_period: Duration,
 }
 
 impl<T> Stream<T>
@@ -52,13 +53,14 @@ where
 
         Stream {
             name,
+            max_buffer_size,
+            flush_period,
             topic,
             last_sequence: 0,
             last_timestamp: 0,
-            max_buffer_size,
             buffer,
+            metrics: StreamMetrics::new(),
             tx,
-            flush_period,
         }
     }
 
@@ -294,13 +296,14 @@ impl<T> Clone for Stream<T> {
     fn clone(&self) -> Self {
         Stream {
             name: self.name.clone(),
+            flush_period: self.flush_period,
+            max_buffer_size: self.max_buffer_size,
             topic: self.topic.clone(),
             last_sequence: 0,
             last_timestamp: 0,
-            max_buffer_size: self.max_buffer_size,
             buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
+            metrics: StreamMetrics::new(),
             tx: self.tx.clone(),
-            flush_period: self.flush_period,
         }
     }
 }

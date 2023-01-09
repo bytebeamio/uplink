@@ -1,5 +1,5 @@
 # TCP Port to connect your applications with uplink
-bridge_port = 5555
+bridge_port = 5557
 
 # MQTT client configuration
 # 
@@ -108,6 +108,6 @@ update_period = 30
 # Required Parameters
 # - num_devices: number of devices to be simulated
 # - gps_paths: path to directory containing files with gps paths to be used in simulation
-[simulator]
-num_devices = 10
-gps_paths = "./paths/"
+# [simulator]
+# num_devices = 10
+# gps_paths = "./paths/"

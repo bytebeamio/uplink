@@ -147,9 +147,16 @@ fn main() -> Result<(), Error> {
         });
     }
 
-    let rt = tokio::runtime::Builder::new_current_thread().thread_name("tcpjson").build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .thread_name("tcpjson")
+        .build()
+        .unwrap();
+
     rt.block_on(async {
+        dbg!();
         TcpJson::new(config, bridge).start().await.unwrap();
+        dbg!();
     });
     Ok(())
 }

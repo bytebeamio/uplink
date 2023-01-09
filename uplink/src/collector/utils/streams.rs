@@ -22,7 +22,7 @@ pub struct Streams {
 }
 
 impl Streams {
-    pub fn new(
+    pub async fn new(
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,

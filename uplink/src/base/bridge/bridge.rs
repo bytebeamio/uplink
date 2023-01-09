@@ -4,7 +4,7 @@ use flume::{bounded, Receiver, RecvError, SendError, Sender};
 use log::{error, info};
 use tokio::{
     select,
-    time::{self, Sleep},
+    time::{self, interval, Sleep},
 };
 
 use super::{stream, Package, Payload, Stream, StreamMetrics};
@@ -43,8 +43,6 @@ pub struct Bridge {
     status_rx: Receiver<ActionResponse>,
     /// Apps registered with the bridge
     apps: HashMap<String, Sender<Action>>,
-    /// Streams
-    streams: Streams,
 }
 
 impl Bridge {
@@ -59,7 +57,6 @@ impl Bridge {
         let (status_tx, status_rx) = bounded(10);
         let (bridge_tx, bridge_rx) = bounded(10);
 
-        let streams = Streams::new(config.clone(), package_tx.clone(), metrics_tx.clone());
         Bridge {
             action_status,
             bridge_tx,
@@ -72,7 +69,6 @@ impl Bridge {
             status_tx,
             status_rx,
             apps: HashMap::with_capacity(10),
-            streams,
         }
     }
 
@@ -87,6 +83,10 @@ impl Bridge {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
+        let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
+        let mut streams =
+            Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
+                .await;
         loop {
             let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
 
@@ -128,7 +128,9 @@ impl Bridge {
                             Event::RegisterApp(name, tx) => {
                                 self.apps.insert(name, tx);
                             }
-                            Event::Data(_) => todo!(),
+                            Event::Data(v) => {
+                                dbg!(v);
+                            }
                             Event::ActionResponse(_) => todo!(),
                         }
                     }
@@ -166,15 +168,14 @@ impl Bridge {
                         }
                     }
                     // Flush stream/partitions that timeout
-                    Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
-                        if let Err(e) = self.streams.flush_stream(&timedout_stream).await {
+                    Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
+                        if let Err(e) = streams.flush_stream(&timedout_stream).await {
                             error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
                         }
                     }
-
                     // Flush metrics when timed out
-                    _ = self.streams.metrics_timeout.tick() => {
-                        if let Err(e) = self.streams.flush_metrics() {
+                    _ = metrics_timeout.tick() => {
+                        if let Err(e) = streams.flush_metrics() {
                             error!("Failed to flush stream metrics. Error = {}", e);
                         }
                     }
