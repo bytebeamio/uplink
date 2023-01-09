@@ -1,18 +1,17 @@
-use flume::{Receiver, Sender};
-use log::{error, info, trace, warn};
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
-use tokio::select;
+use tokio::task;
 use tokio_util::codec::LinesCodecError;
 
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{cmp::Ordering, fs, io, sync::Arc};
 
-use crate::base::bridge::{Package, Stream};
+use crate::base::bridge::BridgeTx;
 use crate::base::SimulatorConfig;
-use crate::{Action, ActionResponse, Payload};
+use crate::{ActionResponse, Payload};
+use std::{cmp::Ordering, fs, io, sync::Arc};
 
 use rand::Rng;
 
@@ -48,11 +47,31 @@ pub struct DeviceData {
 pub enum DataEventType {
     GenerateGPS,
     GenerateIMU,
-    GenerateVehicleData,
-    GeneratePeripheralData,
+    GenerateDeviceShadow,
+    GeneratePeripheralState,
     GenerateMotor,
     GenerateBMS,
 }
+
+impl PartialEq for DataEvent {
+    fn eq(&self, other: &Self) -> bool {
+        self.timestamp == other.timestamp && self.event_type == other.event_type
+    }
+}
+
+impl Ord for DataEvent {
+    fn cmp(&self, other: &DataEvent) -> Ordering {
+        self.timestamp.cmp(&other.timestamp)
+    }
+}
+
+impl PartialOrd for DataEvent {
+    fn partial_cmp(&self, other: &DataEvent) -> Option<Ordering> {
+        Some(other.cmp(self))
+    }
+}
+
+impl Eq for DataEvent {}
 
 #[derive(Clone)]
 pub struct DataEvent {
@@ -71,106 +90,16 @@ pub struct ActionResponseEvent {
     progress: u8,
 }
 
-#[derive(Clone)]
-pub enum Event {
-    DataEvent(DataEvent),
-    ActionResponseEvent(ActionResponseEvent),
-}
-
-impl PartialEq for Event {
-    fn eq(&self, other: &Self) -> bool {
-        match self {
-            Event::DataEvent(e1) => match other {
-                Event::DataEvent(e2) => {
-                    e1.timestamp == e2.timestamp
-                        && e1.event_type == e2.event_type
-                        && e1.device.device_id == e2.device.device_id
-                }
-                Event::ActionResponseEvent(_) => false,
-            },
-            Event::ActionResponseEvent(e1) => match other {
-                Event::ActionResponseEvent(e2) => e1 == e2,
-                Event::DataEvent(_) => false,
-            },
-        }
-    }
-}
-
-impl Eq for Event {}
-
-fn event_timestamp(event: &Event) -> Instant {
-    match event {
-        Event::DataEvent(e) => e.timestamp,
-        Event::ActionResponseEvent(e) => e.timestamp,
-    }
-}
-
-impl Ord for Event {
-    fn cmp(&self, other: &Event) -> Ordering {
-        let t1 = event_timestamp(self);
-        let t2 = event_timestamp(other);
-
-        t1.cmp(&t2)
-    }
-}
-
-impl PartialOrd for Event {
-    fn partial_cmp(&self, other: &Event) -> Option<Ordering> {
-        Some(other.cmp(self))
-    }
-}
-
-pub struct Partitions {
-    map: HashMap<String, Stream<Payload>>,
-    action_statuses: HashMap<String, Stream<ActionResponse>>,
-    tx: Sender<Box<dyn Package>>,
-}
-
-impl Partitions {
-    async fn send(&mut self, payload: Payload) {
-        if let Err(e) = self
-            .map
-            .entry(payload.stream.clone())
-            .or_insert_with(|| Stream::new(&payload.stream, &payload.stream, 10, self.tx.clone()))
-            .fill(payload)
-            .await
-        {
-            error!("Failed to send action result {:?}", e);
-        }
-    }
-
-    async fn send_action_response(&mut self, device_id: &str, response: ActionResponse) {
-        let stream = format!("/tenants/demo/devices/{}/action/status", device_id);
-        if let Err(e) = self
-            .action_statuses
-            .entry(stream.clone())
-            .or_insert_with(|| Stream::new(&stream, &stream, 1, self.tx.clone()))
-            .fill(response)
-            .await
-        {
-            error!("Failed to send action result {:?}", e);
-        }
-    }
-}
-
 pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let collection_timestamp = timestamp;
     let path_len = device.path.len() as u32;
     let path_index = ((device.path_offset + sequence) % path_len) as usize;
     let position = device.path.get(path_index).unwrap();
-
-    Payload {
-        timestamp,
-        sequence,
-        stream: format!("/tenants/demo/devices/{}/events/gps/jsonarray", device.device_id),
-        payload: json!(position),
-    }
+    Payload { timestamp, sequence, stream: "gps".to_owned(), payload: json!(position) }
 }
 
 pub fn generate_float(start: f64, end: f64) -> f64 {
     let mut rng = rand::thread_rng();
-
     rng.gen_range(start..end)
 }
 
@@ -233,7 +162,6 @@ struct Bms {
 
 pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let collection_timestamp = timestamp;
     let payload = Bms {
         periodicity_ms: 250,
         mosfet_temperature: generate_float(40f64, 45f64),
@@ -301,7 +229,6 @@ struct Imu {
 
 pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let collection_timestamp = timestamp;
     let payload = Imu {
         ax: generate_float(1f64, 2.8f64),
         ay: generate_float(1f64, 2.8f64),
@@ -314,12 +241,7 @@ pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
         magz: generate_float(-45f64, -15f64),
     };
 
-    Payload {
-        timestamp,
-        sequence,
-        stream: format!("/tenants/demo/devices/{}/events/imu/jsonarray", device.device_id),
-        payload: json!(payload),
-    }
+    Payload { timestamp, sequence, stream: "imu".to_owned(), payload: json!(payload) }
 }
 
 #[derive(Debug, Serialize)]
@@ -334,7 +256,6 @@ struct Motor {
 
 pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let collection_timestamp = timestamp;
     let payload = Motor {
         motor_temperature1: generate_float(40f64, 45f64),
         motor_temperature2: generate_float(40f64, 45f64),
@@ -345,12 +266,7 @@ pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
         motor_rpm: generate_int(1000, 9000),
     };
 
-    Payload {
-        timestamp,
-        sequence,
-        stream: format!("/tenants/demo/devices/{}/events/motor/jsonarray", device.device_id),
-        payload: json!(payload),
-    }
+    Payload { timestamp, sequence, stream: "motro".to_owned(), payload: json!(payload) }
 }
 
 #[derive(Debug, Serialize)]
@@ -368,7 +284,6 @@ struct PeripheralState {
 
 pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let collection_timestamp = timestamp;
     let payload = PeripheralState {
         gps_status: generate_bool_string(0.99),
         gsm_status: generate_bool_string(0.99),
@@ -381,15 +296,7 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Pay
         right_brake: generate_bool_string(0.1),
     };
 
-    Payload {
-        timestamp,
-        sequence,
-        stream: format!(
-            "/tenants/demo/devices/{}/events/peripheral_state/jsonarray",
-            device.device_id
-        ),
-        payload: json!(payload),
-    }
+    Payload { timestamp, sequence, stream: "peripheral_state".to_owned(), payload: json!(payload) }
 }
 
 #[derive(Debug, Serialize)]
@@ -406,7 +313,6 @@ struct DeviceShadow {
 
 pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let collection_timestamp = timestamp;
     let payload = DeviceShadow {
         mode: "economy".to_owned(),
         status: "Locked".to_owned(),
@@ -417,26 +323,15 @@ pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payloa
         soc: generate_float(50f64, 90f64),
     };
 
-    Payload {
-        timestamp,
-        sequence,
-        stream: format!(
-            "/tenants/demo/devices/{}/events/device_shadow/jsonarray",
-            device.device_id
-        ),
-        payload: json!(payload),
-    }
+    Payload { timestamp, sequence, stream: "device_shadow".to_owned(), payload: json!(payload) }
 }
 
 pub fn read_gps_paths(paths_dir: &str) -> Vec<Arc<Vec<Location>>> {
     (0..10)
         .map(|i| {
             let file_name = format!("{}/path{}.json", paths_dir, i);
-
             let contents = fs::read_to_string(file_name).expect("Oops, failed ot read path");
-
             let parsed: Vec<Location> = serde_json::from_str(&contents).unwrap();
-
             Arc::new(parsed)
         })
         .collect::<Vec<_>>()
@@ -454,58 +349,6 @@ pub fn new_device_data(device_id: u32, paths: &[Arc<Vec<Location>>]) -> DeviceDa
         path,
         path_offset: path_index,
         time_offset: Duration::from_millis(rng.gen_range(0..10000)),
-    }
-}
-
-pub fn generate_initial_events(
-    events: &mut BinaryHeap<Event>,
-    timestamp: Instant,
-    devices: &[DeviceData],
-) {
-    for device in devices.iter() {
-        let timestamp = timestamp + device.time_offset;
-
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateGPS,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
-
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateVehicleData,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
-
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GeneratePeripheralData,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
-
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateMotor,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
-
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateBMS,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
-
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateIMU,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
     }
 }
 
@@ -530,151 +373,139 @@ pub fn next_event_duration(event_type: DataEventType) -> Duration {
     match event_type {
         DataEventType::GenerateGPS => Duration::from_millis(1000),
         DataEventType::GenerateIMU => Duration::from_millis(100),
-        DataEventType::GenerateVehicleData => Duration::from_millis(1000),
-        DataEventType::GeneratePeripheralData => Duration::from_millis(1000),
+        DataEventType::GenerateDeviceShadow => Duration::from_millis(1000),
+        DataEventType::GeneratePeripheralState => Duration::from_millis(1000),
         DataEventType::GenerateMotor => Duration::from_millis(250),
         DataEventType::GenerateBMS => Duration::from_millis(250),
     }
 }
 
-pub async fn process_data_event(
-    event: &DataEvent,
-    events: &mut BinaryHeap<Event>,
-    partitions: &mut Partitions,
+pub fn generate_initial_events(
+    events: &mut BinaryHeap<DataEvent>,
+    timestamp: Instant,
+    device: &DeviceData,
 ) {
+    let timestamp = timestamp + device.time_offset;
+
+    events.push(DataEvent {
+        event_type: DataEventType::GenerateGPS,
+        device: device.clone(),
+        timestamp,
+        sequence: 1,
+    });
+
+    events.push(DataEvent {
+        event_type: DataEventType::GenerateDeviceShadow,
+        device: device.clone(),
+        timestamp,
+        sequence: 1,
+    });
+
+    events.push(DataEvent {
+        event_type: DataEventType::GeneratePeripheralState,
+        device: device.clone(),
+        timestamp,
+        sequence: 1,
+    });
+
+    events.push(DataEvent {
+        event_type: DataEventType::GenerateMotor,
+        device: device.clone(),
+        timestamp,
+        sequence: 1,
+    });
+
+    events.push(DataEvent {
+        event_type: DataEventType::GenerateBMS,
+        device: device.clone(),
+        timestamp,
+        sequence: 1,
+    });
+
+    events.push(DataEvent {
+        event_type: DataEventType::GenerateIMU,
+        device: device.clone(),
+        timestamp,
+        sequence: 1,
+    });
+}
+
+pub async fn process_data_event(event: &DataEvent, events: &mut BinaryHeap<DataEvent>) -> Payload {
     let data = match event.event_type {
         DataEventType::GenerateGPS => generate_gps_data(&event.device, event.sequence),
         DataEventType::GenerateIMU => generate_imu_data(&event.device, event.sequence),
-        DataEventType::GenerateVehicleData => {
+        DataEventType::GenerateDeviceShadow => {
             generate_device_shadow_data(&event.device, event.sequence)
         }
-        DataEventType::GeneratePeripheralData => {
+        DataEventType::GeneratePeripheralState => {
             generate_peripheral_state_data(&event.device, event.sequence)
         }
         DataEventType::GenerateMotor => generate_motor_data(&event.device, event.sequence),
         DataEventType::GenerateBMS => generate_bms_data(&event.device, event.sequence),
     };
 
-    partitions.send(data).await;
-
     let duration = next_event_duration(event.event_type);
-
-    events.push(Event::DataEvent(DataEvent {
+    events.push(DataEvent {
         sequence: event.sequence + 1,
         timestamp: event.timestamp + duration,
         device: event.device.clone(),
         event_type: event.event_type,
-    }));
-}
+    });
 
-async fn process_action_response_event(event: &ActionResponseEvent, partitions: &mut Partitions) {
-    //info!("Sending action response {:?} {} {} {}", event.device_id, event.action_id, event.progress, event.status);
-    let response = ActionResponse::progress(&event.action_id, &event.status, event.progress);
-
-    info!(
-        "Sending action response {:?} {} {} {}",
-        event.device_id, event.action_id, event.progress, event.status
-    );
-
-    partitions.send_action_response(&event.device_id, response).await;
-    info!("Successfully sent action response");
-}
-
-pub async fn process_events(events: &mut BinaryHeap<Event>, partitions: &mut Partitions) {
-    if let Some(e) = events.pop() {
-        let current_time = Instant::now();
-        let timestamp = event_timestamp(&e);
-
-        if timestamp > current_time {
-            let time_left = timestamp.duration_since(current_time);
-
-            if time_left > Duration::from_millis(50) {
-                tokio::time::sleep(time_left).await;
-            }
-        }
-
-        match e {
-            Event::DataEvent(event) => {
-                process_data_event(&event, events, partitions).await;
-            }
-
-            Event::ActionResponseEvent(event) => {
-                process_action_response_event(&event, partitions).await;
-            }
-        }
-    } else {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
-pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
-    info!("Generating action events {}", action.action_id);
-    let now = Instant::now() + Duration::from_millis(rand::thread_rng().gen_range(0..5000));
-
-    for i in 1..100 {
-        events.push(Event::ActionResponseEvent(ActionResponseEvent {
-            action_id: action.action_id.clone(),
-            device_id: action.device_id.clone(),
-            progress: i,
-            status: String::from("in_progress"),
-            timestamp: now + Duration::from_secs(i as u64),
-        }));
-    }
-
-    events.push(Event::ActionResponseEvent(ActionResponseEvent {
-        action_id: action.action_id.clone(),
-        device_id: action.device_id.clone(),
-        progress: 100,
-        status: String::from("Completed"),
-        timestamp: now + Duration::from_secs(100),
-    }));
+    data
 }
 
 #[tokio::main(flavor = "current_thread")]
-pub async fn start(
-    data_tx: Sender<Box<dyn Package>>,
-    actions_rx: Receiver<Action>,
-    simulator_config: &SimulatorConfig,
-) -> Result<(), Error> {
+pub async fn start(simulator_config: &SimulatorConfig, bridge: BridgeTx) -> Result<(), Error> {
     let paths = read_gps_paths(&simulator_config.gps_paths);
     let num_devices = simulator_config.num_devices;
-
     let devices = (1..(num_devices + 1)).map(|i| new_device_data(i, &paths)).collect::<Vec<_>>();
+    let actions_rx = bridge.register_app("simulator").await;
 
-    let mut events = BinaryHeap::new();
+    for device in devices {
+        let bridge = bridge.clone();
+        let mut events = BinaryHeap::new();
+        generate_initial_events(&mut events, Instant::now(), &device);
+        task::spawn(async move {
+            loop {
+                let event = match events.pop() {
+                    Some(event) => event,
+                    _ => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        continue;
+                    }
+                };
 
-    generate_initial_events(&mut events, Instant::now(), &devices);
-
-    let mut partitions =
-        Partitions { map: HashMap::new(), action_statuses: HashMap::new(), tx: data_tx };
-    let mut time = Instant::now();
-    let mut i = 0;
-
-    loop {
-        let current_time = Instant::now();
-        if time.elapsed() > Duration::from_secs(1) {
-            if let Some(event) = events.peek() {
-                let timestamp = event_timestamp(event);
-
-                if current_time > timestamp {
-                    trace!("Time delta {:?} {:?} {:?}", num_devices, current_time - timestamp, i);
-                } else {
-                    warn!("Time delta {:?} -{:?} {:?}", num_devices, timestamp - current_time, i);
+                let current_time = Instant::now();
+                if event.timestamp > current_time {
+                    let time_left = event.timestamp.duration_since(current_time);
+                    if time_left > Duration::from_millis(50) {
+                        tokio::time::sleep(time_left).await;
+                    }
                 }
 
-                i += 1;
+                let payload = process_data_event(&event, &mut events).await;
+                bridge.send_payload(payload).await;
             }
-            time = Instant::now();
-        }
+        });
+    }
 
-        select! {
-            action = actions_rx.recv_async() => {
-                let action = action?;
-                generate_action_events(&action, &mut events);
+    loop {
+        let action = actions_rx.recv_async().await?;
+        let action_id = action.action_id.clone();
+
+        let bridge = bridge.clone();
+        task::spawn(async move {
+            info!("Generating action events {}", action.action_id);
+
+            for i in 1..100 {
+                let response = ActionResponse::progress(&action_id, "in_progress", i);
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                bridge.send_action_response(response).await;
             }
-            _ = process_events(&mut events, &mut partitions) => {
-            }
-        }
+
+            let response = ActionResponse::success(&action_id);
+            bridge.send_action_response(response).await;
+        });
     }
 }
-

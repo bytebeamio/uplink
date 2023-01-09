@@ -172,7 +172,7 @@ pub mod config {
 }
 
 pub use base::actions::{Action, ActionResponse};
-use base::bridge::{self, Bridge, BridgeTx, Package, Payload, Point, Stream, StreamMetrics};
+use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, Stream, StreamMetrics};
 pub use base::middleware;
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
