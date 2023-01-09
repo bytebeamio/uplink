@@ -116,6 +116,19 @@ impl ClientConnection {
                         }
                     };
 
+                    if data.stream == "action_status" {
+                        let response = match ActionResponse::from_payload(&data) {
+                            Ok(response) => response,
+                            Err(e) => {
+                                error!("Couldn't parse payload as an action response: {e:?}");
+                                continue;
+                            }
+                        };
+
+                        self.bridge.send_action_response(response).await;
+                        continue
+                    }
+
                     self.bridge.send_payload(data).await;
                 }
 

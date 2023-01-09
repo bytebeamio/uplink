@@ -35,12 +35,6 @@ pub struct Bridge {
     actions_rx: Receiver<Action>,
     /// Action responses going to backend
     action_status: Stream<ActionResponse>,
-    /// Used to broadcast actions to all client connections
-    actions_tx: Sender<Action>,
-    /// Given to client connections for sending action responses
-    status_tx: Sender<ActionResponse>,
-    /// Process action responses coming in from client connections
-    status_rx: Receiver<ActionResponse>,
     /// Apps registered with the bridge
     apps: HashMap<String, Sender<Action>>,
 }
@@ -53,8 +47,6 @@ impl Bridge {
         actions_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
     ) -> Bridge {
-        let (actions_tx, _) = bounded(10);
-        let (status_tx, status_rx) = bounded(10);
         let (bridge_tx, bridge_rx) = bounded(10);
 
         Bridge {
@@ -65,9 +57,6 @@ impl Bridge {
             metrics_tx,
             config,
             actions_rx,
-            actions_tx,
-            status_tx,
-            status_rx,
             apps: HashMap::with_capacity(10),
         }
     }
@@ -105,12 +94,12 @@ impl Bridge {
                         let action = action?;
                         let action_id = action.action_id.clone();
 
-                        if self.actions_tx.send(action).is_ok() {
-                            info!("Received action: {:?}", action_id);
-                            current_action = Some(CurrentAction::new(&action_id));
-                            let response = ActionResponse::progress(&action_id, "Received", 0);
-                            self.action_status.fill(response).await?;
-                        }
+                        // if self.actions_tx.send(action).is_ok() {
+                        //     info!("Received action: {:?}", action_id);
+                        //     current_action = Some(CurrentAction::new(&action_id));
+                        //     let response = ActionResponse::progress(&action_id, "Received", 0);
+                        //     self.action_status.fill(response).await?;
+                        // }
 
                         // else if self.config.ignore_actions_if_no_clients {
                         //     error!("No clients connected, ignoring action = {:?}", action_id);
@@ -129,32 +118,30 @@ impl Bridge {
                                 self.apps.insert(name, tx);
                             }
                             Event::Data(v) => {
-                                dbg!(v);
+                                streams.forward(v).await;
                             }
-                            Event::ActionResponse(_) => todo!(),
-                        }
-                    }
-                    response = self.status_rx.recv_async() => {
-                        let response = response?;
-                        let inflight_action = match &mut current_action {
-                            Some(v) => v,
-                            None => {
-                                error!("Action timed out already, ignoring response: {:?}", response);
-                                continue;
+                            Event::ActionResponse(response) => {
+                                let inflight_action = match &mut current_action {
+                                    Some(v) => v,
+                                    None => {
+                                        error!("Action timed out already or not present, ignoring response: {:?}", response);
+                                        continue;
+                                    }
+                                };
+
+                                if *inflight_action.id != response.action_id {
+                                    error!("action_id in action_status({}) does not match that of active action ({})", response.action_id, inflight_action.id);
+                                    continue;
+                                }
+
+                                if &response.state == "Completed" || &response.state == "Failed" {
+                                    current_action = None;
+                                }
+
+                                if let Err(e) = self.action_status.fill(response).await {
+                                    error!("Failed to fill. Error = {:?}", e);
+                                }
                             }
-                        };
-
-                        if *inflight_action.id != response.action_id {
-                            error!("action_id in action_status({}) does not match that of active action ({})", response.action_id, inflight_action.id);
-                            continue;
-                        }
-
-                        if &response.state == "Completed" || &response.state == "Failed" {
-                            current_action = None;
-                        }
-
-                        if let Err(e) = self.action_status.fill(response).await {
-                            error!("Failed to fill. Error = {:?}", e);
                         }
                     }
                     _ = &mut current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
