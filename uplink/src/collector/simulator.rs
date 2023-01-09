@@ -4,7 +4,7 @@ use serde_json::json;
 use thiserror::Error;
 use tokio::select;
 use tokio_util::codec::LinesCodecError;
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, instrument, trace, warn};
 
 use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -635,6 +635,7 @@ pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
     }));
 }
 
+#[instrument(name = "Simulator", skip(data_tx, actions_rx))]
 pub async fn start(
     data_tx: Sender<Box<dyn Package>>,
     actions_rx: Receiver<Action>,

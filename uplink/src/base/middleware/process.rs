@@ -3,7 +3,7 @@ use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::{pin, select, task, time};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, instrument};
 
 use crate::{ActionResponse, Package, Stream};
 
@@ -43,6 +43,7 @@ impl Process {
     }
 
     /// Run a process of specified command
+    #[instrument(name = "Process", skip(self))]
     pub async fn run(
         &mut self,
         id: String,

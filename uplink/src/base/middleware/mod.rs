@@ -1,6 +1,6 @@
 use flume::{Receiver, Sender, TrySendError};
 use thiserror::Error;
-use tracing::{debug, error};
+use tracing::{debug, error, instrument};
 
 use std::sync::Arc;
 
@@ -60,6 +60,7 @@ impl Middleware {
     }
 
     /// Start receiving and processing [Action]s
+    #[instrument(name = "Middleware", skip_all)]
     pub async fn start(mut self) {
         loop {
             let action = match self.actions_rx.recv_async().await {

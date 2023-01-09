@@ -4,7 +4,7 @@ use std::{fmt::Debug, mem, sync::Arc};
 use flume::{SendError, Sender};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::{debug, trace};
+use tracing::{debug, instrument, trace};
 
 use crate::config::{StreamConfig, DEFAULT_TIMEOUT};
 
@@ -200,6 +200,7 @@ where
 
     /// Fill buffer with data and trigger async channel send on breaching max_buf_size.
     /// Returns [`StreamStatus`].
+    #[instrument(name = "Stream")]
     pub async fn fill(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
@@ -216,6 +217,7 @@ where
 
     /// Push data into buffer and trigger sync channel send on max_buf_size.
     /// Returns [`StreamStatus`].
+    #[instrument(name = "Stream")]
     pub fn push(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send(Box::new(buf))?;

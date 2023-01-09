@@ -2,7 +2,7 @@ use flume::{Sender, TrySendError};
 use thiserror::Error;
 use tokio::task;
 use tokio::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
 use std::fs::File;
 use std::io::Read;
@@ -59,6 +59,7 @@ impl Mqtt {
     }
 
     /// Poll eventloop to receive packets from broker
+    #[instrument(name = "Mqtt", skip_all)]
     pub async fn start(mut self) {
         loop {
             match self.eventloop.poll().await {

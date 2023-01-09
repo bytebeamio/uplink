@@ -3,7 +3,7 @@ use std::sync::Arc;
 use flume::Receiver;
 use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument, warn};
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
 use crate::{base::Stream, config, Action, ActionResponse};
@@ -46,6 +46,7 @@ impl TunshellSession {
     }
 
     #[tokio::main(flavor = "current_thread")]
+    #[instrument(name = "Tunshell", skip_all)]
     pub async fn start(mut self) {
         while let Ok(action) = self.actions_rx.recv_async().await {
             let action_id = action.action_id.clone();

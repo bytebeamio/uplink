@@ -4,7 +4,7 @@ use sysinfo::{
     ComponentExt, CpuExt, DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, SystemExt,
 };
 use tokio::time::Instant;
-use tracing::error;
+use tracing::{error, instrument};
 
 use std::{
     collections::HashMap,
@@ -520,6 +520,7 @@ impl StatCollector {
     }
 
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
+    #[instrument(name = "System Stats", skip_all)]
     pub fn start(mut self) {
         loop {
             std::thread::sleep(Duration::from_secs(self.config.stats.update_period));

@@ -7,7 +7,7 @@ use tokio::time::{Duration, Sleep};
 use tokio::{select, time};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, instrument};
 
 use std::pin::Pin;
 use std::{io, sync::Arc};
@@ -70,6 +70,7 @@ impl Bridge {
         Bridge { action_status, data_tx, config, actions_rx, actions_tx, status_tx, status_rx }
     }
 
+    #[instrument(name = "Bridge", skip_all, fields(port=self.config.bridge_port))]
     pub async fn start(&mut self) -> Result<(), Error> {
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
@@ -196,6 +197,7 @@ struct ClientConnection {
 }
 
 impl ClientConnection {
+    #[instrument(name = "ClientConnection", skip_all)]
     pub async fn collect(
         &mut self,
         mut client: Framed<TcpStream, LinesCodec>,

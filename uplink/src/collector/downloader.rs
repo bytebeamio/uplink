@@ -47,7 +47,7 @@ use flume::{Receiver, RecvError, Sender};
 use futures_util::StreamExt;
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
 use std::fs::{create_dir_all, File};
 use std::time::Duration;
@@ -142,6 +142,7 @@ impl FileDownloader {
     /// Spawn a thread to handle downloading files as notified by download actions and for forwarding the updated actions
     /// to bridge for further processing, e.g. OTA update installation.
     #[tokio::main(flavor = "current_thread")]
+    #[instrument(name = "File Downloader", skip_all, fields(path=self.downloader_cfg.path))]
     pub async fn start(mut self) -> Result<(), Error> {
         loop {
             self.sequence = 0;
