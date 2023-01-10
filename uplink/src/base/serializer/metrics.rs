@@ -127,11 +127,7 @@ impl StreamMetricsHandler {
             }
         };
 
-        Some(Self {
-            topic,
-            black_list: config.bypass_streams.clone(),
-            map: Default::default(),
-        })
+        Some(Self { topic, black_list: config.bypass_streams.clone(), map: Default::default() })
     }
 
     /// Updates the metrics for a stream as deemed necessary with the count of points in batch

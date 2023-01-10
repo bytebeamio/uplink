@@ -41,7 +41,9 @@ async fn main() {
             idx += 1;
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 }
 
 fn first_response(value: u32) {
