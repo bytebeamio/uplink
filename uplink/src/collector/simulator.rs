@@ -1,12 +1,14 @@
 use flume::{Receiver, Sender};
+use futures_util::StreamExt;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
 use tokio::select;
 use tokio_util::codec::LinesCodecError;
+use tokio_util::time::DelayQueue;
 
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
@@ -520,54 +522,72 @@ pub fn new_device_data(device_id: u32, paths: &[Arc<Vec<Location>>]) -> DeviceDa
 }
 
 pub fn generate_initial_events(
-    events: &mut BinaryHeap<Event>,
+    queue: &mut DelayQueue<Event>,
     timestamp: Instant,
     devices: &[DeviceData],
 ) {
     for device in devices.iter() {
         let timestamp = timestamp + device.time_offset;
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateGPS,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
+        queue.insert(
+            Event::DataEvent(DataEvent {
+                event_type: DataEventType::GenerateGPS,
+                device: device.clone(),
+                timestamp,
+                sequence: 1,
+            }),
+            device.time_offset,
+        );
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateVehicleData,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
+        queue.insert(
+            Event::DataEvent(DataEvent {
+                event_type: DataEventType::GenerateVehicleData,
+                device: device.clone(),
+                timestamp,
+                sequence: 1,
+            }),
+            device.time_offset,
+        );
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GeneratePeripheralData,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
+        queue.insert(
+            Event::DataEvent(DataEvent {
+                event_type: DataEventType::GeneratePeripheralData,
+                device: device.clone(),
+                timestamp,
+                sequence: 1,
+            }),
+            device.time_offset,
+        );
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateMotor,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
+        queue.insert(
+            Event::DataEvent(DataEvent {
+                event_type: DataEventType::GenerateMotor,
+                device: device.clone(),
+                timestamp,
+                sequence: 1,
+            }),
+            device.time_offset,
+        );
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateBMS,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
+        queue.insert(
+            Event::DataEvent(DataEvent {
+                event_type: DataEventType::GenerateBMS,
+                device: device.clone(),
+                timestamp,
+                sequence: 1,
+            }),
+            device.time_offset,
+        );
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateIMU,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
+        queue.insert(
+            Event::DataEvent(DataEvent {
+                event_type: DataEventType::GenerateIMU,
+                device: device.clone(),
+                timestamp,
+                sequence: 1,
+            }),
+            device.time_offset,
+        );
     }
 }
 
@@ -588,13 +608,9 @@ pub fn create_streams(num_devices: u32) -> Vec<(String, usize)> {
         .collect()
 }
 
-pub fn next_event_duration(event_type: DataEventType) -> Duration {
-    Duration::from_millis(event_type.period())
-}
-
 pub async fn process_data_event(
     event: &DataEvent,
-    events: &mut BinaryHeap<Event>,
+    queue: &mut DelayQueue<Event>,
     partitions: &mut Partitions,
     counts: &mut DataEventCounts,
 ) -> Option<DataEventType> {
@@ -616,14 +632,17 @@ pub async fn process_data_event(
 
     partitions.send(data).await;
 
-    let duration = next_event_duration(event.event_type);
+    let duration = Duration::from_millis(event.event_type.period());
 
-    events.push(Event::DataEvent(DataEvent {
-        sequence: event.sequence + 1,
-        timestamp: event.timestamp + duration,
-        device: event.device.clone(),
-        event_type: event.event_type,
-    }));
+    queue.insert(
+        Event::DataEvent(DataEvent {
+            sequence: event.sequence + 1,
+            timestamp: event.timestamp + duration,
+            device: event.device.clone(),
+            event_type: event.event_type,
+        }),
+        duration,
+    );
 
     None
 }
@@ -642,59 +661,51 @@ async fn process_action_response_event(event: &ActionResponseEvent, partitions: 
 }
 
 pub async fn process_events(
-    events: &mut BinaryHeap<Event>,
+    event: Event,
+    queue: &mut DelayQueue<Event>,
     partitions: &mut Partitions,
     counts: &mut DataEventCounts,
 ) -> Option<DataEventType> {
-    if let Some(e) = events.pop() {
-        let current_time = Instant::now();
-        let timestamp = event_timestamp(&e);
-
-        if timestamp > current_time {
-            let time_left = timestamp.duration_since(current_time);
-
-            if time_left > Duration::from_millis(50) {
-                tokio::time::sleep(time_left).await;
-            }
+    match event {
+        Event::DataEvent(event) => {
+            return process_data_event(&event, queue, partitions, counts).await;
         }
-
-        match e {
-            Event::DataEvent(event) => {
-                return process_data_event(&event, events, partitions, counts).await;
-            }
-
-            Event::ActionResponseEvent(event) => {
-                process_action_response_event(&event, partitions).await;
-            }
+        Event::ActionResponseEvent(event) => {
+            process_action_response_event(&event, partitions).await;
         }
-    } else {
-        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
     None
 }
 
-pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
-    info!("Generating action events {}", action.action_id);
-    let now = Instant::now() + Duration::from_millis(rand::thread_rng().gen_range(0..5000));
+pub fn generate_action_responses(action: &Action, queue: &mut DelayQueue<Event>) {
+    info!("Generating action responses {}", action.action_id);
+    let duration = Duration::from_millis(rand::thread_rng().gen_range(0..5000));
+    let now = Instant::now() + duration;
 
     for i in 1..100 {
-        events.push(Event::ActionResponseEvent(ActionResponseEvent {
-            action_id: action.action_id.clone(),
-            device_id: action.device_id.clone(),
-            progress: i,
-            status: String::from("in_progress"),
-            timestamp: now + Duration::from_secs(i as u64),
-        }));
+        queue.insert(
+            Event::ActionResponseEvent(ActionResponseEvent {
+                action_id: action.action_id.clone(),
+                device_id: action.device_id.clone(),
+                progress: i,
+                status: String::from("in_progress"),
+                timestamp: now + Duration::from_secs(i as u64),
+            }),
+            duration,
+        );
     }
 
-    events.push(Event::ActionResponseEvent(ActionResponseEvent {
-        action_id: action.action_id.clone(),
-        device_id: action.device_id.clone(),
-        progress: 100,
-        status: String::from("Completed"),
-        timestamp: now + Duration::from_secs(100),
-    }));
+    queue.insert(
+        Event::ActionResponseEvent(ActionResponseEvent {
+            action_id: action.action_id.clone(),
+            device_id: action.device_id.clone(),
+            progress: 100,
+            status: String::from("Completed"),
+            timestamp: now + Duration::from_secs(100),
+        }),
+        duration,
+    );
 }
 
 pub async fn start(
@@ -706,43 +717,24 @@ pub async fn start(
     let num_devices = simulator_config.num_devices;
 
     let devices = (1..(num_devices + 1)).map(|i| new_device_data(i, &paths)).collect::<Vec<_>>();
-
-    let mut events = BinaryHeap::new();
-
-    generate_initial_events(&mut events, Instant::now(), &devices);
+    let mut queue = DelayQueue::<Event>::new();
+    generate_initial_events(&mut queue, Instant::now(), &devices);
 
     let mut partitions =
         Partitions { map: HashMap::new(), action_statuses: HashMap::new(), tx: data_tx };
-    let mut time = Instant::now();
-    let mut i = 0;
     let mut counts = DataEventCounts::default();
 
     loop {
-        let current_time = Instant::now();
-
-        if time.elapsed() > Duration::from_secs(1) {
-            if let Some(event) = events.peek() {
-                let timestamp = event_timestamp(event);
-
-                if current_time > timestamp {
-                    info!("Time delta {:?} {:?} {:?}", num_devices, current_time - timestamp, i);
-                } else {
-                    info!("Time delta {:?} -{:?} {:?}", num_devices, timestamp - current_time, i);
-                }
-
-                i += 1;
-            }
-            time = Instant::now();
-        }
-
         select! {
             action = actions_rx.recv_async() => {
                 let action = action?;
-                generate_action_events(&action, &mut events);
+                generate_action_responses(&action, &mut queue);
             }
 
-            event = process_events(&mut events, &mut partitions, &mut counts) => if let Some(event_type) = event{
-                return Ok(event_type);
+            Some(event) = queue.next() => {
+                if let Some(event_type) = process_events(event.into_inner(), &mut queue, &mut partitions, &mut counts).await{
+                    return Ok(event_type);
+                }
             }
         }
     }
