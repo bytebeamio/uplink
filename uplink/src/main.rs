@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::thread;
 
 use anyhow::Error;
-use log::{error, warn};
+use log::warn;
 use simplelog::{
     ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, LevelPadding, TermLogger, TerminalMode,
 };
@@ -76,7 +76,7 @@ fn initialize_logging(commandline: &CommandLine) {
     }
 
     if commandline.modules.is_empty() {
-        for module in ["uplink", "disk"] {
+        for module in ["uplink", "disk", "rumqttc"] {
             config.add_filter_allow(module.to_string());
         }
     } else {

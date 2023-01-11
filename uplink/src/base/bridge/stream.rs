@@ -31,8 +31,8 @@ pub struct Stream<T> {
     last_sequence: u32,
     last_timestamp: u64,
     buffer: Buffer<T>,
-    metrics: StreamMetrics,
     tx: Sender<Box<dyn Package>>,
+    pub metrics: StreamMetrics,
 }
 
 impl<T> Stream<T>
@@ -50,6 +50,7 @@ where
         let topic = Arc::new(topic.into());
         let buffer = Buffer::new(name.clone(), topic.clone());
         let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
+        let metrics = StreamMetrics::new(&name);
 
         Stream {
             name,
@@ -59,8 +60,8 @@ where
             last_sequence: 0,
             last_timestamp: 0,
             buffer,
-            metrics: StreamMetrics::new(),
             tx,
+            metrics,
         }
     }
 
@@ -71,13 +72,8 @@ where
         config: &StreamConfig,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let mut stream = if let Some(topic) = &config.topic {
-            Stream::new(name, topic, config.buf_size, tx)
-        } else {
-            Stream::dynamic_with_size(name, project_id, device_id, config.buf_size, tx)
-        };
+        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx);
         stream.flush_period = Duration::from_secs(config.flush_period);
-
         stream
     }
 
@@ -115,24 +111,21 @@ where
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
         let current_sequence = data.sequence();
         let current_timestamp = data.timestamp();
+        let last_sequence = self.last_sequence;
+        let last_timestamp = self.last_timestamp;
 
         // Fill buffer with data
         self.buffer.buffer.push(data);
+        self.metrics.add_point();
 
         // Anomaly detection
         if current_sequence <= self.last_sequence {
-            debug!(
-                "Sequence number anomaly! [{}, {}] - stream = {}",
-                current_sequence, self.last_sequence, self.name
-            );
+            debug!("Sequence number anomaly! [{current_sequence}, {last_sequence}");
             self.buffer.add_sequence_anomaly(self.last_sequence, current_sequence);
         }
 
         if current_timestamp < self.last_timestamp {
-            debug!(
-                "Timestamp anomaly!! [{}, {}] - stream = {}",
-                current_timestamp, self.last_timestamp, self.name
-            );
+            debug!("Timestamp anomaly!! [{current_timestamp}, {last_timestamp}]",);
             self.buffer.add_timestamp_anomaly(self.last_timestamp, current_timestamp);
         }
 
@@ -141,6 +134,7 @@ where
 
         // if max_buffer_size is breached, flush
         let buf = if self.buffer.buffer.len() >= self.max_buffer_size {
+            self.metrics.add_batch();
             Some(self.take_buffer())
         } else {
             None
@@ -208,6 +202,10 @@ where
         };
 
         Ok(status)
+    }
+
+    pub fn metrics(&self) -> StreamMetrics {
+        self.metrics.clone()
     }
 }
 
@@ -308,7 +306,7 @@ impl<T> Clone for Stream<T> {
             last_sequence: 0,
             last_timestamp: 0,
             buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
-            metrics: StreamMetrics::new(),
+            metrics: StreamMetrics::new(&self.name),
             tx: self.tx.clone(),
         }
     }

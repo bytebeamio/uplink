@@ -26,7 +26,7 @@ fn default_file_count() -> usize {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamConfig {
-    pub topic: Option<String>,
+    pub topic: String,
     pub buf_size: usize,
     #[serde(default = "default_timeout")]
     /// Duration(in seconds) that bridge collector waits from
@@ -82,6 +82,7 @@ pub struct Downloader {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamMetricsConfig {
     pub enabled: bool,
+    pub topic: String,
     pub blacklist: Vec<String>,
     pub timeout: u64,
 }
@@ -89,6 +90,8 @@ pub struct StreamMetricsConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SerializerMetricsConfig {
     pub enabled: bool,
+    pub topic: String,
+    pub timeout: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

@@ -7,16 +7,14 @@ use anyhow::Error;
 use base::monitor::Monitor;
 use flume::{bounded, Receiver, Sender};
 use log::error;
-use tokio::task;
 
 pub mod base;
 pub mod collector;
 
 pub mod config {
-    use crate::base::StreamConfig;
     pub use crate::base::{Config, Persistence, Stats};
     use config::{Environment, File, FileFormat};
-    use std::fs;
+    use std::{fs, mem};
     use structopt::StructOpt;
 
     #[derive(StructOpt, Debug)]
@@ -66,18 +64,25 @@ pub mod config {
     [stream_metrics]
     enabled = false
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
+    blacklist = []
     timeout = 10
 
     [serializer_metrics]
     enabled = false
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_metrics/jsonarray"
-    blacklist = []
+    timeout = 10
 
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     buf_size = 1
+    timeout = 10
+
+    [streams.device_shadow]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
+    buf_size = 1
 
     [stats]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/uplink_stats/jsonarray"
     enabled = false
     process_names = ["uplink"]
     update_period = 30
@@ -107,10 +112,12 @@ pub mod config {
         let tenant_id = config.project_id.trim();
         let device_id = config.device_id.trim();
         for config in config.streams.values_mut() {
-            replace_topic_placeholders(config, tenant_id, device_id);
+            replace_topic_placeholders(&mut config.topic, tenant_id, device_id);
         }
 
-        replace_topic_placeholders(&mut config.action_status, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.action_status.topic, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.serializer_metrics.topic, tenant_id, device_id);
 
         // for config in [&mut config.serializer_metrics, &mut config.stream_metrics] {
         //     if let Some(topic) = &config.topic {
@@ -135,12 +142,10 @@ pub mod config {
     }
 
     // Replace placeholders in topic strings with configured values for tenant_id and device_id
-    fn replace_topic_placeholders(config: &mut StreamConfig, tenant_id: &str, device_id: &str) {
-        if let Some(topic) = &config.topic {
-            let topic = topic.replace("{tenant_id}", tenant_id);
-            let topic = topic.replace("{device_id}", device_id);
-            config.topic = Some(topic);
-        }
+    fn replace_topic_placeholders(topic: &mut String, tenant_id: &str, device_id: &str) {
+        let t = topic.replace("{tenant_id}", tenant_id);
+        let t = t.replace("{device_id}", device_id);
+        let _ = mem::replace(topic, t);
     }
 
     #[derive(Debug, thiserror::Error)]
@@ -200,12 +205,7 @@ impl Uplink {
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
 
-        let action_status_topic = &config
-            .action_status
-            .topic
-            .as_ref()
-            .ok_or_else(|| Error::msg("Action status topic missing from config"))?;
-
+        let action_status_topic = &config.action_status.topic;
         let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
         Ok(Uplink {
             config,

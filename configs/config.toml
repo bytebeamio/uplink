@@ -64,6 +64,7 @@ max_file_count = 3
 # In the following config for the device_shadow stream we set buf_size to 1. streams is
 # internally constructed as a map of Name -> Config
 [streams.device_shadow]
+topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
 buf_size = 1
 
 # Built-in streams: action status is a special case of stream and should be configured separately,

@@ -2,7 +2,7 @@ use std::io;
 use std::sync::Arc;
 
 use flume::{Receiver, RecvError};
-use rumqttc::{AsyncClient, ClientError, Request};
+use rumqttc::{AsyncClient, ClientError, QoS, Request};
 use tokio::select;
 
 use crate::base::bridge::StreamMetrics;
@@ -34,16 +34,31 @@ impl Monitor {
 
     pub async fn start(&self) -> Result<(), Error> {
         let stream_metrics_config = self.config.stream_metrics.clone();
+        let stream_metrics_topic = stream_metrics_config.topic;
+        let mut stream_metrics = Vec::with_capacity(10);
+
+        let serializer_metrics_config = self.config.serializer_metrics.clone();
+        let serializer_metrics_topic = serializer_metrics_config.topic;
+        let mut serializer_metrics = Vec::with_capacity(10);
 
         loop {
             select! {
                 o = self.stream_metrics_rx.recv_async() => {
                     let o = o?;
-                    println!("Received {:?}", o);
+                    stream_metrics.push(o);
+                    let v = serde_json::to_string(&stream_metrics).unwrap();
+                    println!("Received {:?}", v);
+
+                    stream_metrics.clear();
+                    self.client.publish(&stream_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                 }
                 o = self.serializer_metrics_rx.recv_async() => {
                     let o = o?;
-                    println!("Received {:?}", o);
+                    serializer_metrics.push(o);
+                    let v = serde_json::to_string(&stream_metrics).unwrap();
+                    println!("Received {:?}", v);
+                    serializer_metrics.clear();
+                    self.client.publish(&serializer_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                 }
             }
         }

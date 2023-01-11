@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use flume::Sender;
-use log::{error, info};
+use log::error;
 use tokio::time::{interval, Interval};
 
 use crate::base::bridge::{self, StreamMetrics, StreamStatus};
@@ -16,7 +16,6 @@ pub struct Streams {
     data_tx: Sender<Box<dyn Package>>,
     metrics_tx: Sender<StreamMetrics>,
     map: HashMap<String, Stream<Payload>>,
-    metrics: StreamMetrics,
     pub stream_timeouts: DelayMap<String>,
     pub metrics_timeout: Interval,
 }
@@ -40,15 +39,7 @@ impl Streams {
         }
 
         let metrics_timeout = interval(Duration::from_secs(config.stream_metrics.timeout));
-        Self {
-            config,
-            data_tx,
-            metrics_tx,
-            map,
-            metrics: StreamMetrics::new(),
-            stream_timeouts: DelayMap::new(),
-            metrics_timeout,
-        }
+        Self { config, data_tx, metrics_tx, map, stream_timeouts: DelayMap::new(), metrics_timeout }
     }
 
     pub async fn forward(&mut self, data: Payload) {
@@ -104,8 +95,13 @@ impl Streams {
 
     // Flush metrics that timeout
     pub fn flush_metrics(&mut self) -> Result<(), flume::TrySendError<StreamMetrics>> {
-        self.metrics_timeout.reset();
-        self.metrics_tx.try_send(self.metrics.clone())?;
+        for (_, data) in self.map.iter_mut() {
+            self.metrics_timeout.reset();
+            let metrics = data.metrics.clone();
+            self.metrics_tx.try_send(metrics)?;
+            data.metrics.reset();
+        }
+
         Ok(())
     }
 }
