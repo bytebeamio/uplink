@@ -110,10 +110,10 @@ impl Bridge {
 
                     action = self.actions_rx.recv_async(), if current_action_.is_none() => {
                         let action = action?;
+                        info!("Received action: {:?}", action);
                         let action_id = action.action_id.clone();
 
                         if self.actions_tx.send(action).is_ok() {
-                            info!("Received action: {:?}", action_id);
                             current_action_ = Some(CurrentAction {
                                 id: action_id.clone(),
                                 timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
