@@ -72,7 +72,7 @@ impl Bridge {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
+        let mut metrics_timeout = interval(Duration::from_secs(60));
         let mut streams =
             Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
                 .await;
@@ -154,15 +154,21 @@ impl Bridge {
                             error!("Failed to fill. Error = {:?}", e);
                         }
                     }
-                    // Flush stream/partitions that timeout
+                    // Flush streams that timeout
                     Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
                         if let Err(e) = streams.flush_stream(&timedout_stream).await {
                             error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
                         }
                     }
-                    // Flush metrics when timed out
+                    // Flush stream metrics that timeout
+                    Some(timedout_stream) = streams.metrics_timeouts.next(), if streams.metrics_timeouts.has_pending() => {
+                        if let Err(e) = streams.flush_stream_metrics(&timedout_stream).await {
+                            error!("Failed to flush stream metrics = {}. Error = {}", timedout_stream, e);
+                        }
+                    }
+                    // Force flush all metrics when timed out
                     _ = metrics_timeout.tick() => {
-                        if let Err(e) = streams.flush_metrics() {
+                        if let Err(e) = streams.check_and_flush_metrics() {
                             error!("Failed to flush stream metrics. Error = {}", e);
                         }
                     }

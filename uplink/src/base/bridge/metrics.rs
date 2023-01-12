@@ -9,30 +9,36 @@ pub struct StreamMetrics {
     sequence: u32,
     stream: String,
     point_count: usize,
+    batch_count: u64,
+    max_batch_count: usize,
     #[serde(skip_serializing)]
     batch_start_time: Instant,
     #[serde(skip_serializing)]
     total_latency: u64,
-    batch_average_latency: u64,
-    batch_min_latency: u64,
-    batch_max_latency: u64,
-    batch_count: u64,
+    min_batch_latency: u64,
+    max_batch_latency: u64,
+    average_batch_latency: u64,
 }
 
 impl StreamMetrics {
-    pub fn new(name: &str) -> Self {
+    pub fn new(name: &str, max_batch_count: usize) -> Self {
         StreamMetrics {
             stream: name.to_owned(),
             timestamp: 0,
             sequence: 0,
             point_count: 0,
+            batch_count: 0,
+            max_batch_count,
             batch_start_time: Instant::now(),
             total_latency: 0,
-            batch_average_latency: 0,
-            batch_min_latency: 0,
-            batch_max_latency: 0,
-            batch_count: 0,
+            average_batch_latency: 0,
+            min_batch_latency: 0,
+            max_batch_latency: 0,
         }
+    }
+
+    pub fn point_count(&self) -> usize {
+        self.point_count
     }
 
     pub fn add_point(&mut self) {
@@ -46,13 +52,13 @@ impl StreamMetrics {
         self.batch_count += 1;
 
         let latency = self.batch_start_time.elapsed().as_millis() as u64;
-        self.batch_max_latency = self.batch_max_latency.max(latency);
-        self.batch_min_latency = self.batch_min_latency.min(latency);
+        self.max_batch_latency = self.max_batch_latency.max(latency);
+        self.min_batch_latency = self.min_batch_latency.min(latency);
         self.total_latency += latency;
-        self.batch_average_latency = self.total_latency / self.batch_count;
+        self.average_batch_latency = self.total_latency / self.batch_count;
     }
 
     pub fn reset(&mut self) {
-        *self = StreamMetrics::new(&self.stream)
+        *self = StreamMetrics::new(&self.stream, self.max_batch_count)
     }
 }

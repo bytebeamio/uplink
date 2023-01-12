@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use flume::Sender;
-use log::error;
+use log::{debug, error};
 use tokio::time::{interval, Interval};
 
 use crate::base::bridge::{self, StreamMetrics, StreamStatus};
@@ -17,6 +17,7 @@ pub struct Streams {
     metrics_tx: Sender<StreamMetrics>,
     map: HashMap<String, Stream<Payload>>,
     pub stream_timeouts: DelayMap<String>,
+    pub metrics_timeouts: DelayMap<String>,
     pub metrics_timeout: Interval,
 }
 
@@ -39,7 +40,15 @@ impl Streams {
         }
 
         let metrics_timeout = interval(Duration::from_secs(config.stream_metrics.timeout));
-        Self { config, data_tx, metrics_tx, map, stream_timeouts: DelayMap::new(), metrics_timeout }
+        Self {
+            config,
+            data_tx,
+            metrics_tx,
+            map,
+            stream_timeouts: DelayMap::new(),
+            metrics_timeouts: DelayMap::new(),
+            metrics_timeout,
+        }
     }
 
     pub async fn forward(&mut self, data: Payload) {
@@ -79,9 +88,10 @@ impl Streams {
             match state {
                 StreamStatus::Flushed(name) => self.stream_timeouts.remove(name),
                 StreamStatus::Init(name, flush_period) => {
-                    self.stream_timeouts.insert(name, flush_period)
+                    debug!("Initialized stream buffer for {}", name);
+                    self.stream_timeouts.insert(name, flush_period);
                 }
-                StreamStatus::Partial(l) => {}
+                StreamStatus::Partial(_l) => {}
             }
         }
     }
@@ -93,13 +103,39 @@ impl Streams {
         Ok(())
     }
 
-    // Flush metrics that timeout
-    pub fn flush_metrics(&mut self) -> Result<(), flume::TrySendError<StreamMetrics>> {
-        for (_, data) in self.map.iter_mut() {
-            self.metrics_timeout.reset();
+    pub async fn flush_stream_metrics(
+        &mut self,
+        stream_name: &str,
+    ) -> Result<(), flume::TrySendError<StreamMetrics>> {
+        let stream = self.map.get_mut(stream_name).unwrap();
+        let metrics = stream.metrics();
+
+        // Disable timer if there are no metrics to publish
+        if metrics.point_count() == 0 {
+            self.metrics_timeouts.remove(&stream_name.to_owned());
+            return Ok(());
+        }
+
+        let timeout = Duration::from_secs(self.config.stream_metrics.timeout);
+        self.metrics_timeouts.insert(&stream_name.to_owned(), timeout);
+        self.metrics_tx.try_send(metrics)?;
+        stream.metrics.reset();
+        Ok(())
+    }
+
+    // Enable actual metrics timers when there is data. This method is called every minute by the bridge
+    pub fn check_and_flush_metrics(&mut self) -> Result<(), flume::TrySendError<StreamMetrics>> {
+        for (name, data) in self.map.iter_mut() {
             let metrics = data.metrics.clone();
-            self.metrics_tx.try_send(metrics)?;
-            data.metrics.reset();
+
+            // Initialize metrics timeouts when force flush sees data counts
+            if metrics.point_count() > 0 {
+                let timeout = Duration::from_secs(self.config.stream_metrics.timeout);
+                // TODO: Remove this premeture optimization. Just check and send all the streams
+                self.metrics_timeouts.insert(name, timeout);
+                self.metrics_tx.try_send(metrics)?;
+                data.metrics.reset();
+            }
         }
 
         Ok(())

@@ -50,7 +50,7 @@ where
         let topic = Arc::new(topic.into());
         let buffer = Buffer::new(name.clone(), topic.clone());
         let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
-        let metrics = StreamMetrics::new(&name);
+        let metrics = StreamMetrics::new(&name, max_buffer_size);
 
         Stream {
             name,
@@ -306,7 +306,7 @@ impl<T> Clone for Stream<T> {
             last_sequence: 0,
             last_timestamp: 0,
             buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
-            metrics: StreamMetrics::new(&self.name),
+            metrics: StreamMetrics::new(&self.name, self.max_buffer_size),
             tx: self.tx.clone(),
         }
     }
