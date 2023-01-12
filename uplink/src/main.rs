@@ -42,7 +42,7 @@
 use std::sync::Arc;
 
 use anyhow::Error;
-use log::{error, warn};
+use log::error;
 use structopt::StructOpt;
 
 use uplink::config::{get_configs, initialize, CommandLine};
