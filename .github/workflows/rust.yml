@@ -7,17 +7,23 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
-
+  clippy:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v2
     - name: Clippy
       run: cargo clippy --verbose
       env:
           RUSTFLAGS: "-D warnings"
-    - name: Build
-      run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+
+  clippy-android:
+    name: Build for armv7-linux-androideabi
+    runs-on: ubuntu-latest
+    container:
+      image: devduttshenoi/android-builder
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build with cargo-ndk
+        run: ANDROID_NDK_HOME="/root/android/ndk/25.1.8937393" cargo ndk --target armv7-linux-androideabi --platform 23 clippy
