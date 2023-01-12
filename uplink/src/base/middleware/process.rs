@@ -43,6 +43,7 @@ impl Process {
     }
 
     /// Run a process of specified command
+    #[tracing::instrument(name = "Process", skip_all)]
     pub async fn run(
         &mut self,
         id: String,

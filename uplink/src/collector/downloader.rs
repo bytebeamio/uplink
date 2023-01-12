@@ -142,6 +142,7 @@ impl FileDownloader {
     /// Spawn a thread to handle downloading files as notified by download actions and for forwarding the updated actions
     /// to bridge for further processing, e.g. OTA update installation.
     #[tokio::main(flavor = "current_thread")]
+    #[tracing::instrument(name = "File Downloader", skip_all)]
     pub async fn start(mut self) -> Result<(), Error> {
         loop {
             self.sequence = 0;

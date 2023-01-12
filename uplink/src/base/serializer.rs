@@ -193,6 +193,7 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     /// Write all data received, from here-on, to disk only.
+    #[tracing::instrument(name = "Serializer::crash", skip_all)]
     async fn crash(&mut self, publish: Publish) -> Result<Status, Error> {
         let storage = match &mut self.storage {
             Some(s) => s,
@@ -210,6 +211,7 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     /// Write new data to disk until back pressure due to slow n/w is resolved
+    #[tracing::instrument(name = "Serializer::slow", skip_all)]
     async fn slow(&mut self, publish: Publish) -> Result<Status, Error> {
         info!("Switching to slow eventloop mode!!");
 
@@ -256,6 +258,7 @@ impl<C: MqttClient> Serializer<C> {
     /// `publish` instead of `try publish` to ensure that transient back
     /// pressure due to a lot of data on disk doesn't switch state to
     /// `Status::SlowEventLoop`
+    #[tracing::instrument(name = "Serializer::catchup", skip_all)]
     async fn catchup(&mut self) -> Result<Status, Error> {
         let storage = match &mut self.storage {
             Some(s) => s,
@@ -337,6 +340,7 @@ impl<C: MqttClient> Serializer<C> {
         }
     }
 
+    #[tracing::instrument(name = "Serializer::normal", skip_all)]
     async fn normal(&mut self) -> Result<Status, Error> {
         info!("Switching to normal mode!!");
         let mut interval = time::interval(time::Duration::from_secs(10));
@@ -410,6 +414,7 @@ impl<C: MqttClient> Serializer<C> {
     /// [catchup mode]: Serializer::catchup
     /// [slow mode]: Serializer::slow
     /// [crash mode]: Serializer::crash
+    #[tracing::instrument(name = "Serializer", skip_all)]
     pub async fn start(mut self) -> Result<(), Error> {
         let mut status = Status::EventLoopReady;
 

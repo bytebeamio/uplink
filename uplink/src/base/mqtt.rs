@@ -59,6 +59,7 @@ impl Mqtt {
     }
 
     /// Poll eventloop to receive packets from broker
+    #[tracing::instrument(name = "Mqtt", skip_all)]
     pub async fn start(mut self) {
         loop {
             match self.eventloop.poll().await {

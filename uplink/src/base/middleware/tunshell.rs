@@ -49,6 +49,7 @@ impl TunshellSession {
     }
 
     #[tokio::main(flavor = "current_thread")]
+    #[tracing::instrument(name = "Tunshell", skip_all)]
     pub async fn start(mut self) {
         while let Ok(action) = self.actions_rx.recv_async().await {
             let action_id = action.action_id.clone();

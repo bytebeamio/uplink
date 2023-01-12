@@ -70,6 +70,7 @@ impl Bridge {
         Bridge { action_status, data_tx, config, actions_rx, actions_tx, status_tx, status_rx }
     }
 
+    #[tracing::instrument(name = "Bridge", skip_all)]
     pub async fn start(&mut self) -> Result<(), Error> {
         loop {
             let addr = format!("0.0.0.0:{}", self.config.bridge_port);
@@ -196,6 +197,7 @@ struct ClientConnection {
 }
 
 impl ClientConnection {
+    #[tracing::instrument(name = "ClientConnection", skip_all)]
     pub async fn collect(
         &mut self,
         mut client: Framed<TcpStream, LinesCodec>,

@@ -60,6 +60,7 @@ impl Middleware {
     }
 
     /// Start receiving and processing [Action]s
+    #[tracing::instrument(name = "Middleware", skip_all)]
     pub async fn start(mut self) {
         loop {
             let action = match self.actions_rx.recv_async().await {

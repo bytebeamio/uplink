@@ -305,6 +305,7 @@ where
 
     /// Fill buffer with data and trigger async channel send on breaching max_buf_size.
     /// Returns [`StreamStatus`].
+    #[tracing::instrument(name = "Stream", skip_all)]
     pub async fn fill(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
@@ -321,6 +322,7 @@ where
 
     /// Push data into buffer and trigger sync channel send on max_buf_size.
     /// Returns [`StreamStatus`].
+    #[tracing::instrument(name = "Stream", skip_all)]
     pub fn push(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send(Box::new(buf))?;

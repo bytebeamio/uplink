@@ -71,6 +71,7 @@ impl LoggerInstance {
     /// On an android system, starts a logcat instance and a journalctl instance for a linux system that
     /// reports to the logs stream for a given device+project id, that logcat instance is killed when
     /// this object is dropped. On any other system, it's a noop.
+    #[tracing::instrument(name = "Logger", skip_all)]
     pub fn start(mut self) -> Result<(), Error> {
         #[cfg(target_os = "linux")]
         if let Some(JournalctlConfig { priority, tags, stream_size: _ }) = &self.config.journalctl {
