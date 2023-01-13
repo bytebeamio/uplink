@@ -55,7 +55,7 @@ impl Monitor {
                 o = self.serializer_metrics_rx.recv_async() => {
                     let o = o?;
                     serializer_metrics.push(o);
-                    let v = serde_json::to_string(&stream_metrics).unwrap();
+                    let v = serde_json::to_string(&serializer_metrics).unwrap();
                     println!("Received {:?}", v);
                     serializer_metrics.clear();
                     self.client.publish(&serializer_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();

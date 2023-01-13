@@ -1,68 +1,67 @@
 use serde::Serialize;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Default, Serialize, Clone)]
+use crate::collector::utils;
+
+#[derive(Debug, Serialize, Clone)]
 pub struct SerializerMetrics {
+    timestamp: u128,
     sequence: u32,
-    timestamp: u64,
-    total_sent_size: usize,
-    total_disk_size: usize,
+    mode: String,
+    batch_count: usize,
+    memory_size: usize,
+    disk_files: usize,
     lost_segments: usize,
-    errors: String,
-    error_count: usize,
+    sent_size: usize,
 }
 
 impl SerializerMetrics {
-    pub fn new(topic: String) -> Self {
-        SerializerMetrics { ..Default::default() }
+    pub fn new(mode: &str) -> Self {
+        SerializerMetrics {
+            timestamp: 0,
+            sequence: 0,
+            mode: mode.to_owned(),
+            batch_count: 0,
+            memory_size: 0,
+            disk_files: 0,
+            lost_segments: 0,
+            sent_size: 0,
+        }
     }
 
-    pub fn add_total_sent_size(&mut self, size: usize) {
-        self.total_sent_size = self.total_sent_size.saturating_add(size);
+    pub fn batch_count(&self) -> usize {
+        self.batch_count
     }
 
-    pub fn add_total_disk_size(&mut self, size: usize) {
-        self.total_disk_size = self.total_disk_size.saturating_add(size);
+    pub fn add_batch(&mut self) {
+        self.batch_count += 1;
+        if self.batch_count == 1 {
+            self.timestamp = utils::clock();
+        }
     }
 
-    pub fn sub_total_disk_size(&mut self, size: usize) {
-        self.total_disk_size = self.total_disk_size.saturating_sub(size);
+    pub fn set_memory_size(&mut self, size: usize) {
+        self.memory_size = size;
+    }
+
+    pub fn set_disk_files(&mut self, count: usize) {
+        self.disk_files = count;
     }
 
     pub fn increment_lost_segments(&mut self) {
         self.lost_segments += 1;
     }
 
-    // pub fn add_error<S: Into<String>>(&mut self, error: S) {
-    //     self.error_count += 1;
-    //     if self.errors.len() > 1024 {
-    //         return;
-    //     }
-    //
-    //     self.errors.push_str(", ");
-    //     self.errors.push_str(&error.into());
-    // }
-
-    pub fn add_errors<S: Into<String>>(&mut self, error: S, count: usize) {
-        self.error_count += count;
-        if self.errors.len() > 1024 {
-            return;
-        }
-
-        self.errors.push_str(&error.into());
-        self.errors.push_str(" | ");
+    pub fn add_sent_size(&mut self, size: usize) {
+        self.sent_size += size;
     }
 
-    // Retrieve metrics to send on network
-    pub fn update(&mut self) {
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
-        self.timestamp = timestamp.as_millis() as u64;
+    pub fn reset(&mut self) {
         self.sequence += 1;
-    }
-
-    pub fn clear(&mut self) {
-        self.errors.clear();
+        self.timestamp = 0;
+        self.batch_count = 0;
+        self.memory_size = 0;
+        self.disk_files = 0;
         self.lost_segments = 0;
+        self.sent_size = 0;
     }
 }

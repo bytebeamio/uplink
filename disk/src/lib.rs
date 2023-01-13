@@ -49,6 +49,18 @@ impl Storage {
         &mut self.current_read_file
     }
 
+    pub fn file_count(&self) -> usize {
+        self.backlog_file_ids.len()
+    }
+
+    pub fn inmemory_read_size(&self) -> usize {
+        self.current_read_file.len()
+    }
+
+    pub fn inmemory_write_size(&self) -> usize {
+        self.current_write_file.len()
+    }
+
     /// Removes a file with provided id
     fn remove(&self, id: u64) -> io::Result<()> {
         let path = self.backup_path.join(&format!("backup@{}", id));

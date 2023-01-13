@@ -250,8 +250,13 @@ impl Uplink {
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone());
         let mqtt_client = mqtt.client();
 
-        let serializer =
-            Serializer::new(self.config.clone(), self.data_rx.clone(), mqtt_client.clone())?;
+        let serializer = Serializer::new(
+            self.config.clone(),
+            self.data_rx.clone(),
+            mqtt_client.clone(),
+            self.serializer_metrics_tx(),
+        )?;
+
         // Serializer thread to handle network conditions state machine
         // and send data to mqtt thread
         thread::spawn(|| {
