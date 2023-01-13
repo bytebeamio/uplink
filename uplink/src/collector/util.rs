@@ -115,12 +115,12 @@ impl Streams {
         // Warn in case stream flushed stream was not in the queue.
         if max_stream_size > 1 {
             match state {
-                StreamStatus::Flushed(name) => self.flush_handler.remove(name),
-                StreamStatus::Init(name, flush_period) => {
-                    self.flush_handler.insert(name, flush_period)
+                StreamStatus::Flushed => self.flush_handler.remove(&stream.name),
+                StreamStatus::Init(flush_period) => {
+                    self.flush_handler.insert(&stream.name, flush_period)
                 }
                 StreamStatus::Partial(l) => {
-                    info!("Flushing stream {} with {} elements", stream.name, l);
+                    info!("Partially filled stream {} has {} elements", &stream.name, l);
                 }
             }
         }
