@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 
 use flume::Sender;
-use log::{debug, error, warn};
+use log::{error, info, warn};
 use tokio_stream::StreamExt;
 use tokio_util::time::{delay_queue::Key, DelayQueue};
 
@@ -115,12 +115,12 @@ impl Streams {
         // Warn in case stream flushed stream was not in the queue.
         if max_stream_size > 1 {
             match state {
-                StreamStatus::Flushed(name) => self.flush_handler.remove(name),
-                StreamStatus::Init(name, flush_period) => {
-                    self.flush_handler.insert(name, flush_period)
+                StreamStatus::Flushed => self.flush_handler.remove(&stream.name),
+                StreamStatus::Init(flush_period) => {
+                    self.flush_handler.insert(&stream.name, flush_period)
                 }
                 StreamStatus::Partial(l) => {
-                    debug!("Stream contains {} elements", l);
+                    info!("Partially filled stream {} has {} elements", &stream.name, l);
                 }
             }
         }

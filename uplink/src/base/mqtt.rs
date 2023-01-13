@@ -1,5 +1,5 @@
 use flume::{Sender, TrySendError};
-use log::{debug, error, info};
+use log::{error, info};
 use thiserror::Error;
 use tokio::task;
 use tokio::time::Duration;
@@ -65,10 +65,11 @@ impl Mqtt {
     pub async fn start(mut self) {
         loop {
             match self.eventloop.poll().await {
-                Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
+                    info!("Connected to broker = {:?}", connack);
                     let subscriptions = self.actions_subscriptions.clone();
                     let client = self.client();
-
+                    
                     // This can potentially block when client from other threads
                     // have already filled the channel due to bad network. So we spawn
                     task::spawn(async move {
@@ -85,8 +86,8 @@ impl Mqtt {
                         error!("Incoming publish handle failed. Error = {:?}", e);
                     }
                 }
-                Ok(Event::Incoming(i)) => debug!("Incoming = {:?}", i),
-                Ok(Event::Outgoing(o)) => debug!("Outgoing = {:?}", o),
+                Ok(Event::Incoming(i)) => info!("Incoming = {:?}", i),
+                Ok(Event::Outgoing(o)) => info!("Outgoing = {:?}", o),
                 Err(e) => {
                     error!("Connection error = {:?}", e.to_string());
                     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -117,7 +118,7 @@ impl Mqtt {
             action.device_id = self.config.device_id.clone();
         }
 
-        debug!("Action = {:?}", action);
+        info!("Action = {:?}", action);
         self.native_actions_tx.try_send(action)?;
 
         Ok(())
