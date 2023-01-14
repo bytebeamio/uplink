@@ -14,7 +14,7 @@ pub mod collector;
 pub mod config {
     pub use crate::base::{Config, Persistence, Stats};
     use config::{Environment, File, FileFormat};
-    use std::{fs, mem};
+    use std::fs;
     use structopt::StructOpt;
 
     #[derive(StructOpt, Debug)]
@@ -100,10 +100,6 @@ pub mod config {
 
         let mut config: Config = config.try_deserialize()?;
 
-        if config.simulator.is_some() {
-            config.device_id = "+".to_string();
-        }
-
         if let Some(persistence) = &config.persistence {
             fs::create_dir_all(&persistence.path)?;
         }
@@ -116,16 +112,8 @@ pub mod config {
         }
 
         replace_topic_placeholders(&mut config.action_status.topic, tenant_id, device_id);
-        replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.serializer_metrics.topic, tenant_id, device_id);
-
-        // for config in [&mut config.serializer_metrics, &mut config.stream_metrics] {
-        //     if let Some(topic) = &config.topic {
-        //         let topic = topic.replace("{tenant_id}", tenant_id);
-        //         let topic = topic.replace("{device_id}", device_id);
-        //         config.topic = Some(topic);
-        //     }
-        // }
+        replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
 
         for stat in [
             "uplink_disk_stats",
@@ -138,14 +126,29 @@ pub mod config {
             config.stream_metrics.blacklist.push(stat.to_owned());
         }
 
+        let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/action/status";
+        let mut device_action_topic = action_topic_template.to_string();
+        replace_topic_placeholders(&mut device_action_topic, tenant_id, device_id);
+
+        // Create initial actions subscription list with topic specific to current device
+        let mut actions_subscriptions = vec![device_action_topic];
+
+        // Add topics to be subscribed to for simulation purposes, if in simulator mode
+        if let Some(sim_cfg) = &mut config.simulator {
+            for n in 1..=sim_cfg.num_devices {
+                let mut topic = action_topic_template.to_string();
+                replace_topic_placeholders(&mut topic, tenant_id, &n.to_string());
+                actions_subscriptions.push(topic);
+            }
+        }
+
         Ok(config)
     }
 
     // Replace placeholders in topic strings with configured values for tenant_id and device_id
     fn replace_topic_placeholders(topic: &mut String, tenant_id: &str, device_id: &str) {
-        let t = topic.replace("{tenant_id}", tenant_id);
-        let t = t.replace("{device_id}", device_id);
-        let _ = mem::replace(topic, t);
+        *topic = topic.replace("{tenant_id}", tenant_id);
+        *topic = topic.replace("{device_id}", device_id);
     }
 
     #[derive(Debug, thiserror::Error)]

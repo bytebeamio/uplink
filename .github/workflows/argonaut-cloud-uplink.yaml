@@ -2,7 +2,7 @@
 name: "Build uplink:cloud and Push to CR"
 
 on:
-  push:
+  workflow_dispatch:
     branches:
       - main
     tags:
