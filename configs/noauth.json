@@ -1,6 +1,6 @@
 {
   "project_id": "demo",
-  "device_id":"3",
-  "broker": "localhost",
+  "device_id": "10",
+  "broker": "stage.bytebeam.io",
   "port": 1883
 }

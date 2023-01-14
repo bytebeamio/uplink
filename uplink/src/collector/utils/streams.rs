@@ -103,26 +103,6 @@ impl Streams {
         Ok(())
     }
 
-    pub async fn flush_stream_metrics(
-        &mut self,
-        stream_name: &str,
-    ) -> Result<(), flume::TrySendError<StreamMetrics>> {
-        let stream = self.map.get_mut(stream_name).unwrap();
-        let metrics = stream.metrics();
-
-        // Disable timer if there are no metrics to publish
-        if metrics.point_count() == 0 {
-            self.metrics_timeouts.remove(&stream_name.to_owned());
-            return Ok(());
-        }
-
-        let timeout = Duration::from_secs(self.config.stream_metrics.timeout);
-        self.metrics_timeouts.insert(&stream_name.to_owned(), timeout);
-        self.metrics_tx.try_send(metrics)?;
-        stream.metrics.reset();
-        Ok(())
-    }
-
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
     pub fn check_and_flush_metrics(&mut self) -> Result<(), flume::TrySendError<StreamMetrics>> {
         for (name, data) in self.map.iter_mut() {
@@ -130,9 +110,6 @@ impl Streams {
 
             // Initialize metrics timeouts when force flush sees data counts
             if metrics.point_count() > 0 {
-                let timeout = Duration::from_secs(self.config.stream_metrics.timeout);
-                // TODO: Remove this premeture optimization. Just check and send all the streams
-                self.metrics_timeouts.insert(name, timeout);
                 self.metrics_tx.try_send(metrics)?;
                 data.metrics.reset();
             }
