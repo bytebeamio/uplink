@@ -199,7 +199,7 @@ impl FileDownloader {
         // Forward Action packet through bridge once file is downloaded
         self.bridge_tx.try_send(action)?;
 
-        let status = ActionResponse::progress(&self.action_id, "Downloaded", 50)
+        let status = ActionResponse::progress(&self.action_id, "Downloaded", 100)
             .set_sequence(self.sequence());
         self.send_status(status).await;
 

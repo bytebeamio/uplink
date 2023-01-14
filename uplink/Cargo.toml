@@ -31,5 +31,9 @@ sysinfo = "0.26"
 lazy_static = "1.4.0"
 glob = "0.3"
 
+[target.'cfg(target_os = "android")'.dependencies]
+regex = "1.7.1"
+time = { version = "0.3.17", features = ["macros"]}
+
 [build-dependencies]
 vergen = { version = "7", features = ["git", "build", "time"] }

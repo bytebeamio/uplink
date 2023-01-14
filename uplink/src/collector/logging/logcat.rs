@@ -1,7 +1,6 @@
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chrono::{Datelike, Local, Timelike};
 use serde::{Deserialize, Serialize};
 
 use super::LoggingConfig;
@@ -91,14 +90,14 @@ lazy_static::lazy_static! {
 
 pub fn parse_logcat_time(s: &str) -> Option<u64> {
     let matches = LOGCAT_TIME_RE.captures(s)?;
-    let date = Local::now()
-        .with_month(matches.get(1)?.as_str().parse::<u32>().ok()?)?
-        .with_day(matches.get(2)?.as_str().parse::<u32>().ok()?)?
-        .with_hour(matches.get(3)?.as_str().parse::<u32>().ok()?)?
-        .with_minute(matches.get(4)?.as_str().parse::<u32>().ok()?)?
-        .with_second(matches.get(5)?.as_str().parse::<u32>().ok()?)?
-        .with_second(matches.get(6)?.as_str().parse::<u32>().ok()? * 1_000_000)?;
-    Some(date.timestamp_millis() as _)
+    let date = time::OffsetDateTime::now_utc()
+        .replace_month(matches.get(1)?.as_str().parse::<u8>().ok()?.try_into().ok()?).ok()?
+        .replace_day(matches.get(2)?.as_str().parse::<u8>().ok()?).ok()?
+        .replace_hour(matches.get(3)?.as_str().parse::<u8>().ok()?).ok()?
+        .replace_minute(matches.get(4)?.as_str().parse::<u8>().ok()?).ok()?
+        .replace_second(matches.get(5)?.as_str().parse::<u8>().ok()?).ok()?
+        .replace_microsecond(matches.get(6)?.as_str().parse::<u32>().ok()? * 1_000_000).ok()?;
+    Some(date.unix_timestamp() as _)
 }
 
 impl LogEntry {

@@ -105,6 +105,8 @@ pub struct Config {
     pub max_inflight: u16,
     pub keep_alive: u64,
     pub actions: Vec<String>,
+    #[serde(skip)]
+    pub actions_subscriptions: Vec<String>,
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
@@ -149,10 +151,14 @@ pub trait Package: Send + Debug {
 
 /// Signals status of stream buffer
 #[derive(Debug)]
-pub enum StreamStatus<'a> {
+pub enum StreamStatus {
+    /// The stream is partially filled, need not be flushed
     Partial(usize),
-    Flushed(&'a String),
-    Init(&'a String, Duration),
+    /// Stream was just flushed
+    Flushed,
+    /// Stream buffer has received initial point and will be ready
+    /// to flush, even if partially filled after specified duration
+    Init(Duration),
 }
 
 #[derive(Debug)]
@@ -305,14 +311,14 @@ where
 
     /// Fill buffer with data and trigger async channel send on breaching max_buf_size.
     /// Returns [`StreamStatus`].
-    pub async fn fill(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
+    pub async fn fill(&mut self, data: T) -> Result<StreamStatus, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
-            return Ok(StreamStatus::Flushed(&self.name));
+            return Ok(StreamStatus::Flushed);
         }
 
         let status = match self.len() {
-            1 => StreamStatus::Init(&self.name, self.flush_period),
+            1 => StreamStatus::Init(self.flush_period),
             len => StreamStatus::Partial(len),
         };
 
@@ -321,14 +327,14 @@ where
 
     /// Push data into buffer and trigger sync channel send on max_buf_size.
     /// Returns [`StreamStatus`].
-    pub fn push(&mut self, data: T) -> Result<StreamStatus<'_>, Error> {
+    pub fn push(&mut self, data: T) -> Result<StreamStatus, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send(Box::new(buf))?;
-            return Ok(StreamStatus::Flushed(&self.name));
+            return Ok(StreamStatus::Flushed);
         }
 
         let status = match self.len() {
-            1 => StreamStatus::Init(&self.name, self.flush_period),
+            1 => StreamStatus::Init(self.flush_period),
             len => StreamStatus::Partial(len),
         };
 
