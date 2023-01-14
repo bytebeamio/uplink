@@ -111,6 +111,8 @@ pub struct Config {
     pub max_inflight: u16,
     pub keep_alive: u64,
     pub actions: Vec<String>,
+    #[serde(skip)]
+    pub actions_subscriptions: Vec<String>,
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
