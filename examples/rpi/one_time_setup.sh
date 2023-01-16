@@ -6,6 +6,8 @@ chmod +x update_fstab.sh
 mount -a
 
 # wget update_fstab_next_root_url -O /mnt/download/update_fstab.sh
+# get update_fstab_next_root
+curl https://github.com/sai-kiran-y/uplink/blob/rpi/examples/rpi/update_fstab_next_root.sh -o /mnt/download/update_fstab_nextroot.sh
 
 #wget uplink_url -O /mnt/download/uplink
 #wget bridge_app_url -O /mnt/download/bridge.py
