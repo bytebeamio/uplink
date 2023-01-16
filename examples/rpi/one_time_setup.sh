@@ -1,17 +1,17 @@
 # Getting one_time_setup.sh
-#curl -o one_time_setup.sh -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/one_time_setup.sh
+#curl -o one_time_setup.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/one_time_setup.sh -s
 
 # Run uplink
 
 # get update_fstab.sh
-curl -o update_fstab.sh -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab.sh
+curl -o update_fstab.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab.sh -s
 chmod +x update_fstab.sh
 ./update_fstab.sh
 mount -a
 
 # wget update_fstab_next_root_url -O /mnt/download/update_fstab.sh
 # get update_fstab_next_root
-curl -o /mnt/download/update_fstab_nextroot.sh -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab_next_root.sh 
+curl -o /mnt/download/update_fstab_nextroot.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab_next_root.sh -s 
 
 #wget uplink_url -O /mnt/download/uplink
 #wget bridge_app_url -O /mnt/download/bridge.py
