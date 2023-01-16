@@ -4,8 +4,8 @@ use crate::collector::utils::{self, clock};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct SerializerMetrics {
-    timestamp: u128,
-    sequence: u32,
+    pub timestamp: u128,
+    pub sequence: u32,
     mode: String,
     batch_count: usize,
     memory_size: usize,
@@ -26,6 +26,10 @@ impl SerializerMetrics {
             lost_segments: 0,
             sent_size: 0,
         }
+    }
+
+    pub fn set_mode(&mut self, name: &str) {
+        self.mode = name.to_owned();
     }
 
     pub fn batch_count(&self) -> usize {
@@ -55,9 +59,9 @@ impl SerializerMetrics {
         self.sent_size += size;
     }
 
-    pub fn reset(&mut self) {
+    pub fn prepare_next(&mut self) {
+        self.timestamp = clock();
         self.sequence += 1;
-        self.timestamp = 0;
         self.batch_count = 0;
         self.memory_size = 0;
         self.disk_files = 0;
