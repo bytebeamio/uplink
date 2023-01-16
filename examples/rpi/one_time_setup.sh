@@ -2,7 +2,7 @@
 # get update_fstab.sh
 curl -s -o update_fstab.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab.sh
 chmod +x update_fstab.sh
-/update_fstab.sh
+./update_fstab.sh
 mount -a
 
 # wget update_fstab_next_root_url -O /mnt/download/update_fstab.sh
