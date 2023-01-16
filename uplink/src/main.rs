@@ -154,9 +154,7 @@ fn main() -> Result<(), Error> {
         .unwrap();
 
     rt.block_on(async {
-        dbg!();
         TcpJson::new(config, bridge).start().await.unwrap();
-        dbg!();
     });
     Ok(())
 }

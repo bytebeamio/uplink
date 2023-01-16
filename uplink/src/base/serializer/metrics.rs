@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::collector::utils;
+use crate::collector::utils::{self, clock};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct SerializerMetrics {
@@ -17,8 +17,8 @@ pub struct SerializerMetrics {
 impl SerializerMetrics {
     pub fn new(mode: &str) -> Self {
         SerializerMetrics {
-            timestamp: 0,
-            sequence: 0,
+            timestamp: clock(),
+            sequence: 1,
             mode: mode.to_owned(),
             batch_count: 0,
             memory_size: 0,

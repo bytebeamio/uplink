@@ -1,5 +1,5 @@
-use std::io;
 use std::sync::Arc;
+use std::{collections::VecDeque, io};
 
 use bytes::Bytes;
 use disk::Storage;
@@ -7,7 +7,7 @@ use flume::{Receiver, RecvError, Sender};
 use log::{error, info, trace};
 use rumqttc::*;
 use thiserror::Error;
-use tokio::{select, time};
+use tokio::{pin, select, time};
 
 use crate::{Config, Package};
 
@@ -163,7 +163,9 @@ pub struct Serializer<C: MqttClient> {
     collector_rx: Receiver<Box<dyn Package>>,
     client: C,
     storage: Option<Storage>,
+    metrics: SerializerMetrics,
     metrics_tx: Sender<SerializerMetrics>,
+    pending_metrics: VecDeque<SerializerMetrics>,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -185,7 +187,15 @@ impl<C: MqttClient> Serializer<C> {
             None => None,
         };
 
-        Ok(Serializer { config, collector_rx, client, storage, metrics_tx })
+        Ok(Serializer {
+            config,
+            collector_rx,
+            client,
+            storage,
+            metrics: SerializerMetrics::new("catchup"),
+            metrics_tx,
+            pending_metrics: VecDeque::with_capacity(3),
+        })
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -208,13 +218,12 @@ impl<C: MqttClient> Serializer<C> {
     /// Write new data to disk until back pressure due to slow n/w is resolved
     async fn slow(&mut self, publish: Publish) -> Result<Status, Error> {
         info!("Switching to slow eventloop mode!!");
-        let mut interval = time::interval(time::Duration::from_secs(10));
         let mut metrics = SerializerMetrics::new("slow");
 
         // Note: self.client.publish() is executing code before await point
         // in publish method every time. Verify this behaviour later
-        let publish =
-            self.client.publish(&publish.topic, QoS::AtLeastOnce, false, &publish.payload[..]);
+        let payload = &publish.payload[..];
+        let publish = self.client.publish(&publish.topic, QoS::AtLeastOnce, false, payload);
         tokio::pin!(publish);
 
         loop {
@@ -231,6 +240,8 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
                     let publish = construct_publish(data)?;
                     let deleted = write_to_disk(publish, storage);
+
+                    // Update metrics
                     metrics.add_batch();
                     metrics.set_memory_size(storage.inmemory_read_size());
                     metrics.set_disk_files(storage.file_count());
@@ -240,7 +251,7 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 o = &mut publish => match o {
                     Ok(_) => {
-                        let _ = check_and_flush_metrics(&mut metrics, &self.metrics_tx);
+                        self.pending_metrics.push_back(metrics);
                         return Ok(Status::EventLoopReady)
                     }
                     Err(MqttError::Send(Request::Publish(publish))) => {
@@ -274,6 +285,7 @@ impl<C: MqttClient> Serializer<C> {
 
         // Done reading all the pending files
         if storage.reload_on_eof().unwrap() {
+            self.pending_metrics.push_back(metrics);
             return Ok(Status::Normal);
         }
 
@@ -282,6 +294,7 @@ impl<C: MqttClient> Serializer<C> {
             Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
             Err(e) => {
                 error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+                self.pending_metrics.push_back(metrics);
                 return Ok(Status::Normal);
             }
         };
@@ -297,6 +310,7 @@ impl<C: MqttClient> Serializer<C> {
                     let publish = construct_publish(data)?;
                     let deleted = write_to_disk(publish, storage);
 
+                    // Update metrics
                     metrics.add_batch();
                     metrics.set_memory_size(storage.inmemory_read_size());
                     metrics.set_disk_files(storage.file_count());
@@ -317,12 +331,13 @@ impl<C: MqttClient> Serializer<C> {
                     match storage.reload_on_eof() {
                         // Done reading all pending files
                         Ok(true) => {
-                            let _ = check_and_flush_metrics(&mut metrics, &self.metrics_tx);
+                            self.pending_metrics.push_back(metrics);
                             return Ok(Status::Normal);
                         }
                         Ok(false) => {},
                         Err(e) => {
                             error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
+                            self.pending_metrics.push_back(metrics);
                             return Ok(Status::Normal)
                         }
                     }
@@ -336,6 +351,9 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     };
 
+                    metrics.add_batch();
+                    metrics.set_memory_size(storage.inmemory_read_size());
+                    metrics.set_disk_files(storage.file_count());
 
                     let payload = publish.payload;
                     last_publish_payload_size = payload.len();
@@ -343,7 +361,7 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
-                    let _ = check_and_flush_metrics(&mut metrics, &self.metrics_tx);
+                    let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut metrics, &self.metrics_tx);
                 }
             }
         }
@@ -354,14 +372,10 @@ impl<C: MqttClient> Serializer<C> {
         let mut interval = time::interval(time::Duration::from_secs(10));
         let mut metrics = SerializerMetrics::new("normal");
 
-        match &mut self.storage {
-            Some(s) => {
-                metrics.set_memory_size(s.inmemory_read_size());
-                metrics.set_disk_files(s.file_count());
-                let _ = try_flush_metrics(&mut metrics, &self.metrics_tx);
-            }
-            None => return Ok(Status::Normal),
-        };
+        if let Some(s) = &mut self.storage {
+            metrics.set_memory_size(s.inmemory_read_size());
+            metrics.set_disk_files(s.file_count());
+        }
 
         loop {
             select! {
@@ -383,7 +397,9 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
-                    let _ = check_and_flush_metrics(&mut metrics, &self.metrics_tx);
+                    if let Err(e) = check_and_flush_metrics(&mut self.pending_metrics, &mut metrics, &self.metrics_tx) {
+                        error!("Failed to flush serializer metrics. Error = {}", e);
+                    }
                 }
             }
         }
@@ -463,10 +479,21 @@ fn write_to_disk(mut publish: Publish, storage: &mut Storage) -> Option<u64> {
 
 // Enable actual metrics timers when there is data. This method is called every minute by the bridge
 pub fn check_and_flush_metrics(
+    pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut SerializerMetrics,
     metrics_tx: &Sender<SerializerMetrics>,
 ) -> Result<(), flume::TrySendError<SerializerMetrics>> {
-    // Initialize metrics timeouts when force flush sees data counts
+    loop {
+        let metrics = match pending.get(0) {
+            Some(v) => v,
+            None => break,
+        };
+
+        // Always send pending metrics. They represent state changes
+        metrics_tx.try_send(metrics.clone())?;
+        pending.pop_front();
+    }
+
     if metrics.batch_count() > 0 {
         metrics_tx.try_send(metrics.clone())?;
         metrics.reset();
