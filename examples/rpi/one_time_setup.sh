@@ -1,0 +1,19 @@
+# Run uplink
+# wget update_fstab_url -O /update_fstab.sh
+chmod +x update_fstab.sh
+/update_fstab.sh
+mount -a
+
+# wget update_fstab_next_root_url -O /mnt/download/update_fstab.sh
+
+#wget uplink_url -O /mnt/download/uplink
+#wget bridge_app_url -O /mnt/download/bridge.py
+#wget systemd_url -O /mnt/download/systemd/systemd.sh
+#wget uplink.service_url -O /mnt/download/systemd/uplink.service
+#wget config.toml -O /mnt/download/config.toml 
+chmod +x /uplink
+
+# uplink.service executes startup.sh, which runs both uplink and bridge app
+ln -s /mnt/download/systemd/uplink.service /etc/systemd/system/multi-user.target.wants/uplink.service
+systemctl daemon-reload
+systemctl start uplink.service

@@ -1,0 +1,13 @@
+[Unit]
+Description=Bytebeam Bridge service
+After=network.target auditd.service
+
+[Service]
+ExecStart=/mnt/download/systemd/bridge.sh
+KillMode=process
+Restart=on-failure
+Type=simple
+
+[Install]
+WantedBy=multi-user.target
+
