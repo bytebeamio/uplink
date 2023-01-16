@@ -650,6 +650,7 @@ mod test {
         fn send(&mut self, i: u32) -> Result<(), Error> {
             let payload = Payload {
                 stream: "hello".to_owned(),
+                topic: None,
                 sequence: i,
                 timestamp: 0,
                 payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,

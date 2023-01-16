@@ -52,23 +52,26 @@ impl Streams {
     }
 
     pub async fn forward(&mut self, data: Payload) {
-        // dbg!(&data);
-        let stream = match self.map.get_mut(&data.stream) {
+        let stream_name = match &data.topic {
+            Some(topic) => topic.to_owned(),
+            _ => data.stream.to_owned(),
+        };
+
+        let stream = match self.map.get_mut(&stream_name) {
             Some(partition) => partition,
             None => {
-                if self.map.keys().len() > 20 {
-                    error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
-                    return;
-                }
+                let stream = if let Some(topic) = &data.topic {
+                    Stream::new(&data.stream, topic, 10, self.data_tx.clone())
+                } else {
+                    Stream::dynamic(
+                        &data.stream,
+                        &self.config.project_id,
+                        &self.config.device_id,
+                        self.data_tx.clone(),
+                    )
+                };
 
-                let stream = Stream::dynamic(
-                    &data.stream,
-                    &self.config.project_id,
-                    &self.config.device_id,
-                    self.data_tx.clone(),
-                );
-
-                self.map.entry(data.stream.to_owned()).or_insert(stream)
+                self.map.entry(stream_name.to_owned()).or_insert(stream)
             }
         };
 
@@ -86,10 +89,10 @@ impl Streams {
         // Warn in case stream flushed stream was not in the queue.
         if max_stream_size > 1 {
             match state {
-                StreamStatus::Flushed(name) => self.stream_timeouts.remove(name),
-                StreamStatus::Init(name, flush_period) => {
-                    debug!("Initialized stream buffer for {}", name);
-                    self.stream_timeouts.insert(name, flush_period);
+                StreamStatus::Flushed => self.stream_timeouts.remove(&stream_name),
+                StreamStatus::Init(flush_period) => {
+                    debug!("Initialized stream buffer for {}", stream_name);
+                    self.stream_timeouts.insert(&stream_name, flush_period);
                 }
                 StreamStatus::Partial(_l) => {}
             }

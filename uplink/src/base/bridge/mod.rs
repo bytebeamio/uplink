@@ -36,6 +36,8 @@ pub trait Package: Send + Debug {
 pub struct Payload {
     #[serde(skip_serializing)]
     pub stream: String,
+    #[serde(skip)]
+    pub topic: Option<String>,
     pub sequence: u32,
     pub timestamp: u64,
     #[serde(flatten)]

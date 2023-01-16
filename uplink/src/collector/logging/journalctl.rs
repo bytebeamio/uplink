@@ -80,9 +80,8 @@ impl LogEntry {
         let payload = serde_json::to_value(self)?;
         // Convert from microseconds to milliseconds
         let timestamp = self.log_timestamp.parse::<u64>()? / 1000;
-        let collection_timestamp = timestamp;
 
-        Ok(Payload { stream: "logs".to_string(), sequence, timestamp, payload })
+        Ok(Payload { stream: "logs".to_string(), topic: None, sequence, timestamp, payload })
     }
 }
 

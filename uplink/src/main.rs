@@ -141,9 +141,9 @@ fn main() -> Result<(), Error> {
     let bridge = uplink.spawn()?;
 
     if let Some(config) = config.simulator.clone() {
-        // let bridge = bridge.clone();
+        let bridge = bridge.clone();
         thread::spawn(move || {
-            simulator::start(uplink.bridge_data_tx(), uplink.bridge_action_rx(), &config).unwrap();
+            simulator::start(&config, bridge, uplink.bridge_action_rx()).unwrap();
         });
     }
 
