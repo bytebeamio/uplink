@@ -49,12 +49,12 @@ def update_firmware(action_id, payload_json):
     print("payload: ")
     print(payload)
 
-    #print("zip_file_path: ")
     zip_file_path = payload['download_path']
     print("zip_file_path: ")
     print(zip_file_path)
 
-    dest_path = '/home/pi/updates/'
+    dest_path = '/mnt/download/'
+    #dest_path = zip_file_path
     
     """
     if os.path.exists(dest_path):
@@ -73,34 +73,15 @@ def update_firmware(action_id, payload_json):
         print("Extracting files to %s"%dest_path)
         zip_file.extractall(dest_path)
 
-        #print("root_path: ")
-        #print(root_path)
-        print("root_path_new: ")
-        print(root_path_new)
-        print("root_path.name: ")
-        print(root_path_new.name)
+        script_cwd = "/mnt/download/"
+        script_path = "/mnt/download/update.sh"
 
-        #script_path = "/home/pi/download/%s/update.sh"%root_path.name
-        #script_cwd = "/home/pi/download/%s/"%root_path.name
-        script_path_new = "/home/pi/updates/%s/update.sh"%root_path_new.name
-        script_cwd_new = "/home/pi/updates/%s/"%root_path_new.name
-
-        #print("script_path: ")
-        #print(script_path)
-        #print("script_cwd: ")
-        #print(script_cwd)
-
-        print("script_path_new: ")
-        print(script_path_new)
-        print("script_cwd_new: ")
-        print(script_cwd_new)
-
-        if os.path.exists(script_path_new):
-            os.chmod(script_path_new, 0o755)
-            print("Running script")
-            subprocess.run(script_path_new, cwd=script_cwd_new)
+        if os.path.exists(script_path):
+            os.chmod(script_path, 0o755)
+            print("Running update.sh script")
+            subprocess.run(script_path, cwd=script_cwd)
         else:
-            print("Path %s does not exist"%script_path_new)
+            print("Path %s does not exist"%script_path)
             return action_failed(action_id, "Could not find the update script")
         
         # run /mnt/download/update_fstab_next_root.sh

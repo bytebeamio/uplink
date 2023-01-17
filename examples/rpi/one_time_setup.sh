@@ -2,7 +2,7 @@
 #curl -o one_time_setup.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/one_time_setup.sh -s
 
 # Run uplink
-
+#https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/demo.py
 # get update_fstab.sh
 curl -o update_fstab.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab.sh -s
 chmod +x update_fstab.sh
@@ -13,14 +13,33 @@ mount -a
 # get update_fstab_next_root
 curl -o /mnt/download/update_fstab_nextroot.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab_next_root.sh -s 
 
-#wget uplink_url -O /mnt/download/uplink
-#wget bridge_app_url -O /mnt/download/bridge.py
-#wget systemd_url -O /mnt/download/systemd/systemd.sh
-#wget uplink.service_url -O /mnt/download/systemd/uplink.service
-#wget config.toml -O /mnt/download/config.toml 
-#chmod +x /uplink
+# get uplink binary
+curl -o /mnt/download/uplink -s -L https://github.com/bytebeamio/uplink/releases/download/v1.6.1/uplink-aarch64-unknown-linux-gnu
 
-# uplink.service executes startup.sh, which runs both uplink and bridge app
-#ln -s /mnt/download/systemd/uplink.service /etc/systemd/system/multi-user.target.wants/uplink.service
-#systemctl daemon-reload
+# get bridge_app
+curl -o /mnt/download/bridge.py -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/bridge.py
+
+# get systemd script
+mkdir -pv /mnt/download/systemd
+curl -o /mnt/download/systemd/systemd.sh -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/systemd/systemd.sh
+
+# get uplink.service
+curl -o /mnt/download/systemd/uplink.service -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/systemd/uplink.service
+
+# get bridge.service
+curl -o /mnt/download/systemd/bridge.service -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/systemd/bridge.service
+
+# get config.toml 
+curl -o /mnt/download/config.toml -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/config.toml
+
+# Make uplink executable
+chmod +x /uplink
+
+ln -s /mnt/download/systemd/uplink.service /etc/systemd/system/multi-user.target.wants/uplink.service
+ln -s /mnt/download/systemd/bridge.service /etc/systemd/system/multi-user.target.wants/bridge.service
+
+systemctl daemon-reload
+
+# Start uplink and bridge services
 #systemctl start uplink.service
+#systemctl start bridge.service
