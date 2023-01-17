@@ -5,8 +5,8 @@
 #https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/demo.py
 # get update_fstab.sh
 curl -o update_fstab.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab.sh -s
-chmod +x update_fstab.sh
-./update_fstab.sh
+chmod +x /mnt/download/update_fstab.sh
+/mnt/download/update_fstab.sh
 mount -a
 
 # wget update_fstab_next_root_url -O /mnt/download/update_fstab.sh
@@ -33,7 +33,17 @@ curl -o /mnt/download/systemd/bridge.service -s https://raw.githubusercontent.co
 curl -o /mnt/download/config.toml -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/config.toml
 
 # Make uplink executable
-chmod +x /uplink
+chmod +x /mnt/download/uplink
+
+if [ -f "/etc/systemd/system/multi-user.target.wants/uplink.service" ]
+then
+	rm /etc/systemd/multi-user.target.wants/uplink.service
+fi
+
+if [ -f "/etc/systemd/system/multi-user.target.wants/bridge.service" ]
+then
+	rm /etc/systemd/multi-user.target.wants/bridge.service
+fi
 
 ln -s /mnt/download/systemd/uplink.service /etc/systemd/system/multi-user.target.wants/uplink.service
 ln -s /mnt/download/systemd/bridge.service /etc/systemd/system/multi-user.target.wants/bridge.service
