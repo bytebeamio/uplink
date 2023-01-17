@@ -36,19 +36,8 @@ curl -o /mnt/download/config.toml -s https://raw.githubusercontent.com/sai-kiran
 # Make uplink executable
 chmod +x /mnt/download/uplink
 
-if [ -f "/etc/systemd/system/multi-user.target.wants/uplink.service" ]
-then
-	rm /etc/systemd/system/multi-user.target.wants/uplink.service
-fi
-
-if [ -f "/etc/systemd/system/multi-user.target.wants/bridge.service" ]
-then
-	rm /etc/systemd/system/multi-user.target.wants/bridge.service
-fi
-
-ln -s /mnt/download/systemd/uplink.service /etc/systemd/system/multi-user.target.wants/uplink.service
-ln -s /mnt/download/systemd/bridge.service /etc/systemd/system/multi-user.target.wants/bridge.service
-
+cp /mnt/download/systemd/uplink.service /etc/systemd/system/
+cp /mnt/download/systemd/bridge.service /etc/systemd/system/
 systemctl daemon-reload
 
 # get run_uplink.sh script
@@ -56,7 +45,7 @@ curl -o /mnt/download/run_uplink.sh -s https://raw.githubusercontent.com/sai-kir
 
 chmod +x /mnt/download/run_uplink.sh
 
-echo "Done!!! Place device.json in /mnt/download folder and run run_uplink.sh"
+echo "Done!!! Place device.json in /mnt/download folder and run the script run_uplink.sh"
 # Start uplink and bridge services
 #systemctl start uplink.service
 #systemctl start bridge.service
