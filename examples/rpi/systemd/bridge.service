@@ -3,7 +3,7 @@ Description=Bytebeam Bridge service
 After=network.target auditd.service
 
 [Service]
-ExecStart=/mnt/download/systemd/bridge.sh
+ExecStart=python /mnt/download/bridge.py
 KillMode=process
 Restart=on-failure
 Type=simple
