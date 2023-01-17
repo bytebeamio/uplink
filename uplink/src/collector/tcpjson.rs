@@ -1,6 +1,6 @@
 use flume::{RecvError, SendError};
 use futures_util::SinkExt;
-use log::{debug, error, info, trace};
+use log::{error, info, trace};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;

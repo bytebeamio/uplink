@@ -156,6 +156,7 @@ impl Bridge {
                     }
                     // Flush streams that timeout
                     Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
+                        info!("Flushing stream = {}", timedout_stream);
                         if let Err(e) = streams.flush_stream(&timedout_stream).await {
                             error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
                         }

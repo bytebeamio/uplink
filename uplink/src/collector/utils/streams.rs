@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use flume::Sender;
-use log::{debug, error};
+use log::{debug, error, info};
 use tokio::time::{interval, Interval};
 
 use crate::base::bridge::{self, StreamMetrics, StreamStatus};
@@ -52,7 +52,6 @@ impl Streams {
     }
 
     pub async fn forward(&mut self, data: Payload) {
-        // dbg!(&data);
         let stream = match self.map.get_mut(&data.stream) {
             Some(partition) => partition,
             None => {
@@ -88,7 +87,7 @@ impl Streams {
             match state {
                 StreamStatus::Flushed(name) => self.stream_timeouts.remove(name),
                 StreamStatus::Init(name, flush_period) => {
-                    debug!("Initialized stream buffer for {}", name);
+                    info!("Initialized stream buffer for {}", name);
                     self.stream_timeouts.insert(name, flush_period);
                 }
                 StreamStatus::Partial(_l) => {}

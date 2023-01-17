@@ -219,6 +219,7 @@ impl<C: MqttClient> Serializer<C> {
     // TODO: Handle errors. Don't return errors
     async fn slow(&mut self, publish: Publish) -> Result<Status, Error> {
         info!("Switching to slow eventloop mode!!");
+        self.metrics.set_mode("slow");
 
         // Note: self.client.publish() is executing code before await point
         // in publish method every time. Verify this behaviour later
