@@ -40,6 +40,12 @@ ln -s /mnt/download/systemd/bridge.service /etc/systemd/system/multi-user.target
 
 systemctl daemon-reload
 
+# get run_uplink.sh script
+curl -o /mnt/download/run_uplink.sh -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/run_uplink.sh
+
+chmod +x /mnt/download/run_uplink.sh
+
+echo "Done!!! Place device.json in /mnt/download folder and run run_uplink.sh"
 # Start uplink and bridge services
 #systemctl start uplink.service
 #systemctl start bridge.service
