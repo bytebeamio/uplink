@@ -1,40 +1,34 @@
 # Getting one_time_setup.sh
-#curl -o one_time_setup.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/one_time_setup.sh -s
+# curl  --proto '=https' --tlsv1.2 -sSf one_time_setup.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/one_time_setup.sh | bash 
 
-# To access raw.githubusercontent.com, this line is necessary in some devices
-echo "185.199.108.133 raw.githubusercontent.com" >> /etc/hosts
-
-# Run uplink
-#https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/demo.py
 # get update_fstab.sh
-curl -o update_fstab.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab.sh -s
+curl --proto '=https' --tlsv1.2 -sSf -o update_fstab.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/rpi/update_fstab.sh
 chmod +x ./update_fstab.sh
 ./update_fstab.sh
 mount -a
 cp update_fstab.sh /mnt/download/
 
-# wget update_fstab_next_root_url -O /mnt/download/update_fstab.sh
 # get update_fstab_next_root
-curl -o /mnt/download/update_fstab_next_root.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab_next_root.sh -s 
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/update_fstab_next_root.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/rpi/update_fstab_next_root.sh
 
 # get uplink binary
-curl -o /mnt/download/uplink -s -L https://github.com/bytebeamio/uplink/releases/download/v1.6.1/uplink-aarch64-unknown-linux-gnu
+curl --proto '=https' --tlsv1.2 -sSfL -o /mnt/download/uplink https://github.com/bytebeamio/uplink/releases/download/v1.6.1/uplink-aarch64-unknown-linux-gnu
 
 # get bridge_app
-curl -o /mnt/download/bridge.py -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/bridge.py
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/bridge.py https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/rpi/bridge.py
 
 # get systemd script
 mkdir -pv /mnt/download/systemd
-curl -o /mnt/download/systemd/systemd.sh -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/systemd/systemd.sh
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/systemd.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/rpi/systemd/systemd.sh
 
 # get uplink.service
-curl -o /mnt/download/systemd/uplink.service -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/systemd/uplink.service
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/uplink.service https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/rpi/systemd/uplink.service
 
 # get bridge.service
-curl -o /mnt/download/systemd/bridge.service -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/systemd/bridge.service
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/bridge.service https://raw.githubusercontent.com/sai-kiran-y/uplink/main/examples/rpi/systemd/bridge.service
 
 # get config.toml 
-curl -o /mnt/download/config.toml -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/config.toml
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/config.toml https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/rpi/config.toml
 
 # Make uplink executable
 chmod +x /mnt/download/uplink
@@ -44,11 +38,8 @@ cp /mnt/download/systemd/bridge.service /etc/systemd/system/
 systemctl daemon-reload
 
 # get run_uplink.sh script
-curl -o /mnt/download/run_uplink.sh -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/run_uplink.sh
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/run_uplink.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/rpi/run_uplink.sh
 
 chmod +x /mnt/download/run_uplink.sh
 
 echo "Done!!! Place device.json in /mnt/download folder and run the script run_uplink.sh"
-# Start uplink and bridge services
-#systemctl start uplink.service
-#systemctl start bridge.service
