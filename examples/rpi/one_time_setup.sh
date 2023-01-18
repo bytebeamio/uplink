@@ -1,6 +1,9 @@
 # Getting one_time_setup.sh
 #curl -o one_time_setup.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/one_time_setup.sh -s
 
+# To access raw.githubusercontent.com, this line is necessary in some devices
+echo "185.199.108.133 raw.githubusercontent.com" >> /etc/hosts
+
 # Run uplink
 #https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/demo.py
 # get update_fstab.sh
