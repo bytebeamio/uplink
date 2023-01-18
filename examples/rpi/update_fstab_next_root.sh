@@ -35,6 +35,8 @@ echo "PARTUUID=$root_uuid	/mnt/next_root	ext4	defaults,noatime	0	2" >> /mnt/next
 mkdir -pv /mnt/download
 echo "PARTUUID=$download_uuid	/mnt/download	ext4	defaults,noatime	0	2" >> /mnt/next_root/etc/fstab
 
+# Copying WiFi config. files to the next rootfs
+cp /etc/wpa_supplicant/wap_supplicant.conf /mnt/next_root/etc/wpa_supplicant/
 <<com
 if [ $(grep -L "$next_root_uuid" /etc/fstab) ]
 then

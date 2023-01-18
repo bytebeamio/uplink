@@ -45,8 +45,6 @@ curl -o /mnt/download/run_uplink.sh -s https://raw.githubusercontent.com/sai-kir
 
 chmod +x /mnt/download/run_uplink.sh
 
-mkdir -pv /mnt/download/current_update/
-
 echo "Done!!! Place device.json in /mnt/download folder and run the script run_uplink.sh"
 # Start uplink and bridge services
 #systemctl start uplink.service
