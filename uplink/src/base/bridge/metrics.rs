@@ -37,6 +37,10 @@ impl StreamMetrics {
         }
     }
 
+    pub fn stream(&self) -> &String {
+        &self.stream
+    }
+
     pub fn point_count(&self) -> usize {
         self.point_count
     }

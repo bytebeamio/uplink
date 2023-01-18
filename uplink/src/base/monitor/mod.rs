@@ -45,6 +45,11 @@ impl Monitor {
             select! {
                 o = self.stream_metrics_rx.recv_async() => {
                     let o = o?;
+
+                    if stream_metrics_config.blacklist.contains(o.stream()) {
+                        continue;
+                    }
+
                     stream_metrics.push(o);
                     let v = serde_json::to_string(&stream_metrics).unwrap();
                     println!("Received {:?}", v);
