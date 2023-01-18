@@ -12,7 +12,7 @@ cp update_fstab.sh /mnt/download/
 
 # wget update_fstab_next_root_url -O /mnt/download/update_fstab.sh
 # get update_fstab_next_root
-curl -o /mnt/download/update_fstab_nextroot.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab_next_root.sh -s 
+curl -o /mnt/download/update_fstab_next_root.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/update_fstab_next_root.sh -s 
 
 # get uplink binary
 curl -o /mnt/download/uplink -s -L https://github.com/bytebeamio/uplink/releases/download/v1.6.1/uplink-aarch64-unknown-linux-gnu
@@ -44,6 +44,8 @@ systemctl daemon-reload
 curl -o /mnt/download/run_uplink.sh -s https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/run_uplink.sh
 
 chmod +x /mnt/download/run_uplink.sh
+
+mkdir -pv /mnt/download/current_update/
 
 echo "Done!!! Place device.json in /mnt/download folder and run the script run_uplink.sh"
 # Start uplink and bridge services
