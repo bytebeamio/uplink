@@ -1,0 +1,3 @@
+Run the following command to do necessary initializations on the device
+
+curl  --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/sai-kiran-y/uplink/rpi/examples/rpi/one_time_setup.sh | bash 
