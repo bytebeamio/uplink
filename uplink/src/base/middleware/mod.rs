@@ -21,8 +21,8 @@ pub enum Error {
     TrySend(#[from] flume::TrySendError<Action>),
     #[error("Invalid action")]
     InvalidActionKind(String),
-    #[error("Another File is downloading")]
-    Downloading,
+    #[error("Uplink is occupied handling another action")]
+    Occupied,
 }
 
 pub struct Middleware {
@@ -103,7 +103,7 @@ impl Middleware {
                     if downloader.actions.contains(&action_name) {
                         // if action can't be sent, Error out and notify cloud
                         self.download_tx.try_send(action).map_err(|e| match e {
-                            TrySendError::Full(_) => Error::Downloading,
+                            TrySendError::Full(_) => Error::Occupied,
                             e => Error::TrySend(e),
                         })?;
                         return Ok(());
@@ -134,11 +134,11 @@ impl Middleware {
     }
 
     async fn forward_action_error(&mut self, id: &str, action: &str, error: Error) {
-        error!("Failed to execute. Command = {:?}, Error = {:?}", action, error);
+        error!("Failed to execute. Command = {action}, Error = {error}");
         let status = ActionResponse::failure(id, error.to_string());
 
         if let Err(e) = self.action_status.fill(status).await {
-            error!("Failed to send status. Error = {:?}", e);
+            error!("Failed to send status. Error = {e}");
         }
     }
 }
