@@ -94,6 +94,12 @@ pub struct SerializerMetricsConfig {
     pub timeout: u64,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct MqttMetricsConfig {
+    pub enabled: bool,
+    pub topic: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
@@ -111,6 +117,7 @@ pub struct Config {
     pub action_status: StreamConfig,
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
+    pub mqtt_metrics: MqttMetricsConfig,
     pub downloader: Option<Downloader>,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,

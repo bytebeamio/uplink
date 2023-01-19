@@ -51,7 +51,7 @@ pub mod config {
     run_logcat = true
     max_packet_size = 102400
     max_inflight = 100
-    keep_alive = 60
+    keep_alive = 10
 
     # Whitelist of binaries which uplink can spawn as a process
     # This makes sure that user is protected against random actions
@@ -71,6 +71,10 @@ pub mod config {
     enabled = false
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_metrics/jsonarray"
     timeout = 10
+
+    [mqtt_metrics]
+    enabled = true
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_mqtt_metrics/jsonarray"
 
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
@@ -231,6 +235,7 @@ impl Uplink {
         );
 
         let bridge_tx = bridge.tx();
+        let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
 
         // Bridge thread to batch data and redicet actions
         thread::spawn(|| {
@@ -247,7 +252,7 @@ impl Uplink {
             })
         });
 
-        let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone());
+        let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
         let mqtt_client = mqtt.client();
 
         let serializer = Serializer::new(
@@ -292,6 +297,7 @@ impl Uplink {
             mqtt_client.clone(),
             self.stream_metrics_rx.clone(),
             self.serializer_metrics_rx.clone(),
+            mqtt_metrics_rx,
         );
 
         // Metrics monitor thread

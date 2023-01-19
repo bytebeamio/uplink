@@ -15,6 +15,10 @@ use rumqttc::{
 };
 use std::sync::Arc;
 
+pub use self::metrics::MqttMetrics;
+
+mod metrics;
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Serde error {0}")]
@@ -41,16 +45,32 @@ pub struct Mqtt {
     native_actions_tx: Sender<Action>,
     /// Currently subscribed topic
     actions_subscription: String,
+    /// Metrics
+    metrics: MqttMetrics,
+    /// Metrics tx
+    metrics_tx: Sender<MqttMetrics>,
 }
 
 impl Mqtt {
-    pub fn new(config: Arc<Config>, actions_tx: Sender<Action>) -> Mqtt {
+    pub fn new(
+        config: Arc<Config>,
+        actions_tx: Sender<Action>,
+        metrics_tx: Sender<MqttMetrics>,
+    ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let (client, eventloop) = AsyncClient::new(options, 10);
         let actions_subscription =
             format!("/tenants/{}/devices/{}/actions", config.project_id, config.device_id);
-        Mqtt { config, client, eventloop, native_actions_tx: actions_tx, actions_subscription }
+        Mqtt {
+            config,
+            client,
+            eventloop,
+            native_actions_tx: actions_tx,
+            actions_subscription,
+            metrics: MqttMetrics::new(),
+            metrics_tx,
+        }
     }
 
     /// Returns a client handle to MQTT interface
@@ -68,6 +88,8 @@ impl Mqtt {
                     let subscription = self.actions_subscription.clone();
                     let client = self.client();
 
+                    self.metrics.add_connection();
+
                     // This can potentially block when client from other threads
                     // have already filled the channel due to bad network. So we spawn
                     task::spawn(async move {
@@ -78,13 +100,38 @@ impl Mqtt {
                     });
                 }
                 Ok(Event::Incoming(Incoming::Publish(p))) => {
+                    self.metrics.add_action();
                     if let Err(e) = self.handle_incoming_publish(p) {
                         error!("Incoming publish handle failed. Error = {:?}", e);
                     }
                 }
-                Ok(Event::Incoming(i)) => info!("Incoming = {:?}", i),
-                Ok(Event::Outgoing(o)) => info!("Outgoing = {:?}", o),
+                Ok(Event::Incoming(packet)) => {
+                    info!("Incoming = {:?}", packet);
+                    match packet {
+                        rumqttc::Packet::PubAck(_) => self.metrics.add_puback(),
+                        rumqttc::Packet::PingResp => {
+                            self.metrics.add_pingresp();
+                            let inflight = self.eventloop.state.inflight();
+                            self.metrics.update_inflight(inflight);
+                            if let Err(e) = self.check_and_flush_metrics() {
+                                error!("Failed to flush MQTT metrics. Erro = {:?}", e);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Outgoing(packet)) => {
+                    info!("Outgoing = {:?}", packet);
+                    match packet {
+                        rumqttc::Outgoing::Publish(_) => self.metrics.add_publish(),
+                        rumqttc::Outgoing::PingReq => {
+                            self.metrics.add_pingreq();
+                        }
+                        _ => {}
+                    }
+                }
                 Err(e) => {
+                    self.metrics.add_disconnection();
                     error!("Connection error = {:?}", e.to_string());
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
@@ -117,6 +164,14 @@ impl Mqtt {
         info!("Action = {:?}", action);
         self.native_actions_tx.try_send(action)?;
 
+        Ok(())
+    }
+
+    // Enable actual metrics timers when there is data. This method is called every minute by the bridge
+    pub fn check_and_flush_metrics(&mut self) -> Result<(), flume::TrySendError<MqttMetrics>> {
+        let metrics = self.metrics.clone();
+        self.metrics_tx.try_send(metrics)?;
+        self.metrics.prepare_next();
         Ok(())
     }
 }
