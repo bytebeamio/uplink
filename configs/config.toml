@@ -34,7 +34,7 @@ enabled = true
 # sending metrics, but with default topic string.
 [stream_metrics]
 enabled = true
-blacklist = ["cancollector_metrics"]
+blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 
 # Configuration details associated with uplink's persistent storage module
 # which writes publish packets to disk in case of slow or crashed network.

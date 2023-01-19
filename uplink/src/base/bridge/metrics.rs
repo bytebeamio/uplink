@@ -24,8 +24,8 @@ impl StreamMetrics {
     pub fn new(name: &str, max_batch_count: usize) -> Self {
         StreamMetrics {
             stream: name.to_owned(),
-            timestamp: 0,
-            sequence: 0,
+            timestamp: utils::clock(),
+            sequence: 1,
             point_count: 0,
             batch_count: 0,
             max_batch_count,
@@ -62,7 +62,16 @@ impl StreamMetrics {
         self.average_batch_latency = self.total_latency / self.batch_count;
     }
 
-    pub fn reset(&mut self) {
-        *self = StreamMetrics::new(&self.stream, self.max_batch_count)
+    pub fn prepare_next(&mut self) {
+        self.timestamp = utils::clock();
+        self.sequence += 1;
+        self.batch_count = 0;
+        self.point_count = 0;
+        self.batch_count = 0;
+        self.batch_start_time = Instant::now();
+        self.total_latency = 0;
+        self.min_batch_latency = 0;
+        self.max_batch_latency = 0;
+        self.average_batch_latency = 0;
     }
 }
