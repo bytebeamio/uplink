@@ -67,8 +67,6 @@ where
 
     pub fn with_config(
         name: &String,
-        project_id: &String,
-        device_id: &String,
         config: &StreamConfig,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {

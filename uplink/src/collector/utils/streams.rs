@@ -29,13 +29,7 @@ impl Streams {
     ) -> Self {
         let mut map = HashMap::new();
         for (name, stream) in &config.streams {
-            let stream = Stream::with_config(
-                name,
-                &config.project_id,
-                &config.device_id,
-                stream,
-                data_tx.clone(),
-            );
+            let stream = Stream::with_config(name, stream, data_tx.clone());
             map.insert(name.to_owned(), stream);
         }
 

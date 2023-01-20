@@ -648,7 +648,7 @@ mod test {
     ) -> (Serializer<MockClient>, flume::Sender<Box<dyn Package>>, Receiver<Request>) {
         let (data_tx, data_rx) = flume::bounded(1);
         let (net_tx, net_rx) = flume::bounded(1);
-        let (metrics_tx, metrics_rx) = flume::bounded(1);
+        let (metrics_tx, _metrics_rx) = flume::bounded(1);
         let client = MockClient { net_tx };
 
         (Serializer::new(config, data_rx, client, metrics_tx).unwrap(), data_tx, net_rx)
