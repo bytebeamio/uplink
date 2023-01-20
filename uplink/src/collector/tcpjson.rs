@@ -100,7 +100,7 @@ impl ClientConnection {
         &mut self,
         mut client: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
-        let actions_rx = self.bridge.register_app(&self.name).await;
+        let actions_rx = self.bridge.register_action_route(&self.name).await;
 
         loop {
             select! {

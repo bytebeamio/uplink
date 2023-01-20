@@ -1,18 +1,18 @@
 use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
-use flume::{bounded, Receiver, RecvError, SendError, Sender};
+use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{error, info};
 use tokio::{
     select,
     time::{self, interval, Sleep},
 };
 
-use super::{stream, Package, Payload, Stream, StreamMetrics};
+use super::{Package, Payload, Stream, StreamMetrics};
 use crate::{collector::utils::Streams, Action, ActionResponse, Config};
 
 pub enum Event {
     /// App name and handle for brige to send actions to the app
-    RegisterApp(String, Sender<Action>),
+    RegisterActionRoute(String, Sender<Action>),
     /// Data sent by the app
     Data(Payload),
     /// Sometime apps can choose to directly send action response instead
@@ -36,7 +36,9 @@ pub struct Bridge {
     /// Action responses going to backend
     action_status: Stream<ActionResponse>,
     /// Apps registered with the bridge
-    apps: HashMap<String, Sender<Action>>,
+    action_routes: HashMap<String, Sender<Action>>,
+    /// Current action that is being processed
+    current_action: Option<CurrentAction>,
 }
 
 impl Bridge {
@@ -57,18 +59,13 @@ impl Bridge {
             metrics_tx,
             config,
             actions_rx,
-            apps: HashMap::with_capacity(10),
+            action_routes: HashMap::with_capacity(10),
+            current_action: None,
         }
     }
 
     pub fn tx(&mut self) -> BridgeTx {
         BridgeTx { events_tx: self.bridge_tx.clone() }
-    }
-
-    pub fn register_app(&mut self, name: &str) -> (Sender<Event>, Receiver<Action>) {
-        let (action_tx, action_rx) = bounded(1);
-        self.apps.insert(name.to_owned(), action_tx);
-        (self.bridge_tx.clone(), action_rx)
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -79,27 +76,24 @@ impl Bridge {
         loop {
             let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
 
-            // NOTE: We only expect one action to be processed over uplink's bridge at a time
-            // - set to None when
-            // -- timeout ends
-            // -- A response with status "Completed" is received
-            // - set to a value when
-            // -- it is currently None and a new action is received
-            // - timeout is updated
-            // -- when a non "Completed" action is received
-            let mut current_action: Option<CurrentAction> = None;
             loop {
                 select! {
-                    action = self.actions_rx.recv_async(), if current_action.is_none() => {
+                    action = self.actions_rx.recv_async(), if self.current_action.is_none() => {
                         let action = action?;
                         let action_id = action.action_id.clone();
+                        info!("Received action: {:?}", action_id);
 
-                        // if self.actions_tx.send(action).is_ok() {
-                        //     info!("Received action: {:?}", action_id);
-                        //     current_action = Some(CurrentAction::new(&action_id));
-                        //     let response = ActionResponse::progress(&action_id, "Received", 0);
-                        //     self.action_status.fill(response).await?;
-                        // }
+                        // NOTE: Don't do any blocking operations here
+                        // TODO: Remove blocking here. Audit all blocking functions here
+                        if let Err(e) = self.try_route_action(action.clone()) {
+                            error!("Failed to route action to app. Error = {:?}", e);
+                            self.forward_action_error(action, e).await;
+                            continue
+                        }
+
+                        self.current_action = Some(CurrentAction::new(action.clone()));
+                        let response = ActionResponse::progress(&action_id, "Received", 0);
+                        self.forward_action_response(response).await;
 
                         // else if self.config.ignore_actions_if_no_clients {
                         //     error!("No clients connected, ignoring action = {:?}", action_id);
@@ -114,45 +108,21 @@ impl Bridge {
                     event = self.bridge_rx.recv_async() => {
                         let event = event?;
                         match event {
-                            Event::RegisterApp(name, tx) => {
-                                self.apps.insert(name, tx);
+                            Event::RegisterActionRoute(name, tx) => {
+                                self.action_routes.insert(name, tx);
                             }
                             Event::Data(v) => {
                                 streams.forward(v).await;
                             }
                             Event::ActionResponse(response) => {
-                                let inflight_action = match &mut current_action {
-                                    Some(v) => v,
-                                    None => {
-                                        error!("Action timed out already or not present, ignoring response: {:?}", response);
-                                        continue;
-                                    }
-                                };
-
-                                if *inflight_action.id != response.action_id {
-                                    error!("action_id in action_status({}) does not match that of active action ({})", response.action_id, inflight_action.id);
-                                    continue;
-                                }
-
-                                if &response.state == "Completed" || &response.state == "Failed" {
-                                    current_action = None;
-                                }
-
-                                if let Err(e) = self.action_status.fill(response).await {
-                                    error!("Failed to fill. Error = {:?}", e);
-                                }
+                                self.forward_action_response(response).await;
                             }
                         }
                     }
-                    _ = &mut current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
-                        let action = current_action.take().unwrap();
+                    _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
+                        let action = self.current_action.take().unwrap();
                         error!("Timeout waiting for action response. Action ID = {}", action.id);
-
-                        // Send failure response to cloud
-                        let status = ActionResponse::failure(&action.id, "Action timed out");
-                        if let Err(e) = self.action_status.fill(status).await {
-                            error!("Failed to fill. Error = {:?}", e);
-                        }
+                        self.forward_action_error(action.action, Error::ActionTimeout).await;
                     }
                     // Flush streams that timeout
                     Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
@@ -171,16 +141,64 @@ impl Bridge {
             }
         }
     }
+
+    /// Handle received actions
+    fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
+        let action_name = action.name.clone();
+        match self.action_routes.get(&action_name) {
+            Some(app_tx) => {
+                app_tx.try_send(action)?;
+                Ok(())
+            }
+            None => Err(Error::NoRoute(action.name)),
+        }
+    }
+
+    async fn forward_action_response(&mut self, response: ActionResponse) {
+        let inflight_action = match &mut self.current_action {
+            Some(v) => v,
+            None => {
+                error!("Action timed out already/not present, ignoring response: {:?}", response);
+                return;
+            }
+        };
+
+        if *inflight_action.id != response.action_id {
+            error!("response id({}) != active action({})", response.action_id, inflight_action.id);
+            return;
+        }
+
+        if &response.state == "Completed" || &response.state == "Failed" {
+            self.current_action = None;
+        }
+
+        if let Err(e) = self.action_status.fill(response).await {
+            error!("Failed to fill. Error = {:?}", e);
+        }
+    }
+
+    async fn forward_action_error(&mut self, action: Action, error: Error) {
+        let status = ActionResponse::failure(&action.action_id, error.to_string());
+
+        if let Err(e) = self.action_status.fill(status).await {
+            error!("Failed to send status. Error = {:?}", e);
+        }
+    }
 }
 
 struct CurrentAction {
     pub id: String,
+    pub action: Action,
     pub timeout: Pin<Box<Sleep>>,
 }
 
 impl CurrentAction {
-    pub fn new(id: &str) -> CurrentAction {
-        CurrentAction { id: id.to_owned(), timeout: Box::pin(time::sleep(Duration::from_secs(30))) }
+    pub fn new(action: Action) -> CurrentAction {
+        CurrentAction {
+            id: action.action_id.clone(),
+            action,
+            timeout: Box::pin(time::sleep(Duration::from_secs(30))),
+        }
     }
 
     pub fn reset_timeout(&mut self) {
@@ -195,9 +213,9 @@ pub struct BridgeTx {
 }
 
 impl BridgeTx {
-    pub async fn register_app(&self, name: &str) -> Receiver<Action> {
+    pub async fn register_action_route(&self, name: &str) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(1);
-        let event = Event::RegisterApp(name.to_owned(), actions_tx);
+        let event = Event::RegisterActionRoute(name.to_owned(), actions_tx);
 
         // Bridge should always be up and hence unwrap is ok
         self.events_tx.send_async(event).await.unwrap();
@@ -215,19 +233,14 @@ impl BridgeTx {
     }
 }
 
-struct App {
-    name: String,
-    tx: Sender<Action>,
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Receiver error {0}")]
     Recv(#[from] RecvError),
-    #[error("Sender error {0}")]
-    Send(#[from] SendError<ActionResponse>),
-    #[error("Stream done")]
-    StreamDone,
-    #[error("Stream error")]
-    Stream(#[from] stream::Error),
+    #[error("Action receiver busy {0}")]
+    TrySend(#[from] TrySendError<Action>),
+    #[error("No route for action {0}")]
+    NoRoute(String),
+    #[error("Action timedout")]
+    ActionTimeout,
 }
