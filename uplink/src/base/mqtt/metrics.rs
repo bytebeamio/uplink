@@ -6,7 +6,6 @@ use crate::collector::utils::clock;
 pub struct MqttMetrics {
     timestamp: u128,
     sequence: u32,
-    inflight_len: usize,
     publish_count: usize,
     puback_count: usize,
     ping_request_count: usize,
@@ -22,7 +21,6 @@ impl MqttMetrics {
         MqttMetrics {
             timestamp: clock(),
             sequence: 1,
-            inflight_len: 0,
             publish_count: 0,
             puback_count: 0,
             ping_request_count: 0,
@@ -69,10 +67,12 @@ impl MqttMetrics {
     pub fn prepare_next(&mut self) {
         self.timestamp = clock();
         self.sequence += 1;
-        self.inflight_len = 0;
         self.publish_count = 0;
         self.puback_count = 0;
         self.ping_request_count = 0;
+        self.ping_response_count = 0;
         self.connection_count = 0;
+        self.disconnection_count = 0;
+        self.inflight_count = 0;
     }
 }
