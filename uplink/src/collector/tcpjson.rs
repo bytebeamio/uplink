@@ -10,7 +10,6 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use std::{io, sync::Arc};
 
 use crate::base::bridge::BridgeTx;
-use crate::base::middleware::Error as ActionsError;
 use crate::{ActionResponse, Config, Payload};
 
 #[derive(Error, Debug)]
@@ -27,12 +26,8 @@ pub enum Error {
     Codec(#[from] LinesCodecError),
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
-    #[error("Download OTA error")]
-    Actions(#[from] ActionsError),
     #[error("Couldn't fill stream")]
     Stream(#[from] crate::base::bridge::Error),
-    #[error("Broadcast receiver error {0}")]
-    BRecv(#[from] tokio::sync::broadcast::error::RecvError),
 }
 
 pub struct TcpJson {

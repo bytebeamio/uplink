@@ -214,11 +214,23 @@ pub struct BridgeTx {
 
 impl BridgeTx {
     pub async fn register_action_route(&self, name: &str) -> Receiver<Action> {
-        let (actions_tx, actions_rx) = bounded(1);
+        let (actions_tx, actions_rx) = bounded(0);
         let event = Event::RegisterActionRoute(name.to_owned(), actions_tx);
 
         // Bridge should always be up and hence unwrap is ok
         self.events_tx.send_async(event).await.unwrap();
+        actions_rx
+    }
+
+    pub async fn register_action_routes(&self, names: Vec<&str>) -> Receiver<Action> {
+        let (actions_tx, actions_rx) = bounded(0);
+
+        for name in names {
+            let event = Event::RegisterActionRoute(name.to_owned(), actions_tx.clone());
+            // Bridge should always be up and hence unwrap is ok
+            self.events_tx.send_async(event).await.unwrap();
+        }
+
         actions_rx
     }
 

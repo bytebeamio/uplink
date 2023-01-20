@@ -5,6 +5,8 @@ use std::thread;
 use anyhow::Error;
 
 use base::monitor::Monitor;
+use collector::downloader::FileDownloader;
+use collector::tunshell::TunshellSession;
 use flume::{bounded, Receiver, Sender};
 use log::error;
 
@@ -60,6 +62,11 @@ pub mod config {
 
     # Create empty streams map
     [streams]
+
+    # Downloader config
+    [downloader]
+    actions = ["update_firmware", "send_file"]
+    path = "/var/tmp/ota-file"
 
     [stream_metrics]
     enabled = false
@@ -183,7 +190,6 @@ pub mod config {
 
 pub use base::actions::{Action, ActionResponse};
 use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, Stream, StreamMetrics};
-pub use base::middleware;
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::Config;
@@ -227,6 +233,7 @@ impl Uplink {
     }
 
     pub fn spawn(&mut self) -> Result<BridgeTx, Error> {
+        let config = self.config.clone();
         let mut bridge = Bridge::new(
             self.config.clone(),
             self.data_tx.clone(),
@@ -292,6 +299,12 @@ impl Uplink {
                 mqtt.start().await;
             })
         });
+
+        let tunshell_session = TunshellSession::new(config.clone(), false, bridge_tx.clone());
+        thread::spawn(move || tunshell_session.start());
+
+        let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
+        thread::spawn(move || file_downloader.start());
 
         let monitor = Monitor::new(
             self.config.clone(),

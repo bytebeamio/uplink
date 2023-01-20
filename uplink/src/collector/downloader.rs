@@ -43,18 +43,19 @@
 //! [`Error::Downloading`]: crate::base::actions::Error::Downloading
 
 use bytes::BytesMut;
-use flume::{Receiver, RecvError, Sender};
+use flume::RecvError;
 use futures_util::StreamExt;
 use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
 use std::fs::{create_dir_all, File};
+use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
 
-use crate::base::{Authentication, Downloader};
-use crate::{Action, ActionResponse, Stream};
+use crate::base::bridge::BridgeTx;
+use crate::{Action, ActionResponse, Config};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -89,11 +90,9 @@ impl From<flume::TrySendError<Action>> for Error {
 /// the download [`Action`], updated with information regarding where the file is stored in the file-system
 /// to the connected bridge application.
 pub struct FileDownloader {
-    downloader_cfg: Downloader,
+    config: Arc<Config>,
     action_id: String,
-    status_bucket: Stream<ActionResponse>,
-    download_rx: Receiver<Action>,
-    bridge_tx: Sender<Action>,
+    bridge_tx: BridgeTx,
     client: Client,
     sequence: u32,
 }
@@ -101,15 +100,10 @@ pub struct FileDownloader {
 impl FileDownloader {
     /// Create a struct to manage downloads, runs on a separate thread. Also returns a [`Sender`]
     /// end of a "One" channel to send associated actions onto.
-    pub fn new(
-        downloader_cfg: Downloader,
-        auth_config: Option<Authentication>,
-        status_bucket: Stream<ActionResponse>,
-        bridge_tx: Sender<Action>,
-    ) -> Result<(Sender<Action>, Self), Error> {
+    pub fn new(config: Arc<Config>, bridge_tx: BridgeTx) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
-        let client = match &auth_config {
+        let client = match &config.authentication {
             Some(certs) => {
                 let ca = Certificate::from_pem(certs.ca_certificate.as_bytes())?;
                 let mut buf = BytesMut::from(certs.device_private_key.as_bytes());
@@ -122,32 +116,20 @@ impl FileDownloader {
         }
         .build()?;
 
-        // Create rendezvous channel with flume
-        let (download_tx, download_rx) = flume::bounded(0);
-
-        Ok((
-            download_tx,
-            Self {
-                downloader_cfg,
-                client,
-                download_rx,
-                status_bucket,
-                bridge_tx,
-                sequence: 0,
-                action_id: String::default(),
-            },
-        ))
+        Ok(Self { config, client, bridge_tx, sequence: 0, action_id: String::default() })
     }
 
     /// Spawn a thread to handle downloading files as notified by download actions and for forwarding the updated actions
     /// to bridge for further processing, e.g. OTA update installation.
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) -> Result<(), Error> {
+        let routes = vec!["update_firmware", "send_file"];
+        let download_rx = self.bridge_tx.register_action_routes(routes).await;
         loop {
             self.sequence = 0;
             // The 0 sized channel only allows one action to be in execution at a time. Only one action is accepted below,
             // all download actions before and after, till the next recv() won't get executed and will be reported to cloud.
-            let action = self.download_rx.recv()?;
+            let action = download_rx.recv_async().await?;
             self.action_id = action.action_id.clone();
 
             let mut error = None;
@@ -165,9 +147,9 @@ impl FileDownloader {
                 tokio::time::sleep(Duration::from_secs(30)).await;
             }
             if let Some(e) = error {
-                let status = ActionResponse::failure(&self.action_id, e.to_string())
-                    .set_sequence(self.sequence());
-                self.send_status(status).await;
+                let status = ActionResponse::failure(&self.action_id, e.to_string());
+                let status = status.set_sequence(self.sequence());
+                self.bridge_tx.send_action_response(status).await;
             }
         }
     }
@@ -175,9 +157,9 @@ impl FileDownloader {
     // Accepts a download `Action` and performs necessary data extraction to actually download the file
     async fn run(&mut self, mut action: Action) -> Result<(), Error> {
         // Update action status for process initiated
-        let status = ActionResponse::progress(&self.action_id, "Downloading", 0)
-            .set_sequence(self.sequence());
-        self.send_status(status).await;
+        let status = ActionResponse::progress(&self.action_id, "Downloading", 0);
+        let status = status.set_sequence(self.sequence());
+        self.bridge_tx.send_action_response(status).await;
 
         // Extract url information from action payload
         let mut update = serde_json::from_str::<DownloadFile>(&action.payload)?;
@@ -196,12 +178,9 @@ impl FileDownloader {
         update.download_path = Some(file_path.clone());
         action.payload = serde_json::to_string(&update)?;
 
-        // Forward Action packet through bridge once file is downloaded
-        self.bridge_tx.try_send(action)?;
-
-        let status = ActionResponse::progress(&self.action_id, "Downloaded", 50)
-            .set_sequence(self.sequence());
-        self.send_status(status).await;
+        let status = ActionResponse::progress(&self.action_id, "Downloaded", 50);
+        let status = status.set_sequence(self.sequence());
+        self.bridge_tx.send_action_response(status).await;
 
         Ok(())
     }
@@ -209,7 +188,7 @@ impl FileDownloader {
     /// Creates file to download into
     fn create_file(&self, name: &str, url: &str, version: &str) -> Result<(File, String), Error> {
         // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
-        let mut download_path = PathBuf::from(self.downloader_cfg.path.clone());
+        let mut download_path = PathBuf::from(self.config.downloader.path.clone());
         download_path.push(name);
         download_path.push(version);
         create_dir_all(&download_path)?;
@@ -257,21 +236,15 @@ impl FileDownloader {
                     }
                 };
                 let status =
-                    ActionResponse::progress(&self.action_id, "Downloading", percentage as u8)
-                        .set_sequence(self.sequence());
-                self.send_status(status).await;
+                    ActionResponse::progress(&self.action_id, "Downloading", percentage as u8);
+                let status = status.set_sequence(self.sequence());
+                self.bridge_tx.send_action_response(status).await;
             }
         }
 
         info!("Firmware downloaded successfully");
 
         Ok(())
-    }
-
-    async fn send_status(&mut self, status: ActionResponse) {
-        if let Err(e) = self.status_bucket.fill(status).await {
-            error!("Failed to send downloader status. Error = {:?}", e);
-        }
     }
 
     fn sequence(&mut self) -> u32 {

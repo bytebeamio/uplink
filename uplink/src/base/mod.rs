@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 pub mod actions;
 pub mod bridge;
-pub mod middleware;
 pub mod monitor;
 pub mod mqtt;
 pub mod serializer;
@@ -118,7 +117,7 @@ pub struct Config {
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
-    pub downloader: Option<Downloader>,
+    pub downloader: Downloader,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
     #[serde(default)]
