@@ -25,7 +25,7 @@ curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/systemd.sh https:/
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/uplink.service https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/rpi/systemd/uplink.service
 
 # get bridge.service
-curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/bridge.service https://raw.githubusercontent.com/sai-kiran-y/uplink/main/examples/rpi/systemd/bridge.service
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/bridge.service https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/rpi/systemd/bridge.service
 
 # get config.toml 
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/config.toml https://raw.githubusercontent.com/bytebeamio/uplink/main/examples/rpi/config.toml
