@@ -2,6 +2,7 @@ use std::io;
 use std::sync::Arc;
 
 use flume::{Receiver, RecvError};
+use log::info;
 use rumqttc::{AsyncClient, ClientError, QoS, Request};
 use tokio::select;
 
@@ -59,8 +60,8 @@ impl Monitor {
                     }
 
                     stream_metrics.push(o);
+                    info!("Stream metrics update = {:#?}", stream_metrics);
                     let v = serde_json::to_string(&stream_metrics).unwrap();
-                    println!("Received {:?}", v);
 
                     stream_metrics.clear();
                     self.client.publish(&stream_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
@@ -68,16 +69,16 @@ impl Monitor {
                 o = self.serializer_metrics_rx.recv_async() => {
                     let o = o?;
                     serializer_metrics.push(o);
+                    info!("Serializer metrics update = {:#?}", serializer_metrics);
                     let v = serde_json::to_string(&serializer_metrics).unwrap();
-                    println!("Received {:?}", v);
                     serializer_metrics.clear();
                     self.client.publish(&serializer_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                 }
                 o = self.mqtt_metrics_rx.recv_async() => {
                     let o = o?;
                     mqtt_metrics.push(o);
+                    info!("MQTT metrics update = {:#?}", mqtt_metrics);
                     let v = serde_json::to_string(&mqtt_metrics).unwrap();
-                    println!("Received {:?}", v);
                     mqtt_metrics.clear();
                     self.client.publish(&mqtt_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                 }

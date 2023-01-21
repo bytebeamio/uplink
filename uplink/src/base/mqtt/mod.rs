@@ -1,5 +1,5 @@
 use flume::{Sender, TrySendError};
-use log::{error, info};
+use log::{debug, error, info};
 use thiserror::Error;
 use tokio::task;
 use tokio::time::Duration;
@@ -106,7 +106,7 @@ impl Mqtt {
                     }
                 }
                 Ok(Event::Incoming(packet)) => {
-                    info!("Incoming = {:?}", packet);
+                    debug!("Incoming = {:?}", packet);
                     match packet {
                         rumqttc::Packet::PubAck(_) => self.metrics.add_puback(),
                         rumqttc::Packet::PingResp => {
@@ -121,7 +121,7 @@ impl Mqtt {
                     }
                 }
                 Ok(Event::Outgoing(packet)) => {
-                    info!("Outgoing = {:?}", packet);
+                    debug!("Outgoing = {:?}", packet);
                     match packet {
                         rumqttc::Outgoing::Publish(_) => self.metrics.add_publish(),
                         rumqttc::Outgoing::PingReq => {
