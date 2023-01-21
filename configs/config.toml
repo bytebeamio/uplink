@@ -29,7 +29,7 @@ bypass_streams = ["mainapp_metrics"]
 # Serializer module can publish associated metrics, to keep track of 
 # serializer performance. 
 [serializer_metrics]
-enabled = true
+enabled = false
 topic = "/tenants/{tenant_id}/devices/{device_id}/metrics/jsonarray"
 
 # Serializer module can also publishe stream metrics, to keep track of latencies 
