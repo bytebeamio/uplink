@@ -89,11 +89,17 @@ impl Bridge {
                     // NOTE: Don't do any blocking operations here
                     // TODO: Remove blocking here. Audit all blocking functions here
                     if let Err(e) = self.try_route_action(action.clone()) {
+                        // Ignore sending failure status to backend. This makes
+                        // backend retry action.
                         //
+                        // TODO: Do we need this? Shouldn't backend have an easy way to
+                        // retry failed actions in bulk?
                         if self.config.ignore_actions_if_no_clients {
                             error!("No clients connected, ignoring action = {:?}", action_id);
+                            self.current_action = None;
                             continue
                         }
+
                         error!("Failed to route action to app. Error = {:?}", e);
                         self.forward_action_error(action, e).await;
                         continue
@@ -102,14 +108,6 @@ impl Bridge {
                     self.current_action = Some(CurrentAction::new(action.clone()));
                     let response = ActionResponse::progress(&action_id, "Received", 0);
                     self.forward_action_response(response).await;
-
-                    // else {
-                    //     error!("Bridge down!! Action ID = {}", action_id);
-                    //     let status = ActionResponse::failure(&action_id, "Bridge down");
-                    //     if let Err(e) = self.action_status.fill(status).await {
-                    //         error!("Failed to send busy status. Error = {:?}", e);
-                    //     }
-                    // }
                 }
                 event = self.bridge_rx.recv_async() => {
                     let event = event?;

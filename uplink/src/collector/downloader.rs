@@ -259,6 +259,7 @@ impl FileDownloader {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct DownloadFile {
     url: String,
+    #[serde(alias = "file_name")]
     version: String,
     /// Path to location in fs where file will be stored
     download_path: Option<String>,
