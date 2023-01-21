@@ -68,74 +68,79 @@ impl Bridge {
         BridgeTx { events_tx: self.bridge_tx.clone() }
     }
 
+    fn clear_current_action(&mut self) {
+        self.current_action = None;
+    }
+
     pub async fn start(&mut self) -> Result<(), Error> {
         let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
         let mut streams =
             Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
                 .await;
+        let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
+
         loop {
-            let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
+            select! {
+                action = self.actions_rx.recv_async(), if self.current_action.is_none() => {
+                    let action = action?;
+                    let action_id = action.action_id.clone();
+                    info!("Received action: {:?}", action_id);
 
-            loop {
-                select! {
-                    action = self.actions_rx.recv_async(), if self.current_action.is_none() => {
-                        let action = action?;
-                        let action_id = action.action_id.clone();
-                        info!("Received action: {:?}", action_id);
-
-                        // NOTE: Don't do any blocking operations here
-                        // TODO: Remove blocking here. Audit all blocking functions here
-                        if let Err(e) = self.try_route_action(action.clone()) {
-                            error!("Failed to route action to app. Error = {:?}", e);
-                            self.forward_action_error(action, e).await;
+                    // NOTE: Don't do any blocking operations here
+                    // TODO: Remove blocking here. Audit all blocking functions here
+                    if let Err(e) = self.try_route_action(action.clone()) {
+                        //
+                        if self.config.ignore_actions_if_no_clients {
+                            error!("No clients connected, ignoring action = {:?}", action_id);
                             continue
                         }
+                        error!("Failed to route action to app. Error = {:?}", e);
+                        self.forward_action_error(action, e).await;
+                        continue
+                    }
 
-                        self.current_action = Some(CurrentAction::new(action.clone()));
-                        let response = ActionResponse::progress(&action_id, "Received", 0);
-                        self.forward_action_response(response).await;
+                    self.current_action = Some(CurrentAction::new(action.clone()));
+                    let response = ActionResponse::progress(&action_id, "Received", 0);
+                    self.forward_action_response(response).await;
 
-                        // else if self.config.ignore_actions_if_no_clients {
-                        //     error!("No clients connected, ignoring action = {:?}", action_id);
-                        // } else {
-                        //     error!("Bridge down!! Action ID = {}", action_id);
-                        //     let status = ActionResponse::failure(&action_id, "Bridge down");
-                        //     if let Err(e) = self.action_status.fill(status).await {
-                        //         error!("Failed to send busy status. Error = {:?}", e);
-                        //     }
-                        // }
-                    }
-                    event = self.bridge_rx.recv_async() => {
-                        let event = event?;
-                        match event {
-                            Event::RegisterActionRoute(name, tx) => {
-                                self.action_routes.insert(name, tx);
-                            }
-                            Event::Data(v) => {
-                                streams.forward(v).await;
-                            }
-                            Event::ActionResponse(response) => {
-                                self.forward_action_response(response).await;
-                            }
+                    // else {
+                    //     error!("Bridge down!! Action ID = {}", action_id);
+                    //     let status = ActionResponse::failure(&action_id, "Bridge down");
+                    //     if let Err(e) = self.action_status.fill(status).await {
+                    //         error!("Failed to send busy status. Error = {:?}", e);
+                    //     }
+                    // }
+                }
+                event = self.bridge_rx.recv_async() => {
+                    let event = event?;
+                    match event {
+                        Event::RegisterActionRoute(name, tx) => {
+                            self.action_routes.insert(name, tx);
+                        }
+                        Event::Data(v) => {
+                            streams.forward(v).await;
+                        }
+                        Event::ActionResponse(response) => {
+                            self.forward_action_response(response).await;
                         }
                     }
-                    _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
-                        let action = self.current_action.take().unwrap();
-                        error!("Timeout waiting for action response. Action ID = {}", action.id);
-                        self.forward_action_error(action.action, Error::ActionTimeout).await;
+                }
+                _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
+                    let action = self.current_action.take().unwrap();
+                    error!("Timeout waiting for action response. Action ID = {}", action.id);
+                    self.forward_action_error(action.action, Error::ActionTimeout).await;
+                }
+                // Flush streams that timeout
+                Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
+                    info!("Flushing stream = {}", timedout_stream);
+                    if let Err(e) = streams.flush_stream(&timedout_stream).await {
+                        error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
                     }
-                    // Flush streams that timeout
-                    Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
-                        info!("Flushing stream = {}", timedout_stream);
-                        if let Err(e) = streams.flush_stream(&timedout_stream).await {
-                            error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
-                        }
-                    }
-                    // Flush all metrics when timed out
-                    _ = metrics_timeout.tick() => {
-                        if let Err(e) = streams.check_and_flush_metrics() {
-                            error!("Failed to flush stream metrics. Error = {}", e);
-                        }
+                }
+                // Flush all metrics when timed out
+                _ = metrics_timeout.tick() => {
+                    if let Err(e) = streams.check_and_flush_metrics() {
+                        error!("Failed to flush stream metrics. Error = {}", e);
                     }
                 }
             }
@@ -169,7 +174,7 @@ impl Bridge {
         }
 
         if &response.state == "Completed" || &response.state == "Failed" {
-            self.current_action = None;
+            self.clear_current_action();
         }
 
         if let Err(e) = self.action_status.fill(response).await {
@@ -183,6 +188,8 @@ impl Bridge {
         if let Err(e) = self.action_status.fill(status).await {
             error!("Failed to send status. Error = {:?}", e);
         }
+
+        self.clear_current_action();
     }
 }
 
