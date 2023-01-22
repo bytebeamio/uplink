@@ -125,7 +125,6 @@ impl ClientConnection {
 
                     self.bridge.send_payload(data).await;
                 }
-
                 action = actions_rx.recv_async() => {
                     let action = action?;
                     match serde_json::to_string(&action) {

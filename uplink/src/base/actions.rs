@@ -37,9 +37,6 @@ pub struct ActionResponse {
     pub progress: u8,
     // list of error
     pub errors: Vec<String>,
-    // timestamp at creation
-    #[serde(skip)]
-    pub collection_timestamp: u64,
 }
 
 impl ActionResponse {
@@ -48,7 +45,6 @@ impl ActionResponse {
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_millis() as u64;
-        let collection_timestamp = timestamp;
 
         ActionResponse {
             action_id: id.to_owned(),
@@ -57,8 +53,15 @@ impl ActionResponse {
             state: state.to_owned(),
             progress,
             errors,
-            collection_timestamp,
         }
+    }
+
+    pub fn is_completed(&self) -> bool {
+        self.state == "Completed"
+    }
+
+    pub fn is_failed(&self) -> bool {
+        self.state == "Failed"
     }
 
     pub fn progress(id: &str, state: &str, progress: u8) -> Self {

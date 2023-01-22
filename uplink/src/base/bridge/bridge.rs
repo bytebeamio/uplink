@@ -81,6 +81,7 @@ impl Bridge {
 
         loop {
             select! {
+                // TODO: Remove if guard
                 action = self.actions_rx.recv_async(), if self.current_action.is_none() => {
                     let action = action?;
                     let action_id = action.action_id.clone();
@@ -171,7 +172,8 @@ impl Bridge {
             return;
         }
 
-        if &response.state == "Completed" || &response.state == "Failed" {
+        info!("Action response = {:?}", response);
+        if response.is_completed() || response.is_failed() {
             self.clear_current_action();
         }
 
