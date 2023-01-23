@@ -30,7 +30,9 @@ jobs:
         uses: nttld/setup-ndk@v1.2.0
         with:
           ndk-version: r25b
+      - run: rustup target add aarch64-linux-android
       - run: cargo ndk --target aarch64-linux-android --platform 23 clippy
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
 
