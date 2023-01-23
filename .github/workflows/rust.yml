@@ -7,6 +7,16 @@ on:
     branches: [ main ]
 
 jobs:
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Clippy
+      run: cargo clippy --verbose
+      env:
+          RUSTFLAGS: "-D warnings"
+    - name: Run tests
+      run: cargo test --verbose
 
   clippy-android:
     name: Build for aarch64-linux-android
@@ -14,6 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: sudo apt install unzip
+      - run: cargo install cargo-ndk@2.11.0
       - name: Setup Android NDK
         id: ndk
         uses: nttld/setup-ndk@v1.2.0
