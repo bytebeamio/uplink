@@ -15,11 +15,13 @@ jobs:
       image: devduttshenoi/android-builder
     steps:
       - uses: actions/checkout@v3
-      - name: Setup Android NDK
-        id: ndk
-        uses: nttld/setup-ndk@v1.2.0
+      - name: Install NDK
+        uses: ravinderjangra/android-ndk-toolchain-setup@0.2
         with:
-          ndk-version: 25.1.8937393
+          api: '23'
+          arch: 'x86'
+          install-location: /root/ndk
+          force: true
       - run: cargo ndk --target aarch64-linux-android --platform 23 clippy
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
