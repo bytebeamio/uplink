@@ -6,6 +6,8 @@ use anyhow::Error;
 
 use base::monitor::Monitor;
 use collector::downloader::FileDownloader;
+use collector::process::ProcessHandler;
+use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellSession;
 use flume::{bounded, Receiver, Sender};
 use log::error;
@@ -305,6 +307,13 @@ impl Uplink {
 
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
+
+        let stat_collector = StatCollector::new(config.clone(), bridge_tx.clone());
+        thread::spawn(move || stat_collector.start());
+
+        let process_handler = ProcessHandler::new(bridge_tx.clone());
+        let processes = config.actions.clone();
+        thread::spawn(move || process_handler.start(processes));
 
         let monitor = Monitor::new(
             self.config.clone(),
