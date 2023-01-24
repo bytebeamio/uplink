@@ -8,6 +8,7 @@ on:
 
 jobs:
   clippy:
+    name: Clippy on linux x86
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -19,7 +20,7 @@ jobs:
         run: cargo test --verbose
 
   clippy-android:
-    name: Build for aarch64-linux-android
+    name: Clippy on android aarch64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
