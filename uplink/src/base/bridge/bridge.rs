@@ -1,7 +1,7 @@
 use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
-use log::{error, info};
+use log::{error, info, trace};
 use tokio::{
     select,
     time::{self, interval, Sleep},
@@ -38,7 +38,7 @@ pub struct Bridge {
     /// Apps registered with the bridge
     action_routes: HashMap<String, Sender<Action>>,
     /// Current action that is being processed
-    current_action: Option<CurrentAction>,
+    current_action: CurrentAction,
 }
 
 impl Bridge {
@@ -60,16 +60,12 @@ impl Bridge {
             config,
             actions_rx,
             action_routes: HashMap::with_capacity(10),
-            current_action: None,
+            current_action: CurrentAction::Vacant,
         }
     }
 
     pub fn tx(&mut self) -> BridgeTx {
         BridgeTx { events_tx: self.bridge_tx.clone() }
-    }
-
-    fn clear_current_action(&mut self) {
-        self.current_action = None;
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -82,7 +78,7 @@ impl Bridge {
         loop {
             select! {
                 // TODO: Remove if guard
-                action = self.actions_rx.recv_async(), if self.current_action.is_none() => {
+                action = self.actions_rx.recv_async(), if self.current_action.is_vacant() => {
                     let action = action?;
                     let action_id = action.action_id.clone();
                     info!("Received action: {:?}", action_id);
@@ -97,7 +93,7 @@ impl Bridge {
                         // retry failed actions in bulk?
                         if self.config.ignore_actions_if_no_clients {
                             error!("No clients connected, ignoring action = {:?}", action_id);
-                            self.current_action = None;
+                            self.current_action.vacate();
                             continue
                         }
 
@@ -106,7 +102,7 @@ impl Bridge {
                         continue
                     }
 
-                    self.current_action = Some(CurrentAction::new(action.clone()));
+                    self.current_action.occupy(action.clone());
                     let response = ActionResponse::progress(&action_id, "Received", 0);
                     self.forward_action_response(response).await;
                 }
@@ -124,10 +120,11 @@ impl Bridge {
                         }
                     }
                 }
-                _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
-                    let action = self.current_action.take().unwrap();
-                    error!("Timeout waiting for action response. Action ID = {}", action.id);
-                    self.forward_action_error(action.action, Error::ActionTimeout).await;
+
+                _ = &mut self.current_action.timeout().unwrap_or(&mut end) => {
+                    let action = self.current_action.vacate().unwrap();
+                    error!("Timeout waiting for action response. Action ID = {}", action.action_id);
+                    self.forward_action_error(action, Error::ActionTimeout).await;
                 }
                 // Flush streams that timeout
                 Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
@@ -159,22 +156,28 @@ impl Bridge {
     }
 
     async fn forward_action_response(&mut self, response: ActionResponse) {
-        let inflight_action = match &mut self.current_action {
-            Some(v) => v,
-            None => {
+        let id = match &self.current_action {
+            CurrentAction::Occupied { id, .. } => id,
+            _ => {
                 error!("Action timed out already/not present, ignoring response: {:?}", response);
                 return;
             }
         };
 
-        if *inflight_action.id != response.action_id {
-            error!("response id({}) != active action({})", response.action_id, inflight_action.id);
+        if *id != response.action_id {
+            error!("response id({}) != active action({})", response.action_id, id);
             return;
         }
 
+        let action_id = id.to_owned();
         info!("Action response = {:?}", response);
         if response.is_completed() || response.is_failed() {
-            self.clear_current_action();
+            // Unwrap is ok since we have validated current_action
+            self.current_action.vacate().unwrap();
+            trace!("Action finished execution; action_id = {action_id}")
+        } else {
+            self.current_action.reset_timeout();
+            trace!("Action timeout reset; action_id = {action_id}")
         }
 
         if let Err(e) = self.action_status.fill(response).await {
@@ -189,34 +192,59 @@ impl Bridge {
             error!("Failed to send status. Error = {:?}", e);
         }
 
-        self.clear_current_action();
+        self.current_action.vacate();
     }
 }
 
-struct CurrentAction {
-    pub id: String,
-    pub action: Action,
-    pub timeout: Pin<Box<Sleep>>,
+enum CurrentAction {
+    Occupied { id: String, action: Action, timeout: Pin<Box<Sleep>> },
+    Vacant,
 }
 
 impl CurrentAction {
-    pub fn new(action: Action) -> CurrentAction {
-        CurrentAction {
+    pub fn occupy(&mut self, action: Action) {
+        *self = CurrentAction::Occupied {
             id: action.action_id.clone(),
             action,
             timeout: Box::pin(time::sleep(Duration::from_secs(30))),
+        };
+    }
+
+    pub fn vacate(&mut self) -> Option<Action> {
+        let action = match self {
+            Self::Occupied { action, .. } => action.to_owned(),
+            _ => return None,
+        };
+        *self = CurrentAction::Vacant;
+
+        Some(action)
+    }
+
+    pub fn is_vacant(&self) -> bool {
+        match self {
+            Self::Vacant => true,
+            _ => false,
+        }
+    }
+
+    pub fn timeout(&mut self) -> Option<&mut Pin<Box<Sleep>>> {
+        match self {
+            Self::Occupied { timeout, .. } => Some(timeout),
+            _ => return None,
         }
     }
 
     pub fn reset_timeout(&mut self) {
-        self.timeout = Box::pin(time::sleep(Duration::from_secs(30)));
+        if let Self::Occupied { timeout, .. } = self {
+            *timeout = Box::pin(time::sleep(Duration::from_secs(30)))
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct BridgeTx {
     // Handle for apps to send events to bridge
-    events_tx: Sender<Event>,
+    pub(crate) events_tx: Sender<Event>,
 }
 
 impl BridgeTx {
