@@ -246,6 +246,11 @@ impl BridgeTx {
         self.events_tx.send_async(event).await.unwrap()
     }
 
+    pub fn send_payload_sync(&self, payload: Payload) {
+        let event = Event::Data(payload);
+        self.events_tx.send(event).unwrap()
+    }
+
     pub async fn send_action_response(&self, response: ActionResponse) {
         let event = Event::ActionResponse(response);
         self.events_tx.send_async(event).await.unwrap()
