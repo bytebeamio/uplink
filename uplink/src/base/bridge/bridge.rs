@@ -10,6 +10,7 @@ use tokio::{
 use super::{Package, Payload, Stream, StreamMetrics};
 use crate::{collector::utils::Streams, Action, ActionResponse, Config};
 
+#[derive(Debug)]
 pub enum Event {
     /// App name and handle for brige to send actions to the app
     RegisterActionRoute(String, Sender<Action>),
@@ -216,7 +217,7 @@ impl CurrentAction {
 #[derive(Debug, Clone)]
 pub struct BridgeTx {
     // Handle for apps to send events to bridge
-    events_tx: Sender<Event>,
+    pub(crate) events_tx: Sender<Event>,
 }
 
 impl BridgeTx {
