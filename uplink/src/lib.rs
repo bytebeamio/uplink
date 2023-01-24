@@ -308,8 +308,10 @@ impl Uplink {
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
 
-        let stat_collector = StatCollector::new(config.clone(), bridge_tx.clone());
-        thread::spawn(move || stat_collector.start());
+        if config.stats.enabled {
+            let stat_collector = StatCollector::new(config.clone(), bridge_tx.clone());
+            thread::spawn(move || stat_collector.start());
+        }
 
         let process_handler = ProcessHandler::new(bridge_tx.clone());
         let processes = config.actions.clone();
