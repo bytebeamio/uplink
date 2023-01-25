@@ -1,11 +1,44 @@
-#[macro_use]
-extern crate log;
-
 use bytes::{Buf, BufMut, BytesMut};
-use std::fs::{File, OpenOptions};
-use std::io::{ErrorKind, Read, Write};
+use data_encoding::HEXUPPER;
+use glob::glob;
+use log::{self, info, warn};
+use ring::digest::{Context, Digest, SHA256};
+
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufReader, Read, Write};
+use std::mem;
 use std::path::{Path, PathBuf};
-use std::{fs, io, mem};
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Io error: {0}")]
+    Io(#[from] io::Error),
+    #[error("Pattern error: {0}")]
+    Pattern(#[from] glob::PatternError),
+    #[error("Glob error: {0}")]
+    Glob(#[from] glob::GlobError),
+    #[error("Not a backup file")]
+    NotBackup,
+    #[error("Missing backup file")]
+    MissingFile,
+    #[error("Corrupted backup file")]
+    CorruptedFile,
+}
+
+fn sha256_digest<R: Read>(mut reader: R) -> Result<Digest, Error> {
+    let mut context = Context::new(&SHA256);
+    let mut buffer = [0; 1024];
+
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        context.update(&buffer[..count]);
+    }
+
+    Ok(context.finish())
+}
 
 pub struct Storage {
     /// list of backlog file ids. Mutated only be the serialization part of the sender
@@ -29,7 +62,7 @@ impl Storage {
         backlog_dir: P,
         max_file_size: usize,
         max_file_count: usize,
-    ) -> io::Result<Storage> {
+    ) -> Result<Storage, Error> {
         let backup_path = backlog_dir.into();
         let backlog_file_ids = get_file_ids(&backup_path)?;
 
@@ -65,10 +98,36 @@ impl Storage {
     }
 
     /// Removes a file with provided id
-    fn remove(&self, id: u64) -> io::Result<()> {
-        let path = self.backup_path.join(&format!("backup@{}", id));
+    fn remove(&self, id: u64) -> Result<(), Error> {
+        let path = self.get_read_file_path(id)?;
         fs::remove_file(path)?;
         Ok(())
+    }
+
+    /// Move corrupt file to special directory
+    fn handle_corrupt_file(&self) -> Result<(), Error> {
+        let id = self.current_read_file_id.expect("There is supposed to be a file here");
+        let path_src = self.backup_path.join(&format!("backup@{}", id));
+        let path_dest = self.backup_path.join(&format!("corrupted\\backup@{}", id));
+        fs::create_dir_all(&path_dest)?;
+        fs::rename(path_src, path_dest)?;
+        Ok(())
+    }
+
+    fn write_buffer_checksum(&self) -> Result<String, Error> {
+        let buf = BufReader::new(&self.current_write_file[..]);
+        let digest = sha256_digest(buf)?;
+        let hash = HEXUPPER.encode(digest.as_ref());
+
+        Ok(hash)
+    }
+
+    fn read_buffer_checksum(&self) -> Result<String, Error> {
+        let buf = BufReader::new(&self.current_read_file[..]);
+        let digest = sha256_digest(buf)?;
+        let hash = HEXUPPER.encode(digest.as_ref());
+
+        Ok(hash)
     }
 
     /// Initializes read buffer before reading data from the file
@@ -80,9 +139,9 @@ impl Storage {
 
     /// Opens file to flush current inmemory write buffer to disk.
     /// Also handles retention of previous files on disk
-    fn open_next_write_file(&mut self) -> io::Result<NextFile> {
+    fn open_next_write_file(&mut self, hash: String) -> Result<NextFile, Error> {
         let next_file_id = self.backlog_file_ids.last().map_or(0, |id| id + 1);
-        let next_file_path = self.backup_path.join(&format!("backup@{}", next_file_id));
+        let next_file_path = self.backup_path.join(&format!("backup@{next_file_id}.{hash}"));
         let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
         self.backlog_file_ids.push(next_file_id);
 
@@ -102,8 +161,9 @@ impl Storage {
 
     /// Flushes what ever is in current write buffer into a new file on the disk
     #[inline]
-    fn flush(&mut self) -> io::Result<Option<u64>> {
-        let mut next_file = self.open_next_write_file()?;
+    fn flush(&mut self) -> Result<Option<u64>, Error> {
+        let hash = self.write_buffer_checksum()?;
+        let mut next_file = self.open_next_write_file(hash)?;
         info!("Flushing data to disk!! {:?}", next_file.path);
         next_file.file.write_all(&self.current_write_file[..])?;
         next_file.file.flush()?;
@@ -113,7 +173,7 @@ impl Storage {
 
     /// Checks current write buffer size and flushes it to disk when the size
     /// exceeds configured size
-    pub fn flush_on_overflow(&mut self) -> io::Result<Option<u64>> {
+    pub fn flush_on_overflow(&mut self) -> Result<Option<u64>, Error> {
         if self.current_write_file.len() >= self.max_file_size {
             return self.flush();
         }
@@ -121,8 +181,16 @@ impl Storage {
         Ok(None)
     }
 
+    fn get_read_file_path(&self, id: u64) -> Result<PathBuf, Error> {
+        let backup_path = format!("{}/backup@{id}.*", self.backup_path.display());
+        let files = glob(&backup_path)?;
+        let path = files.last().ok_or(Error::MissingFile)??;
+
+        Ok(path)
+    }
+
     /// Reloads next buffer even if there is pending data in current buffer
-    fn reload(&mut self) -> io::Result<bool> {
+    fn reload(&mut self) -> Result<bool, Error> {
         // Swap read buffer with write buffer to read data in inmemory write
         // buffer when all the backlog disk files are done
         if self.backlog_file_ids.is_empty() {
@@ -134,14 +202,24 @@ impl Storage {
 
         // Len always > 0 because of above if. Doesn't panic
         let id = self.backlog_file_ids.remove(0);
-        let next_file_path = self.backup_path.join("backup@".to_owned() + &id.to_string());
+        let next_file_path = self.get_read_file_path(id)?;
+
         let mut file = OpenOptions::new().read(true).open(&next_file_path)?;
 
         // Load file into memory and delete it
         let metadata = fs::metadata(&next_file_path)?;
         self.prepare_current_read_buffer(metadata.len() as usize);
         file.read_exact(&mut self.current_read_file[..])?;
+        let actual_hash = self.read_buffer_checksum()?;
         self.current_read_file_id = Some(id);
+
+        // Verify with checksum
+        if let Some(hash) = next_file_path.extension() {
+            if actual_hash.as_str() != hash.to_os_string() {
+                self.handle_corrupt_file()?;
+                return Err(Error::CorruptedFile);
+            }
+        }
 
         Ok(false)
     }
@@ -151,7 +229,7 @@ impl Storage {
     /// swaps current write buffer to current read buffer if there
     /// is pending data in memory write buffer.
     /// Returns true if all the messages are caught up
-    pub fn reload_on_eof(&mut self) -> io::Result<bool> {
+    pub fn reload_on_eof(&mut self) -> Result<bool, Error> {
         // Don't reload if there is data in current read file
         if self.current_read_file.has_remaining() {
             return Ok(false);
@@ -167,22 +245,22 @@ impl Storage {
 }
 
 /// Converts file path to file id
-fn id(path: &Path) -> io::Result<u64> {
+fn id(path: &Path) -> Result<u64, Error> {
     if let Some(file_name) = path.file_name() {
         let file_name = format!("{:?}", file_name);
         if !file_name.contains("backup@") {
-            return Err(io::Error::new(ErrorKind::InvalidInput, "Not a backup file"));
+            return Err(Error::NotBackup);
         }
     }
 
-    let id: Vec<&str> = path.file_name().unwrap().to_str().unwrap().split('@').collect();
+    let id: Vec<&str> = path.file_stem().unwrap().to_str().unwrap().split('@').collect();
     let id: u64 = id[1].parse().unwrap();
     Ok(id)
 }
 
 /// Gets list of file ids in the disk. Id of file backup@10 is 10.
 /// Storing ids instead of full paths enables efficient indexing
-fn get_file_ids(path: &Path) -> io::Result<Vec<u64>> {
+fn get_file_ids(path: &Path) -> Result<Vec<u64>, Error> {
     let mut file_ids = Vec::new();
     let files = fs::read_dir(path)?;
     for file in files {

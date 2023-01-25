@@ -38,6 +38,8 @@ pub enum Error {
     Serde(#[from] serde_json::Error),
     #[error("Io error {0}")]
     Io(#[from] io::Error),
+    #[error("Disk error {0}")]
+    Disk(#[from] disk::Error),
     #[error("Mqtt client error {0}")]
     Client(#[from] MqttError),
     #[error("Storage is disabled/missing")]
