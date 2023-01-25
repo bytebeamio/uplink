@@ -6,6 +6,8 @@ use anyhow::Error;
 
 use base::monitor::Monitor;
 use collector::downloader::FileDownloader;
+use collector::process::ProcessHandler;
+use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellSession;
 use flume::{bounded, Receiver, Sender};
 use log::error;
@@ -14,6 +16,7 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
+    use crate::base::StreamConfig;
     pub use crate::base::{Config, Persistence, Stats};
     use config::{Environment, File, FileFormat};
     use std::{fs, mem};
@@ -139,15 +142,25 @@ pub mod config {
         //     }
         // }
 
-        for stat in [
-            "uplink_disk_stats",
-            "uplink_network_stats",
-            "uplink_processor_stats",
-            "uplink_process_stats",
-            "uplink_component_stats",
-            "uplink_system_stats",
-        ] {
-            config.stream_metrics.blacklist.push(stat.to_owned());
+        if config.stats.enabled {
+            for stream_name in [
+                "uplink_disk_stats",
+                "uplink_network_stats",
+                "uplink_processor_stats",
+                "uplink_process_stats",
+                "uplink_component_stats",
+                "uplink_system_stats",
+            ] {
+                config.stream_metrics.blacklist.push(stream_name.to_owned());
+                let stream_config = StreamConfig {
+                    topic: format!(
+                        "/tenants/{tenant_id}/devices/{device_id}/{stream_name}/jsonarray"
+                    ),
+                    buf_size: config.stats.stream_size.unwrap_or(100),
+                    flush_period: u64::MAX,
+                };
+                config.streams.insert(stream_name.to_owned(), stream_config);
+            }
         }
 
         Ok(config)
@@ -305,6 +318,15 @@ impl Uplink {
 
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
+
+        if config.stats.enabled {
+            let stat_collector = StatCollector::new(config.clone(), bridge_tx.clone());
+            thread::spawn(move || stat_collector.start());
+        }
+
+        let process_handler = ProcessHandler::new(bridge_tx.clone());
+        let processes = config.actions.clone();
+        thread::spawn(move || process_handler.start(processes));
 
         let monitor = Monitor::new(
             self.config.clone(),

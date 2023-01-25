@@ -1,27 +1,16 @@
-use flume::SendError;
+use flume::{RecvError, SendError};
 use log::{debug, error, info};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::{pin, select, task, time};
+use tokio::{pin, select, time};
 
-use crate::{ActionResponse, Package, Stream};
+use crate::base::bridge::BridgeTx;
+use crate::{ActionResponse, Package};
 
 use std::io;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
-/// Process abstracts functions to spawn process and handle their output
-/// It makes sure that a new process isn't executed when the previous process
-/// is in progress.
-/// It sends result and errors to the broker over collector_tx
-pub struct Process {
-    // buffer to send status messages to cloud
-    action_status: Stream<ActionResponse>,
-    // we use this flag to ignore new process spawn while previous process is in progress
-    last_process_done: Arc<Mutex<bool>>,
-}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -29,6 +18,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Json error {0}")]
     Json(#[from] serde_json::Error),
+    #[error("Recv error {0}")]
+    Recv(#[from] RecvError),
     #[error("Send error {0}")]
     Send(#[from] SendError<Box<dyn Package>>),
     #[error("Busy with previous action")]
@@ -37,9 +28,18 @@ pub enum Error {
     NoStdout,
 }
 
-impl Process {
-    pub fn new(action_status: Stream<ActionResponse>) -> Process {
-        Process { last_process_done: Arc::new(Mutex::new(true)), action_status }
+/// Process abstracts functions to spawn process and handle their output
+/// It makes sure that a new process isn't executed when the previous process
+/// is in progress.
+/// It sends result and errors to the broker over collector_tx
+pub struct ProcessHandler {
+    // to receive actions and send responses back to bridge
+    bridge_tx: BridgeTx,
+}
+
+impl ProcessHandler {
+    pub fn new(bridge_tx: BridgeTx) -> Self {
+        Self { bridge_tx }
     }
 
     /// Run a process of specified command
@@ -49,18 +49,12 @@ impl Process {
         command: String,
         payload: String,
     ) -> Result<Child, Error> {
-        *self.last_process_done.lock().unwrap() = false;
-
         let mut cmd = Command::new(command);
         cmd.arg(id).arg(payload).kill_on_drop(true).stdout(Stdio::piped());
 
-        match cmd.spawn() {
-            Ok(child) => Ok(child),
-            Err(e) => {
-                *self.last_process_done.lock().unwrap() = true;
-                Err(e.into())
-            }
-        }
+        let child = cmd.spawn()?;
+
+        Ok(child)
     }
 
     /// Capture stdout of the running process in a spawned task
@@ -68,54 +62,38 @@ impl Process {
         let stdout = child.stdout.take().ok_or(Error::NoStdout)?;
         let mut stdout = BufReader::new(stdout).lines();
 
-        let mut status_bucket = self.action_status.clone();
-        let last_process_done = self.last_process_done.clone();
+        let timeout = time::sleep(Duration::from_secs(10));
+        pin!(timeout);
 
-        task::spawn(async move {
-            let timeout = time::sleep(Duration::from_secs(10));
-            pin!(timeout);
+        loop {
+            select! {
+                 Ok(Some(line)) = stdout.next_line() => {
+                    let status: ActionResponse = match serde_json::from_str(&line) {
+                        Ok(status) => status,
+                        Err(e) => ActionResponse::failure("dummy", e.to_string()),
+                    };
 
-            loop {
-                select! {
-                     Ok(Some(line)) = stdout.next_line() => {
-                        let status: ActionResponse = match serde_json::from_str(&line) {
-                            Ok(status) => status,
-                            Err(e) => ActionResponse::failure("dummy", e.to_string()),
-                        };
-
-                        debug!("Action status: {:?}", status);
-                        if let Err(e) = status_bucket.fill(status).await {
-                            error!("Failed to send child process status. Error = {:?}", e);
-                        }
-                     }
-                     status = child.wait() => info!("Action done!! Status = {:?}", status),
-                     _ = &mut timeout => break
-                }
+                    debug!("Action status: {:?}", status);
+                    self.bridge_tx.send_action_response(status).await;
+                 }
+                 status = child.wait() => info!("Action done!! Status = {:?}", status),
+                 _ = &mut timeout => break
             }
-
-            *last_process_done.lock().unwrap() = true;
-        });
+        }
 
         Ok(())
     }
 
-    pub async fn execute<S: Into<String>>(
-        &mut self,
-        id: S,
-        command: S,
-        payload: S,
-    ) -> Result<(), Error> {
-        let command = String::from("tools/") + &command.into();
+    pub async fn start(mut self, processes: Vec<String>) -> Result<(), Error> {
+        let action_rx = self.bridge_tx.register_action_routes(processes).await;
 
-        // Check if last process is in progress
-        if !(*self.last_process_done.lock().unwrap()) {
-            return Err(Error::Busy);
+        loop {
+            let action = action_rx.recv_async().await?;
+            let command = String::from("tools/") + &action.name;
+
+            // Spawn the action and capture its stdout
+            let child = self.run(action.action_id, command, action.payload).await?;
+            self.spawn_and_capture_stdout(child).await?;
         }
-
-        // Spawn the action and capture its stdout
-        let child = self.run(id.into(), command, payload.into()).await?;
-        self.spawn_and_capture_stdout(child).await?;
-
-        Ok(())
     }
 }

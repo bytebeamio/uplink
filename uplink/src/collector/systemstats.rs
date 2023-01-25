@@ -1,6 +1,6 @@
-use flume::Sender;
 use log::error;
 use serde::Serialize;
+use serde_json::json;
 use sysinfo::{
     ComponentExt, CpuExt, DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, SystemExt,
 };
@@ -12,9 +12,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::{Config, Package, Point, Stream};
-
-use crate::base::bridge;
+use crate::{
+    base::bridge::{BridgeTx, Payload},
+    Config,
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -74,26 +75,50 @@ impl System {
     }
 }
 
-impl Point for System {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
+impl From<&System> for Payload {
+    fn from(value: &System) -> Self {
+        let System {
+            sequence,
+            timestamp,
+            kernel_version,
+            uptime,
+            no_processes,
+            load_avg_one,
+            load_avg_five,
+            load_avg_fifteen,
+            total_memory,
+            available_memory,
+            used_memory,
+        } = value;
 
-    fn timestamp(&self) -> u64 {
-        self.timestamp
+        Payload {
+            stream: "uplink_system_stats".to_owned(),
+            sequence: *sequence,
+            timestamp: *timestamp,
+            payload: json!({
+                "kernel_version": kernel_version,
+                "uptime": uptime,
+                "no_processes": no_processes,
+                "load_avg_one": load_avg_one,
+                "load_avg_five": load_avg_five,
+                "load_avg_fifteen": load_avg_fifteen,
+                "total_memory": total_memory,
+                "available_memory": available_memory,
+                "used_memory": used_memory,
+            }),
+        }
     }
 }
 
 struct SystemStats {
     stat: System,
-    stream: Stream<System>,
 }
 
 impl SystemStats {
-    fn push(&mut self, sys: &sysinfo::System, timestamp: u64) -> Result<(), bridge::Error> {
+    fn push(&mut self, sys: &sysinfo::System, timestamp: u64) -> Payload {
         self.stat.update(sys, timestamp);
-        self.stream.push(self.stat.clone())?;
-        Ok(())
+
+        (&self.stat).into()
     }
 }
 
@@ -130,20 +155,27 @@ impl Network {
     }
 }
 
-impl Point for Network {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
+impl From<&mut Network> for Payload {
+    fn from(value: &mut Network) -> Self {
+        let Network { sequence, timestamp, name, incoming_data_rate, outgoing_data_rate, .. } =
+            value;
 
-    fn timestamp(&self) -> u64 {
-        self.timestamp
+        Payload {
+            stream: "uplink_network_stats".to_owned(),
+            sequence: *sequence,
+            timestamp: *timestamp,
+            payload: json!({
+                "name": name,
+                "incoming_data_rate": incoming_data_rate,
+                "outgoing_data_rate": outgoing_data_rate,
+            }),
+        }
     }
 }
 
 struct NetworkStats {
     sequence: u32,
     map: HashMap<String, Network>,
-    stream: Stream<Network>,
 }
 
 impl NetworkStats {
@@ -152,13 +184,12 @@ impl NetworkStats {
         net_name: String,
         net_data: &sysinfo::NetworkData,
         timestamp: u64,
-    ) -> Result<(), bridge::Error> {
+    ) -> Payload {
         self.sequence += 1;
         let net = self.map.entry(net_name.clone()).or_insert_with(|| Network::init(net_name));
         net.update(net_data, timestamp, self.sequence);
-        self.stream.push(net.clone())?;
 
-        Ok(())
+        net.into()
     }
 }
 
@@ -186,32 +217,38 @@ impl Disk {
     }
 }
 
-impl Point for Disk {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
+impl From<&mut Disk> for Payload {
+    fn from(value: &mut Disk) -> Self {
+        let Disk { sequence, timestamp, name, total, available, used } = value;
 
-    fn timestamp(&self) -> u64 {
-        self.timestamp
+        Payload {
+            stream: "uplink_disk_stats".to_owned(),
+            sequence: *sequence,
+            timestamp: *timestamp,
+            payload: json!({
+                "name": name,
+                "total": total,
+                "available": available,
+                "used": used,
+            }),
+        }
     }
 }
 
 struct DiskStats {
     sequence: u32,
     map: HashMap<String, Disk>,
-    stream: Stream<Disk>,
 }
 
 impl DiskStats {
-    fn push(&mut self, disk_data: &sysinfo::Disk, timestamp: u64) -> Result<(), bridge::Error> {
+    fn push(&mut self, disk_data: &sysinfo::Disk, timestamp: u64) -> Payload {
         self.sequence += 1;
         let disk_name = disk_data.name().to_string_lossy().to_string();
         let disk =
             self.map.entry(disk_name.clone()).or_insert_with(|| Disk::init(disk_name, disk_data));
         disk.update(disk_data, timestamp, self.sequence);
-        self.stream.push(disk.clone())?;
 
-        Ok(())
+        disk.into()
     }
 }
 
@@ -237,31 +274,36 @@ impl Processor {
     }
 }
 
-impl Point for Processor {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
+impl From<&mut Processor> for Payload {
+    fn from(value: &mut Processor) -> Self {
+        let Processor { sequence, timestamp, name, frequency, usage } = value;
 
-    fn timestamp(&self) -> u64 {
-        self.timestamp
+        Payload {
+            stream: "uplink_process_stats".to_owned(),
+            sequence: *sequence,
+            timestamp: *timestamp,
+            payload: json!({
+                "name": name,
+                "frequency": frequency,
+                "usage": usage,
+            }),
+        }
     }
 }
 
 struct ProcessorStats {
     sequence: u32,
     map: HashMap<String, Processor>,
-    stream: Stream<Processor>,
 }
 
 impl ProcessorStats {
-    fn push(&mut self, proc_data: &sysinfo::Cpu, timestamp: u64) -> Result<(), bridge::Error> {
+    fn push(&mut self, proc_data: &sysinfo::Cpu, timestamp: u64) -> Payload {
         let proc_name = proc_data.name().to_string();
         self.sequence += 1;
         let proc = self.map.entry(proc_name.clone()).or_insert_with(|| Processor::init(proc_name));
         proc.update(proc_data, timestamp, self.sequence);
-        self.stream.push(proc.clone())?;
 
-        Ok(())
+        proc.into()
     }
 }
 
@@ -285,49 +327,43 @@ impl Component {
     }
 }
 
-impl Point for Component {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
+impl From<&mut Component> for Payload {
+    fn from(value: &mut Component) -> Self {
+        let Component { sequence, timestamp, label, temperature } = value;
 
-    fn timestamp(&self) -> u64 {
-        self.timestamp
+        Payload {
+            stream: "uplink_component_stats".to_owned(),
+            sequence: *sequence,
+            timestamp: *timestamp,
+            payload: json!({
+                "label": label, "temperature": temperature
+            }),
+        }
     }
 }
 
 struct ComponentStats {
     sequence: u32,
     map: HashMap<String, Component>,
-    stream: Stream<Component>,
 }
 
 impl ComponentStats {
-    fn push(
-        &mut self,
-        comp_data: &sysinfo::Component,
-        timestamp: u64,
-    ) -> Result<(), bridge::Error> {
+    fn push(&mut self, comp_data: &sysinfo::Component, timestamp: u64) -> Payload {
         let comp_label = comp_data.label().to_string();
         self.sequence += 1;
         let comp =
             self.map.entry(comp_label.clone()).or_insert_with(|| Component::init(comp_label));
         comp.update(comp_data, timestamp, self.sequence);
-        self.stream.push(comp.clone())?;
 
-        Ok(())
+        comp.into()
     }
 
-    fn push_custom(
-        &mut self,
-        mut comp_data: Component,
-        timestamp: u64,
-    ) -> Result<(), bridge::Error> {
+    fn push_custom(&mut self, mut comp_data: Component, timestamp: u64) -> Payload {
         self.sequence += 1;
         comp_data.timestamp = timestamp;
         comp_data.sequence = self.sequence;
-        self.stream.push(comp_data)?;
 
-        Ok(())
+        (&mut comp_data).into()
     }
 }
 
@@ -365,20 +401,44 @@ impl Process {
     }
 }
 
-impl Point for Process {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
+impl From<&mut Process> for Payload {
+    fn from(value: &mut Process) -> Self {
+        let Process {
+            sequence,
+            timestamp,
+            pid,
+            name,
+            cpu_usage,
+            mem_usage,
+            disk_total_written_bytes,
+            disk_written_bytes,
+            disk_total_read_bytes,
+            disk_read_bytes,
+            start_time,
+        } = value;
 
-    fn timestamp(&self) -> u64 {
-        self.timestamp
+        Payload {
+            stream: "uplink_process_stats".to_owned(),
+            sequence: *sequence,
+            timestamp: *timestamp,
+            payload: json!({
+                "pid": pid,
+                "name": name,
+                "cpu_usage": cpu_usage,
+                "mem_usage": mem_usage,
+                "disk_total_written_bytes": disk_total_written_bytes,
+                "disk_written_bytes": disk_written_bytes,
+                "disk_total_read_bytes": disk_total_read_bytes,
+                "disk_read_bytes": disk_read_bytes,
+                "start_time": start_time,
+            }),
+        }
     }
 }
 
 struct ProcessStats {
     sequence: u32,
     map: HashMap<Pid, Process>,
-    stream: Stream<Process>,
 }
 
 impl ProcessStats {
@@ -388,14 +448,13 @@ impl ProcessStats {
         proc_data: &sysinfo::Process,
         name: String,
         timestamp: u64,
-    ) -> Result<(), bridge::Error> {
+    ) -> Payload {
         self.sequence += 1;
         let proc =
             self.map.entry(id).or_insert_with(|| Process::init(id, name, proc_data.start_time()));
         proc.update(proc_data, timestamp, self.sequence);
-        self.stream.push(proc.clone())?;
 
-        Ok(())
+        proc.into()
     }
 }
 
@@ -418,11 +477,13 @@ pub struct StatCollector {
     components: ComponentStats,
     /// Uplink configuration.
     config: Arc<Config>,
+    /// Handle to send stats as payload onto bridge
+    bridge_tx: BridgeTx,
 }
 
 impl StatCollector {
     /// Create and initialize a stat collector
-    pub fn new(config: Arc<Config>, tx: Sender<Box<dyn Package>>) -> Self {
+    pub fn new(config: Arc<Config>, bridge_tx: BridgeTx) -> Self {
         let mut sys = sysinfo::System::new();
         sys.refresh_disks_list();
         sys.refresh_networks_list();
@@ -430,77 +491,42 @@ impl StatCollector {
         sys.refresh_cpu();
         sys.refresh_components();
 
-        let max_buf_size = config.stats.stream_size.unwrap_or(10);
-
         let mut map = HashMap::new();
-        let stream = Stream::dynamic_with_size(
-            "uplink_disk_stats",
-            &config.project_id,
-            &config.device_id,
-            max_buf_size,
-            tx.clone(),
-        );
         for disk_data in sys.disks() {
             let disk_name = disk_data.name().to_string_lossy().to_string();
             map.insert(disk_name.clone(), Disk::init(disk_name, disk_data));
         }
-        let disks = DiskStats { sequence: 0, map, stream };
+        let disks = DiskStats { sequence: 0, map };
 
         let mut map = HashMap::new();
-        let stream = Stream::dynamic_with_size(
-            "uplink_network_stats",
-            &config.project_id,
-            &config.device_id,
-            max_buf_size,
-            tx.clone(),
-        );
         for (net_name, _) in sys.networks() {
             map.insert(net_name.to_owned(), Network::init(net_name.to_owned()));
         }
-        let networks = NetworkStats { sequence: 0, map, stream };
+        let networks = NetworkStats { sequence: 0, map };
 
         let mut map = HashMap::new();
-        let stream = Stream::dynamic_with_size(
-            "uplink_processor_stats",
-            &config.project_id,
-            &config.device_id,
-            max_buf_size,
-            tx.clone(),
-        );
         for proc in sys.cpus().iter() {
             let proc_name = proc.name().to_owned();
             map.insert(proc_name.clone(), Processor::init(proc_name));
         }
-        let processors = ProcessorStats { sequence: 0, map, stream };
+        let processors = ProcessorStats { sequence: 0, map };
 
-        let stream = Stream::dynamic_with_size(
-            "uplink_process_stats",
-            &config.project_id,
-            &config.device_id,
-            max_buf_size,
-            tx.clone(),
-        );
-        let processes = ProcessStats { sequence: 0, map: HashMap::new(), stream };
+        let processes = ProcessStats { sequence: 0, map: HashMap::new() };
+        let components = ComponentStats { sequence: 0, map: HashMap::new() };
 
-        let stream = Stream::dynamic_with_size(
-            "uplink_component_stats",
-            &config.project_id,
-            &config.device_id,
-            max_buf_size,
-            tx.clone(),
-        );
-        let components = ComponentStats { sequence: 0, map: HashMap::new(), stream };
+        let system = SystemStats { stat: System::init(&sys) };
 
-        let stream = Stream::dynamic_with_size(
-            "uplink_system_stats",
-            &config.project_id,
-            &config.device_id,
-            max_buf_size,
-            tx.clone(),
-        );
-        let system = SystemStats { stat: System::init(&sys), stream };
-
-        StatCollector { sys, system, config, processes, disks, networks, processors, components }
+        StatCollector {
+            sys,
+            system,
+            config,
+            processes,
+            disks,
+            networks,
+            processors,
+            components,
+            bridge_tx,
+        }
     }
 
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
@@ -520,18 +546,16 @@ impl StatCollector {
         self.sys.refresh_memory();
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-        if let Err(e) = self.system.push(&self.sys, timestamp) {
-            error!("Couldn't send system stats: {}", e);
-        }
+        let payload = self.system.push(&self.sys, timestamp);
+        self.bridge_tx.send_payload_sync(payload);
 
         // Refresh disk info
         self.sys.refresh_disks();
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for disk_data in self.sys.disks() {
-            if let Err(e) = self.disks.push(disk_data, timestamp) {
-                error!("Couldn't send disk stats: {}", e);
-            }
+            let payload = self.disks.push(disk_data, timestamp);
+            self.bridge_tx.send_payload_sync(payload);
         }
 
         // Refresh network byte rate info
@@ -539,9 +563,8 @@ impl StatCollector {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for (net_name, net_data) in self.sys.networks() {
-            if let Err(e) = self.networks.push(net_name.to_owned(), net_data, timestamp) {
-                error!("Couldn't send network stats: {}", e);
-            }
+            let payload = self.networks.push(net_name.to_owned(), net_data, timestamp);
+            self.bridge_tx.send_payload_sync(payload);
         }
 
         // Refresh processor info
@@ -549,9 +572,8 @@ impl StatCollector {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for proc_data in self.sys.cpus().iter() {
-            if let Err(e) = self.processors.push(proc_data, timestamp) {
-                error!("Couldn't send processor stats: {}", e);
-            }
+            let payload = self.processors.push(proc_data, timestamp);
+            self.bridge_tx.send_payload_sync(payload);
         }
 
         // Refresh component info
@@ -559,9 +581,8 @@ impl StatCollector {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for comp_data in self.sys.components().iter() {
-            if let Err(e) = self.components.push(comp_data, timestamp) {
-                error!("Couldn't send component stats: {}", e);
-            }
+            let payload = self.components.push(comp_data, timestamp);
+            self.bridge_tx.send_payload_sync(payload);
         }
         let files = glob::glob("/sys/devices/virtual/thermal/thermal_zone*/temp")?;
         for thermal_zone in files {
@@ -571,9 +592,8 @@ impl StatCollector {
             let label = "thermal_zone".to_owned() + &label;
             let temperature = std::fs::read_to_string(path)?.trim().parse::<f32>()?;
             let comp_data = Component { label, temperature, ..Default::default() };
-            if let Err(e) = self.components.push_custom(comp_data, timestamp) {
-                error!("Couldn't send temperature stats: {}", e);
-            }
+            let payload = self.components.push_custom(comp_data, timestamp);
+            self.bridge_tx.send_payload_sync(payload);
         }
 
         // Refresh processes info
@@ -587,9 +607,8 @@ impl StatCollector {
             let name = p.name().to_owned();
 
             if self.config.stats.process_names.contains(&name) {
-                if let Err(e) = self.processes.push(id.as_u32(), p, name, timestamp) {
-                    error!("Couldn't send process stats: {}", e);
-                }
+                let payload = self.processes.push(id.as_u32(), p, name, timestamp);
+                self.bridge_tx.send_payload_sync(payload);
             }
         }
 
