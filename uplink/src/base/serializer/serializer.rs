@@ -518,7 +518,7 @@ pub fn check_and_flush_metrics(
     }
 
     // Force send when there's pending metrics. This usually signifies state change
-    if force || metrics.batch_count() > 0 {
+    if force || metrics.batches() > 0 {
         metrics_tx.try_send(metrics.clone())?;
         metrics.prepare_next();
     }

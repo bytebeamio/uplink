@@ -131,7 +131,7 @@ impl Mqtt {
                     }
                 }
                 Err(e) => {
-                    self.metrics.add_disconnection();
+                    self.metrics.add_reconnection();
                     error!("Connection error = {:?}", e.to_string());
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
