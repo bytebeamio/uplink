@@ -20,8 +20,8 @@ pub struct Storage {
     current_write_file: BytesMut,
     /// current_read_file
     current_read_file: BytesMut,
-
-    read_file_id: Option<u64>,
+    /// id of file being read, delete it on read completion
+    current_read_file_id: Option<u64>,
 }
 
 impl Storage {
@@ -40,7 +40,7 @@ impl Storage {
             max_file_count,
             current_write_file: BytesMut::with_capacity(max_file_size * 2),
             current_read_file: BytesMut::with_capacity(max_file_size * 2),
-            read_file_id: None,
+            current_read_file_id: None,
         })
     }
 
@@ -129,7 +129,7 @@ impl Storage {
         let metadata = fs::metadata(&next_file_path)?;
         self.prepare_current_read_buffer(metadata.len() as usize);
         file.read_exact(&mut self.current_read_file[..])?;
-        self.read_file_id = Some(id);
+        self.current_read_file_id = Some(id);
 
         Ok(false)
     }
@@ -145,8 +145,8 @@ impl Storage {
             return Ok(false);
         }
 
-        // Remove last file on finishing read
-        if let Some(id) = self.read_file_id.take() {
+        // Remove read file on completion
+        if let Some(id) = self.current_read_file_id.take() {
             self.remove(id)?;
         }
 
@@ -319,12 +319,12 @@ mod test {
         write_n_publishes(&mut storage, 105);
 
         // Initially not on a read file
-        assert_eq!(storage.read_file_id, None);
+        assert_eq!(storage.current_read_file_id, None);
 
         // Successfully read 10 files with files still in storage after 10 reads
         for i in 0..10 {
             read_n_publishes(&mut storage, 10);
-            let file_id = storage.read_file_id.unwrap();
+            let file_id = storage.current_read_file_id.unwrap();
             assert_eq!(file_id, i);
             // Ensure file exists
             let next_file_path =
@@ -334,6 +334,6 @@ mod test {
 
         // All read files should be deleted just after 1 more read
         read_n_publishes(&mut storage, 1);
-        assert_eq!(storage.read_file_id, None);
+        assert_eq!(storage.current_read_file_id, None);
     }
 }
