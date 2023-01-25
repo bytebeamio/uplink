@@ -13,7 +13,7 @@ pub struct MqttMetrics {
     inflight: u16,
     actions_received: usize,
     connections: usize,
-    reconnections: usize,
+    connection_retries: usize,
 }
 
 impl MqttMetrics {
@@ -28,7 +28,7 @@ impl MqttMetrics {
             inflight: 0,
             actions_received: 0,
             connections: 0,
-            reconnections: 0,
+            connection_retries: 0,
         }
     }
 
@@ -53,7 +53,7 @@ impl MqttMetrics {
     }
 
     pub fn add_reconnection(&mut self) {
-        self.reconnections += 1;
+        self.connection_retries += 1;
     }
 
     pub fn add_action(&mut self) {
@@ -72,7 +72,7 @@ impl MqttMetrics {
         self.ping_requests = 0;
         self.ping_responses = 0;
         self.connections = 0;
-        self.reconnections = 0;
+        self.connection_retries = 0;
         self.inflight = 0;
     }
 }

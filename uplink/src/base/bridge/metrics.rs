@@ -10,7 +10,7 @@ pub struct StreamMetrics {
     stream: String,
     points: usize,
     batches: u64,
-    max_batches: usize,
+    max_batch_points: usize,
     #[serde(skip_serializing)]
     batch_start_time: Instant,
     #[serde(skip_serializing)]
@@ -21,14 +21,14 @@ pub struct StreamMetrics {
 }
 
 impl StreamMetrics {
-    pub fn new(name: &str, max_batches: usize) -> Self {
+    pub fn new(name: &str, max_batch_points: usize) -> Self {
         StreamMetrics {
             stream: name.to_owned(),
             timestamp: utils::clock(),
             sequence: 1,
             points: 0,
             batches: 0,
-            max_batches,
+            max_batch_points,
             batch_start_time: Instant::now(),
             total_latency: 0,
             average_batch_latency: 0,
