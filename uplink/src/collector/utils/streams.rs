@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use flume::Sender;
-use log::{error, info};
+use log::{error, info, trace};
 use tokio::time::{interval, Interval};
 
 use crate::base::bridge::{self, StreamMetrics, StreamStatus};
@@ -81,7 +81,7 @@ impl Streams {
             match state {
                 StreamStatus::Flushed(name) => self.stream_timeouts.remove(name),
                 StreamStatus::Init(name, flush_period) => {
-                    info!("Initialized stream buffer for {}", name);
+                    trace!("Initialized stream buffer for {}", name);
                     self.stream_timeouts.insert(name, flush_period);
                 }
                 StreamStatus::Partial(_l) => {}
