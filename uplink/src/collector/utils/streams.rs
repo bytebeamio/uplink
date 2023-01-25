@@ -102,7 +102,7 @@ impl Streams {
             let metrics = data.metrics.clone();
 
             // Initialize metrics timeouts when force flush sees data counts
-            if metrics.point_count() > 0 {
+            if metrics.points() > 0 {
                 self.metrics_tx.try_send(metrics)?;
                 data.metrics.prepare_next();
             }

@@ -7,7 +7,7 @@ pub struct SerializerMetrics {
     pub timestamp: u128,
     pub sequence: u32,
     mode: String,
-    batch_count: usize,
+    batches: usize,
     memory_size: usize,
     disk_files: usize,
     lost_segments: usize,
@@ -20,7 +20,7 @@ impl SerializerMetrics {
             timestamp: clock(),
             sequence: 1,
             mode: mode.to_owned(),
-            batch_count: 0,
+            batches: 0,
             memory_size: 0,
             disk_files: 0,
             lost_segments: 0,
@@ -32,13 +32,13 @@ impl SerializerMetrics {
         self.mode = name.to_owned();
     }
 
-    pub fn batch_count(&self) -> usize {
-        self.batch_count
+    pub fn batches(&self) -> usize {
+        self.batches
     }
 
     pub fn add_batch(&mut self) {
-        self.batch_count += 1;
-        if self.batch_count == 1 {
+        self.batches += 1;
+        if self.batches == 1 {
             self.timestamp = utils::clock();
         }
     }
@@ -62,7 +62,7 @@ impl SerializerMetrics {
     pub fn prepare_next(&mut self) {
         self.timestamp = clock();
         self.sequence += 1;
-        self.batch_count = 0;
+        self.batches = 0;
         self.memory_size = 0;
         self.disk_files = 0;
         self.lost_segments = 0;
