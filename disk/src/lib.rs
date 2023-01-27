@@ -1,11 +1,10 @@
 use bytes::{Buf, BufMut, BytesMut};
-use data_encoding::HEXUPPER;
 use glob::glob;
 use log::{self, info, warn};
-use ring::digest::{Context, Digest, SHA256};
+use seahash::hash;
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, Read, Write};
+use std::io::{self, Read, Write};
 use std::mem;
 use std::path::{Path, PathBuf};
 
@@ -17,27 +16,14 @@ pub enum Error {
     Pattern(#[from] glob::PatternError),
     #[error("Glob error: {0}")]
     Glob(#[from] glob::GlobError),
+    #[error("Parse Int error: {0}")]
+    ParseInt(#[from] std::num::ParseIntError),
     #[error("Not a backup file")]
     NotBackup,
     #[error("Missing backup file")]
     MissingFile,
     #[error("Corrupted backup file")]
     CorruptedFile,
-}
-
-fn sha256_digest<R: Read>(mut reader: R) -> Result<Digest, Error> {
-    let mut context = Context::new(&SHA256);
-    let mut buffer = [0; 1024];
-
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        context.update(&buffer[..count]);
-    }
-
-    Ok(context.finish())
 }
 
 pub struct Storage {
@@ -114,22 +100,6 @@ impl Storage {
         Ok(())
     }
 
-    fn write_buffer_checksum(&self) -> Result<String, Error> {
-        let buf = BufReader::new(&self.current_write_file[..]);
-        let digest = sha256_digest(buf)?;
-        let hash = HEXUPPER.encode(digest.as_ref());
-
-        Ok(hash)
-    }
-
-    fn read_buffer_checksum(&self) -> Result<String, Error> {
-        let buf = BufReader::new(&self.current_read_file[..]);
-        let digest = sha256_digest(buf)?;
-        let hash = HEXUPPER.encode(digest.as_ref());
-
-        Ok(hash)
-    }
-
     /// Initializes read buffer before reading data from the file
     fn prepare_current_read_buffer(&mut self, file_len: usize) {
         self.current_read_file.clear();
@@ -139,7 +109,7 @@ impl Storage {
 
     /// Opens file to flush current inmemory write buffer to disk.
     /// Also handles retention of previous files on disk
-    fn open_next_write_file(&mut self, hash: String) -> Result<NextFile, Error> {
+    fn open_next_write_file(&mut self, hash: u64) -> Result<NextFile, Error> {
         let next_file_id = self.backlog_file_ids.last().map_or(0, |id| id + 1);
         let next_file_path = self.backup_path.join(&format!("backup@{next_file_id}.{hash}"));
         let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
@@ -162,7 +132,7 @@ impl Storage {
     /// Flushes what ever is in current write buffer into a new file on the disk
     #[inline]
     fn flush(&mut self) -> Result<Option<u64>, Error> {
-        let hash = self.write_buffer_checksum()?;
+        let hash = hash(&self.current_write_file[..]);
         let mut next_file = self.open_next_write_file(hash)?;
         info!("Flushing data to disk!! {:?}", next_file.path);
         next_file.file.write_all(&self.current_write_file[..])?;
@@ -210,12 +180,13 @@ impl Storage {
         let metadata = fs::metadata(&next_file_path)?;
         self.prepare_current_read_buffer(metadata.len() as usize);
         file.read_exact(&mut self.current_read_file[..])?;
-        let actual_hash = self.read_buffer_checksum()?;
+        let actual_hash = hash(&self.current_read_file[..]);
         self.current_read_file_id = Some(id);
 
         // Verify with checksum
         if let Some(hash) = next_file_path.extension() {
-            if actual_hash.as_str() != hash.to_os_string() {
+            let expected_hash: u64 = hash.to_string_lossy().parse()?;
+            if actual_hash != expected_hash {
                 self.handle_corrupt_file()?;
                 return Err(Error::CorruptedFile);
             }
