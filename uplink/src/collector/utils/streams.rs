@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use flume::Sender;
-use log::{error, info, trace};
+use log::{error, trace};
 use tokio::time::{interval, Interval};
 
 use crate::base::bridge::{self, StreamMetrics, StreamStatus};
@@ -46,22 +46,27 @@ impl Streams {
     }
 
     pub async fn forward(&mut self, data: Payload) {
-        let stream = match self.map.get_mut(&data.stream) {
+        let (stream_name, device_id) = match &data.device_id {
+            Some(device_id) => (format!("{device_id}/{}", data.stream), device_id.to_owned()),
+            _ => (data.stream.to_owned(), self.config.device_id.to_owned()),
+        };
+
+        let stream = match self.map.get_mut(&stream_name) {
             Some(partition) => partition,
             None => {
                 if self.map.keys().len() > 20 {
-                    error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
+                    error!("Failed to create {:?} stream. More than max 20 streams", stream_name);
                     return;
                 }
 
                 let stream = Stream::dynamic(
-                    &data.stream,
+                    &stream_name,
                     &self.config.project_id,
-                    &self.config.device_id,
+                    &device_id,
                     self.data_tx.clone(),
                 );
 
-                self.map.entry(data.stream.to_owned()).or_insert(stream)
+                self.map.entry(stream_name.to_owned()).or_insert(stream)
             }
         };
 

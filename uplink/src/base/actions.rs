@@ -27,6 +27,8 @@ pub struct Action {
 pub struct ActionResponse {
     #[serde(alias = "id")]
     pub action_id: String,
+    #[serde(skip)]
+    pub device_id: Option<String>,
     // sequence number
     pub sequence: u32,
     // timestamp
@@ -48,6 +50,7 @@ impl ActionResponse {
 
         ActionResponse {
             action_id: id.to_owned(),
+            device_id: None,
             sequence: 0,
             timestamp,
             state: state.to_owned(),
@@ -101,6 +104,7 @@ impl From<&ActionResponse> for Payload {
     fn from(resp: &ActionResponse) -> Self {
         Self {
             stream: "action_status".to_owned(),
+            device_id: resp.device_id.to_owned(),
             sequence: resp.sequence,
             timestamp: resp.timestamp,
             payload: json!({
