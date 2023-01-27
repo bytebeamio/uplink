@@ -54,7 +54,7 @@ impl Streams {
         let stream = match self.map.get_mut(&stream_name) {
             Some(partition) => partition,
             None => {
-                if self.map.keys().len() > 20 {
+                if self.config.simulator.is_none() && self.map.keys().len() > 20 {
                     error!("Failed to create {:?} stream. More than max 20 streams", stream_name);
                     return;
                 }
