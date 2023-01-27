@@ -93,9 +93,14 @@ impl Storage {
     /// Move corrupt file to special directory
     fn handle_corrupt_file(&self) -> Result<(), Error> {
         let id = self.current_read_file_id.expect("There is supposed to be a file here");
-        let path_src = self.backup_path.join(&format!("backup@{}", id));
-        let path_dest = self.backup_path.join(&format!("corrupted\\backup@{}", id));
-        fs::create_dir_all(&path_dest)?;
+        let path_src = self.get_read_file_path(id)?;
+        let dest_dir = self.backup_path.join("corrupted");
+        fs::create_dir_all(&dest_dir)?;
+        
+        let file_name = path_src.file_name().expect("The file name should exist");
+        let path_dest = dest_dir.join(file_name);
+
+        warn!("Moving corrupted file from {path_src:?} to {path_dest:?}");
         fs::rename(path_src, path_dest)?;
         Ok(())
     }
