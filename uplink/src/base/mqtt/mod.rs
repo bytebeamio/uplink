@@ -155,11 +155,10 @@ impl Mqtt {
             let mut tokens = tokens.iter();
             while let Some(token) = tokens.next() {
                 if token == &"devices" {
-                    action.device_id = tokens.next().unwrap().to_string();
+                    let device_id = tokens.next().unwrap().to_string();
+                    action.device_id = Some(device_id);
                 }
             }
-        } else {
-            action.device_id = self.config.device_id.clone();
         }
 
         info!("Action = {:?}", action);

@@ -11,7 +11,7 @@ use crate::{Payload, Point};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
     #[serde(skip)]
-    pub device_id: String,
+    pub device_id: Option<String>,
     // action id
     #[serde(alias = "id")]
     pub action_id: String,

@@ -551,14 +551,17 @@ pub async fn process_events(events: &mut BinaryHeap<Event>, bridge_tx: &BridgeTx
     }
 }
 
-pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
-    info!("Generating action events {}", action.action_id);
+pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
+    let action_id = action.action_id;
+    let device_id = action.device_id.unwrap();
+
+    info!("Generating action events for action: {action_id} on device: {device_id}");
     let now = Instant::now() + Duration::from_millis(rand::thread_rng().gen_range(0..5000));
 
     for i in 1..100 {
         events.push(Event::ActionResponseEvent(ActionResponseEvent {
-            action_id: action.action_id.clone(),
-            device_id: action.device_id.clone(),
+            action_id: action_id.clone(),
+            device_id: device_id.clone(),
             progress: i,
             status: String::from("in_progress"),
             timestamp: now + Duration::from_secs(i as u64),
@@ -566,8 +569,8 @@ pub fn generate_action_events(action: &Action, events: &mut BinaryHeap<Event>) {
     }
 
     events.push(Event::ActionResponseEvent(ActionResponseEvent {
-        action_id: action.action_id.clone(),
-        device_id: action.device_id.clone(),
+        action_id: action_id.clone(),
+        device_id: device_id.clone(),
         progress: 100,
         status: String::from("Completed"),
         timestamp: now + Duration::from_secs(100),
@@ -609,7 +612,7 @@ pub async fn start(bridge_tx: BridgeTx, simulator_config: &SimulatorConfig) -> R
         select! {
             action = actions_rx.recv_async() => {
                 let action = action?;
-                generate_action_events(&action, &mut events);
+                generate_action_events(action, &mut events);
             }
             _ = process_events(&mut events, &bridge_tx) => {
             }
