@@ -1,5 +1,4 @@
 use bytes::{Buf, BufMut, BytesMut};
-use glob::glob;
 use log::{self, info, warn};
 use seahash::hash;
 
@@ -12,16 +11,8 @@ use std::path::{Path, PathBuf};
 pub enum Error {
     #[error("Io error: {0}")]
     Io(#[from] io::Error),
-    #[error("Pattern error: {0}")]
-    Pattern(#[from] glob::PatternError),
-    #[error("Glob error: {0}")]
-    Glob(#[from] glob::GlobError),
-    #[error("Parse Int error: {0}")]
-    ParseInt(#[from] std::num::ParseIntError),
     #[error("Not a backup file")]
     NotBackup,
-    #[error("Missing backup file")]
-    MissingFile,
     #[error("Corrupted backup file")]
     CorruptedFile,
 }
@@ -51,6 +42,7 @@ impl Storage {
     ) -> Result<Storage, Error> {
         let backup_path = backlog_dir.into();
         let backlog_file_ids = get_file_ids(&backup_path)?;
+        info!("List of file ids loaded from disk: {backlog_file_ids:?}");
 
         Ok(Storage {
             backlog_file_ids,
@@ -96,7 +88,7 @@ impl Storage {
         let path_src = self.get_read_file_path(id)?;
         let dest_dir = self.backup_path.join("corrupted");
         fs::create_dir_all(&dest_dir)?;
-        
+
         let file_name = path_src.file_name().expect("The file name should exist");
         let path_dest = dest_dir.join(file_name);
 
@@ -114,9 +106,10 @@ impl Storage {
 
     /// Opens file to flush current inmemory write buffer to disk.
     /// Also handles retention of previous files on disk
-    fn open_next_write_file(&mut self, hash: u64) -> Result<NextFile, Error> {
+    fn open_next_write_file(&mut self) -> Result<NextFile, Error> {
         let next_file_id = self.backlog_file_ids.last().map_or(0, |id| id + 1);
-        let next_file_path = self.backup_path.join(&format!("backup@{next_file_id}.{hash}"));
+        let file_name = format!("backup@{next_file_id}");
+        let next_file_path = self.backup_path.join(file_name);
         let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
         self.backlog_file_ids.push(next_file_id);
 
@@ -138,8 +131,9 @@ impl Storage {
     #[inline]
     fn flush(&mut self) -> Result<Option<u64>, Error> {
         let hash = hash(&self.current_write_file[..]);
-        let mut next_file = self.open_next_write_file(hash)?;
+        let mut next_file = self.open_next_write_file()?;
         info!("Flushing data to disk!! {:?}", next_file.path);
+        next_file.file.write_all(&hash.to_be_bytes())?;
         next_file.file.write_all(&self.current_write_file[..])?;
         next_file.file.flush()?;
         self.current_write_file.clear();
@@ -157,9 +151,8 @@ impl Storage {
     }
 
     fn get_read_file_path(&self, id: u64) -> Result<PathBuf, Error> {
-        let backup_path = format!("{}/backup@{id}.*", self.backup_path.display());
-        let files = glob(&backup_path)?;
-        let path = files.last().ok_or(Error::MissingFile)??;
+        let file_name = format!("backup@{id}");
+        let path = self.backup_path.join(file_name);
 
         Ok(path)
     }
@@ -185,16 +178,14 @@ impl Storage {
         let metadata = fs::metadata(&next_file_path)?;
         self.prepare_current_read_buffer(metadata.len() as usize);
         file.read_exact(&mut self.current_read_file[..])?;
-        let actual_hash = hash(&self.current_read_file[..]);
         self.current_read_file_id = Some(id);
 
         // Verify with checksum
-        if let Some(hash) = next_file_path.extension() {
-            let expected_hash: u64 = hash.to_string_lossy().parse()?;
-            if actual_hash != expected_hash {
-                self.handle_corrupt_file()?;
-                return Err(Error::CorruptedFile);
-            }
+        let expected_hash = self.current_read_file.get_u64();
+        let actual_hash = hash(&self.current_read_file[..]);
+        if actual_hash != expected_hash {
+            self.handle_corrupt_file()?;
+            return Err(Error::CorruptedFile);
         }
 
         Ok(false)
