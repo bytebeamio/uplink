@@ -350,10 +350,7 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Pay
         timestamp,
         device_id: Some(device.device_id.to_owned()),
         sequence,
-        stream: format!(
-            "/tenants/demo/devices/{}/events/peripheral_state/jsonarray",
-            device.device_id
-        ),
+        stream: "peripheral_state".to_string(),
         payload: json!(payload),
     }
 }
@@ -386,10 +383,7 @@ pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payloa
         timestamp,
         device_id: Some(device.device_id.to_owned()),
         sequence,
-        stream: format!(
-            "/tenants/demo/devices/{}/events/device_shadow/jsonarray",
-            device.device_id
-        ),
+        stream: "device_shadow".to_string(),
         payload: json!(payload),
     }
 }
