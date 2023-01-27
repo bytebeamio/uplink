@@ -115,14 +115,25 @@ impl Storage {
 
         let mut next = NextFile { path: next_file_path, file: next_file, deleted: None };
 
-        let backlog_files_count = self.backlog_file_ids.len();
-        if backlog_files_count > self.max_file_count {
-            // Backlog should always be > 0 given the earliest push. doesn't panic
-            let id = self.backlog_file_ids.remove(0);
-            warn!("file limit reached. deleting backup@{}", id);
-            next.deleted = Some(id);
-            self.remove(id)?;
+        let mut backlog_files_count = self.backlog_file_ids.len();
+        // File being read is also to be considered
+        if self.current_read_file_id.is_some() {
+            backlog_files_count += 1
         }
+        // Return next file details if backlog is within limits
+        if backlog_files_count <= self.max_file_count {
+            return Ok(next);
+        }
+
+        // Remove file being read, or first in backlog
+        // NOTE: keeps read buffer unchanged
+        let id = match self.current_read_file_id.take() {
+            Some(id) => id,
+            _ => self.backlog_file_ids.remove(0),
+        };
+        warn!("file limit reached. deleting backup@{}", id);
+        next.deleted = Some(id);
+        self.remove(id)?;
 
         Ok(next)
     }
@@ -157,24 +168,14 @@ impl Storage {
         Ok(path)
     }
 
-    /// Reloads next buffer even if there is pending data in current buffer
-    fn reload(&mut self) -> Result<bool, Error> {
-        // Swap read buffer with write buffer to read data in inmemory write
-        // buffer when all the backlog disk files are done
-        if self.backlog_file_ids.is_empty() {
-            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
-
-            // If read buffer is 0 after swapping, all the data is caught up
-            return if self.current_read_file.is_empty() { Ok(true) } else { Ok(false) };
-        }
-
+    fn load_next_read_file(&mut self) -> Result<(), Error> {
         // Len always > 0 because of above if. Doesn't panic
         let id = self.backlog_file_ids.remove(0);
         let next_file_path = self.get_read_file_path(id)?;
 
         let mut file = OpenOptions::new().read(true).open(&next_file_path)?;
 
-        // Load file into memory and delete it
+        // Load file into memory and store its id for deleting in the future
         let metadata = fs::metadata(&next_file_path)?;
         self.prepare_current_read_buffer(metadata.len() as usize);
         file.read_exact(&mut self.current_read_file[..])?;
@@ -187,6 +188,22 @@ impl Storage {
             self.handle_corrupt_file()?;
             return Err(Error::CorruptedFile);
         }
+
+        Ok(())
+    }
+
+    /// Reloads next buffer even if there is pending data in current buffer
+    fn reload(&mut self) -> Result<bool, Error> {
+        // Swap read buffer with write buffer to read data in inmemory write
+        // buffer when all the backlog disk files are done
+        if self.backlog_file_ids.is_empty() {
+            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
+
+            // If read buffer is 0 after swapping, all the data is caught up
+            return if self.current_read_file.is_empty() { Ok(true) } else { Ok(false) };
+        }
+
+        self.load_next_read_file()?;
 
         Ok(false)
     }
