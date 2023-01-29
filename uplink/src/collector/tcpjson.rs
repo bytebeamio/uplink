@@ -60,7 +60,7 @@ impl TcpJson {
                 Ok((stream, addr)) => {
                     info!("{}: Accepted new connection from {:?}", self.name, addr);
                     Framed::new(stream, LinesCodec::new())
-                },
+                }
                 Err(e) => {
                     error!("Tcp connection accept error = {:?}", e);
                     continue;
@@ -73,49 +73,42 @@ impl TcpJson {
         }
     }
 
-    pub async fn collect(
-        &mut self,
-        mut client: Framed<TcpStream, LinesCodec>,
-    ) -> Result<(), Error> {
+    async fn collect(&mut self, mut client: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
         loop {
             select! {
                 line = client.next() => {
                     let line = line.ok_or(Error::StreamDone)??;
-                    trace!("{}: Received line = {:?}", self.name, line);
-                    let data = match serde_json::from_str::<Payload>(&line) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            error!("Deserialization error = {:?}", e);
-                            continue
-                        }
-                    };
-
-                    if data.stream == "action_status" {
-                        let response = match ActionResponse::from_payload(&data) {
-                            Ok(response) => response,
-                            Err(e) => {
-                                error!("Couldn't parse payload as an action response: {e:?}");
-                                continue;
-                            }
-                        };
-
-                        self.bridge.send_action_response(response).await;
-                        continue
+                    if let Err(e) = self.handle_incoming_line(line).await {
+                        error!("Error handling incoming line = {e}");
                     }
-
-                    self.bridge.send_payload(data).await;
                 }
                 action = self.actions_rx.recv_async() => {
                     let action = action?;
                     match serde_json::to_string(&action) {
                         Ok(data) => client.send(data).await?,
                         Err(e) => {
-                            error!("Serialization error = {:?}", e);
+                            error!("Serialization error = {e}");
                             continue
                         }
                     }
                 }
             }
         }
+    }
+
+    async fn handle_incoming_line(&self, line: String) -> Result<(), Error> {
+        trace!("{}: Received line = {:?}", self.name, line);
+        let data = serde_json::from_str::<Payload>(&line)?;
+
+        if data.stream == "action_status" {
+            let response = ActionResponse::from_payload(&data)?;
+            self.bridge.send_action_response(response).await;
+
+            return Ok(());
+        }
+
+        self.bridge.send_payload(data).await;
+
+        Ok(())
     }
 }
