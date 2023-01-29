@@ -155,19 +155,22 @@ fn main() -> Result<(), Error> {
         });
     }
 
-    for (app, cfg) in config.applications.iter() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_io()
-            .thread_name(format!("tcpjson: {app}"))
-            .build()
-            .unwrap();
-        let bridge = bridge.clone();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .thread_name("tcpjson")
+        .build()
+        .unwrap();
 
-        rt.block_on(async {
-            if let Err(e) = TcpJson::new(app.to_owned(), cfg.clone(), bridge).start().await {
+    rt.block_on(async {
+        for (app, cfg) in config.applications.iter() {
+            let bridge = bridge.clone();
+            let actions_rx = bridge.register_action_routes(&cfg.actions).await;
+            if let Err(e) =
+                TcpJson::new(app.to_owned(), cfg.clone(), bridge, actions_rx).start().await
+            {
                 error!("App failed. Error = {:?}", e);
             }
-        });
-    }
+        }
+    });
     Ok(())
 }

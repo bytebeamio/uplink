@@ -1,4 +1,4 @@
-use flume::{RecvError, SendError};
+use flume::{Receiver, RecvError, SendError};
 use futures_util::SinkExt;
 use log::{error, info, trace};
 use thiserror::Error;
@@ -11,7 +11,7 @@ use std::io;
 
 use crate::base::bridge::BridgeTx;
 use crate::base::AppConfig;
-use crate::{ActionResponse, Payload};
+use crate::{Action, ActionResponse, Payload};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -36,12 +36,18 @@ pub struct TcpJson {
     config: AppConfig,
     /// Bridge handle to register apps
     bridge: BridgeTx,
+    actions_rx: Receiver<Action>,
 }
 
 impl TcpJson {
-    pub fn new(name: String, config: AppConfig, bridge: BridgeTx) -> TcpJson {
+    pub fn new(
+        name: String,
+        config: AppConfig,
+        bridge: BridgeTx,
+        actions_rx: Receiver<Action>,
+    ) -> TcpJson {
         // Note: We can register `TcpJson` itself as an app to direct actions to it
-        TcpJson { name, config, bridge }
+        TcpJson { name, config, bridge, actions_rx }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -77,8 +83,6 @@ impl TcpJson {
         &mut self,
         mut client: Framed<TcpStream, LinesCodec>,
     ) -> Result<(), Error> {
-        let actions_rx = self.bridge.register_action_route(&self.name).await;
-
         loop {
             select! {
                 line = client.next() => {
@@ -107,7 +111,7 @@ impl TcpJson {
 
                     self.bridge.send_payload(data).await;
                 }
-                action = actions_rx.recv_async() => {
+                action = self.actions_rx.recv_async() => {
                     let action = action?;
                     match serde_json::to_string(&action) {
                         Ok(data) => client.send(data).await?,
