@@ -7,10 +7,11 @@ use tokio::select;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
-use std::{io, sync::Arc};
+use std::io;
 
 use crate::base::bridge::BridgeTx;
-use crate::{ActionResponse, Config, Payload};
+use crate::base::AppConfig;
+use crate::{ActionResponse, Payload};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -31,64 +32,45 @@ pub enum Error {
 }
 
 pub struct TcpJson {
-    config: Arc<Config>,
+    name: String,
+    config: AppConfig,
     /// Bridge handle to register apps
     bridge: BridgeTx,
 }
 
 impl TcpJson {
-    pub fn new(config: Arc<Config>, bridge: BridgeTx) -> TcpJson {
+    pub fn new(name: String, config: AppConfig, bridge: BridgeTx) -> TcpJson {
         // Note: We can register `TcpJson` itself as an app to direct actions to it
-        TcpJson { config, bridge }
+        TcpJson { name, config, bridge }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
         loop {
-            let addr = format!("0.0.0.0:{}", self.config.bridge_port);
+            let addr = format!("0.0.0.0:{}", self.config.port);
             let listener = TcpListener::bind(&addr).await?;
-            let mut count = 0;
 
-            info!("Listening for new connection on {:?}", addr);
+            info!("{}: Listening for new connection on {:?}", self.name, addr);
             loop {
                 select! {
                     v = listener.accept() =>  {
-                        match v {
+                        let framed = match v {
                             Ok((stream, addr)) => {
-                                info!("Accepted new connection from {:?}", addr);
-                                count += 1;
-
-                                let framed = Framed::new(stream, LinesCodec::new());
-                                let app = format!("tcp-json-client-{}", count);
-                                let mut tcp_json = ClientConnection::new(&app, self.bridge.clone());
-
-                                tokio::task::spawn(async move {
-                                    if let Err(e) = tcp_json.collect(framed).await {
-                                        error!("Bridge failed. Error = {:?}", e);
-                                    }
-
-                                    // tcp_json.close().await;
-                                });
+                                info!("{}: Accepted new connection from {:?}", self.name, addr);
+                                Framed::new(stream, LinesCodec::new())
                             },
                             Err(e) => {
                                 error!("Tcp connection accept error = {:?}", e);
                                 continue;
                             }
+                        };
+
+                        if let Err(e) = self.collect(framed).await {
+                            error!("TcpJson failed . Error = {:?}", e);
                         }
                     }
                 }
             }
         }
-    }
-}
-
-struct ClientConnection {
-    name: String,
-    bridge: BridgeTx,
-}
-
-impl ClientConnection {
-    pub fn new(name: &str, bridge: BridgeTx) -> ClientConnection {
-        ClientConnection { name: name.to_owned(), bridge }
     }
 
     pub async fn collect(
@@ -138,14 +120,4 @@ impl ClientConnection {
             }
         }
     }
-
-    // TODO: Implement close in bridge
-    // async fn close(&mut self) {
-    //     if let Some(action_id) = self.in_execution.take() {
-    //         let status = ActionResponse::failure(&action_id, "Bridge disconnected");
-    //         if let Err(e) = self.status_tx.send_async(status).await {
-    //             error!("Failed to send failure response. Error = {:?}", e);
-    //         }
-    //     }
-    // }
 }

@@ -43,12 +43,13 @@ use std::sync::Arc;
 use std::thread;
 
 use anyhow::Error;
-use log::warn;
+use log::{error, warn};
 use simplelog::{
     ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, LevelPadding, TermLogger, TerminalMode,
 };
 use structopt::StructOpt;
 
+use uplink::base::AppConfig;
 use uplink::config::{get_configs, initialize, CommandLine};
 use uplink::{simulator, Config, TcpJson, Uplink};
 
@@ -104,7 +105,16 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    project_id: {}", config.project_id);
     println!("    device_id: {}", config.device_id);
     println!("    remote: {}:{}", config.broker, config.port);
-    println!("    bridge_port: {}", config.bridge_port);
+    if !config.applications.is_empty() {
+        println!("    connected applications:");
+        let mut n = 1;
+        for (app, AppConfig { port, actions }) in config.applications.iter() {
+            println!("        {n}. {app}:");
+            println!("            port: {port}");
+            println!("            actions: {actions:?}");
+            n += 1;
+        }
+    }
     println!("    secure_transport: {}", config.authentication.is_some());
     println!("    max_packet_size: {}", config.max_packet_size);
     println!("    max_inflight_messages: {}", config.max_inflight);
@@ -145,14 +155,19 @@ fn main() -> Result<(), Error> {
         });
     }
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .thread_name("tcpjson")
-        .build()
-        .unwrap();
+    for (app, cfg) in config.applications.iter() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .thread_name(format!("tcpjson: {app}"))
+            .build()
+            .unwrap();
+        let bridge = bridge.clone();
 
-    rt.block_on(async {
-        TcpJson::new(config, bridge).start().await.unwrap();
-    });
+        rt.block_on(async {
+            if let Err(e) = TcpJson::new(app.to_owned(), cfg.clone(), bridge).start().await {
+                error!("App failed. Error = {:?}", e);
+            }
+        });
+    }
     Ok(())
 }
