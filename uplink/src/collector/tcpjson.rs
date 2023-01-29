@@ -51,30 +51,24 @@ impl TcpJson {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
+        let addr = format!("0.0.0.0:{}", self.config.port);
+        let listener = TcpListener::bind(&addr).await?;
+
+        info!("{}: Listening for new connection on {:?}", self.name, addr);
         loop {
-            let addr = format!("0.0.0.0:{}", self.config.port);
-            let listener = TcpListener::bind(&addr).await?;
-
-            info!("{}: Listening for new connection on {:?}", self.name, addr);
-            loop {
-                select! {
-                    v = listener.accept() =>  {
-                        let framed = match v {
-                            Ok((stream, addr)) => {
-                                info!("{}: Accepted new connection from {:?}", self.name, addr);
-                                Framed::new(stream, LinesCodec::new())
-                            },
-                            Err(e) => {
-                                error!("Tcp connection accept error = {:?}", e);
-                                continue;
-                            }
-                        };
-
-                        if let Err(e) = self.collect(framed).await {
-                            error!("TcpJson failed . Error = {:?}", e);
-                        }
-                    }
+            let framed = match listener.accept().await {
+                Ok((stream, addr)) => {
+                    info!("{}: Accepted new connection from {:?}", self.name, addr);
+                    Framed::new(stream, LinesCodec::new())
+                },
+                Err(e) => {
+                    error!("Tcp connection accept error = {:?}", e);
+                    continue;
                 }
+            };
+
+            if let Err(e) = self.collect(framed).await {
+                error!("TcpJson failed . Error = {:?}", e);
             }
         }
     }
