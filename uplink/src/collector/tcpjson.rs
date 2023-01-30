@@ -54,21 +54,21 @@ impl TcpJson {
         let addr = format!("0.0.0.0:{}", self.config.port);
         let listener = TcpListener::bind(&addr).await?;
 
-        info!("{}: Listening for new connection on {:?}", self.name, addr);
+        info!("Waiting for app = {} to connect on {:?}", self.name, addr);
         loop {
             let framed = match listener.accept().await {
                 Ok((stream, addr)) => {
-                    info!("{}: Accepted new connection from {:?}", self.name, addr);
+                    info!("Accepted connection from app = {} on {:?}", self.name, addr);
                     Framed::new(stream, LinesCodec::new())
                 }
                 Err(e) => {
-                    error!("Tcp connection accept error = {:?}", e);
+                    error!("Tcp connection accept error = {e}, app = {}", e);
                     continue;
                 }
             };
 
             if let Err(e) = self.collect(framed).await {
-                error!("TcpJson failed . Error = {:?}", e);
+                error!("TcpJson failed. app = {}, Error = {e}", self.name);
             }
         }
     }
@@ -79,7 +79,7 @@ impl TcpJson {
                 line = client.next() => {
                     let line = line.ok_or(Error::StreamDone)??;
                     if let Err(e) = self.handle_incoming_line(line).await {
-                        error!("Error handling incoming line = {e}");
+                        error!("Error handling incoming line = {e}, app = {}", self.name);
                     }
                 }
                 action = self.actions_rx.recv_async() => {
@@ -87,7 +87,7 @@ impl TcpJson {
                     match serde_json::to_string(&action) {
                         Ok(data) => client.send(data).await?,
                         Err(e) => {
-                            error!("Serialization error = {e}");
+                            error!("Serialization error = {e}, app = {}", self.name);
                             continue
                         }
                     }
