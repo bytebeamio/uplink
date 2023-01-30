@@ -48,6 +48,7 @@ use simplelog::{
     ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, LevelPadding, TermLogger, TerminalMode,
 };
 use structopt::StructOpt;
+use tokio::task::JoinSet;
 
 use uplink::base::AppConfig;
 use uplink::config::{get_configs, initialize, CommandLine};
@@ -162,14 +163,19 @@ fn main() -> Result<(), Error> {
         .unwrap();
 
     rt.block_on(async {
+        let mut handles = JoinSet::new();
         for (app, cfg) in config.applications.iter() {
-            let bridge = bridge.clone();
             let actions_rx = bridge.register_action_routes(&cfg.actions).await;
-            if let Err(e) =
-                TcpJson::new(app.to_owned(), cfg.clone(), bridge, actions_rx).start().await
-            {
+            let tcpjson = TcpJson::new(app.to_owned(), cfg.clone(), bridge.clone(), actions_rx);
+            handles.spawn(async move {
+                if let Err(e) = tcpjson.start().await {
                 error!("App failed. Error = {:?}", e);
             }
+            });
+        }
+
+        while let Some(Err(e)) = handles.join_next().await {
+            error!("App failed. Error = {:?}", e);
         }
     });
     Ok(())

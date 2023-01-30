@@ -50,7 +50,7 @@ impl TcpJson {
         TcpJson { name, config, bridge, actions_rx }
     }
 
-    pub async fn start(&mut self) -> Result<(), Error> {
+    pub async fn start(mut self) -> Result<(), Error> {
         let addr = format!("0.0.0.0:{}", self.config.port);
         let listener = TcpListener::bind(&addr).await?;
 
