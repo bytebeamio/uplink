@@ -1,6 +1,3 @@
-# TCP Port to connect your applications with uplink
-bridge_port = 5555
-
 # MQTT client configuration
 # 
 # Required Parameters
@@ -15,7 +12,13 @@ max_inflight = 100
 # triggered from cloud.
 actions = ["tunshell"]
 
-# flushed on a single point entering, ensuring instant forwarding to platform.
+# TCP applications that detail applications which connect with uplink
+# Required Parameters
+# - port: TCP/IP Port on which application can connect to uplink over
+# - actions: A list of actions that uplink can forward to the app
+[applications.1]
+port = 5555
+actions = ["lock", "unlock"]
 
 # Metrics configurations are available for serializer and streams. By default 
 # they are disabled and no metrics will be forwarded to platform. 
