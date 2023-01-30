@@ -4,7 +4,7 @@ use std::{collections::VecDeque, io};
 use bytes::Bytes;
 use disk::Storage;
 use flume::{Receiver, RecvError, Sender};
-use log::{error, info, trace};
+use log::{debug, error, info, trace};
 use rumqttc::*;
 use thiserror::Error;
 use tokio::{select, time};
@@ -446,6 +446,7 @@ async fn send_publish<C: MqttClient>(
     topic: String,
     payload: Bytes,
 ) -> Result<C, MqttError> {
+    debug!("publishing on {topic} with size = {}", payload.len());
     client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
 }
