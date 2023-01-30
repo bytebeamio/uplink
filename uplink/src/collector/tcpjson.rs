@@ -4,6 +4,7 @@ use log::{error, info, trace};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
+use tokio::task::{spawn, JoinHandle};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
@@ -31,6 +32,7 @@ pub enum Error {
     Stream(#[from] crate::base::bridge::Error),
 }
 
+#[derive(Debug, Clone)]
 pub struct TcpJson {
     name: String,
     config: AppConfig,
@@ -50,30 +52,38 @@ impl TcpJson {
         TcpJson { name, config, bridge, actions_rx }
     }
 
-    pub async fn start(mut self) -> Result<(), Error> {
+    pub async fn start(self) -> Result<(), Error> {
         let addr = format!("0.0.0.0:{}", self.config.port);
         let listener = TcpListener::bind(&addr).await?;
+        let mut handle: Option<JoinHandle<()>> = None;
 
         info!("Waiting for app = {} to connect on {:?}", self.name, addr);
         loop {
             let framed = match listener.accept().await {
                 Ok((stream, addr)) => {
-                    info!("Accepted connection from app = {} on {:?}", self.name, addr);
+                    info!("Accepted connection from app = {} on {addr}", self.name);
                     Framed::new(stream, LinesCodec::new())
                 }
                 Err(e) => {
-                    error!("Tcp connection accept error = {e}, app = {}", e);
+                    error!("Tcp connection accept error = {e}, app = {}", self.name);
                     continue;
                 }
             };
 
-            if let Err(e) = self.collect(framed).await {
-                error!("TcpJson failed. app = {}, Error = {e}", self.name);
+            if let Some(handle) = handle {
+                handle.abort();
             }
+
+            let tcpjson = self.clone();
+            handle = Some(spawn(async move {
+                if let Err(e) = tcpjson.collect(framed).await {
+                    error!("TcpJson failed. app = {}, Error = {e}", tcpjson.name);
+                }
+            }));
         }
     }
 
-    async fn collect(&mut self, mut client: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
+    async fn collect(&self, mut client: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
         loop {
             select! {
                 line = client.next() => {
