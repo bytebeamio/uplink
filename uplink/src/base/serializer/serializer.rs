@@ -233,7 +233,7 @@ impl<C: MqttClient> Serializer<C> {
                     let storage = match &mut self.storage {
                         Some(s) => s,
                         None => {
-                            error!("Data loss, no disk to handle network backpressure: {:?}", data);
+                            error!("Data loss, no disk to handle network backpressure");
                             continue;
                         }
                     };
