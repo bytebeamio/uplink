@@ -64,6 +64,10 @@ impl ActionResponse {
         self.state == "Failed"
     }
 
+    pub fn is_done(&self) -> bool {
+        self.progress == 100
+    }
+
     pub fn progress(id: &str, state: &str, progress: u8) -> Self {
         ActionResponse::new(id, state, progress, vec![])
     }

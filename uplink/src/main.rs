@@ -105,6 +105,16 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    device_id: {}", config.device_id);
     println!("    remote: {}:{}", config.broker, config.port);
     println!("    bridge_port: {}", config.bridge_port);
+    if !config.forwards.is_empty() {
+        println!("    forwards:");
+        let mut n = 1;
+        for (action, fwd) in config.forwards.iter() {
+            println!("        {n}.  action_name: \"{action}\"");
+            println!("            fwd_name :\"{fwd}\"");
+            n += 1;
+        }
+        println!();
+    }
     println!("    secure_transport: {}", config.authentication.is_some());
     println!("    max_packet_size: {}", config.max_packet_size);
     println!("    max_inflight_messages: {}", config.max_inflight);

@@ -173,13 +173,38 @@ impl Bridge {
             return;
         }
 
-        info!("Action response = {:?}", response);
-        if response.is_completed() || response.is_failed() {
-            self.clear_current_action();
-        }
+        let action_completed = response.is_completed();
+        let action_failed = response.is_failed();
+        let action_done = response.is_done();
 
+        info!("Action response = {:?}", response);
         if let Err(e) = self.action_status.fill(response).await {
             error!("Failed to fill. Error = {:?}", e);
+        }
+
+        if action_completed || action_failed {
+            self.clear_current_action();
+            return;
+        }
+
+        // Forward actions included in the config to the appropriate forward route, when
+        // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
+        if action_done {
+            let fwd_name = match self.config.forwards.get(&inflight_action.action.name) {
+                Some(n) => n,
+                None => {
+                    self.clear_current_action();
+                    return;
+                }
+            };
+
+            let mut fwd_action = inflight_action.action.clone();
+            fwd_action.name = fwd_name.to_owned();
+
+            if let Err(e) = self.try_route_action(fwd_action.clone()) {
+                error!("Failed to route action to app. Error = {:?}", e);
+                self.forward_action_error(fwd_action, e).await;
+            }
         }
     }
 

@@ -14,8 +14,7 @@ max_inflight = 100
 # This makes sure that user is protected against random actions
 # triggered from cloud.
 actions = ["tunshell"]
-
-# flushed on a single point entering, ensuring instant forwarding to platform.
+forwards = { "firmware_update" = "install_update", "send_file" = "load_file" }
 
 # Metrics configurations are available for serializer and streams. By default 
 # they are disabled and no metrics will be forwarded to platform. 
