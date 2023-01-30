@@ -107,14 +107,15 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    device_id: {}", config.device_id);
     println!("    remote: {}:{}", config.broker, config.port);
     if !config.applications.is_empty() {
-        println!("    connected applications:");
+        println!("    applications:");
         let mut n = 1;
         for (app, AppConfig { port, actions }) in config.applications.iter() {
-            println!("        {n}. {app}:");
+            println!("        {n}.  name: {app:?}");
             println!("            port: {port}");
             println!("            actions: {actions:?}");
             n += 1;
         }
+        println!();
     }
     println!("    secure_transport: {}", config.authentication.is_some());
     println!("    max_packet_size: {}", config.max_packet_size);
@@ -169,8 +170,8 @@ fn main() -> Result<(), Error> {
             let tcpjson = TcpJson::new(app.to_owned(), cfg.clone(), bridge.clone(), actions_rx);
             handles.spawn(async move {
                 if let Err(e) = tcpjson.start().await {
-                error!("App failed. Error = {:?}", e);
-            }
+                    error!("App failed. Error = {:?}", e);
+                }
             });
         }
 

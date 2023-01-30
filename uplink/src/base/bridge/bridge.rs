@@ -37,6 +37,8 @@ pub struct Bridge {
     /// Action responses going to backend
     action_status: Stream<ActionResponse>,
     /// Apps registered with the bridge
+    /// NOTE: Sometimes action_routes could overlap, the latest route
+    /// to be registered will be used in such a circumstance.
     action_routes: HashMap<String, Sender<Action>>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
