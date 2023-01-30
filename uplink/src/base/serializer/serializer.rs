@@ -384,6 +384,7 @@ impl<C: MqttClient> Serializer<C> {
 
                     let publish = construct_publish(data)?;
                     let payload_size = publish.payload.len();
+                    debug!("publishing on {} with size = {}", publish.topic, payload_size);
                     match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, publish.payload) {
                         Ok(_) => {
                             self.metrics.add_batch();
