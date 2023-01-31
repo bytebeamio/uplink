@@ -178,7 +178,7 @@ pub mod config {
             }
         }
 
-        let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/action/status";
+        let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/actions";
         let mut device_action_topic = action_topic_template.to_string();
         replace_topic_placeholders(&mut device_action_topic, tenant_id, device_id);
         config.actions_subscription = device_action_topic;
