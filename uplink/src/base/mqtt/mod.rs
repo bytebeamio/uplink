@@ -145,7 +145,7 @@ impl Mqtt {
     }
 
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
-        if self.actions_subscriptions.contains(&publish.topic) {
+        if !self.actions_subscriptions.contains(&publish.topic) {
             error!("Unsolicited publish on {}", publish.topic);
             return Ok(());
         }
