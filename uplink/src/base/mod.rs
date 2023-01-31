@@ -63,6 +63,10 @@ pub struct SimulatorConfig {
     pub num_devices: u32,
     /// path to directory containing files with gps paths to be used in simulation
     pub gps_paths: String,
+    /// actions that are to be routed to simulator
+    pub actions: Vec<String>,
+    #[serde(skip)]
+    pub actions_subscriptions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -111,6 +115,8 @@ pub struct Config {
     pub max_inflight: u16,
     pub keep_alive: u64,
     pub actions: Vec<String>,
+    #[serde(skip)]
+    pub actions_subscription: String,
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,

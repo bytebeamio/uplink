@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use flume::Sender;
-use log::{error, info, trace};
+use log::{error, trace};
 use tokio::time::{interval, Interval};
 
 use crate::base::bridge::{self, StreamMetrics, StreamStatus};
@@ -46,22 +46,28 @@ impl Streams {
     }
 
     pub async fn forward(&mut self, data: Payload) {
-        let stream = match self.map.get_mut(&data.stream) {
+        let stream_name = &data.stream;
+        let (stream_id, device_id) = match &data.device_id {
+            Some(device_id) => (stream_name.to_owned() + "/" + device_id, device_id.to_owned()),
+            _ => (stream_name.to_owned(), self.config.device_id.to_owned()),
+        };
+
+        let stream = match self.map.get_mut(&stream_id) {
             Some(partition) => partition,
             None => {
-                if self.map.keys().len() > 20 {
-                    error!("Failed to create {:?} stream. More than max 20 streams", data.stream);
+                if self.config.simulator.is_none() && self.map.keys().len() > 20 {
+                    error!("Failed to create {:?} stream. More than max 20 streams", stream_id);
                     return;
                 }
 
                 let stream = Stream::dynamic(
-                    &data.stream,
+                    stream_name,
                     &self.config.project_id,
-                    &self.config.device_id,
+                    &device_id,
                     self.data_tx.clone(),
                 );
 
-                self.map.entry(data.stream.to_owned()).or_insert(stream)
+                self.map.entry(stream_id.to_owned()).or_insert(stream)
             }
         };
 
@@ -79,10 +85,10 @@ impl Streams {
         // Warn in case stream flushed stream was not in the queue.
         if max_stream_size > 1 {
             match state {
-                StreamStatus::Flushed(name) => self.stream_timeouts.remove(name),
-                StreamStatus::Init(name, flush_period) => {
-                    trace!("Initialized stream buffer for {}", name);
-                    self.stream_timeouts.insert(name, flush_period);
+                StreamStatus::Flushed => self.stream_timeouts.remove(&stream_id),
+                StreamStatus::Init(flush_period) => {
+                    trace!("Initialized stream buffer for {stream_id}");
+                    self.stream_timeouts.insert(&stream_id, flush_period);
                 }
                 StreamStatus::Partial(_l) => {}
             }
