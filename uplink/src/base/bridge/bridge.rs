@@ -179,12 +179,12 @@ impl Bridge {
             return;
         }
 
+        inflight_action.reset_timeout();
+
         info!("Action response = {:?}", response);
         if response.is_completed() || response.is_failed() {
             self.clear_current_action();
         }
-
-        self.current_action.as_mut().unwrap().reset_timeout();
 
         if let Some(device_id) = &response.device_id {
             let action_status =
