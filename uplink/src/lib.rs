@@ -162,14 +162,14 @@ pub mod config {
         let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/action/status";
         let mut device_action_topic = action_topic_template.to_string();
         replace_topic_placeholders(&mut device_action_topic, tenant_id, device_id);
-        config.actions_subscriptions.push(device_action_topic);
+        config.actions_subscription = device_action_topic;
 
         // Add topics to be subscribed to for simulation purposes, if in simulator mode
         if let Some(sim_cfg) = &mut config.simulator {
             for n in 1..=sim_cfg.num_devices {
                 let mut topic = action_topic_template.to_string();
                 replace_topic_placeholders(&mut topic, tenant_id, &n.to_string());
-                config.actions_subscriptions.push(topic);
+                sim_cfg.actions_subscriptions.push(topic);
             }
         }
 

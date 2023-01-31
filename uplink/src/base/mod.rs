@@ -65,6 +65,8 @@ pub struct SimulatorConfig {
     pub gps_paths: String,
     /// actions that are to be routed to simulator
     pub actions: Vec<String>,
+    #[serde(skip)]
+    pub actions_subscriptions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -114,7 +116,7 @@ pub struct Config {
     pub keep_alive: u64,
     pub actions: Vec<String>,
     #[serde(skip)]
-    pub actions_subscriptions: Vec<String>,
+    pub actions_subscription: String,
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
