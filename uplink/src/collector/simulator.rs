@@ -581,7 +581,7 @@ pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
 pub async fn start(bridge_tx: BridgeTx, simulator_config: &SimulatorConfig) -> Result<(), Error> {
     let paths = read_gps_paths(&simulator_config.gps_paths);
     let num_devices = simulator_config.num_devices;
-    let actions_rx = bridge_tx.register_action_route("").await;
+    let actions_rx = bridge_tx.register_action_routes(&simulator_config.actions).await;
 
     let devices =
         (1..(num_devices + 1)).map(|i| new_device_data(i.to_string(), &paths)).collect::<Vec<_>>();

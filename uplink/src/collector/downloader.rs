@@ -123,7 +123,7 @@ impl FileDownloader {
     /// to bridge for further processing, e.g. OTA update installation.
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) -> Result<(), Error> {
-        let routes = vec!["update_firmware", "send_file"];
+        let routes = &self.config.actions;
         let download_rx = self.bridge_tx.register_action_routes(routes).await;
         loop {
             self.sequence = 0;

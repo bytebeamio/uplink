@@ -63,6 +63,8 @@ pub struct SimulatorConfig {
     pub num_devices: u32,
     /// path to directory containing files with gps paths to be used in simulation
     pub gps_paths: String,
+    /// actions that are to be routed to simulator
+    pub actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

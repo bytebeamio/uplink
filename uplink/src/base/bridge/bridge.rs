@@ -230,7 +230,10 @@ impl BridgeTx {
         actions_rx
     }
 
-    pub async fn register_action_routes<S: Into<String>>(&self, names: Vec<S>) -> Receiver<Action> {
+    pub async fn register_action_routes<S: Into<String>, V: IntoIterator<Item = S>>(
+        &self,
+        names: V,
+    ) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(0);
 
         for name in names {
