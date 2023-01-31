@@ -184,6 +184,8 @@ impl Bridge {
             self.clear_current_action();
         }
 
+        self.current_action.as_mut().unwrap().reset_timeout();
+
         if let Some(device_id) = &response.device_id {
             let action_status =
                 action_status_map.entry(device_id.to_owned()).or_insert_with(|| {
