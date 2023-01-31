@@ -7,7 +7,3 @@ max_file_count = 3
 num_devices = 20
 gps_paths = "./paths/"
 actions = ["update_firmware", "send_file", "lock", "unlock"]
-
-[streams.bms]
-topic = "/tenants/{tenant_id}/devices/{device_id}/bms/jsonarray"
-buf_size = 25
