@@ -19,7 +19,7 @@ pub mod config {
     use crate::base::StreamConfig;
     pub use crate::base::{Config, Persistence, Stats};
     use config::{Environment, File, FileFormat};
-    use std::fs;
+    use std::{collections::HashMap, fs};
     use structopt::StructOpt;
 
     #[derive(StructOpt, Debug)]
@@ -91,10 +91,6 @@ pub mod config {
     buf_size = 1
     timeout = 10
 
-    [streams.device_shadow]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
-    buf_size = 1
-
     [stats]
     topic = "/tenants/{tenant_id}/devices/{device_id}/uplink_stats/jsonarray"
     enabled = false
@@ -121,9 +117,32 @@ pub mod config {
         // replace placeholders with device/tenant ID
         let tenant_id = config.project_id.trim();
         let device_id = config.device_id.trim();
-        for config in config.streams.values_mut() {
-            replace_topic_placeholders(&mut config.topic, tenant_id, device_id);
+
+        let stream_cfg_per_device = |stream_cfg: &StreamConfig, device_id: &str| -> StreamConfig {
+            let mut stream_cfg = stream_cfg.clone();
+            replace_topic_placeholders(&mut stream_cfg.topic, tenant_id, &device_id);
+            stream_cfg
+        };
+        let mut streams = HashMap::new();
+        if let Some(sim_cfg) = &config.simulator {
+            for (stream_name, stream_cfg) in config.streams.iter() {
+                for n in 1..=sim_cfg.num_devices {
+                    let device_id = n.to_string();
+                    let stream_id = stream_name.to_owned() + "/" + &device_id;
+                    streams.insert(
+                        stream_id.to_owned(),
+                        stream_cfg_per_device(stream_cfg, &device_id),
+                    );
+                }
+            }
+        } else {
+            for (stream_name, stream_cfg) in config.streams.iter() {
+                streams
+                    .insert(stream_name.to_owned(), stream_cfg_per_device(stream_cfg, &device_id));
+            }
         }
+
+        config.streams = streams;
 
         replace_topic_placeholders(&mut config.action_status.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
