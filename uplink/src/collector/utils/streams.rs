@@ -48,7 +48,7 @@ impl Streams {
     pub async fn forward(&mut self, data: Payload) {
         let stream_name = &data.stream;
         let (stream_id, device_id) = match &data.device_id {
-            Some(device_id) => (format!("{device_id}/{}", stream_name), device_id.to_owned()),
+            Some(device_id) => (stream_name.to_owned() + "/" + device_id, device_id.to_owned()),
             _ => (stream_name.to_owned(), self.config.device_id.to_owned()),
         };
 
