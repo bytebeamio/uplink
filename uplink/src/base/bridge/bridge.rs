@@ -79,6 +79,7 @@ impl Bridge {
             Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
                 .await;
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
+        let mut action_status_map = HashMap::new();
 
         loop {
             select! {
@@ -108,8 +109,9 @@ impl Bridge {
                     }
 
                     self.current_action = Some(CurrentAction::new(action.clone()));
-                    let response = ActionResponse::progress(&action_id, "Received", 0);
-                    self.forward_action_response(response).await;
+                    let mut response = ActionResponse::progress(&action_id, "Received", 0);
+                    response.device_id = action.device_id;
+                    self.forward_action_response(response, &mut action_status_map).await;
                 }
                 event = self.bridge_rx.recv_async() => {
                     let event = event?;
@@ -121,7 +123,7 @@ impl Bridge {
                             streams.forward(v).await;
                         }
                         Event::ActionResponse(response) => {
-                            self.forward_action_response(response).await;
+                            self.forward_action_response(response, &mut action_status_map).await;
                         }
                     }
                 }
@@ -159,7 +161,11 @@ impl Bridge {
         }
     }
 
-    async fn forward_action_response(&mut self, response: ActionResponse) {
+    async fn forward_action_response(
+        &mut self,
+        response: ActionResponse,
+        action_status_map: &mut HashMap<String, Stream<ActionResponse>>,
+    ) {
         let inflight_action = match &mut self.current_action {
             Some(v) => v,
             None => {
@@ -176,6 +182,22 @@ impl Bridge {
         info!("Action response = {:?}", response);
         if response.is_completed() || response.is_failed() {
             self.clear_current_action();
+        }
+
+        if let Some(device_id) = &response.device_id {
+            let action_status =
+                action_status_map.entry(device_id.to_owned()).or_insert_with(|| {
+                    let action_status_topic = "/tenants/".to_owned()
+                        + &self.config.project_id
+                        + "/devices/"
+                        + device_id
+                        + "/action/status";
+                    Stream::new("action_status", &action_status_topic, 1, self.package_tx.clone())
+                });
+            if let Err(e) = action_status.fill(response).await {
+                error!("Failed to fill. Error = {:?}", e);
+            }
+            return;
         }
 
         if let Err(e) = self.action_status.fill(response).await {
