@@ -85,10 +85,10 @@ impl Streams {
         // Warn in case stream flushed stream was not in the queue.
         if max_stream_size > 1 {
             match state {
-                StreamStatus::Flushed(name) => self.stream_timeouts.remove(name),
-                StreamStatus::Init(name, flush_period) => {
-                    trace!("Initialized stream buffer for {}", name);
-                    self.stream_timeouts.insert(name, flush_period);
+                StreamStatus::Flushed => self.stream_timeouts.remove(&stream_id),
+                StreamStatus::Init(flush_period) => {
+                    trace!("Initialized stream buffer for {stream_id}");
+                    self.stream_timeouts.insert(&stream_id, flush_period);
                 }
                 StreamStatus::Partial(_l) => {}
             }
