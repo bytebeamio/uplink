@@ -166,8 +166,7 @@ fn main() -> Result<(), Error> {
     rt.block_on(async {
         let mut handles = JoinSet::new();
         for (app, cfg) in config.applications.iter() {
-            let actions_rx = bridge.register_action_routes(&cfg.actions).await;
-            let tcpjson = TcpJson::new(app.to_owned(), cfg.clone(), bridge.clone(), actions_rx);
+            let tcpjson = TcpJson::new(app.to_owned(), cfg.clone(), bridge.clone()).await;
             handles.spawn(async move {
                 if let Err(e) = tcpjson.start().await {
                     error!("App failed. Error = {:?}", e);

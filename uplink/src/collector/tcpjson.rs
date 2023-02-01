@@ -38,16 +38,20 @@ pub struct TcpJson {
     config: AppConfig,
     /// Bridge handle to register apps
     bridge: BridgeTx,
-    actions_rx: Receiver<Action>,
+    /// Action receiver
+    actions_rx: Option<Receiver<Action>>,
 }
 
 impl TcpJson {
-    pub fn new(
-        name: String,
-        config: AppConfig,
-        bridge: BridgeTx,
-        actions_rx: Receiver<Action>,
-    ) -> TcpJson {
+    pub async fn new(name: String, config: AppConfig, bridge: BridgeTx) -> TcpJson {
+        let actions_rx = if config.actions.len() > 0 {
+            // TODO: Return Option<Receiver> while registering multiple actions
+            let actions_rx = bridge.register_action_routes(&config.actions).await;
+            Some(actions_rx)
+        } else {
+            None
+        };
+
         // Note: We can register `TcpJson` itself as an app to direct actions to it
         TcpJson { name, config, bridge, actions_rx }
     }
@@ -84,23 +88,33 @@ impl TcpJson {
     }
 
     async fn collect(&self, mut client: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
-        loop {
-            select! {
-                line = client.next() => {
-                    let line = line.ok_or(Error::StreamDone)??;
-                    if let Err(e) = self.handle_incoming_line(line).await {
-                        error!("Error handling incoming line = {e}, app = {}", self.name);
-                    }
-                }
-                action = self.actions_rx.recv_async() => {
-                    let action = action?;
-                    match serde_json::to_string(&action) {
-                        Ok(data) => client.send(data).await?,
-                        Err(e) => {
-                            error!("Serialization error = {e}, app = {}", self.name);
-                            continue
+        if let Some(actions_rx) = self.actions_rx.as_ref() {
+            loop {
+                select! {
+                    line = client.next() => {
+                        let line = line.ok_or(Error::StreamDone)??;
+                        if let Err(e) = self.handle_incoming_line(line).await {
+                            error!("Error handling incoming line = {e}, app = {}", self.name);
                         }
                     }
+                    action = actions_rx.recv_async() => {
+                        let action = action?;
+                        match serde_json::to_string(&action) {
+                            Ok(data) => client.send(data).await?,
+                            Err(e) => {
+                                error!("Serialization error = {e}, app = {}", self.name);
+                                continue
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            loop {
+                let line = client.next().await;
+                let line = line.ok_or(Error::StreamDone)??;
+                if let Err(e) = self.handle_incoming_line(line).await {
+                    error!("Error handling incoming line = {e}, app = {}", self.name);
                 }
             }
         }

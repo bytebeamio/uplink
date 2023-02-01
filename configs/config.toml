@@ -20,6 +20,10 @@ actions = ["tunshell"]
 port = 5555
 actions = ["lock", "unlock"]
 
+[applications.2]
+port = 5556
+actions = []
+
 # Metrics configurations are available for serializer and streams. By default 
 # they are disabled and no metrics will be forwarded to platform. 
 # Parameters
