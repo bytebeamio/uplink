@@ -106,16 +106,14 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    project_id: {}", config.project_id);
     println!("    device_id: {}", config.device_id);
     println!("    remote: {}:{}", config.broker, config.port);
-    if !config.applications.is_empty() {
-        println!("    applications:");
-        let mut n = 1;
-        for (app, AppConfig { port, actions }) in config.applications.iter() {
-            println!("        {n}.  name: {app:?}");
-            println!("            port: {port}");
-            println!("            actions: {actions:?}");
-            n += 1;
+    if !config.tcpapps.is_empty() {
+        println!("    tcp applications:");
+        for (app, AppConfig { port, actions }) in config.tcpapps.iter() {
+            println!("        name: {app:?}");
+            println!("        port: {port}");
+            println!("        actions: {actions:?}");
+            println!("        --------------------");
         }
-        println!();
     }
     println!("    secure_transport: {}", config.authentication.is_some());
     println!("    max_packet_size: {}", config.max_packet_size);
@@ -165,7 +163,7 @@ fn main() -> Result<(), Error> {
 
     rt.block_on(async {
         let mut handles = JoinSet::new();
-        for (app, cfg) in config.applications.iter() {
+        for (app, cfg) in config.tcpapps.iter() {
             let tcpjson = TcpJson::new(app.to_owned(), cfg.clone(), bridge.clone()).await;
             handles.spawn(async move {
                 if let Err(e) = tcpjson.start().await {

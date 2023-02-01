@@ -16,11 +16,11 @@ actions = ["tunshell"]
 # Required Parameters
 # - port: TCP/IP Port on which application can connect to uplink over
 # - actions: A list of actions that uplink can forward to the app
-[applications.1]
+[tcpapps.1]
 port = 5555
 actions = ["lock", "unlock"]
 
-[applications.2]
+[tcpapps.2]
 port = 5556
 actions = []
 

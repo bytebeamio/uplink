@@ -112,7 +112,7 @@ pub struct Config {
     pub broker: String,
     pub port: u16,
     pub authentication: Option<Authentication>,
-    pub applications: HashMap<String, AppConfig>,
+    pub tcpapps: HashMap<String, AppConfig>,
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub keep_alive: u64,
