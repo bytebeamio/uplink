@@ -77,7 +77,7 @@ pub struct JournalctlConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct Downloader {
+pub struct DownloaderConfig {
     pub actions: Vec<String>,
     pub path: String,
 }
@@ -123,7 +123,7 @@ pub struct Config {
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
-    pub downloader: Downloader,
+    pub downloader: DownloaderConfig,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
     #[serde(default)]
