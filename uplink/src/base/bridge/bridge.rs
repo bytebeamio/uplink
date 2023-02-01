@@ -40,6 +40,8 @@ pub struct Bridge {
     /// NOTE: Sometimes action_routes could overlap, the latest route
     /// to be registered will be used in such a circumstance.
     action_routes: HashMap<String, Sender<Action>>,
+    /// Action redirections
+    action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
 }
@@ -53,6 +55,7 @@ impl Bridge {
         action_status: Stream<ActionResponse>,
     ) -> Bridge {
         let (bridge_tx, bridge_rx) = bounded(10);
+        let action_redirections = config.action_redirections.clone();
 
         Bridge {
             action_status,
@@ -63,6 +66,7 @@ impl Bridge {
             config,
             actions_rx,
             action_routes: HashMap::with_capacity(10),
+            action_redirections,
             current_action: None,
         }
     }
@@ -192,7 +196,7 @@ impl Bridge {
         // Forward actions included in the config to the appropriate forward route, when
         // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
         if action_done {
-            let fwd_name = match self.config.forwards.get(&inflight_action.action.name) {
+            let fwd_name = match self.action_redirections.get(&inflight_action.action.name) {
                 Some(n) => n,
                 None => {
                     self.clear_current_action();

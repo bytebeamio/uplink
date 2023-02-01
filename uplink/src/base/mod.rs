@@ -132,7 +132,7 @@ pub struct Config {
     pub downloader: Downloader,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
-    pub forwards: HashMap<String, String>,
+    pub action_redirections: HashMap<String, String>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
     #[cfg(target_os = "linux")]

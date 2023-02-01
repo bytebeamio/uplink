@@ -106,25 +106,19 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    project_id: {}", config.project_id);
     println!("    device_id: {}", config.device_id);
     println!("    remote: {}:{}", config.broker, config.port);
-    println!("    bridge_port: {}", config.bridge_port);
-    if !config.forwards.is_empty() {
-        println!("    forwards:");
-        let mut n = 1;
-        for (action, fwd) in config.forwards.iter() {
-            println!("        {n}.  action_name: \"{action}\"");
-            println!("            fwd_name :\"{fwd}\"");
-            n += 1;
+    if !config.action_redirections.is_empty() {
+        println!("    action redirections:");
+        for (action, redirection) in config.action_redirections.iter() {
+            println!("        {action} -> {redirection}");
         }
-        println!();
     }
-    println!("    bridge_port: {}", config.bridge_port);
     if !config.tcpapps.is_empty() {
         println!("    tcp applications:");
         for (app, AppConfig { port, actions }) in config.tcpapps.iter() {
             println!("        name: {app:?}");
             println!("        port: {port}");
             println!("        actions: {actions:?}");
-            println!("        --------------------");
+            println!("        @");
         }
     }
     println!("    secure_transport: {}", config.authentication.is_some());
