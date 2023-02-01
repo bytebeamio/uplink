@@ -14,6 +14,7 @@ use log::error;
 
 pub mod base;
 pub mod collector;
+pub mod tracing;
 
 pub mod config {
     use crate::base::StreamConfig;
@@ -21,6 +22,12 @@ pub mod config {
     use config::{Environment, File, FileFormat};
     use std::fs;
     use structopt::StructOpt;
+    use tracing_subscriber::fmt::format::{Format, Pretty};
+    use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
+    use tracing_subscriber::{EnvFilter, Registry};
+
+    pub type ReloadHandle =
+        Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
     #[derive(StructOpt, Debug)]
     #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
@@ -210,6 +217,7 @@ pub mod config {
     }
 }
 
+use self::config::ReloadHandle;
 pub use base::actions::{Action, ActionResponse};
 use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, Stream, StreamMetrics};
 use base::mqtt::Mqtt;
@@ -224,6 +232,7 @@ pub struct Uplink {
     action_tx: Sender<Action>,
     data_rx: Receiver<Box<dyn Package>>,
     data_tx: Sender<Box<dyn Package>>,
+    reload_handle: ReloadHandle,
     action_status: Stream<ActionResponse>,
     stream_metrics_tx: Sender<StreamMetrics>,
     stream_metrics_rx: Receiver<StreamMetrics>,
@@ -232,7 +241,7 @@ pub struct Uplink {
 }
 
 impl Uplink {
-    pub fn new(config: Arc<Config>) -> Result<Uplink, Error> {
+    pub fn new(config: Arc<Config>, reload_handle: ReloadHandle) -> Result<Uplink, Error> {
         let (action_tx, action_rx) = bounded(10);
         let (data_tx, data_rx) = bounded(10);
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
@@ -246,6 +255,7 @@ impl Uplink {
             action_tx,
             data_rx,
             data_tx,
+            reload_handle,
             action_status,
             stream_metrics_tx,
             stream_metrics_rx,
@@ -359,6 +369,13 @@ impl Uplink {
                 }
             })
         });
+
+        if self.config.tracing.enabled {
+            let handle = self.reload_handle.clone();
+            let port = self.config.tracing.port;
+
+            thread::spawn(move || tracing::start(port, handle));
+        }
 
         Ok(bridge_tx)
     }

@@ -104,11 +104,18 @@ pub struct MqttMetricsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct TracingConfig {
+    pub enabled: bool,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
     pub broker: String,
     pub port: u16,
+    pub tracing: TracingConfig,
     pub authentication: Option<Authentication>,
     pub bridge_port: u16,
     pub max_packet_size: usize,

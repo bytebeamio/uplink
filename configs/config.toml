@@ -1,6 +1,11 @@
 # TCP Port to connect your applications with uplink
 bridge_port = 5555
 
+# Define port that accepts tracing control messges, if enabled
+[tracing]
+enabled = true
+port = 3333
+
 # MQTT client configuration
 # 
 # Required Parameters
