@@ -63,6 +63,10 @@ pub struct SimulatorConfig {
     pub num_devices: u32,
     /// path to directory containing files with gps paths to be used in simulation
     pub gps_paths: String,
+    /// actions that are to be routed to simulator
+    pub actions: Vec<String>,
+    #[serde(skip)]
+    pub actions_subscriptions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -99,6 +103,12 @@ pub struct MqttMetricsConfig {
     pub topic: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AppConfig {
+    pub port: u16,
+    pub actions: Vec<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
@@ -106,11 +116,13 @@ pub struct Config {
     pub broker: String,
     pub port: u16,
     pub authentication: Option<Authentication>,
-    pub bridge_port: u16,
+    pub tcpapps: HashMap<String, AppConfig>,
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub keep_alive: u64,
     pub actions: Vec<String>,
+    #[serde(skip)]
+    pub actions_subscription: String,
     pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,

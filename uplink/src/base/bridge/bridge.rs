@@ -37,6 +37,8 @@ pub struct Bridge {
     /// Action responses going to backend
     action_status: Stream<ActionResponse>,
     /// Apps registered with the bridge
+    /// NOTE: Sometimes action_routes could overlap, the latest route
+    /// to be registered will be used in such a circumstance.
     action_routes: HashMap<String, Sender<Action>>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
@@ -255,7 +257,10 @@ impl BridgeTx {
         actions_rx
     }
 
-    pub async fn register_action_routes<S: Into<String>>(&self, names: Vec<S>) -> Receiver<Action> {
+    pub async fn register_action_routes<S: Into<String>, V: IntoIterator<Item = S>>(
+        &self,
+        names: V,
+    ) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(0);
 
         for name in names {
