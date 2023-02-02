@@ -21,7 +21,7 @@ action_redirections = { "firmware_update" = "install_update", "send_file" = "loa
 # - actions: A list of actions that uplink can forward to the app
 [tcpapps.1]
 port = 5555
-actions = ["lock", "unlock"]
+actions = ["install_update", "load_file"]
 
 [tcpapps.2]
 port = 5556
