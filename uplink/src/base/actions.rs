@@ -23,7 +23,7 @@ pub struct Action {
     pub payload: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionResponse {
     #[serde(alias = "id")]
     pub action_id: String,
@@ -39,6 +39,8 @@ pub struct ActionResponse {
     pub progress: u8,
     // list of error
     pub errors: Vec<String>,
+    #[serde(skip)]
+    pub done_response: Option<Action>,
 }
 
 impl ActionResponse {
@@ -56,6 +58,7 @@ impl ActionResponse {
             state: state.to_owned(),
             progress,
             errors,
+            done_response: None,
         }
     }
 
@@ -67,12 +70,22 @@ impl ActionResponse {
         self.state == "Failed"
     }
 
+    pub fn is_done(&self) -> bool {
+        self.progress == 100
+    }
+
     pub fn progress(id: &str, state: &str, progress: u8) -> Self {
         ActionResponse::new(id, state, progress, vec![])
     }
 
     pub fn success(id: &str) -> ActionResponse {
         ActionResponse::new(id, "Completed", 100, vec![])
+    }
+
+    pub fn done(id: &str, state: &str, response: Option<Action>) -> Self {
+        let mut o = ActionResponse::new(id, state, 100, vec![]);
+        o.done_response = response;
+        o
     }
 
     pub fn add_error<E: Into<String>>(mut self, error: E) -> ActionResponse {
@@ -95,7 +108,6 @@ impl ActionResponse {
 
     pub fn from_payload(payload: &Payload) -> Result<Self, serde_json::Error> {
         let intermediate = serde_json::to_value(payload)?;
-
         serde_json::from_value(intermediate)
     }
 }

@@ -11,6 +11,7 @@ max_inflight = 100
 # This ensures that user is protected against random actions
 # triggered from cloud.
 processes = ["echo"]
+action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
 
 # TCP applications that detail applications which connect with uplink
 # Required Parameters
@@ -18,7 +19,7 @@ processes = ["echo"]
 # - actions: A list of actions that uplink can forward to the app
 [tcpapps.1]
 port = 5555
-actions = ["lock", "unlock"]
+actions = ["install_update", "load_file"]
 
 [tcpapps.2]
 port = 5556

@@ -40,6 +40,8 @@ pub struct Bridge {
     /// NOTE: Sometimes action_routes could overlap, the latest route
     /// to be registered will be used in such a circumstance.
     action_routes: HashMap<String, Sender<Action>>,
+    /// Action redirections
+    action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
 }
@@ -53,6 +55,7 @@ impl Bridge {
         action_status: Stream<ActionResponse>,
     ) -> Bridge {
         let (bridge_tx, bridge_rx) = bounded(10);
+        let action_redirections = config.action_redirections.clone();
 
         Bridge {
             action_status,
@@ -63,6 +66,7 @@ impl Bridge {
             config,
             actions_rx,
             action_routes: HashMap::with_capacity(10),
+            action_redirections,
             current_action: None,
         }
     }
@@ -175,13 +179,42 @@ impl Bridge {
             return;
         }
 
+        let action_completed = response.is_completed();
+        let action_failed = response.is_failed();
+        let action_done = response.is_done();
+
         info!("Action response = {:?}", response);
-        if response.is_completed() || response.is_failed() {
-            self.clear_current_action();
+        if let Err(e) = self.action_status.fill(response.clone()).await {
+            error!("Failed to fill. Error = {:?}", e);
         }
 
-        if let Err(e) = self.action_status.fill(response).await {
-            error!("Failed to fill. Error = {:?}", e);
+        if action_completed || action_failed {
+            self.clear_current_action();
+            return;
+        }
+
+        // Forward actions included in the config to the appropriate forward route, when
+        // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
+        if action_done {
+            let fwd_name = match self.action_redirections.get(&inflight_action.action.name) {
+                Some(n) => n,
+                None => {
+                    self.clear_current_action();
+                    return;
+                }
+            };
+
+            if let Some(action) = response.done_response {
+                inflight_action.action = action;
+            }
+
+            let mut fwd_action = inflight_action.action.clone();
+            fwd_action.name = fwd_name.to_owned();
+
+            if let Err(e) = self.try_route_action(fwd_action.clone()) {
+                error!("Failed to route action to app. Error = {:?}", e);
+                self.forward_action_error(fwd_action, e).await;
+            }
         }
     }
 
@@ -207,12 +240,12 @@ impl CurrentAction {
         CurrentAction {
             id: action.action_id.clone(),
             action,
-            timeout: Box::pin(time::sleep(Duration::from_secs(30))),
+            timeout: Box::pin(time::sleep(Duration::from_secs(60))),
         }
     }
 
     pub fn reset_timeout(&mut self) {
-        self.timeout = Box::pin(time::sleep(Duration::from_secs(30)));
+        self.timeout = Box::pin(time::sleep(Duration::from_secs(60)));
     }
 }
 
