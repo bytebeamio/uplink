@@ -55,6 +55,7 @@ use std::time::Duration;
 use std::{io::Write, path::PathBuf};
 
 use crate::base::bridge::BridgeTx;
+use crate::base::DownloaderConfig;
 use crate::{Action, ActionResponse, Config};
 
 #[derive(thiserror::Error, Debug)]
@@ -90,7 +91,7 @@ impl From<flume::TrySendError<Action>> for Error {
 /// the download [`Action`], updated with information regarding where the file is stored in the file-system
 /// to the connected bridge application.
 pub struct FileDownloader {
-    config: Arc<Config>,
+    config: DownloaderConfig,
     action_id: String,
     bridge_tx: BridgeTx,
     client: Client,
@@ -116,7 +117,13 @@ impl FileDownloader {
         }
         .build()?;
 
-        Ok(Self { config, client, bridge_tx, sequence: 0, action_id: String::default() })
+        Ok(Self {
+            config: config.downloader.clone(),
+            client,
+            bridge_tx,
+            sequence: 0,
+            action_id: String::default(),
+        })
     }
 
     /// Spawn a thread to handle downloading files as notified by download actions and for forwarding the updated actions
@@ -188,7 +195,7 @@ impl FileDownloader {
     /// Creates file to download into
     fn create_file(&self, name: &str, url: &str, version: &str) -> Result<(File, String), Error> {
         // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
-        let mut download_path = PathBuf::from(self.config.downloader.path.clone());
+        let mut download_path = PathBuf::from(self.config.path.clone());
         download_path.push(name);
         download_path.push(version);
         create_dir_all(&download_path)?;
@@ -269,7 +276,7 @@ pub struct DownloadFile {
 mod test {
     use std::{collections::HashMap, time::Duration};
 
-    use crate::base::{bridge::Event, Downloader};
+    use crate::base::{bridge::Event, DownloaderConfig};
 
     use super::*;
     use flume::TrySendError;
@@ -277,7 +284,7 @@ mod test {
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 
-    fn config(downloader: Downloader) -> Config {
+    fn config(downloader: DownloaderConfig) -> Config {
         Config {
             broker: "localhost".to_owned(),
             port: 1883,
@@ -295,7 +302,7 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let downloader_cfg = Downloader {
+        let downloader_cfg = DownloaderConfig {
             actions: vec!["firmware_update".to_owned()],
             path: format!("{DOWNLOAD_DIR}/uplink-test"),
         };
@@ -359,7 +366,7 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let downloader_cfg = Downloader {
+        let downloader_cfg = DownloaderConfig {
             actions: vec!["firmware_update".to_string()],
             path: format!("{}/download", DOWNLOAD_DIR),
         };
