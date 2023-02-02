@@ -7,10 +7,10 @@
 max_packet_size = 102400
 max_inflight = 100
 
-# Whitelist of binaries which uplink can spawn as a process
-# This makes sure that user is protected against random actions
+# Collection of binaries which uplink can spawn as a process
+# This ensures that user is protected against random actions
 # triggered from cloud.
-actions = ["tunshell"]
+processes = ["echo"]
 
 # TCP applications that detail applications which connect with uplink
 # Required Parameters

@@ -77,7 +77,7 @@ pub struct JournalctlConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct Downloader {
+pub struct DownloaderConfig {
     pub actions: Vec<String>,
     pub path: String,
 }
@@ -120,7 +120,7 @@ pub struct Config {
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub keep_alive: u64,
-    pub actions: Vec<String>,
+    pub processes: Vec<String>,
     #[serde(skip)]
     pub actions_subscription: String,
     pub persistence: Option<Persistence>,
@@ -129,7 +129,7 @@ pub struct Config {
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
-    pub downloader: Downloader,
+    pub downloader: DownloaderConfig,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
     #[serde(default)]
