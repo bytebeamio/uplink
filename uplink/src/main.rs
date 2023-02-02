@@ -69,12 +69,9 @@ fn initialize_logging(commandline: &CommandLine) {
         .set_thread_level(LevelFilter::Error)
         .set_level_padding(LevelPadding::Right);
 
-    match config.set_time_offset_to_local() {
-        Ok(_) => {}
-        Err(_) => {
-            warn!("failed to get time zone on this platform, logger will use IST");
-            config.set_time_offset(time::UtcOffset::from_hms(5, 30, 0).unwrap());
-        }
+    if config.set_time_offset_to_local().is_err() {
+        warn!("failed to get time zone on this platform, logger will use IST");
+        config.set_time_offset(time::UtcOffset::from_hms(5, 30, 0).unwrap());
     }
 
     if commandline.modules.is_empty() {
@@ -151,10 +148,12 @@ fn main() -> Result<(), Error> {
     if let Some(config) = config.simulator.clone() {
         let bridge = bridge.clone();
         thread::spawn(move || {
+            // Only issue with action recv will trigger following unwrap to panic
             simulator::start(bridge, &config).unwrap();
         });
     }
 
+    // Runtime usually can be built without triggering the panic, but otherwise a panic is valid
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .thread_name("tcpjson")

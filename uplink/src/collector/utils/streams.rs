@@ -97,8 +97,9 @@ impl Streams {
 
     // Flush stream/partitions that timeout
     pub async fn flush_stream(&mut self, stream: &str) -> Result<(), bridge::Error> {
-        let stream = self.map.get_mut(stream).unwrap();
-        stream.flush().await?;
+        if let Some(stream) = self.map.get_mut(stream) {
+            stream.flush().await?;
+        }
         Ok(())
     }
 

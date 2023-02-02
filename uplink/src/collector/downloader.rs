@@ -54,7 +54,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
 
-use crate::base::bridge::BridgeTx;
+use crate::base::bridge::{BridgeTx, Event};
 use crate::{Action, ActionResponse, Config};
 
 #[derive(thiserror::Error, Debug)]
@@ -65,8 +65,8 @@ pub enum Error {
     Reqwest(#[from] reqwest::Error),
     #[error("File io Error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Error forwarding download Action to bridge: {0}")]
-    TrySend(Box<flume::TrySendError<Action>>),
+    #[error("Error forwarding responses to bridge: {0}")]
+    Send(Box<flume::SendError<Event>>),
     #[error("Error receiving action: {0}")]
     Recv(#[from] RecvError),
     #[error("Missing file name: {0}")]
@@ -79,9 +79,9 @@ pub enum Error {
     InstallationError(String),
 }
 
-impl From<flume::TrySendError<Action>> for Error {
-    fn from(e: flume::TrySendError<Action>) -> Self {
-        Self::TrySend(Box::new(e))
+impl From<flume::SendError<Event>> for Error {
+    fn from(e: flume::SendError<Event>) -> Self {
+        Self::Send(Box::new(e))
     }
 }
 
@@ -149,7 +149,7 @@ impl FileDownloader {
             if let Some(e) = error {
                 let status = ActionResponse::failure(&self.action_id, e.to_string());
                 let status = status.set_sequence(self.sequence());
-                self.bridge_tx.send_action_response(status).await;
+                self.bridge_tx.send_action_response(status).await?;
             }
         }
     }
@@ -159,7 +159,7 @@ impl FileDownloader {
         // Update action status for process initiated
         let status = ActionResponse::progress(&self.action_id, "Downloading", 0);
         let status = status.set_sequence(self.sequence());
-        self.bridge_tx.send_action_response(status).await;
+        self.bridge_tx.send_action_response(status).await?;
 
         // Extract url information from action payload
         let mut update = serde_json::from_str::<DownloadFile>(&action.payload)?;
@@ -180,7 +180,7 @@ impl FileDownloader {
 
         let status = ActionResponse::progress(&self.action_id, "Downloaded", 50);
         let status = status.set_sequence(self.sequence());
-        self.bridge_tx.send_action_response(status).await;
+        self.bridge_tx.send_action_response(status).await?;
 
         Ok(())
     }
@@ -238,7 +238,7 @@ impl FileDownloader {
                 let status =
                     ActionResponse::progress(&self.action_id, "Downloading", percentage as u8);
                 let status = status.set_sequence(self.sequence());
-                self.bridge_tx.send_action_response(status).await;
+                self.bridge_tx.send_action_response(status).await?;
             }
         }
 

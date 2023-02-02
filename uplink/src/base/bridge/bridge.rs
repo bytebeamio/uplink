@@ -1,6 +1,6 @@
 use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
-use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
+use flume::{bounded, Receiver, RecvError, SendError, Sender, TrySendError};
 use log::{error, info};
 use tokio::{
     select,
@@ -128,6 +128,7 @@ impl Bridge {
                     }
                 }
                 _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
+                    // Won't panic until the end of time
                     let action = self.current_action.take().unwrap();
                     error!("Timeout waiting for action response. Action ID = {}", action.id);
                     self.forward_action_error(action.action, Error::ActionTimeout).await;
@@ -247,19 +248,22 @@ impl BridgeTx {
         actions_rx
     }
 
-    pub async fn send_payload(&self, payload: Payload) {
+    pub async fn send_payload(&self, payload: Payload) -> Result<(), SendError<Event>> {
         let event = Event::Data(payload);
-        self.events_tx.send_async(event).await.unwrap()
+        self.events_tx.send_async(event).await
     }
 
-    pub fn send_payload_sync(&self, payload: Payload) {
+    pub fn send_payload_sync(&self, payload: Payload) -> Result<(), SendError<Event>> {
         let event = Event::Data(payload);
-        self.events_tx.send(event).unwrap()
+        self.events_tx.send(event)
     }
 
-    pub async fn send_action_response(&self, response: ActionResponse) {
+    pub async fn send_action_response(
+        &self,
+        response: ActionResponse,
+    ) -> Result<(), SendError<Event>> {
         let event = Event::ActionResponse(response);
-        self.events_tx.send_async(event).await.unwrap()
+        self.events_tx.send_async(event).await
     }
 }
 

@@ -158,6 +158,7 @@ impl Mqtt {
             let mut tokens = tokens.iter();
             while let Some(token) = tokens.next() {
                 if token == &"devices" {
+                    // NOTE: Could fail if subscribed to a topic where last token == "devices"
                     let device_id = tokens.next().unwrap().to_string();
                     action.device_id = Some(device_id);
                 }
@@ -200,17 +201,4 @@ fn mqttoptions(config: &Config) -> MqttOptions {
     }
 
     mqttoptions
-}
-
-fn _get_certs(key_path: &Path, ca_path: &Path) -> (Vec<u8>, Vec<u8>) {
-    println!("{:?}", key_path);
-    let mut key = Vec::new();
-    let mut key_file = File::open(key_path).unwrap();
-    key_file.read_to_end(&mut key).unwrap();
-
-    let mut ca = Vec::new();
-    let mut ca_file = File::open(ca_path).unwrap();
-    ca_file.read_to_end(&mut ca).unwrap();
-
-    (key, ca)
 }

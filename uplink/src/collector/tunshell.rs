@@ -54,7 +54,9 @@ impl TunshellSession {
                 Err(e) => {
                     error!("Failed to deserialize keys. Error = {:?}", e);
                     let status = ActionResponse::failure(&action_id, "corruptkeys".to_owned());
-                    self.bridge.send_action_response(status).await;
+                    if let Err(e) = self.bridge.send_action_response(status).await {
+                        error!("Couldn't forward response to bridge: {e}")
+                    }
                     continue;
                 }
             };
@@ -65,23 +67,31 @@ impl TunshellSession {
             //TODO(RT): Findout why this is spawned. We want to send other action's with shell?
             tokio::spawn(async move {
                 let response = ActionResponse::progress(&action_id, "ShellSpawned", 100);
-                status_tx.send_action_response(response).await;
+                if let Err(e) = status_tx.send_action_response(response).await {
+                    error!("Couldn't forward response to bridge: {e}")
+                }
 
                 match client.start_session().compat().await {
                     Ok(status) => {
                         if status != 0 {
                             let response = ActionResponse::failure(&action_id, status.to_string());
-                            status_tx.send_action_response(response).await;
+                            if let Err(e) = status_tx.send_action_response(response).await {
+                                error!("Couldn't forward response to bridge: {e}")
+                            }
                         } else {
                             log::info!("tunshell exited with status: {}", status);
                             let response = ActionResponse::success(&action_id);
-                            status_tx.send_action_response(response).await;
+                            if let Err(e) = status_tx.send_action_response(response).await {
+                                error!("Couldn't forward response to bridge: {e}")
+                            }
                         }
                     }
                     Err(e) => {
                         log::warn!("tunshell client error: {}", e);
                         let response = ActionResponse::failure(&action_id, e.to_string());
-                        status_tx.send_action_response(response).await;
+                        if let Err(e) = status_tx.send_action_response(response).await {
+                            error!("Couldn't forward response to bridge: {e}")
+                        }
                     }
                 };
             });

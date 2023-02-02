@@ -104,6 +104,7 @@ impl LoggerInstance {
 
     // Ensure last used kill switch is set to false so that associated child process gets killed
     fn kill_last(&self) {
+        // Panics if lock is held by a panicked thread or already held in the same thread
         *self.kill_switch.lock().unwrap() = false;
     }
 
@@ -122,6 +123,7 @@ impl LoggerInstance {
                     return;
                 }
             };
+            // Panics if stdout is not captured
             let stdout = logger.stdout.take().unwrap();
             let mut buf_stdout = BufReader::new(stdout);
             loop {

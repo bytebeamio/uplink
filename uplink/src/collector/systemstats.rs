@@ -13,7 +13,7 @@ use std::{
 };
 
 use crate::{
-    base::bridge::{BridgeTx, Payload},
+    base::bridge::{BridgeTx, Event, Payload},
     Config,
 };
 
@@ -27,6 +27,8 @@ pub enum Error {
     Glob(#[from] glob::GlobError),
     #[error("Parse float error {0}")]
     ParseFloat(#[from] std::num::ParseFloatError),
+    #[error("Send error {0}")]
+    Send(#[from] flume::SendError<Event>),
 }
 
 type Pid = u32;
@@ -553,7 +555,7 @@ impl StatCollector {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         let payload = self.system.push(&self.sys, timestamp);
-        self.bridge_tx.send_payload_sync(payload);
+        self.bridge_tx.send_payload_sync(payload)?;
 
         // Refresh disk info
         self.sys.refresh_disks();
@@ -561,7 +563,7 @@ impl StatCollector {
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for disk_data in self.sys.disks() {
             let payload = self.disks.push(disk_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            self.bridge_tx.send_payload_sync(payload)?;
         }
 
         // Refresh network byte rate info
@@ -570,7 +572,7 @@ impl StatCollector {
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for (net_name, net_data) in self.sys.networks() {
             let payload = self.networks.push(net_name.to_owned(), net_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            self.bridge_tx.send_payload_sync(payload)?;
         }
 
         // Refresh processor info
@@ -579,7 +581,7 @@ impl StatCollector {
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for proc_data in self.sys.cpus().iter() {
             let payload = self.processors.push(proc_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            self.bridge_tx.send_payload_sync(payload)?;
         }
 
         // Refresh component info
@@ -588,7 +590,7 @@ impl StatCollector {
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for comp_data in self.sys.components().iter() {
             let payload = self.components.push(comp_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            self.bridge_tx.send_payload_sync(payload)?;
         }
         let files = glob::glob("/sys/devices/virtual/thermal/thermal_zone*/temp")?;
         for thermal_zone in files {
@@ -599,7 +601,7 @@ impl StatCollector {
             let temperature = std::fs::read_to_string(path)?.trim().parse::<f32>()?;
             let comp_data = Component { label, temperature, ..Default::default() };
             let payload = self.components.push_custom(comp_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            self.bridge_tx.send_payload_sync(payload)?;
         }
 
         // Refresh processes info
@@ -614,7 +616,7 @@ impl StatCollector {
 
             if self.config.stats.process_names.contains(&name) {
                 let payload = self.processes.push(id.as_u32(), p, name, timestamp);
-                self.bridge_tx.send_payload_sync(payload);
+                self.bridge_tx.send_payload_sync(payload)?;
             }
         }
 

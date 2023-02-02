@@ -10,7 +10,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::io;
 
-use crate::base::bridge::BridgeTx;
+use crate::base::bridge::{BridgeTx, Event};
 use crate::base::AppConfig;
 use crate::{Action, ActionResponse, Payload};
 
@@ -21,7 +21,7 @@ pub enum Error {
     #[error("Receiver error {0}")]
     Recv(#[from] RecvError),
     #[error("Sender error {0}")]
-    Send(#[from] SendError<ActionResponse>),
+    Send(#[from] SendError<Event>),
     #[error("Stream done")]
     StreamDone,
     #[error("Lines codec error {0}")]
@@ -126,12 +126,12 @@ impl TcpJson {
 
         if data.stream == "action_status" {
             let response = ActionResponse::from_payload(&data)?;
-            self.bridge.send_action_response(response).await;
+            self.bridge.send_action_response(response).await?;
 
             return Ok(());
         }
 
-        self.bridge.send_payload(data).await;
+        self.bridge.send_payload(data).await?;
 
         Ok(())
     }

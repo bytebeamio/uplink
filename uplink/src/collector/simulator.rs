@@ -1,4 +1,5 @@
 use log::{error, info, trace, warn};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
@@ -6,14 +7,13 @@ use tokio::select;
 use tokio_util::codec::LinesCodecError;
 
 use std::collections::BinaryHeap;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
-use crate::base::bridge::BridgeTx;
+use super::utils::clock;
+use crate::base::bridge::{self, BridgeTx};
 use crate::base::SimulatorConfig;
 use crate::{Action, ActionResponse, Payload};
-
-use rand::Rng;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -25,8 +25,10 @@ pub enum Error {
     Codec(#[from] LinesCodecError),
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
-    #[error("flume error {0}")]
+    #[error("flume recv error {0}")]
     Recv(#[from] flume::RecvError),
+    #[error("flume send error {0}")]
+    Send(#[from] flume::SendError<bridge::Event>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -120,7 +122,7 @@ impl PartialOrd for Event {
 }
 
 pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let timestamp = clock() as u64;
     let path_len = device.path.len() as u32;
     let path_index = ((device.path_offset + sequence) % path_len) as usize;
     let position = device.path.get(path_index).unwrap();
@@ -198,7 +200,7 @@ struct Bms {
 }
 
 pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let timestamp = clock() as u64;
     let payload = Bms {
         periodicity_ms: 250,
         mosfet_temperature: generate_float(40f64, 45f64),
@@ -266,7 +268,7 @@ struct Imu {
 }
 
 pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let timestamp = clock() as u64;
     let payload = Imu {
         ax: generate_float(1f64, 2.8f64),
         ay: generate_float(1f64, 2.8f64),
@@ -299,7 +301,7 @@ struct Motor {
 }
 
 pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let timestamp = clock() as u64;
     let payload = Motor {
         motor_temperature1: generate_float(40f64, 45f64),
         motor_temperature2: generate_float(40f64, 45f64),
@@ -333,7 +335,7 @@ struct PeripheralState {
 }
 
 pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let timestamp = clock() as u64;
     let payload = PeripheralState {
         gps_status: generate_bool_string(0.99),
         gsm_status: generate_bool_string(0.99),
@@ -368,7 +370,7 @@ struct DeviceShadow {
 }
 
 pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payload {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    let timestamp = clock() as u64;
     let payload = DeviceShadow {
         mode: "economy".to_owned(),
         status: "Locked".to_owned(),
@@ -484,7 +486,7 @@ pub async fn process_data_event(
     event: &DataEvent,
     events: &mut BinaryHeap<Event>,
     bridge_tx: &BridgeTx,
-) {
+) -> Result<(), Error> {
     let data = match event.event_type {
         DataEventType::GenerateGPS => generate_gps_data(&event.device, event.sequence),
         DataEventType::GenerateIMU => generate_imu_data(&event.device, event.sequence),
@@ -498,7 +500,7 @@ pub async fn process_data_event(
         DataEventType::GenerateBMS => generate_bms_data(&event.device, event.sequence),
     };
 
-    bridge_tx.send_payload(data).await;
+    bridge_tx.send_payload(data).await?;
 
     let duration = next_event_duration(event.event_type);
 
@@ -508,9 +510,14 @@ pub async fn process_data_event(
         device: event.device.clone(),
         event_type: event.event_type,
     }));
+
+    Ok(())
 }
 
-async fn process_action_response_event(event: &ActionResponseEvent, bridge_tx: &BridgeTx) {
+async fn process_action_response_event(
+    event: &ActionResponseEvent,
+    bridge_tx: &BridgeTx,
+) -> Result<(), Error> {
     //info!("Sending action response {:?} {} {} {}", event.device_id, event.action_id, event.progress, event.status);
     let mut response = ActionResponse::progress(&event.action_id, &event.status, event.progress);
     response.device_id = Some(event.device_id.to_owned());
@@ -520,11 +527,16 @@ async fn process_action_response_event(event: &ActionResponseEvent, bridge_tx: &
         event.device_id, event.action_id, event.progress, event.status
     );
 
-    bridge_tx.send_action_response(response).await;
+    bridge_tx.send_action_response(response).await?;
     info!("Successfully sent action response");
+
+    Ok(())
 }
 
-pub async fn process_events(events: &mut BinaryHeap<Event>, bridge_tx: &BridgeTx) {
+pub async fn process_events(
+    events: &mut BinaryHeap<Event>,
+    bridge_tx: &BridgeTx,
+) -> Result<(), Error> {
     if let Some(e) = events.pop() {
         let current_time = Instant::now();
         let timestamp = event_timestamp(&e);
@@ -539,20 +551,23 @@ pub async fn process_events(events: &mut BinaryHeap<Event>, bridge_tx: &BridgeTx
 
         match e {
             Event::DataEvent(event) => {
-                process_data_event(&event, events, bridge_tx).await;
+                process_data_event(&event, events, bridge_tx).await?;
             }
 
             Event::ActionResponseEvent(event) => {
-                process_action_response_event(&event, bridge_tx).await;
+                process_action_response_event(&event, bridge_tx).await?;
             }
         }
     } else {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+
+    Ok(())
 }
 
 pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
     let action_id = action.action_id;
+    // Action shouldn't reach simulator without device_id set
     let device_id = action.device_id.unwrap();
 
     info!("Generating action events for action: {action_id} on device: {device_id}");

@@ -5,8 +5,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::{pin, select, time};
 
-use crate::base::bridge::BridgeTx;
-use crate::{ActionResponse, Package};
+use crate::base::bridge::{BridgeTx, Event};
+use crate::ActionResponse;
 
 use std::io;
 use std::process::Stdio;
@@ -21,7 +21,7 @@ pub enum Error {
     #[error("Recv error {0}")]
     Recv(#[from] RecvError),
     #[error("Send error {0}")]
-    Send(#[from] SendError<Box<dyn Package>>),
+    Send(#[from] SendError<Event>),
     #[error("Busy with previous action")]
     Busy,
     #[error("No stdout in spawned action")]
@@ -74,7 +74,7 @@ impl ProcessHandler {
                     };
 
                     debug!("Action status: {:?}", status);
-                    self.bridge_tx.send_action_response(status).await;
+                    self.bridge_tx.send_action_response(status).await?;
                  }
                  status = child.wait() => info!("Action done!! Status = {:?}", status),
                  _ = &mut timeout => break

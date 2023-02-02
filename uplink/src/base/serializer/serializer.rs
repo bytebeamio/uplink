@@ -285,9 +285,14 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.max_packet_size;
         let client = self.client.clone();
 
-        // Done reading all the pending files
-        if storage.reload_on_eof().unwrap() {
-            return Ok(Status::Normal);
+        match storage.reload_on_eof() {
+            // Done reading all pending files
+            Ok(true) => return Ok(Status::Normal),
+            Ok(false) => {}
+            Err(e) => {
+                error!("Failed to reload storage. Forcing into Normal mode. Error = {:?}", e);
+                return Ok(Status::Normal);
+            }
         }
 
         let publish = match read(storage.reader(), max_packet_size) {
