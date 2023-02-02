@@ -204,14 +204,19 @@ impl<C: MqttClient> Serializer<C> {
             Some(s) => s,
             None => return Err(Error::MissingPersistence),
         };
+
         // Write failed publish to disk first, metrics don't matter
-        write_to_disk(publish, storage);
+        if let Err(e) = write_to_disk(publish, storage) {
+            error!("Crash loop: write error = {:?}", e);
+        }
 
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
             let publish = construct_publish(data)?;
-            write_to_disk(publish, storage);
+            if let Err(e) = write_to_disk(publish, storage) {
+                error!("Crash loop: write error = {:?}", e);
+            }
         }
     }
 
@@ -240,13 +245,17 @@ impl<C: MqttClient> Serializer<C> {
 
                     let data = data?;
                     let publish = construct_publish(data)?;
-                    let deleted = write_to_disk(publish, storage);
+                    match write_to_disk(publish, storage) {
+                        Ok(deleted) => if deleted.is_some() {
+                            self.metrics.increment_lost_segments();
+                        }
+                        Err(_e) => {
+                            self.metrics.increment_write_errors();
+                        }
+                    };
 
                     // Update metrics
                     self.metrics.add_batch();
-                    if deleted.is_some() {
-                        self.metrics.increment_lost_segments();
-                    }
                 }
                 o = &mut publish => match o {
                     Ok(_) => {
@@ -313,13 +322,17 @@ impl<C: MqttClient> Serializer<C> {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
                     let publish = construct_publish(data)?;
-                    let deleted = write_to_disk(publish, storage);
+                    match write_to_disk(publish, storage) {
+                        Ok(deleted) => if deleted.is_some() {
+                            self.metrics.increment_lost_segments();
+                        }
+                        Err(_e) => {
+                            self.metrics.increment_write_errors();
+                        }
+                    };
 
                     // Update metrics
                     self.metrics.add_batch();
-                    if deleted.is_some() {
-                        self.metrics.increment_lost_segments();
-                    }
                 }
                 o = &mut send => {
                     self.metrics.add_sent_size(last_publish_payload_size);
@@ -468,22 +481,15 @@ fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
 // Writes the provided publish packet to disk with [Storage], after setting its pkid to 1.
 // Updates serializer metrics with appropriate values on success, if asked to do so.
 // Returns size in memory, size in disk, number of files in disk,
-fn write_to_disk(mut publish: Publish, storage: &mut Storage) -> Option<u64> {
+fn write_to_disk(mut publish: Publish, storage: &mut Storage) -> Result<Option<u64>, io::Error> {
     publish.pkid = 1;
     if let Err(e) = publish.write(storage.writer()) {
         error!("Failed to fill disk buffer. Error = {:?}", e);
-        return None;
+        return Ok(None);
     }
 
-    let deleted = match storage.flush_on_overflow() {
-        Ok(d) => d,
-        Err(e) => {
-            error!("Failed to flush disk buffer. Error = {:?}", e);
-            return None;
-        }
-    };
-
-    deleted
+    let deleted = storage.flush_on_overflow()?;
+    Ok(deleted)
 }
 
 pub fn save_and_prepare_next_metrics(

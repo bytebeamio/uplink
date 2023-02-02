@@ -11,6 +11,7 @@ pub struct SerializerMetrics {
     memory_size: usize,
     disk_files: usize,
     lost_segments: usize,
+    write_errors: usize,
     sent_size: usize,
 }
 
@@ -24,6 +25,7 @@ impl SerializerMetrics {
             memory_size: 0,
             disk_files: 0,
             lost_segments: 0,
+            write_errors: 0,
             sent_size: 0,
         }
     }
@@ -51,6 +53,10 @@ impl SerializerMetrics {
         self.disk_files = count;
     }
 
+    pub fn increment_write_errors(&mut self) {
+        self.write_errors += 1;
+    }
+
     pub fn increment_lost_segments(&mut self) {
         self.lost_segments += 1;
     }
@@ -67,5 +73,6 @@ impl SerializerMetrics {
         self.disk_files = 0;
         self.lost_segments = 0;
         self.sent_size = 0;
+        self.write_errors = 0;
     }
 }
