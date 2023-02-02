@@ -185,7 +185,7 @@ impl FileDownloader {
         update.download_path = Some(file_path.clone());
         action.payload = serde_json::to_string(&update)?;
 
-        let status = ActionResponse::progress(&self.action_id, "Downloaded", 50);
+        let status = ActionResponse::progress(&self.action_id, "Downloaded", 100);
         let status = status.set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
 
