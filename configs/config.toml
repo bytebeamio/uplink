@@ -10,12 +10,8 @@ max_inflight = 100
 # Collection of binaries which uplink can spawn as a process
 # This ensures that user is protected against random actions
 # triggered from cloud.
-actions = ["tunshell"]
-action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
-
-# flushed on a single point entering, ensuring instant forwarding to platform.
-actions = ["tunshell"]
 processes = ["echo"]
+action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
 
 # TCP applications that detail applications which connect with uplink
 # Required Parameters
