@@ -232,6 +232,15 @@ impl BridgeTx {
         actions_rx
     }
 
+    pub fn register_action_route_sync<S: Into<String>>(&self, name: S) -> Receiver<Action> {
+        let (actions_tx, actions_rx) = bounded(0);
+        let event = Event::RegisterActionRoute(name.into(), actions_tx);
+
+        // Bridge should always be up and hence unwrap is ok
+        self.events_tx.send(event).unwrap();
+        actions_rx
+    }
+
     pub async fn register_action_routes<S: Into<String>, V: IntoIterator<Item = S>>(
         &self,
         names: V,

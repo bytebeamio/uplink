@@ -6,6 +6,8 @@ use anyhow::Error;
 
 use base::monitor::Monitor;
 use collector::downloader::FileDownloader;
+#[cfg(any(target_os = "android", target_os = "linux"))]
+use collector::logging::LoggerInstance;
 use collector::process::ProcessHandler;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellSession;
@@ -328,6 +330,11 @@ impl Uplink {
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
 
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            let logger = LoggerInstance::new(config.clone(), bridge_tx.clone());
+            thread::spawn(move || logger.start());
+        }
         if config.stats.enabled {
             let stat_collector = StatCollector::new(config.clone(), bridge_tx.clone());
             thread::spawn(move || stat_collector.start());

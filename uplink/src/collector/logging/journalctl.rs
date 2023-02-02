@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use super::LoggingConfig;
 use crate::Payload;
 
+pub const LOG_ACTION_NAME: &str = "configure_journalctl";
+
 #[derive(Debug, Deserialize)]
 pub struct JournalctlConfig {
     pub tags: Vec<String>,

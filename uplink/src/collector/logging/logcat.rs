@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use super::LoggingConfig;
 use crate::Payload;
 
+pub const LOG_ACTION_NAME: &str = "configure_logcat";
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
     Verbose = 0,

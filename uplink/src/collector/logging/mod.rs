@@ -7,15 +7,14 @@ mod journalctl;
 #[cfg(target_os = "android")]
 mod logcat;
 
-use flume::{Receiver, Sender};
-
+use crate::base::bridge::BridgeTx;
 #[cfg(target_os = "linux")]
 use crate::base::JournalctlConfig;
-use crate::{Action, Config, Package, Payload, Stream};
+use crate::Config;
 #[cfg(target_os = "linux")]
-pub use journalctl::{new_journalctl, LogEntry};
+pub use journalctl::{new_journalctl, LogEntry, LOG_ACTION_NAME};
 #[cfg(target_os = "android")]
-pub use logcat::{new_logcat, LogEntry};
+pub use logcat::{new_logcat, LogEntry, LOG_ACTION_NAME};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -33,9 +32,8 @@ pub struct LoggingConfig {
 
 pub struct LoggerInstance {
     config: Arc<Config>,
-    log_stream: Stream<Payload>,
+    bridge_tx: BridgeTx,
     kill_switch: Arc<Mutex<bool>>,
-    log_rx: Receiver<Action>,
 }
 
 impl Drop for LoggerInstance {
@@ -46,26 +44,10 @@ impl Drop for LoggerInstance {
 }
 
 impl LoggerInstance {
-    pub fn new(
-        config: Arc<Config>,
-        data_tx: Sender<Box<dyn Package>>,
-        log_rx: Receiver<Action>,
-    ) -> Self {
-        #[cfg(target_os = "linux")]
-        let buf_size = config.journalctl.as_ref().and_then(|c| c.stream_size).unwrap_or(32);
-        #[cfg(not(target_os = "linux"))]
-        let buf_size = 32;
-
-        let log_stream = Stream::dynamic_with_size(
-            "logs",
-            &config.project_id,
-            &config.device_id,
-            buf_size,
-            data_tx,
-        );
+    pub fn new(config: Arc<Config>, bridge_tx: BridgeTx) -> Self {
         let kill_switch = Arc::new(Mutex::new(true));
 
-        Self { config, log_stream, kill_switch, log_rx }
+        Self { config, bridge_tx, kill_switch }
     }
 
     /// On an android system, starts a logcat instance and a journalctl instance for a linux system that
@@ -84,8 +66,10 @@ impl LoggerInstance {
             self.spawn_logger(new_logcat(&config));
         }
 
+        let log_rx = self.bridge_tx.register_action_route_sync(LOG_ACTION_NAME);
+
         loop {
-            let action = self.log_rx.recv()?;
+            let action = log_rx.recv()?;
             let mut config = serde_json::from_str::<LoggingConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
             log::info!("restarting journalctl with following config: {:?}", config);
@@ -110,7 +94,7 @@ impl LoggerInstance {
     // Spawn a thread to run the logger command
     fn spawn_logger(&mut self, mut logger: Command) {
         let kill_switch = self.kill_switch.clone();
-        let mut log_stream = self.log_stream.clone();
+        let bridge_tx = self.bridge_tx.clone();
 
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_micros(1_000_000));
@@ -158,7 +142,7 @@ impl LoggerInstance {
                     }
                 };
                 log::debug!("Log entry {:?}", payload);
-                log_stream.push(payload).unwrap();
+                bridge_tx.send_payload_sync(payload);
                 log_index += 1;
             }
         });
