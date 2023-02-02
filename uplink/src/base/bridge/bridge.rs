@@ -184,7 +184,7 @@ impl Bridge {
         let action_done = response.is_done();
 
         info!("Action response = {:?}", response);
-        if let Err(e) = self.action_status.fill(response).await {
+        if let Err(e) = self.action_status.fill(response.clone()).await {
             error!("Failed to fill. Error = {:?}", e);
         }
 
@@ -203,6 +203,10 @@ impl Bridge {
                     return;
                 }
             };
+
+            if let Some(action) = response.done_response {
+                inflight_action.action = action;
+            }
 
             let mut fwd_action = inflight_action.action.clone();
             fwd_action.name = fwd_name.to_owned();

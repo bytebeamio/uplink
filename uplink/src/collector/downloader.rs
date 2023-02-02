@@ -185,7 +185,7 @@ impl FileDownloader {
         update.download_path = Some(file_path.clone());
         action.payload = serde_json::to_string(&update)?;
 
-        let status = ActionResponse::progress(&self.action_id, "Downloaded", 100);
+        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
         let status = status.set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
 
@@ -242,6 +242,9 @@ impl FileDownloader {
                         downloaded
                     }
                 };
+
+                //TODO: Simplify progress by reusing action_id and state
+                //TODO: let response = self.response.progress(percentage);??
                 let status =
                     ActionResponse::progress(&self.action_id, "Downloading", percentage as u8);
                 let status = status.set_sequence(self.sequence());
