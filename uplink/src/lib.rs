@@ -344,7 +344,7 @@ impl Uplink {
         }
 
         let process_handler = ProcessHandler::new(bridge_tx.clone());
-        let processes = config.actions.clone();
+        let processes = config.processes.clone();
         thread::spawn(move || process_handler.start(processes));
 
         let monitor = Monitor::new(

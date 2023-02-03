@@ -77,7 +77,7 @@ pub struct JournalctlConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct Downloader {
+pub struct DownloaderConfig {
     pub actions: Vec<String>,
     pub path: String,
 }
@@ -103,6 +103,12 @@ pub struct MqttMetricsConfig {
     pub topic: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AppConfig {
+    pub port: u16,
+    pub actions: Vec<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct TracingConfig {
     pub enabled: bool,
@@ -117,11 +123,11 @@ pub struct Config {
     pub port: u16,
     pub tracing: TracingConfig,
     pub authentication: Option<Authentication>,
-    pub bridge_port: u16,
+    pub tcpapps: HashMap<String, AppConfig>,
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub keep_alive: u64,
-    pub actions: Vec<String>,
+    pub processes: Vec<String>,
     #[serde(skip)]
     pub actions_subscription: String,
     pub persistence: Option<Persistence>,
@@ -130,9 +136,10 @@ pub struct Config {
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
-    pub downloader: Downloader,
+    pub downloader: DownloaderConfig,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
+    pub action_redirections: HashMap<String, String>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
     #[cfg(target_os = "linux")]
