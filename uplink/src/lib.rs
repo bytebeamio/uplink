@@ -18,8 +18,8 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
-    use crate::base::StreamConfig;
     pub use crate::base::{Config, Persistence, Stats};
+    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     use config::{Environment, File, FileFormat};
     use std::fs;
     use structopt::StructOpt;
@@ -161,6 +161,29 @@ pub mod config {
             }
         }
 
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            let mut buf_size = 32;
+            #[cfg(target_os = "linux")]
+            if let Some(cfg) = &config.journalctl {
+                buf_size = cfg.stream_size.unwrap_or(32);
+            }
+
+            config.streams.insert(
+                "logs".to_owned(),
+                StreamConfig {
+                    topic: "/tenants/".to_owned()
+                        + tenant_id
+                        + "/devices/"
+                        + device_id
+                        + "/logs/jsonarray",
+                    buf_size,
+                    flush_period: DEFAULT_TIMEOUT,
+                },
+            );
+        }
+
+        #[cfg(target_os = "linux")]
         let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/actions";
         let mut device_action_topic = action_topic_template.to_string();
         replace_topic_placeholders(&mut device_action_topic, tenant_id, device_id);
