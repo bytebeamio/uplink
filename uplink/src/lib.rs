@@ -94,11 +94,11 @@ pub mod config {
     timeout = 10
 
     [streams.device_shadow]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     buf_size = 1
 
     [stats]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/uplink_stats/jsonarray"
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/system_stats/jsonarray"
     enabled = false
     process_names = ["uplink"]
     update_period = 30
@@ -152,7 +152,7 @@ pub mod config {
                 config.stream_metrics.blacklist.push(stream_name.to_owned());
                 let stream_config = StreamConfig {
                     topic: format!(
-                        "/tenants/{tenant_id}/devices/{device_id}/{stream_name}/jsonarray"
+                        "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
                     ),
                     buf_size: config.stats.stream_size.unwrap_or(100),
                     flush_period: u64::MAX,
@@ -176,7 +176,7 @@ pub mod config {
                         + tenant_id
                         + "/devices/"
                         + device_id
-                        + "/logs/jsonarray",
+                        + "/events/logs/jsonarray",
                     buf_size,
                     flush_period: DEFAULT_TIMEOUT,
                 },
