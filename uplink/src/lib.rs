@@ -162,7 +162,7 @@ pub mod config {
         }
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        {
+        if !config.streams.contains_key("logs") {
             let mut buf_size = 32;
             #[cfg(target_os = "linux")]
             if let Some(cfg) = &config.journalctl {
