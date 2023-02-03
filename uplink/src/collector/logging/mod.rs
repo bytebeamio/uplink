@@ -10,7 +10,7 @@ mod logcat;
 use crate::base::bridge::BridgeTx;
 #[cfg(target_os = "linux")]
 use crate::base::JournalctlConfig;
-use crate::Config;
+use crate::{ActionResponse, Config};
 #[cfg(target_os = "linux")]
 pub use journalctl::{new_journalctl, LogEntry, LOG_ACTION_NAME};
 #[cfg(target_os = "android")]
@@ -83,6 +83,9 @@ impl LoggerInstance {
             self.spawn_logger(new_journalctl(&config));
             #[cfg(target_os = "android")]
             self.spawn_logger(new_logcat(&config));
+
+            let response = ActionResponse::success(&action.action_id);
+            self.bridge_tx.send_action_response_sync(response);
         }
     }
 

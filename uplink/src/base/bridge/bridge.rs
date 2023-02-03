@@ -270,6 +270,11 @@ impl BridgeTx {
         let event = Event::ActionResponse(response);
         self.events_tx.send_async(event).await.unwrap()
     }
+
+    pub fn send_action_response_sync(&self, response: ActionResponse) {
+        let event = Event::ActionResponse(response);
+        self.events_tx.send(event).unwrap()
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
