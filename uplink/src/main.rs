@@ -108,6 +108,9 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     if config.stats.enabled {
         println!("    processes: {:?}", config.stats.process_names);
     }
+    if config.tracing.enabled {
+        println!("    tracing: http://localhost:{}", config.tracing.port);
+    }
     println!("\n");
 }
 
