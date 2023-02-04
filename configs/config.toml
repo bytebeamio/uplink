@@ -1,6 +1,3 @@
-# TCP Port to connect your applications with uplink
-bridge_port = 5555
-
 # MQTT client configuration
 # 
 # Required Parameters
@@ -10,12 +7,23 @@ bridge_port = 5555
 max_packet_size = 102400
 max_inflight = 100
 
-# Whitelist of binaries which uplink can spawn as a process
-# This makes sure that user is protected against random actions
+# Collection of binaries which uplink can spawn as a process
+# This ensures that user is protected against random actions
 # triggered from cloud.
-actions = ["tunshell"]
+processes = ["echo"]
+action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
 
-# flushed on a single point entering, ensuring instant forwarding to platform.
+# TCP applications that detail applications which connect with uplink
+# Required Parameters
+# - port: TCP/IP Port on which application can connect to uplink over
+# - actions: A list of actions that uplink can forward to the app
+[tcpapps.1]
+port = 5555
+actions = ["install_update", "load_file"]
+
+[tcpapps.2]
+port = 5556
+actions = []
 
 # Metrics configurations are available for serializer and streams. By default 
 # they are disabled and no metrics will be forwarded to platform. 

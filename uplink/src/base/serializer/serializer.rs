@@ -4,7 +4,7 @@ use std::{collections::VecDeque, io};
 use bytes::Bytes;
 use disk::Storage;
 use flume::{Receiver, RecvError, Sender};
-use log::{error, info, trace};
+use log::{debug, error, info, trace};
 use rumqttc::*;
 use thiserror::Error;
 use tokio::{select, time};
@@ -235,7 +235,7 @@ impl<C: MqttClient> Serializer<C> {
                     let storage = match &mut self.storage {
                         Some(s) => s,
                         None => {
-                            error!("Data loss, no disk to handle network backpressure: {:?}", data);
+                            error!("Data loss, no disk to handle network backpressure");
                             continue;
                         }
                     };
@@ -386,6 +386,7 @@ impl<C: MqttClient> Serializer<C> {
 
                     let publish = construct_publish(data)?;
                     let payload_size = publish.payload.len();
+                    debug!("publishing on {} with size = {}", publish.topic, payload_size);
                     match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, publish.payload) {
                         Ok(_) => {
                             self.metrics.add_batch();
@@ -448,6 +449,7 @@ async fn send_publish<C: MqttClient>(
     topic: String,
     payload: Bytes,
 ) -> Result<C, MqttError> {
+    debug!("publishing on {topic} with size = {}", payload.len());
     client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
 }
@@ -676,6 +678,7 @@ mod test {
         fn send(&mut self, i: u32) -> Result<(), Error> {
             let payload = Payload {
                 stream: "hello".to_owned(),
+                device_id: None,
                 sequence: i,
                 timestamp: 0,
                 payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,

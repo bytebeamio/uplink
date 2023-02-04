@@ -123,6 +123,7 @@ impl LogEntry {
 
         Ok(Payload {
             stream: "logs".to_string(),
+            device_id: None,
             sequence,
             timestamp: self.timestamp,
             collection_timestamp: self.timestamp,

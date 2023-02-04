@@ -11,7 +11,7 @@ use crate::{Payload, Point};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
     #[serde(skip)]
-    pub device_id: String,
+    pub device_id: Option<String>,
     // action id
     #[serde(alias = "id")]
     pub action_id: String,
@@ -23,10 +23,12 @@ pub struct Action {
     pub payload: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionResponse {
     #[serde(alias = "id")]
     pub action_id: String,
+    #[serde(skip)]
+    pub device_id: Option<String>,
     // sequence number
     pub sequence: u32,
     // timestamp
@@ -37,6 +39,8 @@ pub struct ActionResponse {
     pub progress: u8,
     // list of error
     pub errors: Vec<String>,
+    #[serde(skip)]
+    pub done_response: Option<Action>,
 }
 
 impl ActionResponse {
@@ -48,11 +52,13 @@ impl ActionResponse {
 
         ActionResponse {
             action_id: id.to_owned(),
+            device_id: None,
             sequence: 0,
             timestamp,
             state: state.to_owned(),
             progress,
             errors,
+            done_response: None,
         }
     }
 
@@ -64,12 +70,22 @@ impl ActionResponse {
         self.state == "Failed"
     }
 
+    pub fn is_done(&self) -> bool {
+        self.progress == 100
+    }
+
     pub fn progress(id: &str, state: &str, progress: u8) -> Self {
         ActionResponse::new(id, state, progress, vec![])
     }
 
     pub fn success(id: &str) -> ActionResponse {
         ActionResponse::new(id, "Completed", 100, vec![])
+    }
+
+    pub fn done(id: &str, state: &str, response: Option<Action>) -> Self {
+        let mut o = ActionResponse::new(id, state, 100, vec![]);
+        o.done_response = response;
+        o
     }
 
     pub fn add_error<E: Into<String>>(mut self, error: E) -> ActionResponse {
@@ -92,7 +108,6 @@ impl ActionResponse {
 
     pub fn from_payload(payload: &Payload) -> Result<Self, serde_json::Error> {
         let intermediate = serde_json::to_value(payload)?;
-
         serde_json::from_value(intermediate)
     }
 }
@@ -101,6 +116,7 @@ impl From<&ActionResponse> for Payload {
     fn from(resp: &ActionResponse) -> Self {
         Self {
             stream: "action_status".to_owned(),
+            device_id: resp.device_id.to_owned(),
             sequence: resp.sequence,
             timestamp: resp.timestamp,
             payload: json!({
