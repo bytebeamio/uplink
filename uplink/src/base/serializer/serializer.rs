@@ -251,7 +251,8 @@ impl<C: MqttClient> Serializer<C> {
                         Ok(deleted) => if deleted.is_some() {
                             self.metrics.increment_lost_segments();
                         }
-                        Err(_e) => {
+                        Err(e) => {
+                            error!("Storage write error = {:?}", e);
                             self.metrics.increment_write_errors();
                         }
                     };
@@ -328,7 +329,8 @@ impl<C: MqttClient> Serializer<C> {
                         Ok(deleted) => if deleted.is_some() {
                             self.metrics.increment_lost_segments();
                         }
-                        Err(_e) => {
+                        Err(e) => {
+                            error!("Storage write error = {:?}", e);
                             self.metrics.increment_write_errors();
                         }
                     };
@@ -483,7 +485,7 @@ fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
 // Writes the provided publish packet to disk with [Storage], after setting its pkid to 1.
 // Updates serializer metrics with appropriate values on success, if asked to do so.
 // Returns size in memory, size in disk, number of files in disk,
-fn write_to_disk(mut publish: Publish, storage: &mut Storage) -> Result<Option<u64>, io::Error> {
+fn write_to_disk(mut publish: Publish, storage: &mut Storage) -> Result<Option<u64>, disk::Error> {
     publish.pkid = 1;
     if let Err(e) = publish.write(storage.writer()) {
         error!("Failed to fill disk buffer. Error = {:?}", e);
