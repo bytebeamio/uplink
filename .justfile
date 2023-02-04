@@ -5,4 +5,4 @@ vv:
   cargo run -- -a configs/noauth.json -c configs/config.toml -vv
 
 stress:
-  cargo run -- -a configs/toxic.json -c configs/simulator.toml -vv
+  cargo run -- -a configs/stress.json -c configs/stress.toml -v
