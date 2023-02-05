@@ -375,7 +375,7 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     self.metrics.add_batch();
-                    self.metrics.set_memory_size(storage.inmemory_read_size());
+                    self.metrics.set_write_memory(storage.inmemory_read_size());
                     self.metrics.set_disk_files(storage.file_count());
 
                     let payload = publish.payload;
@@ -384,8 +384,6 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
-                    self.metrics.set_memory_size(storage.inmemory_read_size());
-                    self.metrics.set_disk_files(storage.file_count());
                     let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx);
                 }
             }
@@ -425,7 +423,7 @@ impl<C: MqttClient> Serializer<C> {
                     // Check in storage stats every tick. TODO: Make storage object always
                     // available. It can be inmemory storage
                     if let Some(s) = &mut self.storage {
-                        self.metrics.set_memory_size(s.inmemory_read_size());
+                        self.metrics.set_write_memory(s.inmemory_read_size());
                         self.metrics.set_disk_files(s.file_count());
                     }
 
@@ -505,18 +503,20 @@ fn write_to_disk(mut publish: Publish, storage: &mut Storage) -> Result<Option<u
 
 pub fn check_metrics(metrics: &mut SerializerMetrics, storage: &Option<Storage>) {
     if let Some(s) = storage {
-        metrics.set_memory_size(s.inmemory_read_size());
+        metrics.set_write_memory(s.inmemory_write_size());
+        metrics.set_read_memory(s.inmemory_read_size());
         metrics.set_disk_files(s.file_count());
     }
 
     info!(
-        "{:>17}: batches = {:<5} memory = {:<5} disk files = {:<3} lost segments = {} write errors = {} ",
+        "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
         metrics.mode,
         metrics.batches,
-        metrics.memory_size,
-        metrics.disk_files,
+        metrics.write_errors,
         metrics.lost_segments,
-        metrics.write_errors
+        metrics.disk_files,
+        metrics.write_memory,
+        metrics.read_memory,
     );
 }
 
@@ -526,7 +526,8 @@ pub fn save_and_prepare_next_metrics(
     storage: &Option<Storage>,
 ) {
     if let Some(s) = storage {
-        metrics.set_memory_size(s.inmemory_read_size());
+        metrics.set_write_memory(s.inmemory_write_size());
+        metrics.set_read_memory(s.inmemory_read_size());
         metrics.set_disk_files(s.file_count());
     }
 
@@ -550,28 +551,29 @@ pub fn check_and_flush_metrics(
 
         // Always send pending metrics. They represent state changes
         info!(
-            "{:>17}: batches = {:<5} memory = {:<5} disk files = {:<3} lost segments = {} write errors = {} ",
+            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
             metrics.mode,
             metrics.batches,
-            metrics.memory_size,
-            metrics.disk_files,
+            metrics.write_errors,
             metrics.lost_segments,
-            metrics.write_errors
+            metrics.disk_files,
+            metrics.write_memory,
+            metrics.read_memory,
         );
-
         metrics_tx.try_send(metrics.clone())?;
         pending.pop_front();
     }
 
     if metrics.batches() > 0 {
         info!(
-            "{:>17}: batches = {:<5} memory = {:<5} disk files = {:<3} lost segments = {} write errors = {} ",
+            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
             metrics.mode,
             metrics.batches,
-            metrics.memory_size,
-            metrics.disk_files,
+            metrics.write_errors,
             metrics.lost_segments,
-            metrics.write_errors
+            metrics.disk_files,
+            metrics.write_memory,
+            metrics.read_memory,
         );
 
         metrics_tx.try_send(metrics.clone())?;
