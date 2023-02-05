@@ -104,14 +104,14 @@ impl Streams {
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
     pub fn check_and_flush_metrics(&mut self) -> Result<(), flume::TrySendError<StreamMetrics>> {
-        for (_name, data) in self.map.iter_mut() {
+        for (buffer_name, data) in self.map.iter_mut() {
             let metrics = data.metrics.clone();
 
             // Initialize metrics timeouts when force flush sees data counts
             if metrics.points() > 0 {
                 info!(
                     "{:>20}: points = {:<5} batches = {:<5} latency = {}",
-                    metrics.stream, metrics.points, metrics.batches, metrics.average_batch_latency
+                    buffer_name, metrics.points, metrics.batches, metrics.average_batch_latency
                 );
                 self.metrics_tx.try_send(metrics)?;
                 data.metrics.prepare_next();
