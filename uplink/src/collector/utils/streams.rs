@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use flume::Sender;
-use log::{error, trace};
+use log::{error, info, trace};
 use tokio::time::{interval, Interval};
 
 use crate::base::bridge::{self, StreamMetrics, StreamStatus};
@@ -109,6 +109,10 @@ impl Streams {
 
             // Initialize metrics timeouts when force flush sees data counts
             if metrics.points() > 0 {
+                info!(
+                    "{:>20}: points = {:<5} batches = {:<5} latency = {}",
+                    metrics.stream, metrics.points, metrics.batches, metrics.average_batch_latency
+                );
                 self.metrics_tx.try_send(metrics)?;
                 data.metrics.prepare_next();
             }

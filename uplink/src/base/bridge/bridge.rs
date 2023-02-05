@@ -1,7 +1,7 @@
 use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
-use log::{error, info};
+use log::{debug, error, info};
 use tokio::{
     select,
     time::{self, interval, Sleep},
@@ -146,7 +146,7 @@ impl Bridge {
                 // Flush all metrics when timed out
                 _ = metrics_timeout.tick() => {
                     if let Err(e) = streams.check_and_flush_metrics() {
-                        error!("Failed to flush stream metrics. Error = {}", e);
+                        debug!("Failed to flush stream metrics. Error = {}", e);
                     }
                 }
             }

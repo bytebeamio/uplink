@@ -6,13 +6,13 @@ use crate::collector::utils::{self, clock};
 pub struct SerializerMetrics {
     pub timestamp: u128,
     pub sequence: u32,
-    mode: String,
-    batches: usize,
-    memory_size: usize,
-    disk_files: usize,
-    lost_segments: usize,
-    write_errors: usize,
-    sent_size: usize,
+    pub mode: String,
+    pub batches: usize,
+    pub memory_size: usize,
+    pub disk_files: usize,
+    pub lost_segments: usize,
+    pub write_errors: usize,
+    pub sent_size: usize,
 }
 
 impl SerializerMetrics {

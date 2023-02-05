@@ -1,4 +1,4 @@
-use log::{error, info, trace, warn};
+use log::{error, info, trace};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
@@ -601,7 +601,7 @@ pub async fn start(bridge_tx: BridgeTx, simulator_config: &SimulatorConfig) -> R
                 if current_time > timestamp {
                     trace!("Time delta {:?} {:?} {:?}", num_devices, current_time - timestamp, i);
                 } else {
-                    warn!("Time delta {:?} -{:?} {:?}", num_devices, timestamp - current_time, i);
+                    trace!("Time delta {:?} -{:?} {:?}", num_devices, timestamp - current_time, i);
                 }
 
                 i += 1;

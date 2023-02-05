@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 use std::{collections::VecDeque, io};
 
 use bytes::Bytes;
@@ -12,6 +13,8 @@ use tokio::{select, time};
 use crate::{Config, Package};
 
 use super::SerializerMetrics;
+
+const METRICS_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(thiserror::Error, Debug)]
 pub enum MqttError {
@@ -225,6 +228,7 @@ impl<C: MqttClient> Serializer<C> {
     /// Write new data to disk until back pressure due to slow n/w is resolved
     // TODO: Handle errors. Don't return errors
     async fn slow(&mut self, publish: Publish) -> Result<Status, Error> {
+        let mut interval = time::interval(METRICS_INTERVAL);
         info!("Switching to slow eventloop mode!!");
         self.metrics.set_mode("slow");
 
@@ -271,6 +275,9 @@ impl<C: MqttClient> Serializer<C> {
                         unreachable!("Unexpected error: {}", e);
                     }
                 },
+                _ = interval.tick() => {
+                    check_metrics(&mut self.metrics, &self.storage);
+                }
             }
         };
 
@@ -291,7 +298,7 @@ impl<C: MqttClient> Serializer<C> {
         };
 
         info!("Switching to catchup mode!!");
-        let mut interval = time::interval(time::Duration::from_secs(10));
+        let mut interval = time::interval(METRICS_INTERVAL);
         self.metrics.set_mode("catchup");
 
         let max_packet_size = self.config.max_packet_size;
@@ -390,7 +397,7 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     async fn normal(&mut self) -> Result<Status, Error> {
-        let mut interval = time::interval(time::Duration::from_secs(10));
+        let mut interval = time::interval(METRICS_INTERVAL);
         self.metrics.set_mode("normal");
         info!("Switching to normal mode!!");
 
@@ -423,7 +430,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
 
                     if let Err(e) = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx) {
-                        error!("Failed to flush serializer metrics (normal). Error = {}", e);
+                        debug!("Failed to flush serializer metrics (normal). Error = {}", e);
                     }
                 }
             }
@@ -496,6 +503,23 @@ fn write_to_disk(mut publish: Publish, storage: &mut Storage) -> Result<Option<u
     Ok(deleted)
 }
 
+pub fn check_metrics(metrics: &mut SerializerMetrics, storage: &Option<Storage>) {
+    if let Some(s) = storage {
+        metrics.set_memory_size(s.inmemory_read_size());
+        metrics.set_disk_files(s.file_count());
+    }
+
+    info!(
+        "{:>17}: batches = {:<5} memory = {:<5} disk files = {:<3} lost segments = {} write errors = {} ",
+        metrics.mode,
+        metrics.batches,
+        metrics.memory_size,
+        metrics.disk_files,
+        metrics.lost_segments,
+        metrics.write_errors
+    );
+}
+
 pub fn save_and_prepare_next_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut SerializerMetrics,
@@ -517,7 +541,7 @@ pub fn check_and_flush_metrics(
     metrics: &mut SerializerMetrics,
     metrics_tx: &Sender<SerializerMetrics>,
 ) -> Result<(), flume::TrySendError<SerializerMetrics>> {
-    let force = pending.len() > 0;
+    // Send pending metrics. This signifies state change
     loop {
         let metrics = match pending.get(0) {
             Some(v) => v,
@@ -525,12 +549,31 @@ pub fn check_and_flush_metrics(
         };
 
         // Always send pending metrics. They represent state changes
+        info!(
+            "{:>17}: batches = {:<5} memory = {:<5} disk files = {:<3} lost segments = {} write errors = {} ",
+            metrics.mode,
+            metrics.batches,
+            metrics.memory_size,
+            metrics.disk_files,
+            metrics.lost_segments,
+            metrics.write_errors
+        );
+
         metrics_tx.try_send(metrics.clone())?;
         pending.pop_front();
     }
 
-    // Force send when there's pending metrics. This usually signifies state change
-    if force || metrics.batches() > 0 {
+    if metrics.batches() > 0 {
+        info!(
+            "{:>17}: batches = {:<5} memory = {:<5} disk files = {:<3} lost segments = {} write errors = {} ",
+            metrics.mode,
+            metrics.batches,
+            metrics.memory_size,
+            metrics.disk_files,
+            metrics.lost_segments,
+            metrics.write_errors
+        );
+
         metrics_tx.try_send(metrics.clone())?;
         metrics.prepare_next();
     }
