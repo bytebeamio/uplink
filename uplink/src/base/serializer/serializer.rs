@@ -309,6 +309,8 @@ impl<C: MqttClient> Serializer<C> {
             return Ok(Status::Normal);
         }
 
+        // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
+        // This leads to force switching to normal mode. Increasing max_payload_size to bypass this
         let publish = match read(storage.reader(), max_packet_size) {
             Ok(Packet::Publish(publish)) => publish,
             Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
