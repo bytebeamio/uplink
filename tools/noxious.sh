@@ -14,6 +14,20 @@ function reset {
   http POST http://localhost:8474/reset
 }
 
+# Example
+# proxy 4444 cloud.bytebeam.io:1883
+# https://github.com/Shopify/toxiproxy#http-api
+function proxy() {
+  data='{
+    "name":"toxic-broker",
+    "enabled":true,
+    "listen":"0.0.0.0:1883",
+    "upstream":"stage.bytebeam.io:1883"
+  }'
+
+  echo $data | http http://localhost:8474/proxies
+}
+
 function slowdown() {
   data='{
     "name": "slowdown",
@@ -96,20 +110,6 @@ function 2g() {
   }'
 
   echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
-}
-
-# Example
-# proxy 4444 cloud.bytebeam.io:1883
-# https://github.com/Shopify/toxiproxy#http-api
-function proxy() {
-  data='{
-    "name":"toxic-broker",
-    "enabled":true,
-    "listen":"0.0.0.0:1883",
-    "upstream":"stage.bytebeam.io:1883"
-  }'
-
-  echo $data | http http://localhost:8474/proxies
 }
 
 "$@"

@@ -257,7 +257,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                         Err(e) => {
                             error!("Storage write error = {:?}", e);
-                            self.metrics.increment_write_errors();
+                            self.metrics.increment_errors();
                         }
                     };
 
@@ -315,6 +315,7 @@ impl<C: MqttClient> Serializer<C> {
             Ok(Packet::Publish(publish)) => publish,
             Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
             Err(e) => {
+                self.metrics.increment_errors();
                 error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
                 save_and_prepare_next_metrics(
                     &mut self.pending_metrics,
@@ -340,7 +341,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                         Err(e) => {
                             error!("Storage write error = {:?}", e);
-                            self.metrics.increment_write_errors();
+                            self.metrics.increment_errors();
                         }
                     };
 
@@ -521,7 +522,7 @@ pub fn check_metrics(metrics: &mut SerializerMetrics, storage: &Option<Storage>)
         "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
         metrics.mode,
         metrics.batches,
-        metrics.write_errors,
+        metrics.errors,
         metrics.lost_segments,
         metrics.disk_files,
         convert(metrics.write_memory as f64),
@@ -565,7 +566,7 @@ pub fn check_and_flush_metrics(
             "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
             metrics.mode,
             metrics.batches,
-            metrics.write_errors,
+            metrics.errors,
             metrics.lost_segments,
             metrics.disk_files,
             convert(metrics.write_memory as f64),
@@ -580,7 +581,7 @@ pub fn check_and_flush_metrics(
             "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
             metrics.mode,
             metrics.batches,
-            metrics.write_errors,
+            metrics.errors,
             metrics.lost_segments,
             metrics.disk_files,
             convert(metrics.write_memory as f64),
