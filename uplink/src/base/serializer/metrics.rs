@@ -52,7 +52,7 @@ impl SerializerMetrics {
     }
 
     pub fn set_read_memory(&mut self, size: usize) {
-        self.write_memory = size;
+        self.read_memory = size;
     }
 
     pub fn set_disk_files(&mut self, count: usize) {

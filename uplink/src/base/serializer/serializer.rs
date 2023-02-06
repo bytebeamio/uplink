@@ -384,6 +384,10 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
+                    // TODO(RT): Move storage updates into `check_and_flush`
+                    self.metrics.set_write_memory(storage.inmemory_write_size());
+                    self.metrics.set_read_memory(storage.inmemory_read_size());
+                    self.metrics.set_disk_files(storage.file_count());
                     let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx);
                 }
             }
@@ -422,9 +426,10 @@ impl<C: MqttClient> Serializer<C> {
                 _ = interval.tick() => {
                     // Check in storage stats every tick. TODO: Make storage object always
                     // available. It can be inmemory storage
-                    if let Some(s) = &mut self.storage {
-                        self.metrics.set_write_memory(s.inmemory_read_size());
-                        self.metrics.set_disk_files(s.file_count());
+                    if let Some(storage) = &mut self.storage {
+                        self.metrics.set_write_memory(storage.inmemory_write_size());
+                        self.metrics.set_read_memory(storage.inmemory_read_size());
+                        self.metrics.set_disk_files(storage.file_count());
                     }
 
                     if let Err(e) = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx) {
@@ -502,6 +507,8 @@ fn write_to_disk(mut publish: Publish, storage: &mut Storage) -> Result<Option<u
 }
 
 pub fn check_metrics(metrics: &mut SerializerMetrics, storage: &Option<Storage>) {
+    use pretty_bytes::converter::convert;
+
     if let Some(s) = storage {
         metrics.set_write_memory(s.inmemory_write_size());
         metrics.set_read_memory(s.inmemory_read_size());
@@ -515,8 +522,8 @@ pub fn check_metrics(metrics: &mut SerializerMetrics, storage: &Option<Storage>)
         metrics.write_errors,
         metrics.lost_segments,
         metrics.disk_files,
-        metrics.write_memory,
-        metrics.read_memory,
+        convert(metrics.write_memory as f64),
+        convert(metrics.read_memory as f64),
     );
 }
 
@@ -542,6 +549,8 @@ pub fn check_and_flush_metrics(
     metrics: &mut SerializerMetrics,
     metrics_tx: &Sender<SerializerMetrics>,
 ) -> Result<(), flume::TrySendError<SerializerMetrics>> {
+    use pretty_bytes::converter::convert;
+
     // Send pending metrics. This signifies state change
     loop {
         let metrics = match pending.get(0) {
@@ -557,8 +566,8 @@ pub fn check_and_flush_metrics(
             metrics.write_errors,
             metrics.lost_segments,
             metrics.disk_files,
-            metrics.write_memory,
-            metrics.read_memory,
+            convert(metrics.write_memory as f64),
+            convert(metrics.read_memory as f64),
         );
         metrics_tx.try_send(metrics.clone())?;
         pending.pop_front();
@@ -572,8 +581,8 @@ pub fn check_and_flush_metrics(
             metrics.write_errors,
             metrics.lost_segments,
             metrics.disk_files,
-            metrics.write_memory,
-            metrics.read_memory,
+            convert(metrics.write_memory as f64),
+            convert(metrics.read_memory as f64),
         );
 
         metrics_tx.try_send(metrics.clone())?;
@@ -591,6 +600,9 @@ pub fn flush_metrics(
     metrics.prepare_next();
     Ok(())
 }
+
+// TODO(RT): Test cases
+// - Restart with no internet but files on disk
 
 #[cfg(test)]
 mod test {
