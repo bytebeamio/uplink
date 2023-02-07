@@ -5,19 +5,19 @@ use crate::collector::utils;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct StreamMetrics {
-    timestamp: u128,
-    sequence: u32,
-    stream: String,
-    points: usize,
-    batches: u64,
-    max_batch_points: usize,
+    pub timestamp: u128,
+    pub sequence: u32,
+    pub stream: String,
+    pub points: usize,
+    pub batches: u64,
+    pub max_batch_points: usize,
     #[serde(skip_serializing)]
-    batch_start_time: Instant,
+    pub batch_start_time: Instant,
     #[serde(skip_serializing)]
-    total_latency: u64,
-    min_batch_latency: u64,
-    max_batch_latency: u64,
-    average_batch_latency: u64,
+    pub total_latency: u64,
+    pub min_batch_latency: u64,
+    pub max_batch_latency: u64,
+    pub average_batch_latency: u64,
 }
 
 impl StreamMetrics {

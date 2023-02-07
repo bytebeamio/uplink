@@ -4,7 +4,7 @@
 # - max_packet_size: Maximum packet size acceptable for MQTT messages
 # - max_inflight: Maximum number of outgoing QoS 1/2 messages that can be
 #                 handled by uplink, at a time, requiring acknowledgedment.
-max_packet_size = 102400
+max_packet_size = 256000
 max_inflight = 100
 
 # Collection of binaries which uplink can spawn as a process

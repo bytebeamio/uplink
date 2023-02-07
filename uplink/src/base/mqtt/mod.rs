@@ -86,7 +86,7 @@ impl Mqtt {
         loop {
             match self.eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
-                    info!("Connected to broker = {:?}", connack);
+                    info!("Connected to broker. Session present = {}", connack.session_present);
                     let subscriptions = self.actions_subscriptions.clone();
                     let client = self.client();
 
@@ -136,8 +136,9 @@ impl Mqtt {
                 }
                 Err(e) => {
                     self.metrics.add_reconnection();
-                    error!("Connection error = {:?}", e.to_string());
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    self.check_disconnection_metrics();
+                    debug!("Connection error = {:?}", e.to_string());
+                    tokio::time::sleep(Duration::from_secs(3)).await;
                     continue;
                 }
             }
@@ -171,8 +172,32 @@ impl Mqtt {
     }
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
+    pub fn check_disconnection_metrics(&mut self) {
+        let metrics = self.metrics.clone();
+        error!(
+            "{:>35}: reconnects = {:<3} publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3}",
+            "disconnected",
+            metrics.connection_retries,
+            metrics.publishes,
+            metrics.pubacks,
+            metrics.ping_requests,
+            metrics.ping_responses,
+        );
+    }
+
+    // Enable actual metrics timers when there is data. This method is called every minute by the bridge
     pub fn check_and_flush_metrics(&mut self) -> Result<(), flume::TrySendError<MqttMetrics>> {
         let metrics = self.metrics.clone();
+        info!(
+            "{:>35}: publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3} inflight = {}",
+            "connected",
+            metrics.publishes,
+            metrics.pubacks,
+            metrics.ping_requests,
+            metrics.ping_responses,
+            metrics.inflight
+        );
+
         self.metrics_tx.try_send(metrics)?;
         self.metrics.prepare_next();
         Ok(())

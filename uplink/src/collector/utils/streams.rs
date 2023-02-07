@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use flume::Sender;
-use log::{error, trace};
+use log::{error, info, trace};
 use tokio::time::{interval, Interval};
 
 use crate::base::bridge::{self, StreamMetrics, StreamStatus};
@@ -104,11 +104,15 @@ impl Streams {
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
     pub fn check_and_flush_metrics(&mut self) -> Result<(), flume::TrySendError<StreamMetrics>> {
-        for (_name, data) in self.map.iter_mut() {
+        for (buffer_name, data) in self.map.iter_mut() {
             let metrics = data.metrics.clone();
 
             // Initialize metrics timeouts when force flush sees data counts
             if metrics.points() > 0 {
+                info!(
+                    "{:>20}: points = {:<5} batches = {:<5} latency = {}",
+                    buffer_name, metrics.points, metrics.batches, metrics.average_batch_latency
+                );
                 self.metrics_tx.try_send(metrics)?;
                 data.metrics.prepare_next();
             }

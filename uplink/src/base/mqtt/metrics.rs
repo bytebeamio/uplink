@@ -4,16 +4,16 @@ use crate::collector::utils::clock;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct MqttMetrics {
-    timestamp: u128,
-    sequence: u32,
-    publishes: usize,
-    pubacks: usize,
-    ping_requests: usize,
-    ping_responses: usize,
-    inflight: u16,
-    actions_received: usize,
-    connections: usize,
-    connection_retries: usize,
+    pub timestamp: u128,
+    pub sequence: u32,
+    pub publishes: usize,
+    pub pubacks: usize,
+    pub ping_requests: usize,
+    pub ping_responses: usize,
+    pub inflight: u16,
+    pub actions_received: usize,
+    pub connections: usize,
+    pub connection_retries: usize,
 }
 
 impl MqttMetrics {
