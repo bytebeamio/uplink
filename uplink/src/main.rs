@@ -51,6 +51,7 @@ use structopt::StructOpt;
 use tokio::task::JoinSet;
 
 use uplink::base::AppConfig;
+use uplink::collector::device_shadow::DeviceShadow;
 use uplink::config::{get_configs, initialize, CommandLine};
 use uplink::{simulator, Config, TcpJson, Uplink};
 
@@ -163,12 +164,22 @@ fn main() -> Result<(), Error> {
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
+        .enable_time()
         .thread_name("tcpjson")
         .build()
         .unwrap();
 
     rt.block_on(async {
         let mut handles = JoinSet::new();
+        if let Some(device_shadow) = &config.device_shadow {
+            let tcpjson = DeviceShadow::new(device_shadow.clone(), bridge.clone()).await;
+            handles.spawn(async move {
+                if let Err(e) = tcpjson.start().await {
+                    error!("App failed. Error = {:?}", e);
+                }
+            });
+        }
+
         for (app, cfg) in config.tcpapps.iter() {
             let tcpjson = TcpJson::new(app.to_owned(), cfg.clone(), bridge.clone()).await;
             handles.spawn(async move {

@@ -1,3 +1,4 @@
+pub mod device_shadow;
 pub mod downloader;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod logging;

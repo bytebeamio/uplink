@@ -33,7 +33,7 @@ pub trait Package: Send + Debug {
 
 // TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
 // TODO which cloud will double deserialize (Batch 1st and messages next)
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Payload {
     #[serde(skip_serializing)]
     pub stream: String,

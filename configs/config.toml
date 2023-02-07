@@ -120,3 +120,7 @@ update_period = 30
 # [simulator]
 # num_devices = 10
 # gps_paths = "./paths/"
+
+[device_shadow]
+port = 4444
+timeout = 30
