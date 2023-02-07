@@ -304,13 +304,22 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.max_packet_size;
         let client = self.client.clone();
 
-        match storage.reload_on_eof() {
-            // Done reading all the pending files
-            Ok(true) => return Ok(Status::Normal),
-            Ok(false) => {}
-            Err(e) => {
-                error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
-                return Ok(Status::Normal);
+        loop {
+            match storage.reload_on_eof() {
+                // Done reading all the pending files
+                Ok(true) => return Ok(Status::Normal),
+                Ok(false) => break,
+                // Reload again on encountering a corrupted file
+                Err(disk::Error::CorruptedFile) => {
+                    self.metrics.increment_errors();
+                    self.metrics.increment_lost_segments();
+                    error!("Corrupted file encountered");
+                }
+                Err(e) => {
+                    self.metrics.increment_errors();
+                    error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
+                    return Ok(Status::Normal);
+                }
             }
         }
 
@@ -363,13 +372,22 @@ impl<C: MqttClient> Serializer<C> {
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
-                    match storage.reload_on_eof() {
-                        // Done reading all the pending files
-                        Ok(true) => return Ok(Status::Normal),
-                        Ok(false) => {}
-                        Err(e) => {
-                            error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
-                            return Ok(Status::Normal);
+                    loop {
+                        match storage.reload_on_eof() {
+                            // Done reading all the pending files
+                            Ok(true) => return Ok(Status::Normal),
+                            Ok(false) => break,
+                            // Reload again on encountering a corrupted file
+                            Err(disk::Error::CorruptedFile) => {
+                                self.metrics.increment_errors();
+                                self.metrics.increment_lost_segments();
+                                error!("Corrupted file encountered");
+                            }
+                            Err(e) => {
+                                self.metrics.increment_errors();
+                                error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
+                                return Ok(Status::Normal);
+                            }
                         }
                     }
 

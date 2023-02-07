@@ -229,13 +229,7 @@ impl Storage {
             self.remove(id)?;
         }
 
-        loop {
-            match self.reload() {
-                // Reload again on encountering a corrupted file
-                Err(Error::CorruptedFile) => error!("Corrupted file encountered"),
-                v => return v,
-            }
-        }
+        self.reload()
     }
 }
 
