@@ -310,15 +310,11 @@ impl<C: MqttClient> Serializer<C> {
                 Ok(true) => return Ok(Status::Normal),
                 Ok(false) => break,
                 // Reload again on encountering a corrupted file
-                Err(disk::Error::CorruptedFile) => {
-                    self.metrics.increment_errors();
-                    self.metrics.increment_lost_segments();
-                    error!("Corrupted file encountered");
-                }
                 Err(e) => {
                     self.metrics.increment_errors();
-                    error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
-                    return Ok(Status::Normal);
+                    self.metrics.increment_lost_segments();
+                    error!("Failed to reload from storage. Error = {e}");
+                    continue;
                 }
             }
         }
@@ -378,15 +374,11 @@ impl<C: MqttClient> Serializer<C> {
                             Ok(true) => return Ok(Status::Normal),
                             Ok(false) => break,
                             // Reload again on encountering a corrupted file
-                            Err(disk::Error::CorruptedFile) => {
-                                self.metrics.increment_errors();
-                                self.metrics.increment_lost_segments();
-                                error!("Corrupted file encountered");
-                            }
                             Err(e) => {
                                 self.metrics.increment_errors();
-                                error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
-                                return Ok(Status::Normal);
+                                self.metrics.increment_lost_segments();
+                                error!("Failed to reload from storage. Error = {e}");
+                                continue
                             }
                         }
                     }

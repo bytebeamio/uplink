@@ -213,7 +213,11 @@ impl Storage {
             return if self.current_read_file.is_empty() { Ok(true) } else { Ok(false) };
         }
 
-        self.load_next_read_file()?;
+        if let Err(e) = self.load_next_read_file() {
+            self.current_read_file.clear();
+            self.current_read_file_id.take();
+            return Err(e);
+        }
 
         Ok(false)
     }
