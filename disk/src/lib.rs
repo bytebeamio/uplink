@@ -143,23 +143,28 @@ impl Storage {
     #[inline]
     fn flush(&mut self) -> Result<Option<u64>, Error> {
         let hash = hash(&self.current_write_file[..]);
+
         let mut next_file = self.open_next_write_file()?;
         info!("Flushing data to disk!! {:?}", next_file.path);
         next_file.file.write_all(&hash.to_be_bytes())?;
         next_file.file.write_all(&self.current_write_file[..])?;
         next_file.file.flush()?;
-        self.current_write_file.clear();
+
         Ok(next_file.deleted)
     }
 
     /// Checks current write buffer size and flushes it to disk when the size
     /// exceeds configured size
     pub fn flush_on_overflow(&mut self) -> Result<Option<u64>, Error> {
-        if self.current_write_file.len() >= self.max_file_size {
-            return self.flush();
+        if self.current_write_file.len() < self.max_file_size {
+            return Ok(None);
         }
 
-        Ok(None)
+        // Clear write buffer even if flush to file was unsuccessful
+        let f = self.flush();
+        self.current_write_file.clear();
+
+        f
     }
 
     fn get_read_file_path(&self, id: u64) -> Result<PathBuf, Error> {
