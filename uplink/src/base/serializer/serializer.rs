@@ -304,9 +304,14 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.max_packet_size;
         let client = self.client.clone();
 
-        // Done reading all the pending files
-        if storage.reload_on_eof().unwrap() {
-            return Ok(Status::Normal);
+        match storage.reload_on_eof() {
+            // Done reading all the pending files
+            Ok(true) => return Ok(Status::Normal),
+            Ok(false) => {}
+            Err(e) => {
+                error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
+                return Ok(Status::Normal);
+            }
         }
 
         // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
@@ -359,12 +364,12 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     match storage.reload_on_eof() {
-                        // Done reading all pending files
-                        Ok(true) => break Ok(Status::Normal),
-                        Ok(false) => {},
+                        // Done reading all the pending files
+                        Ok(true) => return Ok(Status::Normal),
+                        Ok(false) => {}
                         Err(e) => {
-                            error!("Failed to   reload storage. Forcing into Normal mode. Error = {:?}", e);
-                            break Ok(Status::Normal)
+                            error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
+                            return Ok(Status::Normal);
                         }
                     }
 
@@ -801,7 +806,7 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage);
+        write_to_disk(publish.clone(), &mut storage).unwrap();
 
         let stored_publish = read_from_storage(&mut storage, serializer.config.max_packet_size);
 
@@ -928,7 +933,7 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage);
+        write_to_disk(publish.clone(), &mut storage).unwrap();
 
         // Replace storage into serializer
         serializer.storage = Some(storage);
@@ -962,7 +967,7 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage);
+        write_to_disk(publish.clone(), &mut storage).unwrap();
 
         // Replace storage into serializer
         serializer.storage = Some(storage);

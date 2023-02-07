@@ -1,5 +1,5 @@
 use bytes::{Buf, BufMut, BytesMut};
-use log::{self, info, warn};
+use log::{self, error, info, warn};
 use seahash::hash;
 
 use std::fs::{self, File, OpenOptions};
@@ -94,6 +94,7 @@ impl Storage {
 
         warn!("Moving corrupted file from {path_src:?} to {path_dest:?}");
         fs::rename(path_src, path_dest)?;
+
         Ok(())
     }
 
@@ -182,6 +183,10 @@ impl Storage {
         self.current_read_file_id = Some(id);
 
         // Verify with checksum
+        if self.current_read_file.len() < 8 {
+            self.handle_corrupt_file()?;
+            return Err(Error::CorruptedFile);
+        }
         let expected_hash = self.current_read_file.get_u64();
         let actual_hash = hash(&self.current_read_file[..]);
         if actual_hash != expected_hash {
@@ -224,7 +229,13 @@ impl Storage {
             self.remove(id)?;
         }
 
-        self.reload()
+        loop {
+            match self.reload() {
+                // Reload again on encountering a corrupted file
+                Err(Error::CorruptedFile) => error!("Corrupted file encountered"),
+                v => return v,
+            }
+        }
     }
 }
 
