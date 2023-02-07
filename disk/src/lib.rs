@@ -6,6 +6,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::mem;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -82,12 +83,35 @@ impl Storage {
         Ok(())
     }
 
+    fn prepare_corrupted_directory(&self) -> Result<PathBuf, Error> {
+        let dest_dir = self.backup_path.join("corrupted");
+        fs::create_dir_all(&dest_dir)?;
+
+        let file_count = fs::read_dir(&dest_dir)?.count();
+        if file_count < self.max_file_count {
+            return Ok(dest_dir);
+        }
+
+        let mut earliest = (PathBuf::new(), SystemTime::now());
+        let files = fs::read_dir(&dest_dir)?;
+        for file in files {
+            let entry = file?;
+            let path = entry.path();
+            let created = entry.metadata()?.created()?;
+            if earliest.1 > created {
+                earliest = (path, created);
+            }
+        }
+        fs::remove_file(earliest.0)?;
+
+        Ok(dest_dir)
+    }
+
     /// Move corrupt file to special directory
     fn handle_corrupt_file(&self) -> Result<(), Error> {
         let id = self.current_read_file_id.expect("There is supposed to be a file here");
         let path_src = self.get_read_file_path(id)?;
-        let dest_dir = self.backup_path.join("corrupted");
-        fs::create_dir_all(&dest_dir)?;
+        let dest_dir = self.prepare_corrupted_directory()?;
 
         let file_name = path_src.file_name().expect("The file name should exist");
         let path_dest = dest_dir.join(file_name);
