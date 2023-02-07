@@ -1,5 +1,5 @@
 use flume::RecvError;
-use log::{error, info, trace};
+use log::{error, info, trace, warn};
 use serde_json::json;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
@@ -16,6 +16,8 @@ use crate::base::bridge::{BridgeTx, Payload};
 use crate::base::DeviceShadowConfig;
 
 use super::utils::clock;
+
+const STREAM: &str = "device_shadow";
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -48,7 +50,7 @@ impl DeviceShadow {
             config,
             bridge,
             payload: Payload {
-                stream: "device_shadow".to_owned(),
+                stream: STREAM.to_owned(),
                 device_id: None,
                 sequence: 0,
                 timestamp: 0,
@@ -108,7 +110,13 @@ impl DeviceShadow {
             let line = line.ok_or(Error::StreamDone)??;
             trace!("Device Shadow:  Received line = {:?}", line);
             // Store incoming points into payload
-            self.payload = serde_json::from_str(&line)?;
+            let payload: Payload = serde_json::from_str(&line)?;
+            if payload.stream != STREAM {
+                warn!("Device Shadow: unexpected data sent to port");
+                return Ok(());
+            }
+
+            self.payload = payload;
         }
     }
 }
