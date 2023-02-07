@@ -121,6 +121,14 @@ update_period = 30
 # num_devices = 10
 # gps_paths = "./paths/"
 
+# To enable easy config of uplink for sending heartbeats on timeout. This app spawns a 
+# TCP port that accepts data payloads only on the device_shadow stream, forwarding
+# updated device shadows received from the connected app, else sending default values. 
+# NOTE: the app is disabled if left unconfigured.
+#
+# Required Parameters
+# - port: port to which app can connect to
+# - timeout: interval between data push
 [device_shadow]
 port = 4444
 timeout = 30
