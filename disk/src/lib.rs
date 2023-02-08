@@ -86,14 +86,7 @@ impl Storage {
     fn handle_corrupt_file(&self) -> Result<(), Error> {
         let id = self.current_read_file_id.expect("There is supposed to be a file here");
         let path_src = self.get_read_file_path(id)?;
-        let dest_dir = self.backup_path.join("corrupted");
-        fs::create_dir_all(&dest_dir)?;
-
-        let file_name = path_src.file_name().expect("The file name should exist");
-        let path_dest = dest_dir.join(file_name);
-
-        warn!("Moving corrupted file from {path_src:?} to {path_dest:?}");
-        fs::rename(path_src, path_dest)?;
+        move_corrupt_file(&path_src, &self.backup_path)?;
 
         Ok(())
     }
@@ -242,6 +235,19 @@ impl Storage {
     }
 }
 
+fn move_corrupt_file(corrupt_file: &Path, backup_path: &Path) -> Result<(), Error> {
+    let corrupt_dir = backup_path.join("corrupted");
+    fs::create_dir_all(&corrupt_dir)?;
+
+    let file_name = corrupt_file.file_name().expect("The file name should exist");
+    let corrupt_dest = corrupt_dir.join(file_name);
+
+    warn!("Moving corrupted file from {corrupt_file:?} to {corrupt_dest:?}");
+    fs::rename(corrupt_file, corrupt_dest)?;
+
+    Ok(())
+}
+
 /// Converts file path to file id
 fn id(path: &Path) -> Result<u64, Error> {
     if let Some(file_name) = path.file_name() {
@@ -251,16 +257,21 @@ fn id(path: &Path) -> Result<u64, Error> {
         }
     }
 
-    let id: Vec<&str> = path.file_stem().unwrap().to_str().unwrap().split('@').collect();
-    let id: u64 = id[1].parse().unwrap();
+    let file_name = path.file_stem().map(|x| x.to_str()).flatten().ok_or(Error::CorruptedFile)?;
+    let id: u64 = file_name
+        .strip_prefix("backup@")
+        .map(|x| x.parse().ok())
+        .flatten()
+        .ok_or(Error::CorruptedFile)?;
+
     Ok(id)
 }
 
 /// Gets list of file ids in the disk. Id of file backup@10 is 10.
 /// Storing ids instead of full paths enables efficient indexing
-fn get_file_ids(path: &Path) -> Result<Vec<u64>, Error> {
+fn get_file_ids(backup_path: &Path) -> Result<Vec<u64>, Error> {
     let mut file_ids = Vec::new();
-    let files = fs::read_dir(path)?;
+    let files = fs::read_dir(&backup_path)?;
     for file in files {
         let path = file?.path();
 
@@ -271,6 +282,11 @@ fn get_file_ids(path: &Path) -> Result<Vec<u64>, Error> {
 
         match id(&path) {
             Ok(id) => file_ids.push(id),
+            // Move corrupted files into directory
+            Err(Error::CorruptedFile) => {
+                move_corrupt_file(&path, &backup_path)?;
+                continue;
+            }
             Err(_) => continue,
         }
     }
