@@ -248,23 +248,13 @@ fn move_corrupt_file(corrupt_file: &Path, backup_path: &Path) -> Result<(), Erro
     Ok(())
 }
 
-/// Converts file path to file id
-fn id(path: &Path) -> Result<u64, Error> {
-    if let Some(file_name) = path.file_name() {
-        let file_name = format!("{:?}", file_name);
-        if !file_name.contains("backup@") {
-            return Err(Error::NotBackup);
-        }
-    }
+/// Converts file path to file id, returns none if file name has unexpected form
+/// Expected form: `backup@{id}` where `{id}` can be replaced with any number `0..=u64::MAX`
+fn id(path: &Path) -> Option<u64> {
+    let file_name = path.file_stem().map(|x| x.to_str()).flatten()?;
+    let id: u64 = file_name.strip_prefix("backup@").map(|x| x.parse().ok()).flatten()?;
 
-    let file_name = path.file_stem().map(|x| x.to_str()).flatten().ok_or(Error::CorruptedFile)?;
-    let id: u64 = file_name
-        .strip_prefix("backup@")
-        .map(|x| x.parse().ok())
-        .flatten()
-        .ok_or(Error::CorruptedFile)?;
-
-    Ok(id)
+    Some(id)
 }
 
 /// Gets list of file ids in the disk. Id of file backup@10 is 10.
@@ -281,13 +271,9 @@ fn get_file_ids(backup_path: &Path) -> Result<Vec<u64>, Error> {
         }
 
         match id(&path) {
-            Ok(id) => file_ids.push(id),
+            Some(id) => file_ids.push(id),
             // Move corrupted files into directory
-            Err(Error::CorruptedFile) => {
-                move_corrupt_file(&path, &backup_path)?;
-                continue;
-            }
-            Err(_) => continue,
+            _ => move_corrupt_file(&path, &backup_path)?,
         }
     }
 
