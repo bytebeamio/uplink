@@ -83,8 +83,7 @@ impl Storage {
     }
 
     /// Move corrupt file to special directory
-    fn handle_corrupt_file(&self) -> Result<(), Error> {
-        let id = self.current_read_file_id.expect("There is supposed to be a file here");
+    fn handle_corrupt_file(&self, id: u64) -> Result<(), Error> {
         let path_src = self.get_read_file_path(id)?;
         move_corrupt_file(&path_src, &self.backup_path)?;
 
@@ -178,19 +177,19 @@ impl Storage {
         let metadata = fs::metadata(&next_file_path)?;
         self.prepare_current_read_buffer(metadata.len() as usize);
         file.read_exact(&mut self.current_read_file[..])?;
-        self.current_read_file_id = Some(id);
 
         // Verify with checksum
         if self.current_read_file.len() < 8 {
-            self.handle_corrupt_file()?;
+            self.handle_corrupt_file(id)?;
             return Err(Error::CorruptedFile);
         }
         let expected_hash = self.current_read_file.get_u64();
         let actual_hash = hash(&self.current_read_file[..]);
         if actual_hash != expected_hash {
-            self.handle_corrupt_file()?;
+            self.handle_corrupt_file(id)?;
             return Err(Error::CorruptedFile);
         }
+        self.current_read_file_id = Some(id);
 
         Ok(())
     }
@@ -239,6 +238,7 @@ fn move_corrupt_file(corrupt_file: &Path, backup_path: &Path) -> Result<(), Erro
     let corrupt_dir = backup_path.join("corrupted");
     fs::create_dir_all(&corrupt_dir)?;
 
+    // NOTE: can't really do much if the path provided is not actually of a file
     let file_name = corrupt_file.file_name().expect("The file name should exist");
     let corrupt_dest = corrupt_dir.join(file_name);
 
