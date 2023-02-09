@@ -69,11 +69,20 @@ max_file_count = 3
 # - flush-period(optional): Duration in seconds after a data point enters the stream
 #   and WILL be flushed by collector. Defaults to 60s in case not configured.
 #
-# In the following config for the device_shadow stream we set buf_size to 1. streams is
+# In the following config for the gps stream we set buf_size to 10. streams is
 # internally constructed as a map of Name -> Config
-[streams.device_shadow]
-topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
-buf_size = 1
+[streams.gps]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/gps/jsonarray"
+buf_size = 10
+
+# To enable easy config of uplink for sending heartbeats on timeout. 
+#
+# Required Parameters
+# - topic: topic of device shadow stream
+# - timeout: interval between data push
+[device_shadow]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
+timeout = 10
 
 # Built-in streams: action status is a special case of stream and should be configured separately,
 # outside of the streams map. The action_status stream is used to push progress of Actions in
@@ -120,15 +129,3 @@ update_period = 30
 # [simulator]
 # num_devices = 10
 # gps_paths = "./paths/"
-
-# To enable easy config of uplink for sending heartbeats on timeout. This app spawns a 
-# TCP port that accepts data payloads only on the device_shadow stream, forwarding
-# updated device shadows received from the connected app, else sending default values. 
-# NOTE: the app is disabled if left unconfigured.
-#
-# Required Parameters
-# - port: port to which app can connect to
-# - timeout: interval between data push
-[device_shadow]
-port = 4444
-timeout = 30

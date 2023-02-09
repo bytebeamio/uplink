@@ -7,7 +7,7 @@ import shutil
 import threading
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.connect(("localhost", 4444))
+s.connect(("localhost", 5555))
 
 # Constructs a payload and sends it over TCP to uplink
 def send_data(s, payload):
