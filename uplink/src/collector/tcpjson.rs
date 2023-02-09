@@ -131,6 +131,15 @@ impl TcpJson {
             return Ok(());
         }
 
+        // If received payload is an object for the device_shadow stream, forward to bridge
+        // NOTE: if not an object, the payload is still forwarded to bridge and will be handled as normal
+        if data.stream == "device_shadow" && data.payload.is_object() {
+            let payload = data.payload.as_object().unwrap().to_owned();
+            self.bridge.send_device_shadow(payload).await;
+
+            return Ok(());
+        }
+
         self.bridge.send_payload(data).await;
 
         Ok(())

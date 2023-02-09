@@ -15,6 +15,8 @@ use log::error;
 pub mod base;
 pub mod collector;
 
+const UPLINK_VERSION: &str = std::env!("VERGEN_BUILD_SEMVER");
+
 pub mod config {
     use crate::base::StreamConfig;
     pub use crate::base::{Config, Persistence, Stats};
@@ -26,7 +28,7 @@ pub mod config {
     #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
     pub struct CommandLine {
         /// Binary version
-        #[structopt(skip = env ! ("VERGEN_BUILD_SEMVER"))]
+        #[structopt(skip = super::UPLINK_VERSION)]
         pub version: String,
         /// Build profile
         #[structopt(skip = env ! ("VERGEN_CARGO_PROFILE"))]
@@ -129,6 +131,7 @@ pub mod config {
         replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.serializer_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.mqtt_metrics.topic, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.device_shadow.topic, tenant_id, device_id);
 
         // for config in [&mut config.serializer_metrics, &mut config.stream_metrics] {
         //     if let Some(topic) = &config.topic {

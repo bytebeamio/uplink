@@ -2,13 +2,17 @@ use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info};
+use serde_json::{json, Map, Value};
 use tokio::{
     select,
     time::{self, interval, Sleep},
 };
 
 use super::{Package, Payload, Stream, StreamMetrics};
-use crate::{collector::utils::Streams, Action, ActionResponse, Config};
+use crate::{
+    collector::utils::{clock, Streams},
+    Action, ActionResponse, Config, UPLINK_VERSION,
+};
 
 #[derive(Debug)]
 pub enum Event {
@@ -19,6 +23,8 @@ pub enum Event {
     /// Sometime apps can choose to directly send action response instead
     /// sending in `Payload` form
     ActionResponse(ActionResponse),
+    /// Merge and update device shadow
+    DeviceShadow(Map<String, Value>),
 }
 
 pub struct Bridge {
@@ -44,6 +50,8 @@ pub struct Bridge {
     action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
+    /// Handler that updates and periodically forwards device shadow
+    device_shadow: DeviceShadow,
 }
 
 impl Bridge {
@@ -56,6 +64,8 @@ impl Bridge {
     ) -> Bridge {
         let (bridge_tx, bridge_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
+        let device_shadow_stream =
+            Stream::new("device_shadow", &config.device_shadow.topic, 1, package_tx.clone());
 
         Bridge {
             action_status,
@@ -68,6 +78,7 @@ impl Bridge {
             action_routes: HashMap::with_capacity(10),
             action_redirections,
             current_action: None,
+            device_shadow: DeviceShadow::new(device_shadow_stream),
         }
     }
 
@@ -81,6 +92,8 @@ impl Bridge {
 
     pub async fn start(&mut self) -> Result<(), Error> {
         let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
+        let mut device_shadow_timeout =
+            interval(Duration::from_secs(self.config.device_shadow.timeout));
         let mut streams =
             Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
                 .await;
@@ -120,15 +133,12 @@ impl Bridge {
                 event = self.bridge_rx.recv_async() => {
                     let event = event?;
                     match event {
-                        Event::RegisterActionRoute(name, tx) => {
-                            self.action_routes.insert(name, tx);
-                        }
-                        Event::Data(v) => {
-                            streams.forward(v).await;
-                        }
-                        Event::ActionResponse(response) => {
-                            self.forward_action_response(response).await;
-                        }
+                        Event::RegisterActionRoute(name,tx)=> {
+                            self.action_routes.insert(name,tx);
+                        },
+                        Event::Data(v)=> streams.forward(v).await,
+                        Event::ActionResponse(response)=>self.forward_action_response(response).await,
+                        Event::DeviceShadow(payload) => self.device_shadow.update(payload),
                     }
                 }
                 _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
@@ -147,6 +157,12 @@ impl Bridge {
                 _ = metrics_timeout.tick() => {
                     if let Err(e) = streams.check_and_flush_metrics() {
                         debug!("Failed to flush stream metrics. Error = {}", e);
+                    }
+                }
+                // Regularly forward device shadows
+                _ = device_shadow_timeout.tick() => {
+                    if let Err(e) = self.device_shadow.forward().await {
+                        debug!("Failed to forward device shadow. Error = {e}");
                     }
                 }
             }
@@ -229,6 +245,44 @@ impl Bridge {
     }
 }
 
+struct DeviceShadow {
+    sequence: u32,
+    state: Map<String, Value>,
+    stream: Stream<Payload>,
+}
+
+impl DeviceShadow {
+    pub fn new(stream: Stream<Payload>) -> Self {
+        let mut state = Map::new();
+        state.insert("uplink_version".to_string(), Value::String(UPLINK_VERSION.to_owned()));
+
+        Self { sequence: 0, state, stream }
+    }
+
+    /// Update old value or insert new one
+    pub fn update(&mut self, payload: Map<String, Value>) {
+        for (key, value) in payload {
+            self.state.insert(key.to_owned(), value.to_owned());
+        }
+    }
+
+    ///
+    pub async fn forward(&mut self) -> Result<(), Error> {
+        self.sequence += 1;
+        let data = Payload {
+            stream: "device_shadow".to_owned(),
+            device_id: None,
+            sequence: self.sequence,
+            timestamp: clock() as u64,
+            payload: json!(self.state),
+        };
+
+        self.stream.fill(data).await?;
+
+        Ok(())
+    }
+}
+
 struct CurrentAction {
     pub id: String,
     pub action: Action,
@@ -294,6 +348,11 @@ impl BridgeTx {
         let event = Event::ActionResponse(response);
         self.events_tx.send_async(event).await.unwrap()
     }
+
+    pub async fn send_device_shadow(&self, payload: Map<String, Value>) {
+        let event = Event::DeviceShadow(payload);
+        self.events_tx.send_async(event).await.unwrap()
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -302,6 +361,8 @@ pub enum Error {
     Recv(#[from] RecvError),
     #[error("Action receiver busy {0}")]
     TrySend(#[from] TrySendError<Action>),
+    #[error("Stream error: {0}")]
+    Stream(#[from] super::stream::Error),
     #[error("No route for action {0}")]
     NoRoute(String),
     #[error("Action timedout")]

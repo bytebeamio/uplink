@@ -109,6 +109,12 @@ pub struct AppConfig {
     pub actions: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct DeviceShadow {
+    pub timeout: u64,
+    pub topic: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
@@ -121,6 +127,7 @@ pub struct Config {
     pub max_inflight: u16,
     pub keep_alive: u64,
     pub processes: Vec<String>,
+    pub device_shadow: DeviceShadow,
     #[serde(skip)]
     pub actions_subscription: String,
     pub persistence: Option<Persistence>,
