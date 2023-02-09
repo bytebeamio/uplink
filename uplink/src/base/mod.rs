@@ -109,12 +109,6 @@ pub struct AppConfig {
     pub actions: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub struct DeviceShadowConfig {
-    pub port: u16,
-    pub timeout: u64,
-}
-
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
@@ -123,7 +117,6 @@ pub struct Config {
     pub port: u16,
     pub authentication: Option<Authentication>,
     pub tcpapps: HashMap<String, AppConfig>,
-    pub device_shadow: Option<DeviceShadowConfig>,
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub keep_alive: u64,
