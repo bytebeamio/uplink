@@ -193,6 +193,8 @@ impl Bridge {
             return;
         }
 
+        inflight_action.reset_timeout();
+
         // Forward actions included in the config to the appropriate forward route, when
         // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
         if action_done {
