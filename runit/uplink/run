@@ -3,4 +3,4 @@
 cd /usr/share/bytebeam/uplink
 
 export RUST_LOG=debug
-exec ./target/debug/uplink -c configs/demo.toml -a configs/noauth.json
+exec ./target/debug/uplink -c configs/simulator.toml -a configs/simulator.json
