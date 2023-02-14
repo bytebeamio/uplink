@@ -277,7 +277,7 @@ pub struct DownloadFile {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashMap, time::Duration};
+    use std::{collections::HashMap, sync::RwLock, time::Duration};
 
     use crate::base::{bridge::Event, DownloaderConfig};
 
@@ -311,7 +311,8 @@ mod test {
         };
         let config = config(downloader_cfg.clone());
         let (events_tx, events_rx) = flume::bounded(1);
-        let bridge_tx = BridgeTx { events_tx };
+        let shutdown = Arc::new(RwLock::new(false));
+        let bridge_tx = BridgeTx { events_tx, shutdown };
 
         // Create channels to forward and push action_status on
         let downloader = FileDownloader::new(Arc::new(config), bridge_tx).unwrap();
@@ -375,7 +376,8 @@ mod test {
         };
         let config = config(downloader_cfg.clone());
         let (events_tx, events_rx) = flume::bounded(1);
-        let bridge_tx = BridgeTx { events_tx };
+        let shutdown = Arc::new(RwLock::new(false));
+        let bridge_tx = BridgeTx { events_tx, shutdown };
 
         // Create channels to forward and push action_status on
         let downloader = FileDownloader::new(Arc::new(config), bridge_tx).unwrap();

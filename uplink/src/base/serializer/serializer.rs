@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use std::{collections::VecDeque, io};
 
@@ -55,10 +55,12 @@ enum Status {
     SlowEventloop(Publish),
     EventLoopReady,
     EventLoopCrash(Publish),
+    Shutdown,
 }
 
 #[async_trait::async_trait]
 pub trait MqttClient: Clone {
+    async fn disconnect(&self) -> Result<(), MqttError>;
     async fn publish<S, V>(
         &self,
         topic: S,
@@ -93,6 +95,12 @@ pub trait MqttClient: Clone {
 
 #[async_trait::async_trait]
 impl MqttClient for AsyncClient {
+    async fn disconnect(&self) -> Result<(), MqttError> {
+        self.disconnect().await?;
+
+        Ok(())
+    }
+
     async fn publish<S, V>(
         &self,
         topic: S,
@@ -171,6 +179,8 @@ pub struct Serializer<C: MqttClient> {
     metrics: SerializerMetrics,
     metrics_tx: Sender<SerializerMetrics>,
     pending_metrics: VecDeque<SerializerMetrics>,
+    /// Shutdown handle
+    shutdown: Arc<RwLock<bool>>,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -179,6 +189,7 @@ impl<C: MqttClient> Serializer<C> {
         collector_rx: Receiver<Box<dyn Package>>,
         client: C,
         metrics_tx: Sender<SerializerMetrics>,
+        shutdown: Arc<RwLock<bool>>,
     ) -> Result<Serializer<C>, Error> {
         let storage = match &config.persistence {
             Some(persistence) => {
@@ -200,6 +211,7 @@ impl<C: MqttClient> Serializer<C> {
             metrics: SerializerMetrics::new("catchup"),
             metrics_tx,
             pending_metrics: VecDeque::with_capacity(3),
+            shutdown,
         })
     }
 
@@ -227,18 +239,28 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Write new data to disk until back pressure due to slow n/w is resolved
     // TODO: Handle errors. Don't return errors
-    async fn slow(&mut self, publish: Publish) -> Result<Status, Error> {
+    async fn slow(&mut self, packet: Publish) -> Result<Status, Error> {
         let mut interval = time::interval(METRICS_INTERVAL);
         info!("Switching to slow eventloop mode!!");
         self.metrics.set_mode("slow");
 
         // Note: self.client.publish() is executing code before await point
         // in publish method every time. Verify this behaviour later
-        let payload = &publish.payload[..];
-        let publish = self.client.publish(&publish.topic, QoS::AtLeastOnce, false, payload);
+        let publish = self.client.publish(
+            packet.topic.clone(),
+            QoS::AtLeastOnce,
+            false,
+            packet.payload.clone(),
+        );
         tokio::pin!(publish);
 
         let v: Result<Status, Error> = loop {
+            let shutdown = self.shutdown.read().unwrap();
+            if *shutdown {
+                self.client.disconnect().await?;
+                return Ok(Status::EventLoopCrash(packet));
+            }
+
             select! {
                 data = self.collector_rx.recv_async() => {
                     let storage = match &mut self.storage {
@@ -337,10 +359,16 @@ impl<C: MqttClient> Serializer<C> {
         };
 
         let mut last_publish_payload_size = publish.payload.len();
-        let send = send_publish(client, publish.topic, publish.payload);
+        let send = send_publish(client, publish.topic.clone(), publish.payload.clone());
         tokio::pin!(send);
 
         let v: Result<Status, Error> = loop {
+            let shutdown = self.shutdown.read().unwrap();
+            if *shutdown {
+                self.client.disconnect().await?;
+                return Ok(Status::EventLoopCrash(publish));
+            }
+
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
@@ -422,6 +450,12 @@ impl<C: MqttClient> Serializer<C> {
         info!("Switching to normal mode!!");
 
         loop {
+            let shutdown = self.shutdown.read().unwrap();
+            if *shutdown {
+                self.client.disconnect().await?;
+                return Ok(Status::Shutdown);
+            }
+
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
@@ -480,6 +514,7 @@ impl<C: MqttClient> Serializer<C> {
                 Status::SlowEventloop(publish) => self.slow(publish).await?,
                 Status::EventLoopReady => self.catchup().await?,
                 Status::EventLoopCrash(publish) => self.crash(publish).await?,
+                Status::Shutdown => return Ok(()),
             };
 
             status = next_status;
@@ -640,6 +675,10 @@ mod test {
 
     #[async_trait::async_trait]
     impl MqttClient for MockClient {
+        async fn disconnect(&self) -> Result<(), MqttError> {
+            Ok(())
+        }
+
         async fn publish<S, V>(
             &self,
             topic: S,
@@ -737,8 +776,9 @@ mod test {
         let (net_tx, net_rx) = flume::bounded(1);
         let (metrics_tx, _metrics_rx) = flume::bounded(1);
         let client = MockClient { net_tx };
+        let shutdown = Arc::new(RwLock::new(false));
 
-        (Serializer::new(config, data_rx, client, metrics_tx).unwrap(), data_tx, net_rx)
+        (Serializer::new(config, data_rx, client, metrics_tx, shutdown).unwrap(), data_tx, net_rx)
     }
 
     #[derive(Error, Debug)]

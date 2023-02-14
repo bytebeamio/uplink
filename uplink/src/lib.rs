@@ -1,5 +1,6 @@
 #[doc = include_str ! ("../../README.md")]
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::thread;
 
 use anyhow::Error;
@@ -229,6 +230,8 @@ pub struct Uplink {
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
     serializer_metrics_rx: Receiver<SerializerMetrics>,
+    /// Shutdown handle
+    shutdown: Arc<RwLock<bool>>,
 }
 
 impl Uplink {
@@ -251,6 +254,7 @@ impl Uplink {
             stream_metrics_rx,
             serializer_metrics_tx,
             serializer_metrics_rx,
+            shutdown: Arc::new(RwLock::new(false)),
         })
     }
 
@@ -262,6 +266,7 @@ impl Uplink {
             self.stream_metrics_tx().clone(),
             self.action_rx.clone(),
             self.action_status(),
+            self.shutdown.clone(),
         );
 
         let bridge_tx = bridge.tx();
@@ -282,7 +287,11 @@ impl Uplink {
             })
         });
 
-        let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
+        let mut mqtt = Mqtt::new(
+            self.config.clone(),
+            self.action_tx.clone(),
+            mqtt_metrics_tx,
+        );
         let mqtt_client = mqtt.client();
 
         let serializer = Serializer::new(
@@ -290,6 +299,7 @@ impl Uplink {
             self.data_rx.clone(),
             mqtt_client.clone(),
             self.serializer_metrics_tx(),
+            self.shutdown.clone(),
         )?;
 
         // Serializer thread to handle network conditions state machine

@@ -102,6 +102,15 @@ impl Streams {
         Ok(())
     }
 
+    /// Force flush all streams
+    pub async fn shutdown(&mut self) {
+        for (stream_name, mut stream) in self.map.drain() {
+            if let Err(e) = stream.flush().await {
+                error!("Failed to flush stream = {stream_name}. Error = {e}");
+            }
+        }
+    }
+
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
     pub fn check_and_flush_metrics(&mut self) -> Result<(), flume::TrySendError<StreamMetrics>> {
         for (buffer_name, data) in self.map.iter_mut() {

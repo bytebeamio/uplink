@@ -1,4 +1,9 @@
-use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info};
@@ -44,6 +49,8 @@ pub struct Bridge {
     action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
+    /// Shutdown handle
+    shutdown: Arc<RwLock<bool>>,
 }
 
 impl Bridge {
@@ -53,6 +60,7 @@ impl Bridge {
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
+        shutdown: Arc<RwLock<bool>>,
     ) -> Bridge {
         let (bridge_tx, bridge_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
@@ -68,11 +76,12 @@ impl Bridge {
             action_routes: HashMap::with_capacity(10),
             action_redirections,
             current_action: None,
+            shutdown,
         }
     }
 
     pub fn tx(&mut self) -> BridgeTx {
-        BridgeTx { events_tx: self.bridge_tx.clone() }
+        BridgeTx { events_tx: self.bridge_tx.clone(), shutdown: self.shutdown.clone() }
     }
 
     fn clear_current_action(&mut self) {
@@ -87,6 +96,13 @@ impl Bridge {
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
 
         loop {
+            let shutdown = self.shutdown.read().unwrap();
+            if *shutdown {
+                streams.shutdown().await;
+                return Ok(());
+            }
+            drop(shutdown);
+
             select! {
                 // TODO: Remove if guard
                 action = self.actions_rx.recv_async(), if self.current_action.is_none() => {
@@ -253,6 +269,8 @@ impl CurrentAction {
 pub struct BridgeTx {
     // Handle for apps to send events to bridge
     pub(crate) events_tx: Sender<Event>,
+    /// Shutdown handle
+    pub(crate) shutdown: Arc<RwLock<bool>>,
 }
 
 impl BridgeTx {
@@ -278,6 +296,11 @@ impl BridgeTx {
         }
 
         actions_rx
+    }
+
+    pub fn shutdown(&self) {
+        let mut shutdown = self.shutdown.write().unwrap();
+        *shutdown = true;
     }
 
     pub async fn send_payload(&self, payload: Payload) {
