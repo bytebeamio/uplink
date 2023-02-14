@@ -4,7 +4,7 @@ use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info};
 use tokio::{
     select,
-    time::{self, interval, Sleep},
+    time::{self, Sleep},
 };
 
 use super::{Package, Payload, Stream, StreamMetrics};
@@ -80,11 +80,17 @@ impl Bridge {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
+        let mut metrics_timeout = if self.config.stream_metrics.enabled {
+            Some(Box::pin(time::sleep(Duration::from_secs(self.config.stream_metrics.timeout))))
+        } else {
+            None
+        };
+
         let mut streams =
             Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
                 .await;
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
+        let mut forever = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
 
         loop {
             select! {
@@ -144,7 +150,7 @@ impl Bridge {
                     }
                 }
                 // Flush all metrics when timed out
-                _ = metrics_timeout.tick() => {
+                _ = &mut metrics_timeout.as_mut().unwrap_or(&mut forever) => {
                     if let Err(e) = streams.check_and_flush_metrics() {
                         debug!("Failed to flush stream metrics. Error = {}", e);
                     }
@@ -308,4 +314,165 @@ pub enum Error {
     NoRoute(String),
     #[error("Action timedout")]
     ActionTimeout,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    use flume::bounded;
+
+    use crate::{
+        base::{bridge::Stream, StreamMetricsConfig},
+        Action, ActionResponse, Config,
+    };
+
+    use super::Bridge;
+
+    fn default_config() -> Config {
+        let stream_metrics = StreamMetricsConfig {
+            enabled: false,
+            topic: "".to_string(),
+            blacklist: vec![],
+            timeout: 10,
+        };
+        Config {
+            broker: "localhost".to_owned(),
+            port: 1883,
+            device_id: "123".to_owned(),
+            max_packet_size: 1024 * 1024,
+            stream_metrics,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn action_timeout_no_response() {
+        let config = Arc::new(default_config());
+        let (package_tx, package_rx) = bounded(10);
+        let (metrics_tx, _) = bounded(10);
+        let (actions_tx, actions_rx) = bounded(10);
+        let action_status = Stream::new("action_status", "action_status", 1, package_tx.clone());
+
+        let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status);
+        let bridge_tx = bridge.tx();
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .thread_name("rt1")
+            .enable_time()
+            .build()
+            .unwrap();
+        let rx = rt.block_on(async move { bridge_tx.register_action_route("start").await });
+
+        std::thread::spawn(move || {
+            rt.block_on(async move { bridge.start().await.unwrap() });
+        });
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .thread_name("rt2")
+            .enable_time()
+            .build()
+            .unwrap();
+        std::thread::spawn(move || {
+            rt.block_on(async move {
+                rx.recv().unwrap();
+            });
+        });
+
+        std::thread::sleep(Duration::from_millis(100));
+        let start = Instant::now();
+
+        actions_tx
+            .send(Action {
+                device_id: None,
+                action_id: "1".to_string(),
+                kind: "".to_string(),
+                name: "start".to_string(),
+                payload: "1".to_string(),
+            })
+            .unwrap();
+
+        let v = package_rx.recv().unwrap().serialize().unwrap();
+        let status: Vec<ActionResponse> = serde_json::from_slice(&v).unwrap();
+        match status[0] {
+            ActionResponse { ref state, .. } if state == "Received" => {}
+            _ => unreachable!(),
+        }
+
+        // wait 60s before action timeout
+        let v = package_rx.recv().unwrap().serialize().unwrap();
+        assert!(start.elapsed().as_secs() >= 60);
+        let status: Vec<ActionResponse> = serde_json::from_slice(&v).unwrap();
+        assert!(status[0].is_failed());
+        assert_eq!(status[0].errors, ["Action timedout"]);
+    }
+
+    #[test]
+    fn action_timeout_reset_on_response() {
+        let config = Arc::new(default_config());
+        let (package_tx, package_rx) = bounded(10);
+        let (metrics_tx, _) = bounded(10);
+        let (actions_tx, actions_rx) = bounded(10);
+        let action_status = Stream::new("action_status", "action_status", 1, package_tx.clone());
+
+        let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status);
+        let bridge_tx = bridge.tx();
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .thread_name("rt1")
+            .enable_time()
+            .build()
+            .unwrap();
+        let rx = rt.block_on(async { bridge_tx.register_action_route("start").await });
+
+        std::thread::spawn(move || {
+            rt.block_on(async move { bridge.start().await.unwrap() });
+        });
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .thread_name("rt2")
+            .enable_time()
+            .build()
+            .unwrap();
+        std::thread::spawn(move || {
+            rt.block_on(async move {
+                rx.recv().unwrap();
+                std::thread::sleep(Duration::from_secs(60));
+                bridge_tx.send_action_response(ActionResponse::progress("1", "Starting", 50)).await;
+            });
+        });
+
+        std::thread::sleep(Duration::from_micros(100));
+        let start = Instant::now();
+
+        actions_tx
+            .send(Action {
+                device_id: None,
+                action_id: "1".to_string(),
+                kind: "".to_string(),
+                name: "start".to_string(),
+                payload: "1".to_string(),
+            })
+            .unwrap();
+
+        let v = package_rx.recv().unwrap().serialize().unwrap();
+        let status: Vec<ActionResponse> = serde_json::from_slice(&v).unwrap();
+        match status[0] {
+            ActionResponse { ref state, .. } if state == "Received" => {}
+            _ => unreachable!(),
+        }
+
+        // wait 120s before action timeout
+        loop {
+            let v = package_rx.recv().unwrap().serialize().unwrap();
+            let status: Vec<ActionResponse> = serde_json::from_slice(&v).unwrap();
+            if status[0].errors == ["Action timedout"] {
+                assert!(start.elapsed().as_secs() >= 120);
+                return;
+            }
+        }
+    }
 }
