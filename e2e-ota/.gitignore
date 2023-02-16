@@ -1,0 +1,4 @@
+device_*
+uplink_*.log
+app_*.log
+pids
