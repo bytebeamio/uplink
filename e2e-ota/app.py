@@ -10,7 +10,12 @@ import sys
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 port = "500"+sys.argv[1]
 print("Connecting to :", port)
-s.connect(("localhost", int(port)))
+while True:
+    try: 
+        s.connect(("localhost", int(port)))
+        break
+    except:
+        print("Reconnecting")
 
 # Converts JSON data received over TCP into a python dictionary
 def recv_action(s):
