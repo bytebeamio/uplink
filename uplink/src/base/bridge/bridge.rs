@@ -179,6 +179,8 @@ impl Bridge {
             return;
         }
 
+        inflight_action.reset_timeout();
+
         let action_completed = response.is_completed();
         let action_failed = response.is_failed();
         let action_done = response.is_done();
