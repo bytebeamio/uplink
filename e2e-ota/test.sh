@@ -4,8 +4,8 @@ start_devices() {
     for id in $(seq 1 $1)
     do 
         # prepare config, please comment below line and download the right config from platform
-        echo "{\"project_id\": \"demo\",\"device_id\": \"$id\",\"broker\": \"stage.bytebeam.io\",\"port\": 1883}" > device_$id.json
-        echo "processes = [] \naction_redirections = { update_firmware = \"install_firmware\" } \n\n[tcpapps.1] \nport = 500$id \nactions= [\"install_firmware\"] \n\n[downloader] \nactions= [\"install_firmware\"] \npath = \"/var/tmp/ota/$id\"" > device_$id.toml
+        # echo "{\"project_id\": \"demo\",\"device_id\": \"$id\",\"broker\": \"stage.bytebeam.io\",\"port\": 1883}" > device_$id.json
+        echo "processes = [] \naction_redirections = { send_file = \"load_file\" } \n\n[tcpapps.1] \nport = 500$id \nactions= [\"load_file\"] \n\n[downloader] \nactions= [\"send_file\"] \npath = \"/var/tmp/ota/$id\"" > device_$id.toml
         start_uplink $id
 
         sleep 1
