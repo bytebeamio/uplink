@@ -2025,6 +2025,7 @@ dependencies = [
  "serde",
  "serde_json",
  "simplelog",
+ "structopt",
  "thiserror",
  "tokio 1.22.0",
  "tokio-stream",

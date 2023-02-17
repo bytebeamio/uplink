@@ -1,10 +1,14 @@
 use futures_util::sink::SinkExt;
 use futures_util::stream::SplitSink;
 use futures_util::StreamExt;
-use log::{error, info, trace};
+use log::{error, info, trace, LevelFilter};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use simplelog::{
+    ColorChoice, CombinedLogger, ConfigBuilder, LevelPadding, TermLogger, TerminalMode,
+};
+use structopt::StructOpt;
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::select;
@@ -12,9 +16,22 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use uplink::Action;
 
 use std::collections::BinaryHeap;
-use std::env::args;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
+
+#[derive(StructOpt, Debug)]
+#[structopt(name = "simulator", about = "simulates a demo device")]
+pub struct CommandLine {
+    /// uplink port
+    #[structopt(short = "p", help = "uplink port")]
+    pub port: u16,
+    /// path of GPS coordinates
+    #[structopt(short = "g", help = "gps path file directory")]
+    pub paths: String,
+    /// log level (v: info, vv: debug, vvv: trace)
+    #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
+    pub verbose: u8,
+}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -584,10 +601,10 @@ pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Error> {
-    let args: Vec<String> = args().collect();
+    let commandline = init();
 
-    let addr = &args[1];
-    let path = read_gps_path(&args[2]);
+    let addr = format!("localhost:{}", commandline.port);
+    let path = read_gps_path(&commandline.paths);
     let device = new_device_data(path);
 
     let stream = TcpStream::connect(addr).await?;
@@ -626,4 +643,26 @@ async fn main() -> Result<(), Error> {
             }
         }
     }
+}
+
+fn init() -> CommandLine {
+    let commandline: CommandLine = StructOpt::from_args();
+    let level = match commandline.verbose {
+        0 => LevelFilter::Warn,
+        1 => LevelFilter::Info,
+        2 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    };
+
+    let mut config = ConfigBuilder::new();
+    config
+        .set_location_level(LevelFilter::Off)
+        .set_target_level(LevelFilter::Error)
+        .set_thread_level(LevelFilter::Error)
+        .set_level_padding(LevelPadding::Right);
+
+    let loggers = TermLogger::new(level, config.build(), TerminalMode::Mixed, ColorChoice::Auto);
+    CombinedLogger::init(vec![loggers]).unwrap();
+
+    commandline
 }
