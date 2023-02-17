@@ -21,12 +21,12 @@ start_devices() {
 }
 
 start_uplink() {
-    nohup cargo run --bin uplink -- -a devices/device_$1.json -c devices/device_$1.toml -vv > devices/uplink_$1.log 2>&1 &
+    nohup ./target/release/uplink -a devices/device_$1.json -c devices/device_$1.toml -vv > devices/uplink_$1.log 2>&1 &
     echo $! >> devices/pids
 }
 
 start_simulaotr() {
-    nohup cargo run --bin simulator -- -p 500$1 -g ./paths -vvv > devices/simulator_$1.log 2>&1 &
+    nohup ./target/release/simulator -p 500$1 -g ./paths -vvv > devices/simulator_$1.log 2>&1 &
     echo $! >> devices/pids
 }
 
