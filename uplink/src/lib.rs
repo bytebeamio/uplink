@@ -92,7 +92,7 @@ pub mod config {
     timeout = 10
 
     [streams.device_shadow]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     buf_size = 1
 
     [stats]
