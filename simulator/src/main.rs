@@ -582,10 +582,11 @@ pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
     info!("Generating action events for action: {action_id}");
     let now = Instant::now() + Duration::from_millis(rand::thread_rng().gen_range(0..5000));
 
-    for i in 1..100 {
+    // Action response, 10% completion per second
+    for i in 1..10 {
         events.push(Event::ActionResponseEvent(ActionResponseEvent {
             action_id: action_id.clone(),
-            progress: i,
+            progress: i*10,
             status: String::from("in_progress"),
             timestamp: now + Duration::from_secs(i as u64),
         }));
@@ -595,7 +596,7 @@ pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
         action_id: action_id.clone(),
         progress: 100,
         status: String::from("Completed"),
-        timestamp: now + Duration::from_secs(100),
+        timestamp: now + Duration::from_secs(10),
     }));
 }
 
