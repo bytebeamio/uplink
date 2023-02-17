@@ -12,3 +12,5 @@ target
 #**/*.rs.bk
 certs/
 config/
+
+devices
