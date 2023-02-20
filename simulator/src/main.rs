@@ -17,7 +17,7 @@ use tokio_util::time::DelayQueue;
 use uplink::Action;
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{cmp::Ordering, fs, io, sync::Arc};
+use std::{fs, io, sync::Arc};
 
 const RESET_LIMIT: u32 = 1500;
 
@@ -47,13 +47,13 @@ pub enum Error {
     Json(#[from] serde_json::error::Error),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Location {
     latitude: f64,
     longitude: f64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct DeviceData {
     path: Arc<Vec<Location>>,
     path_offset: u32,
@@ -82,7 +82,7 @@ impl DataEventType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct DataEvent {
     timestamp: Instant,
     event_type: DataEventType,
@@ -109,51 +109,10 @@ pub struct Payload {
     pub payload: Value,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Event {
     DataEvent(DataEvent),
     ActionResponseEvent(ActionResponseEvent),
-}
-
-impl PartialEq for Event {
-    fn eq(&self, other: &Self) -> bool {
-        match self {
-            Event::DataEvent(e1) => match other {
-                Event::DataEvent(e2) => {
-                    e1.timestamp == e2.timestamp && e1.event_type == e2.event_type
-                }
-                Event::ActionResponseEvent(_) => false,
-            },
-            Event::ActionResponseEvent(e1) => match other {
-                Event::ActionResponseEvent(e2) => e1 == e2,
-                Event::DataEvent(_) => false,
-            },
-        }
-    }
-}
-
-impl Eq for Event {}
-
-fn event_timestamp(event: &Event) -> Instant {
-    match event {
-        Event::DataEvent(e) => e.timestamp,
-        Event::ActionResponseEvent(e) => e.timestamp,
-    }
-}
-
-impl Ord for Event {
-    fn cmp(&self, other: &Event) -> Ordering {
-        let t1 = event_timestamp(self);
-        let t2 = event_timestamp(other);
-
-        t1.cmp(&t2)
-    }
-}
-
-impl PartialOrd for Event {
-    fn partial_cmp(&self, other: &Event) -> Option<Ordering> {
-        Some(other.cmp(self))
-    }
 }
 
 pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
