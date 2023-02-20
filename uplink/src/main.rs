@@ -47,6 +47,7 @@ use anyhow::Error;
 use structopt::StructOpt;
 use tokio::task::JoinSet;
 
+use tracing::error;
 use uplink::base::AppConfig;
 use uplink::config::{get_configs, initialize, CommandLine, ReloadHandle};
 use uplink::{simulator, Config, TcpJson, Uplink};
