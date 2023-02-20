@@ -279,7 +279,7 @@ pub struct DownloadFile {
 mod test {
     use std::{collections::HashMap, time::Duration};
 
-    use crate::base::{bridge::Event, DownloaderConfig};
+    use crate::base::{bridge::Event, DownloaderConfig, MqttConfig};
 
     use super::*;
     use flume::TrySendError;
@@ -293,7 +293,7 @@ mod test {
             port: 1883,
             device_id: "123".to_owned(),
             streams: HashMap::new(),
-            max_packet_size: 1024 * 1024,
+            mqtt: MqttConfig { max_packet_size: 1024 * 1024, ..Default::default() },
             downloader,
             ..Default::default()
         }

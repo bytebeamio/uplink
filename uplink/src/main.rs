@@ -122,9 +122,9 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
         }
     }
     println!("    secure_transport: {}", config.authentication.is_some());
-    println!("    max_packet_size: {}", config.max_packet_size);
-    println!("    max_inflight_messages: {}", config.max_inflight);
-    println!("    keep_alive_timeout: {}", config.keep_alive);
+    println!("    max_packet_size: {}", config.mqtt.max_packet_size);
+    println!("    max_inflight_messages: {}", config.mqtt.max_inflight);
+    println!("    keep_alive_timeout: {}", config.mqtt.keep_alive);
     if let Some(persistence) = &config.persistence {
         println!("    persistence_dir: {}", persistence.path);
         println!("    persistence_max_segment_size: {}", persistence.max_file_size);

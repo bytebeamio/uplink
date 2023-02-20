@@ -301,7 +301,7 @@ impl<C: MqttClient> Serializer<C> {
         let mut interval = time::interval(METRICS_INTERVAL);
         self.metrics.set_mode("catchup");
 
-        let max_packet_size = self.config.max_packet_size;
+        let max_packet_size = self.config.mqtt.max_packet_size;
         let client = self.client.clone();
 
         loop {
@@ -628,6 +628,7 @@ mod test {
 
     use super::*;
     use crate::base::bridge::Stream;
+    use crate::base::MqttConfig;
     use crate::{config::Persistence, Payload};
     use std::collections::HashMap;
 
@@ -713,7 +714,7 @@ mod test {
             port: 1883,
             device_id: "123".to_owned(),
             streams: HashMap::new(),
-            max_packet_size: 1024 * 1024,
+            mqtt: MqttConfig { max_packet_size: 1024 * 1024, ..Default::default() },
             ..Default::default()
         }
     }
@@ -818,7 +819,8 @@ mod test {
         );
         write_to_disk(publish.clone(), &mut storage).unwrap();
 
-        let stored_publish = read_from_storage(&mut storage, serializer.config.max_packet_size);
+        let stored_publish =
+            read_from_storage(&mut storage, serializer.config.mqtt.max_packet_size);
 
         // Ensure publish.pkid is 1, as written to disk
         publish.pkid = 1;
