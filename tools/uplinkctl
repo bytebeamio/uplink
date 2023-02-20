@@ -1,0 +1,10 @@
+#! /bin/bash
+
+# Change log level
+function log() {
+  level=${1:?"Missing cluster name"}
+  curl -X POST -H "Content-Type: text/plain" -d "uplink=$level,rumqtt=$level" http://localhost:3333
+}
+
+"$@"
+

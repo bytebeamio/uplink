@@ -110,7 +110,7 @@ process_names = ["uplink"]
 update_period = 30
 
 # Define port that accepts tracing control messges, if enabled
-[tracing]
+[apis]
 enabled = true
 port = 3333
 
