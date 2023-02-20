@@ -121,7 +121,7 @@ pub struct Config {
     pub device_id: String,
     pub broker: String,
     pub port: u16,
-    pub tracing: TracingConfig,
+    pub apis: TracingConfig,
     pub authentication: Option<Authentication>,
     pub tcpapps: HashMap<String, AppConfig>,
     pub max_packet_size: usize,

@@ -39,6 +39,8 @@
 //!                                                                      ActionResponse
 //!```
 
+mod apis;
+
 use std::sync::Arc;
 use std::thread;
 
@@ -48,8 +50,15 @@ use structopt::StructOpt;
 use tokio::task::JoinSet;
 
 use tracing::error;
+use tracing_subscriber::fmt::format::{Format, Pretty};
+use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
+use tracing_subscriber::{EnvFilter, Registry};
+
+pub type ReloadHandle =
+    Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
+
 use uplink::base::AppConfig;
-use uplink::config::{get_configs, initialize, CommandLine, ReloadHandle};
+use uplink::config::{get_configs, initialize, CommandLine};
 use uplink::{simulator, Config, TcpJson, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
@@ -126,8 +135,8 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     if config.stats.enabled {
         println!("    processes: {:?}", config.stats.process_names);
     }
-    if config.tracing.enabled {
-        println!("    tracing: http://localhost:{}", config.tracing.port);
+    if config.apis.enabled {
+        println!("    tracing: http://localhost:{}", config.apis.port);
     }
     println!("\n");
 }
@@ -146,7 +155,7 @@ fn main() -> Result<(), Error> {
 
     banner(&commandline, &config);
 
-    let mut uplink = Uplink::new(config.clone(), reload_handle)?;
+    let mut uplink = Uplink::new(config.clone())?;
     let bridge = uplink.spawn()?;
 
     if let Some(config) = config.simulator.clone() {
@@ -154,6 +163,12 @@ fn main() -> Result<(), Error> {
         thread::spawn(move || {
             simulator::start(bridge, &config).unwrap();
         });
+    }
+
+    if config.apis.enabled {
+        let handle = reload_handle.clone();
+        let port = config.apis.port;
+        thread::spawn(move || apis::start(port, handle));
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()

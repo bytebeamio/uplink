@@ -2,7 +2,7 @@ use log::info;
 use rouille::input::plain_text_body;
 use rouille::{start_server, try_or_400, Response};
 
-use crate::config::ReloadHandle;
+use crate::ReloadHandle;
 
 pub fn start(port: u16, handle: ReloadHandle) {
     let address = format!("0.0.0.0:{}", port);
