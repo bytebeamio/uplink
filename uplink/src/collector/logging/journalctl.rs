@@ -1,15 +1,8 @@
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
-
-use super::LoggingConfig;
+use super::LoggerConfig;
 use crate::Payload;
-
-#[derive(Debug, Deserialize)]
-pub struct JournalctlConfig {
-    pub tags: Vec<String>,
-    pub min_level: u8,
-}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
@@ -92,7 +85,7 @@ impl LogEntry {
     }
 }
 
-pub fn new_journalctl(logging_config: &LoggingConfig) -> Command {
+pub fn new_journalctl(logging_config: &LoggerConfig) -> Command {
     // silence everything
     let mut journalctl_args = ["-o", "json", "-f", "-p", &logging_config.min_level.to_string()]
         .map(String::from)

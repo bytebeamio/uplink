@@ -5,6 +5,7 @@ use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use crate::collector::logging::LoggerConfig;
 
 pub mod actions;
 pub mod middleware;
@@ -75,13 +76,6 @@ pub struct SimulatorConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct JournalctlConfig {
-    pub tags: Vec<String>,
-    pub priority: u8,
-    pub stream_size: Option<usize>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Downloader {
     pub actions: Vec<String>,
     pub path: String,
@@ -118,10 +112,7 @@ pub struct Config {
     pub simulator: Option<SimulatorConfig>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
-    #[cfg(target_os = "linux")]
-    pub journalctl: Option<JournalctlConfig>,
-    #[cfg(target_os = "android")]
-    pub run_logcat: bool,
+    pub logging: Option<LoggerConfig>,
 }
 
 pub trait Point: Send + Debug {
