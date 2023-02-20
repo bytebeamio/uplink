@@ -1,10 +1,8 @@
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chrono::{Datelike, Local, Timelike};
 use serde::{Deserialize, Serialize};
-
-use super::LoggingConfig;
+use super::LoggerConfig;
 use crate::Payload;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -46,13 +44,13 @@ impl LogLevel {
 
     pub fn from_syslog_level(l: u8) -> Option<LogLevel> {
         let level = match l {
-            0 => LogLevel::Verbose,
-            1 => LogLevel::Debug,
-            2 => LogLevel::Info,
+            0 => LogLevel::Fatal,
+            1 => LogLevel::Assert,
+            2 => LogLevel::Error,
             3 => LogLevel::Warn,
-            4 => LogLevel::Error,
-            5 => LogLevel::Assert,
-            6 => LogLevel::Fatal,
+            4 => LogLevel::Info,
+            5 => LogLevel::Debug,
+            6 => LogLevel::Verbose,
             _ => return None,
         };
 
@@ -77,7 +75,7 @@ pub enum Error {
 #[derive(Debug, Serialize)]
 pub struct LogEntry {
     level: LogLevel,
-    log_timestamp: String,
+    log_timestamp: u64,
     tag: String,
     message: String,
     line: String,
@@ -91,29 +89,28 @@ lazy_static::lazy_static! {
 
 pub fn parse_logcat_time(s: &str) -> Option<u64> {
     let matches = LOGCAT_TIME_RE.captures(s)?;
-    let date = Local::now()
-        .with_month(matches.get(1)?.as_str().parse::<u32>().ok()?)?
-        .with_day(matches.get(2)?.as_str().parse::<u32>().ok()?)?
-        .with_hour(matches.get(3)?.as_str().parse::<u32>().ok()?)?
-        .with_minute(matches.get(4)?.as_str().parse::<u32>().ok()?)?
-        .with_second(matches.get(5)?.as_str().parse::<u32>().ok()?)?
-        .with_second(matches.get(6)?.as_str().parse::<u32>().ok()? * 1_000_000)?;
-    Some(date.timestamp_millis() as _)
+    let date = time::OffsetDateTime::now_utc()
+        .replace_month(matches.get(1)?.as_str().parse::<u8>().ok()?.try_into().ok()?).ok()?
+        .replace_day(matches.get(2)?.as_str().parse::<u8>().ok()?).ok()?
+        .replace_hour(matches.get(3)?.as_str().parse::<u8>().ok()?).ok()?
+        .replace_minute(matches.get(4)?.as_str().parse::<u8>().ok()?).ok()?
+        .replace_second(matches.get(5)?.as_str().parse::<u8>().ok()?).ok()?
+        .replace_microsecond(matches.get(6)?.as_str().parse::<u32>().ok()? * 1_000_000).ok()?;
+    Some(date.unix_timestamp() as _)
 }
 
 impl LogEntry {
     pub fn from_string(line: &str) -> anyhow::Result<Self> {
         let matches = LOGCAT_RE.captures(line).ok_or(Error::Parse)?;
-        let log_timestamp = matches.get(1).ok_or(Error::Timestamp)?.as_str().to_string();
-        let level =
-            LogLevel::from_str(matches.get(2).ok_or(Error::Level)?.as_str()).ok_or(Error::Level)?;
-        let tag = matches.get(3).ok_or(Error::Tag)?.as_str().to_string();
-        let message = matches.get(4).ok_or(Error::Msg)?.as_str().to_string();
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_millis() as u64;
-        let timestamp = parse_logcat_time(line).unwrap_or(timestamp);
+        let log_timestamp = parse_logcat_time(matches.get(1).ok_or(Error::Timestamp)?.as_str()).unwrap_or(timestamp);
+        let level =
+            LogLevel::from_str(matches.get(2).ok_or(Error::Level)?.as_str()).ok_or(Error::Level)?;
+        let tag = matches.get(3).ok_or(Error::Tag)?.as_str().to_string();
+        let message = matches.get(4).ok_or(Error::Msg)?.as_str().to_string();
 
         Ok(Self { level, log_timestamp, tag, message, line: line.to_string(), timestamp })
     }
@@ -126,15 +123,20 @@ impl LogEntry {
             device_id: None,
             sequence,
             timestamp: self.timestamp,
-            collection_timestamp: self.timestamp,
             payload,
         })
     }
 }
 
-pub fn new_logcat(logging_config: &LoggingConfig) -> Command {
+pub fn new_logcat(logging_config: &LoggerConfig) -> Command {
+    let now = {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+        let millis = timestamp % 1000;
+        let seconds = timestamp / 1000;
+        format!("{seconds}.{:03}", millis)
+    };
     // silence everything
-    let mut logcat_args = ["-v", "time", "*:S"].map(String::from).to_vec();
+    let mut logcat_args = ["-v", "time", "-T", now.as_str(), "*:S"].map(String::from).to_vec();
     // enable logging for requested tags
     for tag in &logging_config.tags {
         let min_level = LogLevel::from_syslog_level(logging_config.min_level)
