@@ -488,7 +488,7 @@ pub async fn process_data_event(
     client.send(payload).await?;
 
     let duration = event.event_type.duration();
-    let sequence = if event.sequence >= RESET_LIMIT { 0 } else { event.sequence + 1 };
+    let sequence = if event.sequence >= RESET_LIMIT { 1 } else { event.sequence + 1 };
 
     events.insert(
         Event::DataEvent(DataEvent {
