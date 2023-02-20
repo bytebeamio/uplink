@@ -541,7 +541,7 @@ pub fn generate_action_events(action: Action, events: &mut DelayQueue<Event>) {
     let action_id = action.action_id;
 
     info!("Generating action events for action: {action_id}");
-    let now = Instant::now() + Duration::from_millis(rand::thread_rng().gen_range(0..5000));
+    let now = Instant::now();
 
     // Action response, 10% completion per second
     for i in 1..10 {
