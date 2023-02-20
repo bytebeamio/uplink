@@ -1,7 +1,8 @@
+use fake::{Dummy, Fake, Faker};
 use futures_util::sink::SinkExt;
 use futures_util::stream::SplitSink;
 use futures_util::StreamExt;
-use log::{error, info, LevelFilter};
+use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -130,114 +131,104 @@ pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
     }
 }
 
-pub fn generate_float(start: f64, end: f64) -> f64 {
-    let mut rng = rand::thread_rng();
+struct BoolString;
 
-    rng.gen_range(start..end)
-}
-
-pub fn generate_int(start: i32, end: i32) -> i64 {
-    rand::thread_rng().gen_range(start..end) as i64
-}
-
-pub fn generate_bool_string(p: f64) -> String {
-    if rand::thread_rng().gen_bool(p) {
-        "on".to_owned()
-    } else {
-        "off".to_owned()
+impl Dummy<BoolString> for String {
+    fn dummy_with_rng<R: Rng + ?Sized>(_: &BoolString, rng: &mut R) -> String {
+        const NAMES: &[&str] = &["on", "off"];
+        NAMES.choose(rng).unwrap().to_string()
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Dummy)]
 struct Bms {
+    #[dummy(faker = "250")]
     periodicity_ms: i32,
+    #[dummy(faker = "40.0 .. 45.0")]
     mosfet_temperature: f64,
+    #[dummy(faker = "35.0 .. 40.0")]
     ambient_temperature: f64,
+    #[dummy(faker = "1")]
     mosfet_status: i32,
+    #[dummy(faker = "16")]
     cell_voltage_count: i32,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_1: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_2: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_3: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_4: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_5: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_6: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_7: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_8: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_9: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_10: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_11: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_12: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_13: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_14: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_15: f64,
+    #[dummy(faker = "3.0 .. 3.2")]
     cell_voltage_16: f64,
+    #[dummy(faker = "8")]
     cell_thermistor_count: i32,
+    #[dummy(faker = "40.0 .. 43.0")]
     cell_temp_1: f64,
+    #[dummy(faker = "40.0 .. 43.0")]
     cell_temp_2: f64,
+    #[dummy(faker = "40.0 .. 43.0")]
     cell_temp_3: f64,
+    #[dummy(faker = "40.0 .. 43.0")]
     cell_temp_4: f64,
+    #[dummy(faker = "40.0 .. 43.0")]
     cell_temp_5: f64,
+    #[dummy(faker = "40.0 .. 43.0")]
     cell_temp_6: f64,
+    #[dummy(faker = "40.0 .. 43.0")]
     cell_temp_7: f64,
+    #[dummy(faker = "40.0 .. 43.0")]
     cell_temp_8: f64,
+    #[dummy(faker = "1")]
     cell_balancing_status: i32,
+    #[dummy(faker = "95.0 .. 96.0")]
     pack_voltage: f64,
+    #[dummy(faker = "15.0 .. 20.0")]
     pack_current: f64,
+    #[dummy(faker = "80.0 .. 90.0")]
     pack_soc: f64,
+    #[dummy(faker = "9.5 .. 9.9")]
     pack_soh: f64,
+    #[dummy(faker = "9.5 .. 9.9")]
     pack_sop: f64,
+    #[dummy(faker = "100 .. 150")]
     pack_cycle_count: i64,
+    #[dummy(faker = "2000 .. 3000")]
     pack_available_energy: i64,
+    #[dummy(faker = "2000 .. 3000")]
     pack_consumed_energy: i64,
+    #[dummy(faker = "0")]
     pack_fault: i32,
+    #[dummy(faker = "1")]
     pack_status: i32,
 }
 
 pub fn generate_bms_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let payload = Bms {
-        periodicity_ms: 250,
-        mosfet_temperature: generate_float(40f64, 45f64),
-        ambient_temperature: generate_float(35f64, 40f64),
-        mosfet_status: 1,
-        cell_voltage_count: 16,
-        cell_voltage_1: generate_float(3.0f64, 3.2f64),
-        cell_voltage_2: generate_float(3.0f64, 3.2f64),
-        cell_voltage_3: generate_float(3.0f64, 3.2f64),
-        cell_voltage_4: generate_float(3.0f64, 3.2f64),
-        cell_voltage_5: generate_float(3.0f64, 3.2f64),
-        cell_voltage_6: generate_float(3.0f64, 3.2f64),
-        cell_voltage_7: generate_float(3.0f64, 3.2f64),
-        cell_voltage_8: generate_float(3.0f64, 3.2f64),
-        cell_voltage_9: generate_float(3.0f64, 3.2f64),
-        cell_voltage_10: generate_float(3.0f64, 3.2f64),
-        cell_voltage_11: generate_float(3.0f64, 3.2f64),
-        cell_voltage_12: generate_float(3.0f64, 3.2f64),
-        cell_voltage_13: generate_float(3.0f64, 3.2f64),
-        cell_voltage_14: generate_float(3.0f64, 3.2f64),
-        cell_voltage_15: generate_float(3.0f64, 3.2f64),
-        cell_voltage_16: generate_float(3.0f64, 3.2f64),
-        cell_thermistor_count: 8,
-        cell_temp_1: generate_float(40.0f64, 43.0f64),
-        cell_temp_2: generate_float(40.0f64, 43.0f64),
-        cell_temp_3: generate_float(40.0f64, 43.0f64),
-        cell_temp_4: generate_float(40.0f64, 43.0f64),
-        cell_temp_5: generate_float(40.0f64, 43.0f64),
-        cell_temp_6: generate_float(40.0f64, 43.0f64),
-        cell_temp_7: generate_float(40.0f64, 43.0f64),
-        cell_temp_8: generate_float(40.0f64, 43.0f64),
-        cell_balancing_status: 1,
-        pack_voltage: generate_float(95f64, 96f64),
-        pack_current: generate_float(15f64, 20f64),
-        pack_soc: generate_float(80f64, 90f64),
-        pack_soh: generate_float(9.5f64, 9.9f64),
-        pack_sop: generate_float(9.5f64, 9.9f64),
-        pack_cycle_count: generate_int(100, 150),
-        pack_available_energy: generate_int(2000, 3000),
-        pack_consumed_energy: generate_int(2000, 3000),
-        pack_fault: 0,
-        pack_status: 1,
-    };
+    let payload: Bms = Faker.fake();
 
     Payload {
         timestamp,
@@ -248,32 +239,31 @@ pub fn generate_bms_data(sequence: u32) -> Payload {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Dummy)]
 struct Imu {
+    #[dummy(faker = "1.0 .. 2.8")]
     ax: f64,
+    #[dummy(faker = "1.0 .. 2.8")]
     ay: f64,
+    #[dummy(faker = "9.79 .. 9.82")]
     az: f64,
+    #[dummy(faker = "0.8 .. 1.0")]
     pitch: f64,
+    #[dummy(faker = "0.8 .. 1.0")]
     roll: f64,
+    #[dummy(faker = "0.8 .. 1.0")]
     yaw: f64,
+    #[dummy(faker = "-45.0 .. -15.0")]
     magx: f64,
+    #[dummy(faker = "-45.0 .. -15.0")]
     magy: f64,
+    #[dummy(faker = "-45.0 .. -15.0")]
     magz: f64,
 }
 
 pub fn generate_imu_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let payload = Imu {
-        ax: generate_float(1f64, 2.8f64),
-        ay: generate_float(1f64, 2.8f64),
-        az: generate_float(9.79f64, 9.82f64),
-        pitch: generate_float(0.8f64, 1f64),
-        roll: generate_float(0.8f64, 1f64),
-        yaw: generate_float(0.8f64, 1f64),
-        magx: generate_float(-45f64, -15f64),
-        magy: generate_float(-45f64, -15f64),
-        magz: generate_float(-45f64, -15f64),
-    };
+    let payload: Imu = Faker.fake();
 
     Payload {
         timestamp,
@@ -284,27 +274,26 @@ pub fn generate_imu_data(sequence: u32) -> Payload {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Dummy)]
 struct Motor {
+    #[dummy(faker = "40.0 .. 45.0")]
     motor_temperature1: f64,
+    #[dummy(faker = "40.0 .. 45.0")]
     motor_temperature2: f64,
+    #[dummy(faker = "40.0 .. 45.0")]
     motor_temperature3: f64,
+    #[dummy(faker = "95.0 .. 96.0")]
     motor_voltage: f64,
+    #[dummy(faker = "20.0 .. 25.0")]
     motor_current: f64,
+    #[dummy(faker = "1000 .. 9000")]
     motor_rpm: i64,
 }
 
 pub fn generate_motor_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let payload = Motor {
-        motor_temperature1: generate_float(40f64, 45f64),
-        motor_temperature2: generate_float(40f64, 45f64),
-        motor_temperature3: generate_float(40f64, 45f64),
+    let payload: Motor = Faker.fake();
 
-        motor_voltage: generate_float(95f64, 96f64),
-        motor_current: generate_float(20f64, 25f64),
-        motor_rpm: generate_int(1000, 9000),
-    };
 
     Payload {
         timestamp,
@@ -315,32 +304,31 @@ pub fn generate_motor_data(sequence: u32) -> Payload {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Dummy)]
 struct PeripheralState {
+    #[dummy(faker = "BoolString")]
     gps_status: String,
+    #[dummy(faker = "BoolString")]
     gsm_status: String,
+    #[dummy(faker = "BoolString")]
     imu_status: String,
+    #[dummy(faker = "BoolString")]
     left_indicator: String,
+    #[dummy(faker = "BoolString")]
     right_indicator: String,
+    #[dummy(faker = "BoolString")]
     headlamp: String,
+    #[dummy(faker = "BoolString")]
     horn: String,
+    #[dummy(faker = "BoolString")]
     left_brake: String,
+    #[dummy(faker = "BoolString")]
     right_brake: String,
 }
 
 pub fn generate_peripheral_state_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let payload = PeripheralState {
-        gps_status: generate_bool_string(0.99),
-        gsm_status: generate_bool_string(0.99),
-        imu_status: generate_bool_string(0.99),
-        left_indicator: generate_bool_string(0.1),
-        right_indicator: generate_bool_string(0.1),
-        headlamp: generate_bool_string(0.9),
-        horn: generate_bool_string(0.05),
-        left_brake: generate_bool_string(0.1),
-        right_brake: generate_bool_string(0.1),
-    };
+    let payload: PeripheralState = Faker.fake();
 
     Payload {
         timestamp,
@@ -351,29 +339,28 @@ pub fn generate_peripheral_state_data(sequence: u32) -> Payload {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Dummy)]
 struct DeviceShadow {
+    #[dummy(faker = "BoolString")]
     mode: String,
+    #[dummy(faker = "BoolString")]
     status: String,
+    #[dummy(faker = "BoolString")]
     firmware_version: String,
+    #[dummy(faker = "BoolString")]
     config_version: String,
+    #[dummy(faker = "20000..30000")]
     distance_travelled: i64,
+    #[dummy(faker = "50000..60000")]
     range: i64,
     #[serde(rename(serialize = "SOC"))]
+    #[dummy(faker = "50.0..90.0")]
     soc: f64,
 }
 
 pub fn generate_device_shadow_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let payload = DeviceShadow {
-        mode: "economy".to_owned(),
-        status: "Locked".to_owned(),
-        firmware_version: "1.33-Aug-2020b1".to_owned(),
-        config_version: "1.23".to_owned(),
-        distance_travelled: generate_int(20000, 30000),
-        range: generate_int(50000, 60000),
-        soc: generate_float(50f64, 90f64),
-    };
+    let payload: DeviceShadow = Faker.fake();
 
     Payload {
         timestamp,
