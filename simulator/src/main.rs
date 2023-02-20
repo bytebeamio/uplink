@@ -2,6 +2,7 @@ use fake::{Dummy, Fake, Faker};
 use futures_util::sink::SinkExt;
 use futures_util::stream::SplitSink;
 use futures_util::StreamExt;
+use log::{error, info, trace, LevelFilter};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -122,6 +123,8 @@ pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
     let path_index = ((device.path_offset + sequence) % path_len) as usize;
     let position = device.path.get(path_index).unwrap();
 
+    trace!("Data Event: GPS {:?}", position);
+
     Payload {
         timestamp,
         device_id: None,
@@ -230,6 +233,8 @@ pub fn generate_bms_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let payload: Bms = Faker.fake();
 
+    trace!("Data Event: {:?}", payload);
+
     Payload {
         timestamp,
         device_id: None,
@@ -265,6 +270,8 @@ pub fn generate_imu_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let payload: Imu = Faker.fake();
 
+    trace!("Data Event: {:?}", payload);
+
     Payload {
         timestamp,
         device_id: None,
@@ -294,6 +301,7 @@ pub fn generate_motor_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let payload: Motor = Faker.fake();
 
+    trace!("Data Event: {:?}", payload);
 
     Payload {
         timestamp,
@@ -330,6 +338,8 @@ pub fn generate_peripheral_state_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let payload: PeripheralState = Faker.fake();
 
+    trace!("Data Event: {:?}", payload);
+
     Payload {
         timestamp,
         device_id: None,
@@ -361,6 +371,8 @@ struct DeviceShadow {
 pub fn generate_device_shadow_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let payload: DeviceShadow = Faker.fake();
+
+    trace!("Data Event: {:?}", payload);
 
     Payload {
         timestamp,
