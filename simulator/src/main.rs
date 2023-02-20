@@ -19,6 +19,8 @@ use uplink::Action;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
+const RESET_LIMIT: u32 = 1500;
+
 #[derive(StructOpt, Debug)]
 #[structopt(name = "simulator", about = "simulates a demo device")]
 pub struct CommandLine {
@@ -528,10 +530,11 @@ pub async fn process_data_event(
     client.send(payload).await?;
 
     let duration = event.event_type.duration();
+    let sequence = if event.sequence >= RESET_LIMIT { 0 } else { event.sequence + 1 };
 
     events.insert(
         Event::DataEvent(DataEvent {
-            sequence: event.sequence + 1,
+            sequence,
             timestamp: event.timestamp + duration,
             device: event.device.clone(),
             event_type: event.event_type,
