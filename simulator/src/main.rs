@@ -1,7 +1,7 @@
 use futures_util::sink::SinkExt;
 use futures_util::stream::SplitSink;
 use futures_util::StreamExt;
-use log::{error, info, trace, LevelFilter};
+use log::{error, info, LevelFilter};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -13,9 +13,9 @@ use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
+use tokio_util::time::DelayQueue;
 use uplink::Action;
 
-use std::collections::BinaryHeap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
@@ -65,6 +65,19 @@ pub enum DataEventType {
     GeneratePeripheralData,
     GenerateMotor,
     GenerateBMS,
+}
+
+impl DataEventType {
+    fn duration(&self) -> Duration {
+        match self {
+            DataEventType::GenerateGPS => Duration::from_millis(1000),
+            DataEventType::GenerateIMU => Duration::from_millis(100),
+            DataEventType::GenerateVehicleData => Duration::from_millis(1000),
+            DataEventType::GeneratePeripheralData => Duration::from_millis(1000),
+            DataEventType::GenerateMotor => Duration::from_millis(250),
+            DataEventType::GenerateBMS => Duration::from_millis(250),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -429,68 +442,77 @@ pub fn new_device_data(path: Arc<Vec<Location>>) -> DeviceData {
     DeviceData { path, path_offset: path_index }
 }
 
-pub fn generate_initial_events(
-    events: &mut BinaryHeap<Event>,
-    timestamp: Instant,
-    device: &DeviceData,
-) {
-    events.push(Event::DataEvent(DataEvent {
-        event_type: DataEventType::GenerateGPS,
-        device: device.clone(),
-        timestamp,
-        sequence: 1,
-    }));
+pub fn generate_initial_events(events: &mut DelayQueue<Event>, now: Instant, device: &DeviceData) {
+    let duration = DataEventType::GenerateGPS.duration();
+    events.insert(
+        Event::DataEvent(DataEvent {
+            event_type: DataEventType::GenerateGPS,
+            device: device.clone(),
+            timestamp: now + duration,
+            sequence: 1,
+        }),
+        duration,
+    );
 
-    events.push(Event::DataEvent(DataEvent {
-        event_type: DataEventType::GenerateVehicleData,
-        device: device.clone(),
-        timestamp,
-        sequence: 1,
-    }));
+    let duration = DataEventType::GenerateVehicleData.duration();
+    events.insert(
+        Event::DataEvent(DataEvent {
+            event_type: DataEventType::GenerateVehicleData,
+            device: device.clone(),
+            timestamp: now + duration,
+            sequence: 1,
+        }),
+        duration,
+    );
 
-    events.push(Event::DataEvent(DataEvent {
-        event_type: DataEventType::GeneratePeripheralData,
-        device: device.clone(),
-        timestamp,
-        sequence: 1,
-    }));
+    let duration = DataEventType::GeneratePeripheralData.duration();
+    events.insert(
+        Event::DataEvent(DataEvent {
+            event_type: DataEventType::GeneratePeripheralData,
+            device: device.clone(),
+            timestamp: now + duration,
+            sequence: 1,
+        }),
+        duration,
+    );
 
-    events.push(Event::DataEvent(DataEvent {
-        event_type: DataEventType::GenerateMotor,
-        device: device.clone(),
-        timestamp,
-        sequence: 1,
-    }));
+    let duration = DataEventType::GenerateMotor.duration();
+    events.insert(
+        Event::DataEvent(DataEvent {
+            event_type: DataEventType::GenerateMotor,
+            device: device.clone(),
+            timestamp: now + duration,
+            sequence: 1,
+        }),
+        duration,
+    );
 
-    events.push(Event::DataEvent(DataEvent {
-        event_type: DataEventType::GenerateBMS,
-        device: device.clone(),
-        timestamp,
-        sequence: 1,
-    }));
+    let duration = DataEventType::GenerateBMS.duration();
+    events.insert(
+        Event::DataEvent(DataEvent {
+            event_type: DataEventType::GenerateBMS,
+            device: device.clone(),
+            timestamp: now + duration,
+            sequence: 1,
+        }),
+        duration,
+    );
 
-    events.push(Event::DataEvent(DataEvent {
-        event_type: DataEventType::GenerateIMU,
-        device: device.clone(),
-        timestamp,
-        sequence: 1,
-    }));
-}
-
-pub fn next_event_duration(event_type: DataEventType) -> Duration {
-    match event_type {
-        DataEventType::GenerateGPS => Duration::from_millis(1000),
-        DataEventType::GenerateIMU => Duration::from_millis(100),
-        DataEventType::GenerateVehicleData => Duration::from_millis(1000),
-        DataEventType::GeneratePeripheralData => Duration::from_millis(1000),
-        DataEventType::GenerateMotor => Duration::from_millis(250),
-        DataEventType::GenerateBMS => Duration::from_millis(250),
-    }
+    let duration = DataEventType::GenerateIMU.duration();
+    events.insert(
+        Event::DataEvent(DataEvent {
+            event_type: DataEventType::GenerateIMU,
+            device: device.clone(),
+            timestamp: now + duration,
+            sequence: 1,
+        }),
+        duration,
+    );
 }
 
 pub async fn process_data_event(
     event: &DataEvent,
-    events: &mut BinaryHeap<Event>,
+    events: &mut DelayQueue<Event>,
     client: &mut SplitSink<Framed<TcpStream, LinesCodec>, String>,
 ) -> Result<(), Error> {
     let data = match event.event_type {
@@ -505,14 +527,17 @@ pub async fn process_data_event(
     let payload = serde_json::to_string(&data)?;
     client.send(payload).await?;
 
-    let duration = next_event_duration(event.event_type);
+    let duration = event.event_type.duration();
 
-    events.push(Event::DataEvent(DataEvent {
-        sequence: event.sequence + 1,
-        timestamp: event.timestamp + duration,
-        device: event.device.clone(),
-        event_type: event.event_type,
-    }));
+    events.insert(
+        Event::DataEvent(DataEvent {
+            sequence: event.sequence + 1,
+            timestamp: event.timestamp + duration,
+            device: event.device.clone(),
+            event_type: event.event_type,
+        }),
+        duration,
+    );
 
     Ok(())
 }
@@ -545,22 +570,11 @@ async fn process_action_response_event(
 }
 
 pub async fn process_events(
-    events: &mut BinaryHeap<Event>,
+    events: &mut DelayQueue<Event>,
     client: &mut SplitSink<Framed<TcpStream, LinesCodec>, String>,
 ) -> Result<(), Error> {
-    if let Some(e) = events.pop() {
-        let current_time = Instant::now();
-        let timestamp = event_timestamp(&e);
-
-        if timestamp > current_time {
-            let time_left = timestamp.duration_since(current_time);
-
-            if time_left > Duration::from_millis(50) {
-                tokio::time::sleep(time_left).await;
-            }
-        }
-
-        match e {
+    if let Some(e) = events.next().await {
+        match e.into_inner() {
             Event::DataEvent(event) => {
                 process_data_event(&event, events, client).await?;
             }
@@ -569,14 +583,12 @@ pub async fn process_events(
                 process_action_response_event(&event, client).await?;
             }
         }
-    } else {
-        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
     Ok(())
 }
 
-pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
+pub fn generate_action_events(action: Action, events: &mut DelayQueue<Event>) {
     let action_id = action.action_id;
 
     info!("Generating action events for action: {action_id}");
@@ -584,20 +596,28 @@ pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
 
     // Action response, 10% completion per second
     for i in 1..10 {
-        events.push(Event::ActionResponseEvent(ActionResponseEvent {
-            action_id: action_id.clone(),
-            progress: i * 10,
-            status: String::from("in_progress"),
-            timestamp: now + Duration::from_secs(i as u64),
-        }));
+        let duration = Duration::from_secs(i as u64);
+        events.insert(
+            Event::ActionResponseEvent(ActionResponseEvent {
+                action_id: action_id.clone(),
+                progress: i * 10,
+                status: String::from("in_progress"),
+                timestamp: now + duration,
+            }),
+            duration,
+        );
     }
 
-    events.push(Event::ActionResponseEvent(ActionResponseEvent {
-        action_id: action_id.clone(),
-        progress: 100,
-        status: String::from("Completed"),
-        timestamp: now + Duration::from_secs(10),
-    }));
+    let duration = Duration::from_secs(10);
+    events.insert(
+        Event::ActionResponseEvent(ActionResponseEvent {
+            action_id: action_id.clone(),
+            progress: 100,
+            status: String::from("Completed"),
+            timestamp: now + duration,
+        }),
+        duration,
+    );
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -611,29 +631,11 @@ async fn main() -> Result<(), Error> {
     let stream = TcpStream::connect(addr).await?;
     let (mut data_tx, mut actions_rx) = Framed::new(stream, LinesCodec::new()).split();
 
-    let mut events = BinaryHeap::new();
+    let mut events = DelayQueue::new();
 
     generate_initial_events(&mut events, Instant::now(), &device);
-    let mut time = Instant::now();
-    let mut i = 0;
 
     loop {
-        let current_time = Instant::now();
-        if time.elapsed() > Duration::from_secs(1) {
-            if let Some(event) = events.peek() {
-                let timestamp = event_timestamp(event);
-
-                if current_time > timestamp {
-                    trace!("Time delta {:?} {:?}", current_time - timestamp, i);
-                } else {
-                    trace!("Time delta -{:?} {:?}", timestamp - current_time, i);
-                }
-
-                i += 1;
-            }
-            time = Instant::now();
-        }
-
         select! {
             line = actions_rx.next() => {
                 let line = line.ok_or(Error::StreamDone)??;
