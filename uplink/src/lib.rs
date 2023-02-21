@@ -52,16 +52,17 @@ pub mod config {
     }
 
     const DEFAULT_CONFIG: &str = r#"
-    bridge_port = 5555
     run_logcat = true
-    max_packet_size = 102400
-    max_inflight = 100
-    keep_alive = 30
 
     # Whitelist of binaries which uplink can spawn as a process
     # This makes sure that user is protected against random actions
     # triggered from cloud.
     actions = ["tunshell"]
+
+    [mqtt]
+    max_packet_size = 256000
+    max_inflight = 100
+    keep_alive = 30
 
     # Create empty streams map
     [streams]

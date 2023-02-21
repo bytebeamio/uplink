@@ -2,5 +2,6 @@
 
 cd /usr/share/bytebeam/uplink
 
-export RUST_LOG=debug
-exec ./target/debug/uplink -c configs/demo.toml -a configs/noauth.json
+exec ./simulator.sh start_devices 20
+echo "Check devices directory for uplink and simulator logs"
+echo "Run ./simulator.sh kill_devices to stop simulator"

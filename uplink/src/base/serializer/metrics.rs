@@ -6,12 +6,14 @@ use crate::collector::utils::{self, clock};
 pub struct SerializerMetrics {
     pub timestamp: u128,
     pub sequence: u32,
-    mode: String,
-    batches: usize,
-    memory_size: usize,
-    disk_files: usize,
-    lost_segments: usize,
-    sent_size: usize,
+    pub mode: String,
+    pub batches: usize,
+    pub write_memory: usize,
+    pub read_memory: usize,
+    pub disk_files: usize,
+    pub lost_segments: usize,
+    pub errors: usize,
+    pub sent_size: usize,
 }
 
 impl SerializerMetrics {
@@ -21,9 +23,11 @@ impl SerializerMetrics {
             sequence: 1,
             mode: mode.to_owned(),
             batches: 0,
-            memory_size: 0,
+            write_memory: 0,
+            read_memory: 0,
             disk_files: 0,
             lost_segments: 0,
+            errors: 0,
             sent_size: 0,
         }
     }
@@ -43,12 +47,20 @@ impl SerializerMetrics {
         }
     }
 
-    pub fn set_memory_size(&mut self, size: usize) {
-        self.memory_size = size;
+    pub fn set_write_memory(&mut self, size: usize) {
+        self.write_memory = size;
+    }
+
+    pub fn set_read_memory(&mut self, size: usize) {
+        self.read_memory = size;
     }
 
     pub fn set_disk_files(&mut self, count: usize) {
         self.disk_files = count;
+    }
+
+    pub fn increment_errors(&mut self) {
+        self.errors += 1;
     }
 
     pub fn increment_lost_segments(&mut self) {
@@ -63,9 +75,11 @@ impl SerializerMetrics {
         self.timestamp = clock();
         self.sequence += 1;
         self.batches = 0;
-        self.memory_size = 0;
+        self.write_memory = 0;
+        self.read_memory = 0;
         self.disk_files = 0;
         self.lost_segments = 0;
         self.sent_size = 0;
+        self.errors = 0;
     }
 }

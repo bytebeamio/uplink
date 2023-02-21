@@ -1,7 +1,7 @@
 use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
-use log::{error, info};
+use log::{debug, error, info};
 use tokio::{
     select,
     time::{self, interval, Sleep},
@@ -138,7 +138,7 @@ impl Bridge {
                 }
                 // Flush streams that timeout
                 Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
-                    info!("Flushing stream = {}", timedout_stream);
+                    debug!("Flushing stream = {}", timedout_stream);
                     if let Err(e) = streams.flush_stream(&timedout_stream).await {
                         error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
                     }
@@ -146,7 +146,7 @@ impl Bridge {
                 // Flush all metrics when timed out
                 _ = metrics_timeout.tick() => {
                     if let Err(e) = streams.check_and_flush_metrics() {
-                        error!("Failed to flush stream metrics. Error = {}", e);
+                        debug!("Failed to flush stream metrics. Error = {}", e);
                     }
                 }
             }

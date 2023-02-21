@@ -116,6 +116,13 @@ pub struct TracingConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct MqttConfig {
+    pub max_packet_size: usize,
+    pub max_inflight: u16,
+    pub keep_alive: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -124,9 +131,7 @@ pub struct Config {
     pub apis: TracingConfig,
     pub authentication: Option<Authentication>,
     pub tcpapps: HashMap<String, AppConfig>,
-    pub max_packet_size: usize,
-    pub max_inflight: u16,
-    pub keep_alive: u64,
+    pub mqtt: MqttConfig,
     pub processes: Vec<String>,
     #[serde(skip)]
     pub actions_subscription: String,

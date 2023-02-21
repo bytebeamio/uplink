@@ -32,6 +32,7 @@ async-trait = "0.1"
 sysinfo = "0.26"
 lazy_static = "1.4.0"
 glob = "0.3"
+pretty-bytes = "0.2.2"
 
 [build-dependencies]
 vergen = { version = "7", features = ["git", "build", "time"] }
