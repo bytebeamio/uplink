@@ -1,17 +1,21 @@
+# Collection of binaries which uplink can spawn as a process
+# This ensures that user is protected against random actions
+# triggered from cloud.
+processes = ["echo"]
+action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
+
 # MQTT client configuration
 # 
 # Required Parameters
 # - max_packet_size: Maximum packet size acceptable for MQTT messages
 # - max_inflight: Maximum number of outgoing QoS 1/2 messages that can be
 #                 handled by uplink, at a time, requiring acknowledgedment.
+# - keep_alive: Number of seconds after which the MQTT client should ping
+#               the broker if there is no other data exchange.
+[mqtt]
 max_packet_size = 256000
 max_inflight = 100
-
-# Collection of binaries which uplink can spawn as a process
-# This ensures that user is protected against random actions
-# triggered from cloud.
-processes = ["echo"]
-action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
+keep_alive = 30
 
 # TCP applications that detail applications which connect with uplink
 # Required Parameters
