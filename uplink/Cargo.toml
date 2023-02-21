@@ -10,7 +10,7 @@ config = { version = "0.13.2", default-features = false, features = ["toml", "js
 log = "0.4"
 rouille = "3.1.1"
 tracing = { version="0.1", features=["log"] }
-tracing-subscriber = { version="0.3.16", features=["env-filter"] }
+tracing-subscriber = { version="=0.3.14", features=["env-filter"] }
 time = "0.3"
 disk = { path = "../disk" }
 tokio = { version = "1", features = ["full"] }
