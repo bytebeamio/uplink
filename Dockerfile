@@ -30,7 +30,7 @@ RUN source $HOME/.cargo/env
 COPY . /usr/share/bytebeam/uplink
 
 WORKDIR /usr/share/bytebeam/uplink
-RUN $HOME/.cargo/bin/cargo build
+RUN $HOME/.cargo/bin/cargo build --release
 
 ###################################################################################################
 
