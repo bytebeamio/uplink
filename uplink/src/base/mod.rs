@@ -128,6 +128,7 @@ pub struct Config {
     pub device_id: String,
     pub broker: String,
     pub port: u16,
+    #[serde(default)]
     pub apis: TracingConfig,
     pub authentication: Option<Authentication>,
     pub tcpapps: HashMap<String, AppConfig>,
