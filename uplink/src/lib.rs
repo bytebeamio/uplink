@@ -93,11 +93,11 @@ pub mod config {
     timeout = 10
 
     [streams.device_shadow]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     buf_size = 1
 
     [stats]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/uplink_stats/jsonarray"
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stats/jsonarray"
     enabled = false
     process_names = ["uplink"]
     update_period = 30
