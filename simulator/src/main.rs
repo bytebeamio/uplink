@@ -13,11 +13,12 @@ use simplelog::{
 use structopt::StructOpt;
 use thiserror::Error;
 use tokio::net::TcpStream;
-use tokio::select;
+use tokio::{select, task};
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use tokio_util::time::DelayQueue;
 use uplink::Action;
 
+use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{fs, io, sync::Arc};
 
@@ -402,9 +403,15 @@ pub fn new_device_data(path: Arc<Vec<Location>>) -> DeviceData {
     DeviceData { path, path_offset: path_index }
 }
 
-pub fn generate_initial_events(events: &mut DelayQueue<Event>, now: Instant, device: &DeviceData) {
+pub fn generate_initial_events(
+    events: &Arc<Mutex<DelayQueue<Event>>>,
+    now: Instant,
+    device: &DeviceData,
+) {
     let duration = DataEventType::GenerateGPS.duration();
-    events.insert(
+    let mut handle = events.lock().unwrap();
+
+    handle.insert(
         Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateGPS,
             device: device.clone(),
@@ -415,7 +422,7 @@ pub fn generate_initial_events(events: &mut DelayQueue<Event>, now: Instant, dev
     );
 
     let duration = DataEventType::GenerateVehicleData.duration();
-    events.insert(
+    handle.insert(
         Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateVehicleData,
             device: device.clone(),
@@ -426,7 +433,7 @@ pub fn generate_initial_events(events: &mut DelayQueue<Event>, now: Instant, dev
     );
 
     let duration = DataEventType::GeneratePeripheralData.duration();
-    events.insert(
+    handle.insert(
         Event::DataEvent(DataEvent {
             event_type: DataEventType::GeneratePeripheralData,
             device: device.clone(),
@@ -437,7 +444,7 @@ pub fn generate_initial_events(events: &mut DelayQueue<Event>, now: Instant, dev
     );
 
     let duration = DataEventType::GenerateMotor.duration();
-    events.insert(
+    handle.insert(
         Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateMotor,
             device: device.clone(),
@@ -448,7 +455,7 @@ pub fn generate_initial_events(events: &mut DelayQueue<Event>, now: Instant, dev
     );
 
     let duration = DataEventType::GenerateBMS.duration();
-    events.insert(
+    handle.insert(
         Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateBMS,
             device: device.clone(),
@@ -459,7 +466,7 @@ pub fn generate_initial_events(events: &mut DelayQueue<Event>, now: Instant, dev
     );
 
     let duration = DataEventType::GenerateIMU.duration();
-    events.insert(
+    handle.insert(
         Event::DataEvent(DataEvent {
             event_type: DataEventType::GenerateIMU,
             device: device.clone(),
@@ -472,7 +479,7 @@ pub fn generate_initial_events(events: &mut DelayQueue<Event>, now: Instant, dev
 
 pub async fn process_data_event(
     event: &DataEvent,
-    events: &mut DelayQueue<Event>,
+    events: &Arc<Mutex<DelayQueue<Event>>>,
     client: &mut SplitSink<Framed<TcpStream, LinesCodec>, String>,
 ) -> Result<(), Error> {
     let data = match event.event_type {
@@ -490,7 +497,8 @@ pub async fn process_data_event(
     let duration = event.event_type.duration();
     let sequence = if event.sequence >= RESET_LIMIT { 1 } else { event.sequence + 1 };
 
-    events.insert(
+    let mut handle = events.lock().unwrap();
+    handle.insert(
         Event::DataEvent(DataEvent {
             sequence,
             timestamp: event.timestamp + duration,
@@ -531,12 +539,14 @@ async fn process_action_response_event(
 }
 
 pub async fn process_events(
-    events: &mut DelayQueue<Event>,
+    events: &Arc<Mutex<DelayQueue<Event>>>,
     client: &mut SplitSink<Framed<TcpStream, LinesCodec>, String>,
 ) -> Result<(), Error> {
-    if let Some(e) = events.next().await {
+    let mut handle = events.lock().unwrap();
+    if let Some(e) = handle.next().await {
         match e.into_inner() {
             Event::DataEvent(event) => {
+                drop(handle);
                 process_data_event(&event, events, client).await?;
             }
 
@@ -549,16 +559,17 @@ pub async fn process_events(
     Ok(())
 }
 
-pub fn generate_action_events(action: Action, events: &mut DelayQueue<Event>) {
+pub fn generate_action_events(action: Action, events: Arc<Mutex<DelayQueue<Event>>>) {
     let action_id = action.action_id;
 
     info!("Generating action events for action: {action_id}");
     let now = Instant::now();
+    let mut handle = events.lock().unwrap();
 
     // Action response, 10% completion per second
     for i in 1..10 {
         let duration = Duration::from_secs(i as u64);
-        events.insert(
+        handle.insert(
             Event::ActionResponseEvent(ActionResponseEvent {
                 action_id: action_id.clone(),
                 progress: i * 10,
@@ -570,7 +581,7 @@ pub fn generate_action_events(action: Action, events: &mut DelayQueue<Event>) {
     }
 
     let duration = Duration::from_secs(10);
-    events.insert(
+    handle.insert(
         Event::ActionResponseEvent(ActionResponseEvent {
             action_id: action_id.clone(),
             progress: 100,
@@ -592,18 +603,21 @@ async fn main() -> Result<(), Error> {
     let stream = TcpStream::connect(addr).await?;
     let (mut data_tx, mut actions_rx) = Framed::new(stream, LinesCodec::new()).split();
 
-    let mut events = DelayQueue::new();
+    let events = Arc::new(Mutex::new(DelayQueue::new()));
 
-    generate_initial_events(&mut events, Instant::now(), &device);
+    generate_initial_events(&events, Instant::now(), &device);
 
     loop {
         select! {
             line = actions_rx.next() => {
                 let line = line.ok_or(Error::StreamDone)??;
                 let action = serde_json::from_str(&line)?;
-                generate_action_events(action, &mut events);
+                let events = events.clone();
+                task::spawn(async move {
+                    generate_action_events(action, events);
+                });
             }
-            _ = process_events(&mut events, &mut data_tx) => {
+            _ = process_events(&events, &mut data_tx) => {
             }
         }
     }
