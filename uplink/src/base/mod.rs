@@ -110,6 +110,12 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct TracingConfig {
+    pub enabled: bool,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct MqttConfig {
     pub max_packet_size: usize,
     pub max_inflight: u16,
@@ -122,6 +128,7 @@ pub struct Config {
     pub device_id: String,
     pub broker: String,
     pub port: u16,
+    pub apis: TracingConfig,
     pub authentication: Option<Authentication>,
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
