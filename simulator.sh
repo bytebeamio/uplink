@@ -7,10 +7,8 @@ start_devices() {
     echo "Starting uplink and simulator"
     for id in $(seq 1 $limit)
     do 
-        mkdir -p devices
-        # prepare config, please comment below line and download the right config from platform
-        # echo "{\"project_id\": \"demo\",\"device_id\": \"$id\",\"broker\": \"stage.bytebeam.io\",\"port\": 1883}" > devices/device_$id.json
-        printf "processes = [] \naction_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" } \n\n[tcpapps.1] \nport = 500$id \nactions= [\"load_file\", \"install_firmware\"] \n\n[downloader] \nactions= [\"send_file\", \"update_firmware\"] \npath = \"/var/tmp/ota/$id\"" > devices/device_$id.toml
+        download_auth_config $id
+        create_uplink_config $id
         start_uplink $id
 
         sleep 1
@@ -18,6 +16,20 @@ start_devices() {
     done
 
     echo DONE
+}
+
+create_uplink_config() {
+    printf "processes = [] \naction_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" } \n\n[tcpapps.1] \nport = 500$1 \nactions= [\"load_file\", \"install_firmware\"] \n\n[downloader] \nactions= [\"send_file\", \"update_firmware\"] \npath = \"/var/tmp/ota/$1\"" > devices/device_$1.toml
+}
+
+download_auth_config() {
+    id=${1:?"Missing id"}
+    url="https://$CONSOLED_DOMAIN/api/v1/devices/$id/cert"
+    echo "Downloading config: $url"
+    mkdir -p devices
+    curl --location $url \
+        --header 'x-bytebeam-tenant: demo' \
+        --header "x-bytebeam-api-key: $BYTEBEAM_API_KEY" > devices/device_$id.json
 }
 
 start_uplink() {
