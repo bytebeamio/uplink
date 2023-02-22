@@ -1,11 +1,11 @@
 #!/bin/bash
 
 start_devices() {
+    limit=${1:?"Missing device count"}
     kill_devices;
 
-
     echo "Starting uplink and simulator"
-    for id in $(seq 1 $1)
+    for id in $(seq 1 $limit)
     do 
         mkdir -p devices
         # prepare config, please comment below line and download the right config from platform
@@ -44,4 +44,4 @@ kill_devices() {
     echo DONE
 }
 
-$1 $2
+${1:?"Missing command"} ${@:2}
