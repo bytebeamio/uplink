@@ -14,8 +14,13 @@ start_devices() {
         sleep 1
         start_simulaotr $id
     done
-
     echo DONE
+
+    # Wait on pids and block till atleast one uplink is running
+    while read pid
+    do
+      tail --pid=$pid -f /dev/null
+    done < devices/pids
 }
 
 create_uplink_config() {
