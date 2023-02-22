@@ -80,7 +80,6 @@ impl LoggerInstance {
             let action = self.log_rx.recv()?;
             let mut config = serde_json::from_str::<LoggerConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
-            log::info!("restarting journalctl with following config: {:?}", config);
 
             // Ensure any logger child process created earlier gets killed
             self.kill_last();
@@ -149,7 +148,7 @@ impl LoggerInstance {
                         continue;
                     }
                 };
-                log::debug!("Log entry {:?}", payload);
+                log::trace!("Log entry {:?}", payload);
                 log_stream.push(payload).unwrap();
                 log_index += 1;
             }
