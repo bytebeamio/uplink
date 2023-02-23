@@ -8,7 +8,7 @@ use tokio::{
 };
 
 use super::{Package, Payload, Stream, StreamMetrics};
-use crate::{collector::utils::Streams, Action, ActionResponse, Config};
+use crate::{base::ActionRoute, collector::utils::Streams, Action, ActionResponse, Config};
 
 #[derive(Debug)]
 pub enum Event {
@@ -271,7 +271,7 @@ pub struct BridgeTx {
 }
 
 impl BridgeTx {
-    pub async fn register_action_route<S: Into<String>>(&self, name: S) -> Receiver<Action> {
+    pub async fn register_action_route(&self, route: ActionRoute) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(0);
         let duration = Duration::from_secs(30);
         let action_router = ActionRouter { actions_tx, duration };
@@ -282,15 +282,17 @@ impl BridgeTx {
         actions_rx
     }
 
-    pub async fn register_action_routes<S: Into<String>, V: IntoIterator<Item = S>>(
+    pub async fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item = R>>(
         &self,
-        names: V,
+        routes: V,
     ) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(0);
 
-            let duration = Duration::from_secs(30);
+        for route in routes {
+            let route = route.into();
+            let duration = Duration::from_secs(route.duration);
             let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
-            let event = Event::RegisterActionRoute(name.into(), action_router);
+            let event = Event::RegisterActionRoute(route.name, action_router);
             // Bridge should always be up and hence unwrap is ok
             self.events_tx.send_async(event).await.unwrap();
         }

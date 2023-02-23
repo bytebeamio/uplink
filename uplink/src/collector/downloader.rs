@@ -279,7 +279,7 @@ pub struct DownloadFile {
 mod test {
     use std::{collections::HashMap, time::Duration};
 
-    use crate::base::{bridge::Event, DownloaderConfig, MqttConfig};
+    use crate::base::{bridge::Event, DownloaderConfig, MqttConfig, ActionRoute};
 
     use super::*;
     use flume::TrySendError;
@@ -305,10 +305,8 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let downloader_cfg = DownloaderConfig {
-            actions: vec!["firmware_update".to_owned()],
-            path: format!("{DOWNLOAD_DIR}/uplink-test"),
-        };
+        let downloader_cfg =
+            DownloaderConfig { actions: vec![ActionRoute { name: "firmware_update".to_owned(), duration: 10 }], path: format!("{DOWNLOAD_DIR}/uplink-test") };
         let config = config(downloader_cfg.clone());
         let (events_tx, events_rx) = flume::bounded(1);
         let bridge_tx = BridgeTx { events_tx };
@@ -370,7 +368,7 @@ mod test {
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
         let downloader_cfg = DownloaderConfig {
-            actions: vec!["firmware_update".to_string()],
+            actions: vec![ActionRoute { name: "firmware_update".to_owned(), duration: 10 }],
             path: format!("{}/download", DOWNLOAD_DIR),
         };
         let config = config(downloader_cfg.clone());

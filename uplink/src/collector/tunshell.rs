@@ -6,7 +6,7 @@ use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
 use crate::{
-    base::{self, bridge::BridgeTx},
+    base::{self, bridge::BridgeTx, ActionRoute},
     ActionResponse,
 };
 
@@ -43,7 +43,8 @@ impl TunshellSession {
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) {
-        let actions_rx = self.bridge.register_action_route("launch_shell").await;
+        let route = ActionRoute { name: "launch_shell".to_owned(), duration: 10 };
+        let actions_rx = self.bridge.register_action_route(route).await;
 
         while let Ok(action) = actions_rx.recv_async().await {
             let action_id = action.action_id.clone();
