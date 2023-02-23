@@ -13,7 +13,7 @@ use crate::{collector::utils::Streams, Action, ActionResponse, Config};
 #[derive(Debug)]
 pub enum Event {
     /// App name and handle for brige to send actions to the app
-    RegisterActionRoute(String, Sender<Action>),
+    RegisterActionRoute(String, ActionRouter),
     /// Data sent by the app
     Data(Payload),
     /// Sometime apps can choose to directly send action response instead
@@ -39,7 +39,7 @@ pub struct Bridge {
     /// Apps registered with the bridge
     /// NOTE: Sometimes action_routes could overlap, the latest route
     /// to be registered will be used in such a circumstance.
-    action_routes: HashMap<String, Sender<Action>>,
+    action_routes: HashMap<String, ActionRouter>,
     /// Action redirections
     action_redirections: HashMap<String, String>,
     /// Current action that is being processed
@@ -96,24 +96,26 @@ impl Bridge {
 
                     // NOTE: Don't do any blocking operations here
                     // TODO: Remove blocking here. Audit all blocking functions here
-                    if let Err(e) = self.try_route_action(action.clone()) {
-                        // Ignore sending failure status to backend. This makes
-                        // backend retry action.
-                        //
-                        // TODO: Do we need this? Shouldn't backend have an easy way to
-                        // retry failed actions in bulk?
-                        if self.config.ignore_actions_if_no_clients {
-                            error!("No clients connected, ignoring action = {:?}", action_id);
-                            self.current_action = None;
+                    match self.try_route_action(action.clone()) {
+                        Ok(d) => self.current_action = Some(CurrentAction::new(action.clone(), d)),
+                        Err(e) => {
+                            // Ignore sending failure status to backend. This makes
+                            // backend retry action.
+                            //
+                            // TODO: Do we need this? Shouldn't backend have an easy way to
+                            // retry failed actions in bulk?
+                            if self.config.ignore_actions_if_no_clients {
+                                error!("No clients connected, ignoring action = {:?}", action_id);
+                                self.current_action = None;
+                                continue
+                            }
+
+                            error!("Failed to route action to app. Error = {:?}", e);
+                            self.forward_action_error(action, e).await;
                             continue
                         }
-
-                        error!("Failed to route action to app. Error = {:?}", e);
-                        self.forward_action_error(action, e).await;
-                        continue
                     }
 
-                    self.current_action = Some(CurrentAction::new(action.clone()));
                     let response = ActionResponse::progress(&action_id, "Received", 0);
                     self.forward_action_response(response).await;
                 }
@@ -154,12 +156,12 @@ impl Bridge {
     }
 
     /// Handle received actions
-    fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
+    fn try_route_action(&mut self, action: Action) -> Result<Duration, Error> {
         let action_name = action.name.clone();
         match self.action_routes.get(&action_name) {
             Some(app_tx) => {
-                app_tx.try_send(action)?;
-                Ok(())
+                let duration = app_tx.try_send(action)?;
+                Ok(duration)
             }
             None => Err(Error::NoRoute(action.name)),
         }
@@ -211,9 +213,12 @@ impl Bridge {
             let mut fwd_action = inflight_action.action.clone();
             fwd_action.name = fwd_name.to_owned();
 
-            if let Err(e) = self.try_route_action(fwd_action.clone()) {
-                error!("Failed to route action to app. Error = {:?}", e);
-                self.forward_action_error(fwd_action, e).await;
+            match self.try_route_action(fwd_action.clone()) {
+                Ok(d) => self.current_action = Some(CurrentAction::new(fwd_action, d)),
+                Err(e) => {
+                    error!("Failed to route action to app. Error = {:?}", e);
+                    self.forward_action_error(fwd_action, e).await;
+                }
             }
         }
     }
@@ -236,16 +241,26 @@ struct CurrentAction {
 }
 
 impl CurrentAction {
-    pub fn new(action: Action) -> CurrentAction {
+    pub fn new(action: Action, duration: Duration) -> CurrentAction {
         CurrentAction {
             id: action.action_id.clone(),
             action,
-            timeout: Box::pin(time::sleep(Duration::from_secs(60))),
+            timeout: Box::pin(time::sleep(duration)),
         }
     }
+}
 
-    pub fn reset_timeout(&mut self) {
-        self.timeout = Box::pin(time::sleep(Duration::from_secs(60)));
+#[derive(Debug)]
+pub struct ActionRouter {
+    actions_tx: Sender<Action>,
+    duration: Duration,
+}
+
+impl ActionRouter {
+    pub fn try_send(&self, action: Action) -> Result<Duration, TrySendError<Action>> {
+        self.actions_tx.try_send(action)?;
+
+        Ok(self.duration)
     }
 }
 
@@ -258,7 +273,9 @@ pub struct BridgeTx {
 impl BridgeTx {
     pub async fn register_action_route<S: Into<String>>(&self, name: S) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(0);
-        let event = Event::RegisterActionRoute(name.into(), actions_tx);
+        let duration = Duration::from_secs(30);
+        let action_router = ActionRouter { actions_tx, duration };
+        let event = Event::RegisterActionRoute(route.name, action_router);
 
         // Bridge should always be up and hence unwrap is ok
         self.events_tx.send_async(event).await.unwrap();
@@ -271,8 +288,9 @@ impl BridgeTx {
     ) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(0);
 
-        for name in names {
-            let event = Event::RegisterActionRoute(name.into(), actions_tx.clone());
+            let duration = Duration::from_secs(30);
+            let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
+            let event = Event::RegisterActionRoute(name.into(), action_router);
             // Bridge should always be up and hence unwrap is ok
             self.events_tx.send_async(event).await.unwrap();
         }
