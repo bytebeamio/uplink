@@ -222,6 +222,7 @@ impl FileDownloader {
         };
         let mut downloaded = 0;
         let mut next = 1;
+        let mut progress = 1;
         let mut stream = resp.bytes_stream();
 
         // Download and store to disk by streaming as chunks
@@ -238,8 +239,8 @@ impl FileDownloader {
                 let percentage = match content_length {
                     Some(content_length) => 100 * downloaded / content_length,
                     None => {
-                        downloaded = (downloaded + 1) % 101;
-                        downloaded
+                        progress += if progress < 99 { 1 } else { 0 };
+                        progress
                     }
                 };
 
