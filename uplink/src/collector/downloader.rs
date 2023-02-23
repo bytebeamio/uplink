@@ -173,7 +173,7 @@ impl FileDownloader {
         let url = update.url.clone();
 
         // Create file to actually download into
-        let (file, file_path) = self.create_file(&action.name, &url, &update.version)?;
+        let (file, file_path) = self.create_file(&action.name, &update.version)?;
 
         // Create handler to perform download from URL
         // TODO: Error out for 1XX/3XX responses
@@ -193,16 +193,13 @@ impl FileDownloader {
     }
 
     /// Creates file to download into
-    fn create_file(&self, name: &str, url: &str, version: &str) -> Result<(File, String), Error> {
+    fn create_file(&self, name: &str, file_name: &str) -> Result<(File, String), Error> {
         // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
         let mut download_path = PathBuf::from(self.config.path.clone());
         download_path.push(name);
-        download_path.push(version);
         create_dir_all(&download_path)?;
 
         let mut file_path = download_path.to_owned();
-        let file_name =
-            url.split('/').last().ok_or_else(|| Error::FileNameMissing(url.to_owned()))?;
         file_path.push(file_name);
         let file_path = file_path.as_path();
         let file = File::create(file_path)?;
