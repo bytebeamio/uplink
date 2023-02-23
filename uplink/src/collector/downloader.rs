@@ -307,7 +307,7 @@ mod test {
             path: format!("{DOWNLOAD_DIR}/uplink-test"),
         };
         let config = config(downloader_cfg.clone());
-        let (events_tx, events_rx) = flume::bounded(1);
+        let (events_tx, events_rx) = flume::bounded(2);
         let bridge_tx = BridgeTx { events_tx };
 
         // Create channels to forward and push action_status on
@@ -319,12 +319,11 @@ mod test {
         // Create a firmware update action
         let download_update = DownloadFile {
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            file_name: "1.0".to_string(),
+            file_name: "test.txt".to_string(),
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path =
-            Some(downloader_cfg.path + "/firmware_update/1.0/logo.png");
+        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
         let download_action = Action {
             device_id: None,
             action_id: "1".to_string(),
@@ -337,11 +336,6 @@ mod test {
             Event::RegisterActionRoute(_, download_tx) => download_tx,
             e => unreachable!("Unexpected event: {e:#?}"),
         };
-
-        match events_rx.recv().unwrap() {
-            Event::RegisterActionRoute(_, _) => {}
-            e => unreachable!("Unexpected event: {e:#?}"),
-        }
 
         std::thread::sleep(Duration::from_millis(10));
 
@@ -356,9 +350,20 @@ mod test {
         assert_eq!(status.state, "Downloading");
 
         // Collect and ensure forwarded action contains expected info
-        // let Event::RegisterActionRoute(_, download_tx) = events_rx.recv().unwrap();
-        // let forward: DownloadFile = serde_json::from_str(&forwardpayload).unwrap();
-        // assert_eq!(forward, expected_forward);
+        loop {
+            match dbg!(events_rx.recv().unwrap()) {
+                Event::ActionResponse(ActionResponse {
+                    done_response: Some(Action { payload, .. }),
+                    ..
+                }) => {
+                    let forward: DownloadFile = serde_json::from_str(&payload).unwrap();
+                    assert_eq!(forward, expected_forward);
+                    break;
+                }
+                Event::ActionResponse(response) if response.is_failed() => break,
+                _ => {}
+            }
+        }
     }
 
     #[test]
@@ -371,7 +376,7 @@ mod test {
             path: format!("{}/download", DOWNLOAD_DIR),
         };
         let config = config(downloader_cfg.clone());
-        let (events_tx, events_rx) = flume::bounded(1);
+        let (events_tx, events_rx) = flume::bounded(3);
         let bridge_tx = BridgeTx { events_tx };
 
         // Create channels to forward and push action_status on
@@ -387,8 +392,7 @@ mod test {
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path =
-            Some(downloader_cfg.path + "/firmware_update/1.0/logo.png");
+        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
         let download_action = Action {
             device_id: None,
             action_id: "1".to_string(),
