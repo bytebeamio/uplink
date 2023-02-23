@@ -54,11 +54,6 @@ pub mod config {
     const DEFAULT_CONFIG: &str = r#"
     run_logcat = true
 
-    # Whitelist of binaries which uplink can spawn as a process
-    # This makes sure that user is protected against random actions
-    # triggered from cloud.
-    actions = ["tunshell"]
-
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -69,7 +64,7 @@ pub mod config {
 
     # Downloader config
     [downloader]
-    actions = ["update_firmware", "send_file"]
+    actions = [{ name = "update_firmware", duration = 60 }, { name = "send_file", duration = 60 }]
     path = "/var/tmp/ota-file"
 
     [stream_metrics]
