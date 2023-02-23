@@ -173,7 +173,7 @@ impl FileDownloader {
         let url = update.url.clone();
 
         // Create file to actually download into
-        let (file, file_path) = self.create_file(&action.name, &update.version)?;
+        let (file, file_path) = self.create_file(&action.name, &update.file_name)?;
 
         // Create handler to perform download from URL
         // TODO: Error out for 1XX/3XX responses
@@ -266,8 +266,8 @@ impl FileDownloader {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct DownloadFile {
     url: String,
-    #[serde(alias = "file_name")]
-    version: String,
+    #[serde(alias = "version")]
+    file_name: String,
     /// Path to location in fs where file will be stored
     download_path: Option<String>,
 }
@@ -319,7 +319,7 @@ mod test {
         // Create a firmware update action
         let download_update = DownloadFile {
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            version: "1.0".to_string(),
+            file_name: "1.0".to_string(),
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
@@ -383,7 +383,7 @@ mod test {
         // Create a firmware update action
         let download_update = DownloadFile {
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            version: "1.0".to_string(),
+            file_name: "1.0".to_string(),
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
