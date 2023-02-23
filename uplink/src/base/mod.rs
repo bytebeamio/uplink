@@ -117,7 +117,7 @@ pub struct Config {
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
     #[serde(default)]
-    pub ignore_actions_if_no_clients: bool,
+    pub wait_for_clients: bool,
     #[cfg(target_os = "linux")]
     pub journalctl: Option<JournalctlConfig>,
     #[cfg(target_os = "android")]

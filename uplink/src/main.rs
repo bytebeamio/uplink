@@ -137,7 +137,7 @@ async fn main() -> Result<(), Error> {
 
     banner(&commandline, &config);
 
-    let mut uplink = Uplink::new(config.clone())?;
+    let mut uplink = Uplink::new(config.clone()).await?;
     uplink.spawn()?;
 
     if let Some(simulator_config) = &config.simulator {

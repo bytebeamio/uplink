@@ -126,7 +126,10 @@ impl Bridge {
                         }
                     }
 
-                    action = self.actions_rx.recv_async(), if current_action.is_none() => {
+                    action = self.actions_rx.recv_async(), if current_action.is_none() && (
+                        // if "wait_for_clients == true", do not process new actions if there are no clients connected
+                        ! self.config.wait_for_clients || self.actions_tx.receiver_count() > 0
+                    ) => {
                         let action = action?;
                         info!("Received action: {:?}", action);
                         let action_id = action.action_id.clone();
@@ -136,9 +139,6 @@ impl Bridge {
                                 id: action_id.clone(),
                                 timeout: Box::pin(time::sleep(ACTION_TIMEOUT)),
                             });
-                            self.action_status.fill(ActionResponse::progress(&action_id, "Received", 0)).await?;
-                        } else if self.config.ignore_actions_if_no_clients {
-                            error!("No clients connected, ignoring action = {:?}", action_id);
                         } else {
                             error!("Bridge down!! Action ID = {}", action_id);
                             let status = ActionResponse::failure(&action_id, "Bridge down");

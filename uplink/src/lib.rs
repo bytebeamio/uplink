@@ -4,7 +4,8 @@ use std::thread;
 
 use anyhow::Error;
 
-use flume::{bounded, Receiver, Sender};
+use flume::{bounded, Receiver, RecvError, Sender};
+use futures_util::{StreamExt, TryFutureExt};
 use log::error;
 use tokio::task;
 
@@ -188,16 +189,35 @@ pub struct Uplink {
 }
 
 impl Uplink {
-    pub fn new(config: Arc<Config>) -> Result<Uplink, Error> {
-        let (action_tx, action_rx) = bounded(10);
+    pub async fn new(config: Arc<Config>) -> Result<Uplink, Error> {
         let (data_tx, data_rx) = bounded(10);
-
         let action_status_topic = &config
             .action_status
             .topic
             .as_ref()
             .ok_or_else(|| Error::msg("Action status topic missing from config"))?;
         let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
+
+        let (action_tx, action_rx_buffer) = bounded::<Action>(5);
+        let (action_tx_buffer, action_rx) = bounded(5);
+        let mut action_status_buffer = action_status.clone();
+        tokio::spawn(async move {
+            loop {
+                match action_rx_buffer.recv_async().await {
+                    Ok(action) => {
+                        if action_status_buffer.fill(ActionResponse::progress(&action.action_id, "Received", 0)).await.is_err() {
+                            break;
+                        }
+                        if action_tx_buffer.send_async(action).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                }
+            }
+        });
 
         Ok(Uplink { config, action_rx, action_tx, data_rx, data_tx, action_status })
     }
