@@ -4,8 +4,7 @@ use std::thread;
 
 use anyhow::Error;
 
-use flume::{bounded, Receiver, RecvError, Sender};
-use futures_util::{StreamExt, TryFutureExt};
+use flume::{bounded, Receiver, Sender};
 use log::error;
 use tokio::task;
 
@@ -202,19 +201,12 @@ impl Uplink {
         let (action_tx_buffer, action_rx) = bounded(5);
         let mut action_status_buffer = action_status.clone();
         tokio::spawn(async move {
-            loop {
-                match action_rx_buffer.recv_async().await {
-                    Ok(action) => {
-                        if action_status_buffer.fill(ActionResponse::progress(&action.action_id, "Received", 0)).await.is_err() {
-                            break;
-                        }
-                        if action_tx_buffer.send_async(action).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => {
-                        break;
-                    }
+            while let Ok(action) = action_rx_buffer.recv_async().await {
+                if action_status_buffer.fill(ActionResponse::progress(&action.action_id, "Received", 0)).await.is_err() {
+                    break;
+                }
+                if action_tx_buffer.send_async(action).await.is_err() {
+                    break;
                 }
             }
         });
