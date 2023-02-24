@@ -275,7 +275,6 @@ mod test {
     use crate::base::{bridge::Event, DownloaderConfig, MqttConfig};
 
     use super::*;
-    use flume::TrySendError;
     use serde_json::json;
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
@@ -315,6 +314,7 @@ mod test {
         // Create a firmware update action
         let download_update = DownloadFile {
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
+            content_length: 296658,
             version: "1.0".to_string(),
             download_path: None,
         };
@@ -334,11 +334,6 @@ mod test {
             e => unreachable!("Unexpected event: {e:#?}"),
         };
 
-        match events_rx.recv().unwrap() {
-            Event::RegisterActionRoute(_, _) => {}
-            e => unreachable!("Unexpected event: {e:#?}"),
-        }
-
         std::thread::sleep(Duration::from_millis(10));
 
         // Send action to FileDownloader with Sender<Action>
@@ -350,11 +345,26 @@ mod test {
             e => unreachable!("Unexpected event: {e:#?}"),
         };
         assert_eq!(status.state, "Downloading");
+        let mut progress = 0;
 
         // Collect and ensure forwarded action contains expected info
-        // let Event::RegisterActionRoute(_, download_tx) = events_rx.recv().unwrap();
-        // let forward: DownloadFile = serde_json::from_str(&forwardpayload).unwrap();
-        // assert_eq!(forward, expected_forward);
-    }
+        loop {
+            let status = match events_rx.recv().unwrap() {
+                Event::ActionResponse(status) => status,
+                e => unreachable!("Unexpected event: {e:#?}"),
+            };
 
+            assert!(progress <= status.progress);
+            progress = status.progress;
+
+            if status.is_done() {
+                let fwd_action = status.done_response.unwrap();
+                let fwd = serde_json::from_str(&fwd_action.payload).unwrap();
+                assert_eq!(expected_forward, fwd);
+                break;
+            } else if status.is_failed() {
+                break;
+            }
+        }
+    }
 }
