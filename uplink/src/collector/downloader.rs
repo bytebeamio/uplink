@@ -179,7 +179,7 @@ impl FileDownloader {
         // TODO: Error out for 1XX/3XX responses
         let resp = self.client.get(&url).send().await?.error_for_status()?;
         info!("Downloading from {} into {}", url, file_path);
-        self.download(resp, file).await?;
+        self.download(resp, file, update.content_length).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.download_path = Some(file_path.clone());
@@ -212,14 +212,12 @@ impl FileDownloader {
     }
 
     /// Downloads from server and stores into file
-    async fn download(&mut self, resp: Response, mut file: File) -> Result<(), Error> {
-        // Error out in case of 0 sized files, but handle situation where file size is not
-        // reported by the webserver in response by incrementing count 0..100 over and over.
-        let content_length = match resp.content_length() {
-            None => None,
-            Some(0) => return Err(Error::EmptyFile),
-            Some(l) => Some(l as usize),
-        };
+    async fn download(
+        &mut self,
+        resp: Response,
+        mut file: File,
+        content_length: usize,
+    ) -> Result<(), Error> {
         let mut downloaded = 0;
         let mut next = 1;
         let mut stream = resp.bytes_stream();
@@ -231,17 +229,10 @@ impl FileDownloader {
             file.write_all(&chunk)?;
 
             // NOTE: ensure lesser frequency of action responses, once every 100KB
-            if downloaded / 102400 > next {
+            if downloaded / 100 * 1024 > next {
                 next += 1;
-                // Calculate percentage on the basis of content_length if available,
-                // else increment 0..100 till task is completed.
-                let percentage = match content_length {
-                    Some(content_length) => 100 * downloaded / content_length,
-                    None => {
-                        downloaded = (downloaded + 1) % 101;
-                        downloaded
-                    }
-                };
+                // Calculate percentage on the basis of content_length
+                let percentage = 100 * downloaded / content_length;
 
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
@@ -269,6 +260,8 @@ impl FileDownloader {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct DownloadFile {
     url: String,
+    #[serde(alias = "content-length")]
+    content_length: usize,
     #[serde(alias = "file_name")]
     version: String,
     /// Path to location in fs where file will be stored
