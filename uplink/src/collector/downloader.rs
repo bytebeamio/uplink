@@ -232,7 +232,7 @@ impl FileDownloader {
             if downloaded / 100 * 1024 > next {
                 next += 1;
                 // Calculate percentage on the basis of content_length
-                let percentage = 100 * downloaded / content_length;
+                let percentage = 99 * downloaded / content_length;
 
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
