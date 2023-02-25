@@ -234,7 +234,7 @@ impl ClientConnection {
             select! {
                 line = client.next() => {
                     let line = line.ok_or(Error::StreamDone)??;
-                    debug!("Received line = {:?}", line);
+                    info!("Received line = {:?}", line);
 
                     let data = match serde_json::from_str::<Payload>(&line) {
                         Ok(d) => d.set_collection_timestamp(),

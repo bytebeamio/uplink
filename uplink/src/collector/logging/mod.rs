@@ -146,7 +146,7 @@ impl LoggerInstance {
                 let entry = match LogEntry::from_string(next_line) {
                     Ok(entry) => entry,
                     Err(e) => {
-                        log::warn!("log line: {} couldn't be parsed due to: {}", next_line, e);
+                        log::warn!("log line: {:?} couldn't be parsed due to: {}", next_line, e);
                         continue;
                     }
                 };
@@ -157,7 +157,7 @@ impl LoggerInstance {
                         continue;
                     }
                 };
-                log::debug!("Log entry {:?}", payload);
+                log::trace!("Log entry {:?}", payload);
                 log_stream.push(payload).unwrap();
                 log_index += 1;
             }

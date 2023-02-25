@@ -1,5 +1,5 @@
 use flume::{Sender, TrySendError};
-use log::{error, info};
+use log::{debug, error, info};
 use thiserror::Error;
 use tokio::task;
 use tokio::time::Duration;
@@ -82,8 +82,8 @@ impl Mqtt {
                         error!("Incoming publish handle failed. Error = {:?}", e);
                     }
                 }
-                Ok(Event::Incoming(i)) => info!("Incoming = {:?}", i),
-                Ok(Event::Outgoing(o)) => info!("Outgoing = {:?}", o),
+                Ok(Event::Incoming(i)) => debug!("Incoming = {:?}", i),
+                Ok(Event::Outgoing(o)) => debug!("Outgoing = {:?}", o),
                 Err(e) => {
                     error!("Connection error = {:?}", e.to_string());
                     tokio::time::sleep(Duration::from_secs(1)).await;
