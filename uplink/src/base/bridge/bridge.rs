@@ -268,16 +268,21 @@ impl BridgeTx {
     pub async fn register_action_routes<S: Into<String>, V: IntoIterator<Item = S>>(
         &self,
         names: V,
-    ) -> Receiver<Action> {
+    ) -> Option<Receiver<Action>> {
+        let names: Vec<String> = names.into_iter().map(|n| n.into()).collect();
+        if names.is_empty() {
+            return None;
+        }
+
         let (actions_tx, actions_rx) = bounded(0);
 
         for name in names {
-            let event = Event::RegisterActionRoute(name.into(), actions_tx.clone());
+            let event = Event::RegisterActionRoute(name, actions_tx.clone());
             // Bridge should always be up and hence unwrap is ok
             self.events_tx.send_async(event).await.unwrap();
         }
 
-        actions_rx
+        Some(actions_rx)
     }
 
     pub async fn send_payload(&self, payload: Payload) {

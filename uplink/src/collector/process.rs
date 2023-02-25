@@ -85,7 +85,10 @@ impl ProcessHandler {
     }
 
     pub async fn start(mut self, processes: Vec<String>) -> Result<(), Error> {
-        let action_rx = self.bridge_tx.register_action_routes(processes).await;
+        let action_rx = match self.bridge_tx.register_action_routes(processes).await {
+            Some(r) => r,
+            _ => return Ok(()),
+        };
 
         loop {
             let action = action_rx.recv_async().await?;

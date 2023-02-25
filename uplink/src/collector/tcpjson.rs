@@ -46,8 +46,7 @@ impl TcpJson {
     pub async fn new(name: String, config: AppConfig, bridge: BridgeTx) -> TcpJson {
         let actions_rx = if config.actions.len() > 0 {
             // TODO: Return Option<Receiver> while registering multiple actions
-            let actions_rx = bridge.register_action_routes(&config.actions).await;
-            Some(actions_rx)
+            bridge.register_action_routes(&config.actions).await
         } else {
             None
         };
