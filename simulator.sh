@@ -3,6 +3,7 @@
 start_devices() {
     limit=${1:?"Missing device count"}
     kill_devices;
+    mkdir -p devices
 
     echo "Starting uplink and simulator"
     for id in $(seq 1 $limit)
@@ -38,12 +39,12 @@ download_auth_config() {
 }
 
 start_uplink() {
-    nohup ./target/release/uplink -a devices/device_$1.json -c devices/device_$1.toml -vv > devices/uplink_$1.log 2>&1 &
+    nohup uplink -a devices/device_$1.json -c devices/device_$1.toml -vv > devices/uplink_$1.log 2>&1 &
     echo $! >> devices/pids
 }
 
 start_simulaotr() {
-    nohup ./target/release/simulator -p 500$1 -g ./paths -vvv > devices/simulator_$1.log 2>&1 &
+    nohup simulator -p 500$1 -g ./paths -vvv > devices/simulator_$1.log 2>&1 &
     echo $! >> devices/pids
 }
 
