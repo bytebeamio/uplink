@@ -17,4 +17,4 @@ thiserror = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "time"] }
-uplink = { path = "../uplink" }
+uplink = { path = "../../uplink" }

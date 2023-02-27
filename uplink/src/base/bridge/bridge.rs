@@ -10,6 +10,18 @@ use tokio::{
 use super::{Package, Payload, Stream, StreamMetrics};
 use crate::{base::ActionRoute, collector::utils::Streams, Action, ActionResponse, Config};
 
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Receiver error {0}")]
+    Recv(#[from] RecvError),
+    #[error("Action receiver busy or down")]
+    UnresponsiveReceiver,
+    #[error("No route for action {0}")]
+    NoRoute(String),
+    #[error("Action timedout")]
+    ActionTimeout,
+}
+
 #[derive(Debug)]
 pub enum Event {
     /// App name and handle for brige to send actions to the app
@@ -158,7 +170,8 @@ impl Bridge {
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
         match self.action_routes.get(&action.name) {
             Some(app_tx) => {
-                let duration = app_tx.try_send(action.clone())?;
+                let duration =
+                    app_tx.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
                 self.current_action = Some(CurrentAction::new(action, duration));
 
                 Ok(())
@@ -311,16 +324,4 @@ impl BridgeTx {
         let event = Event::ActionResponse(response);
         self.events_tx.send_async(event).await.unwrap()
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("Receiver error {0}")]
-    Recv(#[from] RecvError),
-    #[error("Action receiver busy {0}")]
-    TrySend(#[from] TrySendError<Action>),
-    #[error("No route for action {0}")]
-    NoRoute(String),
-    #[error("Action timedout")]
-    ActionTimeout,
 }
