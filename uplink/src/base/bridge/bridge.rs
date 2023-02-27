@@ -273,7 +273,7 @@ pub struct BridgeTx {
 impl BridgeTx {
     pub async fn register_action_route(&self, route: ActionRoute) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(0);
-        let duration = Duration::from_secs(30);
+        let duration = Duration::from_secs(route.timeout);
         let action_router = ActionRouter { actions_tx, duration };
         let event = Event::RegisterActionRoute(route.name, action_router);
 
@@ -290,7 +290,7 @@ impl BridgeTx {
 
         for route in routes {
             let route = route.into();
-            let duration = Duration::from_secs(route.duration);
+            let duration = Duration::from_secs(route.timeout);
             let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
             let event = Event::RegisterActionRoute(route.name, action_router);
             // Bridge should always be up and hence unwrap is ok

@@ -64,7 +64,7 @@ pub mod config {
 
     # Downloader config
     [downloader]
-    actions = [{ name = "update_firmware", duration = 60 }, { name = "send_file", duration = 60 }]
+    actions = [{ name = "update_firmware", timeout = 60 }, { name = "send_file", timeout = 60 }]
     path = "/var/tmp/ota-file"
 
     [stream_metrics]

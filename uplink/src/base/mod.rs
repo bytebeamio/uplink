@@ -125,7 +125,8 @@ pub struct MqttConfig {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ActionRoute {
     pub name: String,
-    pub duration: u64,
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
 }
 
 impl From<&ActionRoute> for ActionRoute {
