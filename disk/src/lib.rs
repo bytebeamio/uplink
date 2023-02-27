@@ -245,7 +245,7 @@ impl Storage {
 /// Converts file path to file id
 fn id(path: &Path) -> Result<u64, Error> {
     if let Some(file_name) = path.file_name() {
-        let file_name = format!("{:?}", file_name);
+        let file_name = format!("{file_name:?}");
         if !file_name.contains("backup@") {
             return Err(Error::NotBackup);
         }

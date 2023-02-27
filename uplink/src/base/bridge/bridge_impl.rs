@@ -1,6 +1,6 @@
 use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
-use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
+use flume::{bounded, Receiver, RecvError, Sender};
 use log::{debug, error, info};
 use tokio::{
     select,
@@ -154,6 +154,7 @@ impl Bridge {
     }
 
     /// Handle received actions
+    #[allow(clippy::result_large_err)]
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
         let action_name = action.name.clone();
         match self.action_routes.get(&action_name) {
@@ -242,10 +243,6 @@ impl CurrentAction {
             action,
             timeout: Box::pin(time::sleep(Duration::from_secs(60))),
         }
-    }
-
-    pub fn reset_timeout(&mut self) {
-        self.timeout = Box::pin(time::sleep(Duration::from_secs(60)));
     }
 }
 
