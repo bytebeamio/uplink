@@ -4,6 +4,7 @@ use std::thread;
 
 use anyhow::Error;
 
+use base::bridge::stream::Stream;
 use base::monitor::Monitor;
 use collector::downloader::FileDownloader;
 use collector::process::ProcessHandler;
@@ -207,7 +208,7 @@ pub mod config {
 }
 
 pub use base::actions::{Action, ActionResponse};
-use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, Stream, StreamMetrics};
+use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::Config;
@@ -255,7 +256,7 @@ impl Uplink {
         let mut bridge = Bridge::new(
             self.config.clone(),
             self.data_tx.clone(),
-            self.stream_metrics_tx().clone(),
+            self.stream_metrics_tx(),
             self.action_rx.clone(),
             self.action_status(),
         );
@@ -335,7 +336,7 @@ impl Uplink {
 
         let monitor = Monitor::new(
             self.config.clone(),
-            mqtt_client.clone(),
+            mqtt_client,
             self.stream_metrics_rx.clone(),
             self.serializer_metrics_rx.clone(),
             mqtt_metrics_rx,

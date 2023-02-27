@@ -99,7 +99,7 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     ░░▀▀▀░█░░░░▀▀░▀▀▀░▀░░▀░▀░▀
     "#;
 
-    println!("{}", B);
+    println!("{B}");
     println!("    version: {}", commandline.version);
     println!("    profile: {}", commandline.profile);
     println!("    commit_sha: {}", commandline.commit_sha);
@@ -166,9 +166,8 @@ fn main() -> Result<(), Error> {
     }
 
     if config.apis.enabled {
-        let handle = reload_handle.clone();
         let port = config.apis.port;
-        thread::spawn(move || apis::start(port, handle));
+        thread::spawn(move || apis::start(port, reload_handle));
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()

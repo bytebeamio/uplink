@@ -1,16 +1,30 @@
-mod bridge;
+use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
+use log::{debug, error, info};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::select;
+use tokio::time::{self, interval, Sleep};
+
+use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
+
 mod metrics;
 pub(crate) mod stream;
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::sync::Arc;
-
-pub use bridge::Event;
-pub use bridge::{Bridge, BridgeTx};
+use crate::{base::ActionRoute, collector::utils::Streams, Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
-use std::fmt::Debug;
-pub use stream::{Error, Stream, StreamStatus};
+use stream::Stream;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Receiver error {0}")]
+    Recv(#[from] RecvError),
+    #[error("Action receiver busy or down")]
+    UnresponsiveReceiver,
+    #[error("No route for action {0}")]
+    NoRoute(String),
+    #[error("Action timedout")]
+    ActionTimeout,
+}
 
 pub trait Point: Send + Debug {
     fn sequence(&self) -> u32;
@@ -52,5 +66,310 @@ impl Point for Payload {
 
     fn timestamp(&self) -> u64 {
         self.timestamp
+    }
+}
+
+#[derive(Debug)]
+pub enum Event {
+    /// App name and handle for brige to send actions to the app
+    RegisterActionRoute(String, ActionRouter),
+    /// Data sent by the app
+    Data(Payload),
+    /// Sometime apps can choose to directly send action response instead
+    /// sending in `Payload` form
+    ActionResponse(ActionResponse),
+}
+
+pub struct Bridge {
+    /// All configuration
+    config: Arc<Config>,
+    /// Tx handle to give to apps
+    bridge_tx: Sender<Event>,
+    /// Rx to receive events from apps
+    bridge_rx: Receiver<Event>,
+    /// Handle to send batched data to serialzer
+    package_tx: Sender<Box<dyn Package>>,
+    /// Handle to send stream metrics to monitor
+    metrics_tx: Sender<StreamMetrics>,
+    /// Actions incoming from backend
+    actions_rx: Receiver<Action>,
+    /// Action responses going to backend
+    action_status: Stream<ActionResponse>,
+    /// Apps registered with the bridge
+    /// NOTE: Sometimes action_routes could overlap, the latest route
+    /// to be registered will be used in such a circumstance.
+    action_routes: HashMap<String, ActionRouter>,
+    /// Action redirections
+    action_redirections: HashMap<String, String>,
+    /// Current action that is being processed
+    current_action: Option<CurrentAction>,
+}
+
+impl Bridge {
+    pub fn new(
+        config: Arc<Config>,
+        package_tx: Sender<Box<dyn Package>>,
+        metrics_tx: Sender<StreamMetrics>,
+        actions_rx: Receiver<Action>,
+        action_status: Stream<ActionResponse>,
+    ) -> Bridge {
+        let (bridge_tx, bridge_rx) = bounded(10);
+        let action_redirections = config.action_redirections.clone();
+
+        Bridge {
+            action_status,
+            bridge_tx,
+            bridge_rx,
+            package_tx,
+            metrics_tx,
+            config,
+            actions_rx,
+            action_routes: HashMap::with_capacity(10),
+            action_redirections,
+            current_action: None,
+        }
+    }
+
+    pub fn tx(&mut self) -> BridgeTx {
+        BridgeTx { events_tx: self.bridge_tx.clone() }
+    }
+
+    fn clear_current_action(&mut self) {
+        self.current_action = None;
+    }
+
+    pub async fn start(&mut self) -> Result<(), Error> {
+        let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
+        let mut streams =
+            Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
+                .await;
+        let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
+
+        loop {
+            select! {
+                // TODO: Remove if guard
+                action = self.actions_rx.recv_async(), if self.current_action.is_none() => {
+                    let action = action?;
+                    let action_id = action.action_id.clone();
+                    info!("Received action: {:?}", action_id);
+
+                    // NOTE: Don't do any blocking operations here
+                    // TODO: Remove blocking here. Audit all blocking functions here
+                    let error = match self.try_route_action(action.clone()) {
+                        Ok(_) => {
+                            let response = ActionResponse::progress(&action_id, "Received", 0);
+                            self.forward_action_response(response).await;
+                            continue;
+                        }
+                        Err(e) => e,
+                    };
+                    // Ignore sending failure status to backend. This makes
+                    // backend retry action.
+                    //
+                    // TODO: Do we need this? Shouldn't backend have an easy way to
+                    // retry failed actions in bulk?
+                    if self.config.ignore_actions_if_no_clients {
+                        error!("No clients connected, ignoring action = {:?}", action_id);
+                        self.current_action = None;
+                        continue;
+                    }
+
+                    error!("Failed to route action to app. Error = {:?}", error);
+                    self.forward_action_error(action, error).await;
+                }
+                event = self.bridge_rx.recv_async() => {
+                    let event = event?;
+                    match event {
+                        Event::RegisterActionRoute(name, tx) => {
+                            self.action_routes.insert(name, tx);
+                        }
+                        Event::Data(v) => {
+                            streams.forward(v).await;
+                        }
+                        Event::ActionResponse(response) => {
+                            self.forward_action_response(response).await;
+                        }
+                    }
+                }
+                _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
+                    let action = self.current_action.take().unwrap();
+                    error!("Timeout waiting for action response. Action ID = {}", action.id);
+                    self.forward_action_error(action.action, Error::ActionTimeout).await;
+                }
+                // Flush streams that timeout
+                Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
+                    debug!("Flushing stream = {}", timedout_stream);
+                    if let Err(e) = streams.flush_stream(&timedout_stream).await {
+                        error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
+                    }
+                }
+                // Flush all metrics when timed out
+                _ = metrics_timeout.tick() => {
+                    if let Err(e) = streams.check_and_flush_metrics() {
+                        debug!("Failed to flush stream metrics. Error = {}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Handle received actions
+    #[allow(clippy::result_large_err)]
+    fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
+        match self.action_routes.get(&action.name) {
+            Some(app_tx) => {
+                let duration =
+                    app_tx.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
+                self.current_action = Some(CurrentAction::new(action, duration));
+
+                Ok(())
+            }
+            None => Err(Error::NoRoute(action.name)),
+        }
+    }
+
+    async fn forward_action_response(&mut self, response: ActionResponse) {
+        let inflight_action = match &mut self.current_action {
+            Some(v) => v,
+            None => {
+                error!("Action timed out already/not present, ignoring response: {:?}", response);
+                return;
+            }
+        };
+
+        if *inflight_action.id != response.action_id {
+            error!("response id({}) != active action({})", response.action_id, inflight_action.id);
+            return;
+        }
+
+        let action_completed = response.is_completed();
+        let action_failed = response.is_failed();
+        let action_done = response.is_done();
+
+        info!("Action response = {:?}", response);
+        if let Err(e) = self.action_status.fill(response.clone()).await {
+            error!("Failed to fill. Error = {:?}", e);
+        }
+
+        if action_completed || action_failed {
+            self.clear_current_action();
+            return;
+        }
+
+        // Forward actions included in the config to the appropriate forward route, when
+        // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
+        if action_done {
+            let fwd_name = match self.action_redirections.get(&inflight_action.action.name) {
+                Some(n) => n,
+                None => {
+                    self.clear_current_action();
+                    return;
+                }
+            };
+
+            if let Some(action) = response.done_response {
+                inflight_action.action = action;
+            }
+
+            let mut fwd_action = inflight_action.action.clone();
+            fwd_action.name = fwd_name.to_owned();
+
+            if let Err(e) = self.try_route_action(fwd_action.clone()) {
+                error!("Failed to route action to app. Error = {:?}", e);
+                self.forward_action_error(fwd_action, e).await;
+            }
+        }
+    }
+
+    async fn forward_action_error(&mut self, action: Action, error: Error) {
+        let status = ActionResponse::failure(&action.action_id, error.to_string());
+
+        if let Err(e) = self.action_status.fill(status).await {
+            error!("Failed to send status. Error = {:?}", e);
+        }
+
+        self.clear_current_action();
+    }
+}
+
+struct CurrentAction {
+    pub id: String,
+    pub action: Action,
+    pub timeout: Pin<Box<Sleep>>,
+}
+
+impl CurrentAction {
+    pub fn new(action: Action, duration: Duration) -> CurrentAction {
+        CurrentAction {
+            id: action.action_id.clone(),
+            action,
+            timeout: Box::pin(time::sleep(duration)),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ActionRouter {
+    actions_tx: Sender<Action>,
+    duration: Duration,
+}
+
+impl ActionRouter {
+    pub fn try_send(&self, action: Action) -> Result<Duration, TrySendError<Action>> {
+        self.actions_tx.try_send(action)?;
+
+        Ok(self.duration)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BridgeTx {
+    // Handle for apps to send events to bridge
+    pub(crate) events_tx: Sender<Event>,
+}
+
+impl BridgeTx {
+    pub async fn register_action_route(&self, route: ActionRoute) -> Receiver<Action> {
+        let (actions_tx, actions_rx) = bounded(0);
+        let duration = Duration::from_secs(route.timeout);
+        let action_router = ActionRouter { actions_tx, duration };
+        let event = Event::RegisterActionRoute(route.name, action_router);
+
+        // Bridge should always be up and hence unwrap is ok
+        self.events_tx.send_async(event).await.unwrap();
+        actions_rx
+    }
+
+    pub async fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item = R>>(
+        &self,
+        routes: V,
+    ) -> Receiver<Action> {
+        let (actions_tx, actions_rx) = bounded(0);
+
+        for route in routes {
+            let route = route.into();
+            let duration = Duration::from_secs(route.timeout);
+            let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
+            let event = Event::RegisterActionRoute(route.name, action_router);
+            // Bridge should always be up and hence unwrap is ok
+            self.events_tx.send_async(event).await.unwrap();
+        }
+
+        actions_rx
+    }
+
+    pub async fn send_payload(&self, payload: Payload) {
+        let event = Event::Data(payload);
+        self.events_tx.send_async(event).await.unwrap()
+    }
+
+    pub fn send_payload_sync(&self, payload: Payload) {
+        let event = Event::Data(payload);
+        self.events_tx.send(event).unwrap()
+    }
+
+    pub async fn send_action_response(&self, response: ActionResponse) {
+        let event = Event::ActionResponse(response);
+        self.events_tx.send_async(event).await.unwrap()
     }
 }
