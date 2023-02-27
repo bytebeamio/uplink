@@ -103,7 +103,7 @@ impl Streams {
     }
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
-    pub fn check_and_flush_metrics(&mut self) -> Result<(), flume::TrySendError<StreamMetrics>> {
+    pub fn check_and_flush_metrics(&mut self) -> Result<(), Box<flume::TrySendError<StreamMetrics>>> {
         for (buffer_name, data) in self.map.iter_mut() {
             let metrics = data.metrics.clone();
 

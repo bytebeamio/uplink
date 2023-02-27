@@ -154,6 +154,7 @@ impl Bridge {
     }
 
     /// Handle received actions
+    #[allow(clippy::result_large_err)]
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
         let action_name = action.name.clone();
         match self.action_routes.get(&action_name) {

@@ -1,4 +1,4 @@
-mod bridge;
+mod bridge_impl;
 mod metrics;
 pub(crate) mod stream;
 
@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 
-pub use bridge::Event;
-pub use bridge::{Bridge, BridgeTx};
+pub use bridge_impl::Event;
+pub use bridge_impl::{Bridge, BridgeTx};
 pub use metrics::StreamMetrics;
 use std::fmt::Debug;
 pub use stream::{Error, Stream, StreamStatus};

@@ -570,12 +570,7 @@ pub fn check_and_flush_metrics(
     use pretty_bytes::converter::convert;
 
     // Send pending metrics. This signifies state change
-    loop {
-        let metrics = match pending.get(0) {
-            Some(v) => v,
-            None => break,
-        };
-
+    while let Some(metrics) = pending.get(0) {
         // Always send pending metrics. They represent state changes
         info!(
             "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
