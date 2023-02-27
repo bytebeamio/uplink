@@ -1,11 +1,11 @@
 
-processes = [{ name = "echo", duration = 30 }]
+processes = [{ name = "echo" }]
 
 action_redirections = { "update_firmware" = "install_update", "send_file" = "load_file" }
 
 [tcpapps.1]
 port = 5555
-actions = [{ name = "install_update", duration = 30 }, { name = "load_file", duration = 30 }]
+actions = [{ name = "install_update" }, { name = "load_file" }]
 
 [persistence]
 path = "/tmp/uplink"
@@ -16,8 +16,8 @@ max_file_count = 3
 num_devices = 20
 gps_paths = "./paths/"
 actions = [
-    { name = "update_firmware", duration = 30 },
-    { name = "send_file", duration = 30 },
-    { name = "lock", duration = 30 },
-    { name = "unlock", duration = 30 }
+    { name = "update_firmware" },
+    { name = "send_file" },
+    { name = "lock" },
+    { name = "unlock" }
 ]
