@@ -173,7 +173,7 @@ impl FileDownloader {
         let url = update.url.clone();
 
         // Create file to actually download into
-        let (file, file_path) = self.create_file(&action.name, &url, &update.version)?;
+        let (file, file_path) = self.create_file(&action.name, &update.file_name)?;
 
         // Create handler to perform download from URL
         // TODO: Error out for 1XX/3XX responses
@@ -193,16 +193,13 @@ impl FileDownloader {
     }
 
     /// Creates file to download into
-    fn create_file(&self, name: &str, url: &str, version: &str) -> Result<(File, String), Error> {
+    fn create_file(&self, name: &str, file_name: &str) -> Result<(File, String), Error> {
         // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
         let mut download_path = PathBuf::from(self.config.path.clone());
         download_path.push(name);
-        download_path.push(version);
         create_dir_all(&download_path)?;
 
         let mut file_path = download_path.to_owned();
-        let file_name =
-            url.split('/').last().ok_or_else(|| Error::FileNameMissing(url.to_owned()))?;
         file_path.push(file_name);
         let file_path = file_path.as_path();
         let file = File::create(file_path)?;
@@ -269,8 +266,8 @@ impl FileDownloader {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct DownloadFile {
     url: String,
-    #[serde(alias = "file_name")]
-    version: String,
+    #[serde(alias = "version")]
+    file_name: String,
     /// Path to location in fs where file will be stored
     download_path: Option<String>,
 }
@@ -310,7 +307,7 @@ mod test {
             path: format!("{DOWNLOAD_DIR}/uplink-test"),
         };
         let config = config(downloader_cfg.clone());
-        let (events_tx, events_rx) = flume::bounded(1);
+        let (events_tx, events_rx) = flume::bounded(2);
         let bridge_tx = BridgeTx { events_tx };
 
         // Create channels to forward and push action_status on
@@ -322,12 +319,11 @@ mod test {
         // Create a firmware update action
         let download_update = DownloadFile {
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            version: "1.0".to_string(),
+            file_name: "test.txt".to_string(),
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path =
-            Some(downloader_cfg.path + "/firmware_update/1.0/logo.png");
+        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
         let download_action = Action {
             device_id: None,
             action_id: "1".to_string(),
@@ -340,11 +336,6 @@ mod test {
             Event::RegisterActionRoute(_, download_tx) => download_tx,
             e => unreachable!("Unexpected event: {e:#?}"),
         };
-
-        match events_rx.recv().unwrap() {
-            Event::RegisterActionRoute(_, _) => {}
-            e => unreachable!("Unexpected event: {e:#?}"),
-        }
 
         std::thread::sleep(Duration::from_millis(10));
 
@@ -359,9 +350,20 @@ mod test {
         assert_eq!(status.state, "Downloading");
 
         // Collect and ensure forwarded action contains expected info
-        // let Event::RegisterActionRoute(_, download_tx) = events_rx.recv().unwrap();
-        // let forward: DownloadFile = serde_json::from_str(&forwardpayload).unwrap();
-        // assert_eq!(forward, expected_forward);
+        loop {
+            match dbg!(events_rx.recv().unwrap()) {
+                Event::ActionResponse(ActionResponse {
+                    done_response: Some(Action { payload, .. }),
+                    ..
+                }) => {
+                    let forward: DownloadFile = serde_json::from_str(&payload).unwrap();
+                    assert_eq!(forward, expected_forward);
+                    break;
+                }
+                Event::ActionResponse(response) if response.is_failed() => break,
+                _ => {}
+            }
+        }
     }
 
     #[test]
@@ -374,7 +376,7 @@ mod test {
             path: format!("{}/download", DOWNLOAD_DIR),
         };
         let config = config(downloader_cfg.clone());
-        let (events_tx, events_rx) = flume::bounded(1);
+        let (events_tx, events_rx) = flume::bounded(3);
         let bridge_tx = BridgeTx { events_tx };
 
         // Create channels to forward and push action_status on
@@ -386,12 +388,11 @@ mod test {
         // Create a firmware update action
         let download_update = DownloadFile {
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            version: "1.0".to_string(),
+            file_name: "1.0".to_string(),
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path =
-            Some(downloader_cfg.path + "/firmware_update/1.0/logo.png");
+        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
         let download_action = Action {
             device_id: None,
             action_id: "1".to_string(),
