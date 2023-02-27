@@ -39,56 +39,57 @@
 //!                                                                      ActionResponse
 //!```
 
+mod apis;
+
 use std::sync::Arc;
 use std::thread;
 
 use anyhow::Error;
-use log::{error, warn};
-use simplelog::{
-    ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, LevelPadding, TermLogger, TerminalMode,
-};
+
 use structopt::StructOpt;
 use tokio::task::JoinSet;
+
+use tracing::error;
+use tracing_subscriber::fmt::format::{Format, Pretty};
+use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
+use tracing_subscriber::{EnvFilter, Registry};
+
+pub type ReloadHandle =
+    Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
 use uplink::base::AppConfig;
 use uplink::config::{get_configs, initialize, CommandLine};
 use uplink::{simulator, Config, TcpJson, Uplink};
 
-fn initialize_logging(commandline: &CommandLine) {
+fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
     let level = match commandline.verbose {
-        0 => LevelFilter::Warn,
-        1 => LevelFilter::Info,
-        2 => LevelFilter::Debug,
-        _ => LevelFilter::Trace,
+        0 => "warn",
+        1 => "info",
+        2 => "debug",
+        _ => "trace",
     };
 
-    let mut config = ConfigBuilder::new();
-    config
-        .set_location_level(LevelFilter::Off)
-        .set_target_level(LevelFilter::Error)
-        .set_thread_level(LevelFilter::Error)
-        .set_level_padding(LevelPadding::Right);
+    let levels =
+        match commandline.modules.clone().into_iter().reduce(|acc, e| format!("{acc},{e}={level}"))
+        {
+            Some(f) => f,
+            _ => format!("uplink={level},disk={level}"),
+        };
 
-    match config.set_time_offset_to_local() {
-        Ok(_) => {}
-        Err(_) => {
-            warn!("failed to get time zone on this platform, logger will use IST");
-            config.set_time_offset(time::UtcOffset::from_hms(5, 30, 0).unwrap());
-        }
-    }
+    let builder = tracing_subscriber::fmt()
+        .pretty()
+        .with_line_number(false)
+        .with_file(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_env_filter(levels)
+        .with_filter_reloading();
 
-    if commandline.modules.is_empty() {
-        for module in ["uplink", "disk" /*"rumqttc"*/] {
-            config.add_filter_allow(module.to_string());
-        }
-    } else {
-        for module in commandline.modules.iter() {
-            config.add_filter_allow(module.to_string());
-        }
-    }
+    let reload_handle = builder.reload_handle();
 
-    let loggers = TermLogger::new(level, config.build(), TerminalMode::Mixed, ColorChoice::Auto);
-    CombinedLogger::init(vec![loggers]).unwrap();
+    builder.try_init().expect("initialized subscriber succesfully");
+
+    reload_handle
 }
 
 fn banner(commandline: &CommandLine, config: &Arc<Config>) {
@@ -98,7 +99,7 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     ░░▀▀▀░█░░░░▀▀░▀▀▀░▀░░▀░▀░▀
     "#;
 
-    println!("{}", B);
+    println!("{B}");
     println!("    version: {}", commandline.version);
     println!("    profile: {}", commandline.profile);
     println!("    commit_sha: {}", commandline.commit_sha);
@@ -134,6 +135,9 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     if config.stats.enabled {
         println!("    processes: {:?}", config.stats.process_names);
     }
+    if config.apis.enabled {
+        println!("    tracing: http://localhost:{}", config.apis.port);
+    }
     println!("\n");
 }
 
@@ -144,7 +148,7 @@ fn main() -> Result<(), Error> {
     }
 
     let commandline: CommandLine = StructOpt::from_args();
-    initialize_logging(&commandline);
+    let reload_handle = initialize_logging(&commandline);
 
     let (auth, config) = get_configs(&commandline)?;
     let config = Arc::new(initialize(&auth, &config.unwrap_or_default())?);
@@ -159,6 +163,11 @@ fn main() -> Result<(), Error> {
         thread::spawn(move || {
             simulator::start(bridge, &config).unwrap();
         });
+    }
+
+    if config.apis.enabled {
+        let port = config.apis.port;
+        thread::spawn(move || apis::start(port, reload_handle));
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()

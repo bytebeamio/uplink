@@ -228,7 +228,7 @@ fn mqttoptions(config: &Config) -> MqttOptions {
 }
 
 fn _get_certs(key_path: &Path, ca_path: &Path) -> (Vec<u8>, Vec<u8>) {
-    println!("{:?}", key_path);
+    println!("{key_path:?}");
     let mut key = Vec::new();
     let mut key_file = File::open(key_path).unwrap();
     key_file.read_to_end(&mut key).unwrap();

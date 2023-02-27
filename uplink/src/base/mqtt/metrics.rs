@@ -76,3 +76,9 @@ impl MqttMetrics {
         self.inflight = 0;
     }
 }
+
+impl Default for MqttMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}

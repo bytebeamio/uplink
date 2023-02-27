@@ -6,8 +6,11 @@ members = [
     "uplink",
     "disk",
 ]
-
-exclude = ["tools/tunshell", "tools/utils"]
+exclude = [
+    "tools/tunshell",
+    "tools/utils",
+    "tools/simulator",
+]
 
 [profile.dev]
 opt-level = 1

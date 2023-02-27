@@ -93,11 +93,11 @@ pub mod config {
     timeout = 10
 
     [streams.device_shadow]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     buf_size = 1
 
     [stats]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/uplink_stats/jsonarray"
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stats/jsonarray"
     enabled = false
     process_names = ["uplink"]
     update_period = 30
@@ -260,7 +260,7 @@ impl Uplink {
         let mut bridge = Bridge::new(
             self.config.clone(),
             self.data_tx.clone(),
-            self.stream_metrics_tx().clone(),
+            self.stream_metrics_tx(),
             self.action_rx.clone(),
             self.action_status(),
         );
@@ -340,7 +340,7 @@ impl Uplink {
 
         let monitor = Monitor::new(
             self.config.clone(),
-            mqtt_client.clone(),
+            mqtt_client,
             self.stream_metrics_rx.clone(),
             self.serializer_metrics_rx.clone(),
             mqtt_metrics_rx,

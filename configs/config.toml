@@ -113,6 +113,11 @@ enabled = false
 process_names = ["uplink"]
 update_period = 30
 
+# Define port that accepts tracing control messges, if enabled
+[apis]
+enabled = true
+port = 3333
+
 # Configurations associated with running uplink in simulator mode, if enabled 
 # uplink will push simulated data for device_id 1..=num_devices and respond to any
 # actions triggered on the tenant connected to, with progress 0..=100.
