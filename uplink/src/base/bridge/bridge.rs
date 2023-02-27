@@ -243,10 +243,6 @@ impl CurrentAction {
             timeout: Box::pin(time::sleep(Duration::from_secs(60))),
         }
     }
-
-    pub fn reset_timeout(&mut self) {
-        self.timeout = Box::pin(time::sleep(Duration::from_secs(60)));
-    }
 }
 
 #[derive(Debug, Clone)]
