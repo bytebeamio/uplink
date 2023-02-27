@@ -96,28 +96,27 @@ impl Bridge {
 
                     // NOTE: Don't do any blocking operations here
                     // TODO: Remove blocking here. Audit all blocking functions here
-                    match self.try_route_action(action.clone()) {
-                        Ok(d) => self.current_action = Some(CurrentAction::new(action.clone(), d)),
-                        Err(e) => {
-                            // Ignore sending failure status to backend. This makes
-                            // backend retry action.
-                            //
-                            // TODO: Do we need this? Shouldn't backend have an easy way to
-                            // retry failed actions in bulk?
-                            if self.config.ignore_actions_if_no_clients {
-                                error!("No clients connected, ignoring action = {:?}", action_id);
-                                self.current_action = None;
-                                continue
-                            }
-
-                            error!("Failed to route action to app. Error = {:?}", e);
-                            self.forward_action_error(action, e).await;
-                            continue
+                    let error = match self.try_route_action(action.clone()) {
+                        Ok(_) => {
+                            let response = ActionResponse::progress(&action_id, "Received", 0);
+                            self.forward_action_response(response).await;
+                            continue;
                         }
+                        Err(e) => e,
+                    };
+                    // Ignore sending failure status to backend. This makes
+                    // backend retry action.
+                    //
+                    // TODO: Do we need this? Shouldn't backend have an easy way to
+                    // retry failed actions in bulk?
+                    if self.config.ignore_actions_if_no_clients {
+                        error!("No clients connected, ignoring action = {:?}", action_id);
+                        self.current_action = None;
+                        continue;
                     }
 
-                    let response = ActionResponse::progress(&action_id, "Received", 0);
-                    self.forward_action_response(response).await;
+                    error!("Failed to route action to app. Error = {:?}", error);
+                    self.forward_action_error(action, error).await;
                 }
                 event = self.bridge_rx.recv_async() => {
                     let event = event?;
@@ -156,12 +155,13 @@ impl Bridge {
     }
 
     /// Handle received actions
-    fn try_route_action(&mut self, action: Action) -> Result<Duration, Error> {
-        let action_name = action.name.clone();
-        match self.action_routes.get(&action_name) {
+    fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
+        match self.action_routes.get(&action.name) {
             Some(app_tx) => {
-                let duration = app_tx.try_send(action)?;
-                Ok(duration)
+                let duration = app_tx.try_send(action.clone())?;
+                self.current_action = Some(CurrentAction::new(action, duration));
+
+                Ok(())
             }
             None => Err(Error::NoRoute(action.name)),
         }
@@ -213,12 +213,9 @@ impl Bridge {
             let mut fwd_action = inflight_action.action.clone();
             fwd_action.name = fwd_name.to_owned();
 
-            match self.try_route_action(fwd_action.clone()) {
-                Ok(d) => self.current_action = Some(CurrentAction::new(fwd_action, d)),
-                Err(e) => {
-                    error!("Failed to route action to app. Error = {:?}", e);
-                    self.forward_action_error(fwd_action, e).await;
-                }
+            if let Err(e) = self.try_route_action(fwd_action.clone()) {
+                error!("Failed to route action to app. Error = {:?}", e);
+                self.forward_action_error(fwd_action, e).await;
             }
         }
     }
