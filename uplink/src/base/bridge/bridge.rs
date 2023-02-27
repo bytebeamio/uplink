@@ -158,7 +158,7 @@ impl Bridge {
         let action_name = action.name.clone();
         match self.action_routes.get(&action_name) {
             Some(app_tx) => {
-                app_tx.try_send(action)?;
+                app_tx.try_send(action).map_err(|_v| Error::UnresponsiveReceiver)?;
                 Ok(())
             }
             None => Err(Error::NoRoute(action.name)),
@@ -300,8 +300,8 @@ impl BridgeTx {
 pub enum Error {
     #[error("Receiver error {0}")]
     Recv(#[from] RecvError),
-    #[error("Action receiver busy {0}")]
-    TrySend(#[from] TrySendError<Action>),
+    #[error("Action receiver busy or down")]
+    UnresponsiveReceiver,
     #[error("No route for action {0}")]
     NoRoute(String),
     #[error("Action timedout")]
