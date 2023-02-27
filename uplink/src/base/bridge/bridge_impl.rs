@@ -1,6 +1,6 @@
 use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
-use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
+use flume::{bounded, Receiver, RecvError, Sender};
 use log::{debug, error, info};
 use tokio::{
     select,
