@@ -312,3 +312,89 @@ impl BridgeTx {
         self.events_tx.send_async(event).await.unwrap()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, time::Duration};
+
+    use flume::bounded;
+    use tokio::runtime::Runtime;
+
+    use crate::{
+        base::{
+            bridge::{Bridge, Stream},
+            StreamMetricsConfig,
+        },
+        Action, ActionResponse, Config,
+    };
+
+    fn default_config() -> Config {
+        Config {
+            stream_metrics: StreamMetricsConfig {
+                enabled: false,
+                timeout: 10,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn recv_action_while_current_action_exists() {
+        let config = Arc::new(default_config());
+        let (package_tx, package_rx) = bounded(10);
+        let (metrics_tx, _) = bounded(10);
+        let (actions_tx, actions_rx) = bounded(10);
+        let action_status = Stream::dynamic_with_size("", "", "", 1, package_tx.clone());
+
+        let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status);
+        let bridge_tx = bridge.tx();
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            rt.block_on(async { bridge.start().await.unwrap() });
+        });
+
+        let action_rx = bridge_tx.register_action_route("test").await;
+
+        std::thread::spawn(move || loop {
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "1".to_owned());
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action_1 = Action {
+            device_id: None,
+            action_id: "1".to_string(),
+            kind: "test".to_string(),
+            name: "test".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action_1).unwrap();
+
+        let status = package_rx.recv().unwrap().serialize().unwrap();
+        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
+        let status = &status[0];
+
+        assert_eq!(status.action_id, "1".to_owned());
+        assert_eq!(status.state, "Received".to_owned());
+
+        let action_2 = Action {
+            device_id: None,
+            action_id: "2".to_string(),
+            kind: "test".to_string(),
+            name: "test".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action_2).unwrap();
+
+        let status = package_rx.recv().unwrap().serialize().unwrap();
+        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
+        let status = &status[0];
+
+        // verify response is uplink occupied failure
+        assert!(status.is_failed());
+        assert_eq!(status.action_id, "2".to_owned());
+        assert_eq!(status.errors, ["Uplink occupied"]);
+    }
+}
