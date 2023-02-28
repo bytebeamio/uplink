@@ -49,7 +49,7 @@ use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
-use std::fs::{create_dir_all, File};
+use std::fs::{create_dir_all, File, remove_dir_all};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
@@ -197,6 +197,7 @@ impl FileDownloader {
         // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
         let mut download_path = PathBuf::from(self.config.path.clone());
         download_path.push(name);
+        remove_dir_all(&download_path)?;
         create_dir_all(&download_path)?;
 
         let mut file_path = download_path.to_owned();
