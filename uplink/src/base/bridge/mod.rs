@@ -373,3 +373,129 @@ impl BridgeTx {
         self.events_tx.send_async(event).await.unwrap()
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use std::{sync::Arc, time::Duration};
+
+    use flume::bounded;
+    use tokio::{runtime::Runtime, select};
+
+    use crate::{
+        base::{ActionRoute, StreamMetricsConfig},
+        Action, ActionResponse, Config,
+    };
+
+    use super::{stream::Stream, Bridge};
+
+    fn default_config() -> Config {
+        Config {
+            stream_metrics: StreamMetricsConfig {
+                enabled: false,
+                timeout: 10,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_on_diff_routes() {
+        let config = Arc::new(default_config());
+        let (package_tx, package_rx) = bounded(10);
+        let (metrics_tx, _) = bounded(10);
+        let (actions_tx, actions_rx) = bounded(10);
+        let action_status = Stream::dynamic_with_size("", "", "", 1, package_tx.clone());
+
+        let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status);
+        let bridge_tx = bridge.tx();
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            rt.block_on(async { bridge.start().await.unwrap() });
+        });
+
+        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
+        let route_1_rx = bridge_tx.register_action_route(route_1).await;
+
+        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: 30 };
+        let route_2_rx = bridge_tx.register_action_route(route_2).await;
+
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            rt.block_on(async {
+                loop {
+                    select! {
+                        action = route_1_rx.recv_async() => {
+                            let action = action.unwrap();
+                            assert_eq!(action.action_id, "1".to_owned());
+                        }
+
+                        action = route_2_rx.recv_async() => {
+                            let action = action.unwrap();
+                            assert_eq!(action.action_id, "2".to_owned());
+                        }
+                    }
+                }
+            });
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action_1 = Action {
+            device_id: None,
+            action_id: "1".to_string(),
+            kind: "test".to_string(),
+            name: "route_1".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action_1).unwrap();
+
+        let status = package_rx.recv().unwrap().serialize().unwrap();
+        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
+        let status = &status[0];
+
+        assert_eq!(status.state, "Received".to_owned());
+        let start = status.timestamp;
+
+        let status = package_rx.recv().unwrap().serialize().unwrap();
+        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
+        let status = &status[0];
+
+        // verify response is timeout failure
+        assert!(status.is_failed());
+        assert_eq!(status.action_id, "1".to_owned());
+        assert_eq!(status.errors, ["Action timedout"]);
+        let elapsed = status.timestamp - start;
+        // verify timeout in 10s
+        assert_eq!(elapsed / 1000, 10);
+
+        let action_2 = Action {
+            device_id: None,
+            action_id: "2".to_string(),
+            kind: "test".to_string(),
+            name: "route_2".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action_2).unwrap();
+
+        let status = package_rx.recv().unwrap().serialize().unwrap();
+        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
+        let status = &status[0];
+
+        assert_eq!(status.state, "Received".to_owned());
+        let start = status.timestamp;
+
+        let status = package_rx.recv().unwrap().serialize().unwrap();
+        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
+        let status = &status[0];
+
+        // verify response is timeout failure
+        assert!(status.is_failed());
+        assert_eq!(status.action_id, "2".to_owned());
+        assert_eq!(status.errors, ["Action timedout"]);
+        let elapsed = status.timestamp - start;
+        // verify timeout in 30s
+        assert_eq!(elapsed / 1000, 30);
+    }
+}
