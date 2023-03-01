@@ -1,4 +1,4 @@
-use flume::{Receiver, RecvError, SendError};
+use flume::{bounded, Receiver, RecvError, SendError};
 use futures_util::SinkExt;
 use log::{error, info, trace};
 use thiserror::Error;
@@ -7,8 +7,12 @@ use tokio::select;
 use tokio::task::{spawn, JoinHandle};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
+use futures_util::future::{Future, ready, Ready, select_all, SelectAll};
+use futures_util::stream::{FuturesUnordered, Stream};
 
 use std::io;
+use std::time::Duration;
+use tokio::time::{Sleep, Timeout, timeout};
 
 use crate::base::bridge::BridgeTx;
 use crate::base::AppConfig;
@@ -33,7 +37,8 @@ pub enum Error {
     Stream(#[from] crate::base::bridge::Error),
 }
 
-#[derive(Debug, Clone)]
+
+#[derive(Debug)]
 pub struct TcpJson {
     name: String,
     config: AppConfig,
@@ -41,11 +46,13 @@ pub struct TcpJson {
     bridge: BridgeTx,
     /// Action receiver
     actions_rx: Option<Receiver<Action>>,
+    buffered_action: Option<(Action, Sleep)>,
+    connected_client: Option<Framed<TcpStream, LinesCodec>>,
 }
 
 impl TcpJson {
     pub async fn new(name: String, config: AppConfig, bridge: BridgeTx) -> TcpJson {
-        let actions_rx = if ! config.actions.is_empty() {
+        let actions_rx = if !config.actions.is_empty() {
             // TODO: Return Option<Receiver> while registering multiple actions
             let actions_rx = bridge.register_action_routes(&config.actions).await;
             Some(actions_rx)
@@ -54,37 +61,90 @@ impl TcpJson {
         };
 
         // Note: We can register `TcpJson` itself as an app to direct actions to it
-        TcpJson { name, config, bridge, actions_rx }
+        TcpJson {
+            name,
+            config,
+            bridge,
+            actions_rx,
+            buffered_action: None,
+            connected_client: None,
+        }
     }
 
-    pub async fn start(self) -> Result<(), Error> {
+    pub async fn start(mut self) -> Result<(), Error> {
         let addr = format!("0.0.0.0:{}", self.config.port);
         let listener = TcpListener::bind(&addr).await?;
         let mut handle: Option<JoinHandle<()>> = None;
-
+        let (_, mut mock_action_receiver) = bounded(0);
         info!("Waiting for app = {} to connect on {:?}", self.name, addr);
         loop {
-            let framed = match listener.accept().await {
-                Ok((stream, addr)) => {
-                    info!("Accepted connection from app = {} on {addr}", self.name);
-                    Framed::new(stream, LinesCodec::new())
+            select! {
+                framed = listener.accept(), if self.connected_client.is_none() => {
+                    match framed {
+                        Ok((stream, addr)) => {
+                            info!("Accepted connection from app = {} on {addr}", self.name);
+                            let mut client = Framed::new(stream, LinesCodec::new());
+                            if let Some((action, _)) = self.buffered_action.take() {
+                                client.send(serde_json::to_string(&action)?).await?;
+                            }
+                            self.connected_client = Some(client);
+                        }
+                        Err(e) => {
+                            error!("Tcp connection accept error = {e}, app = {}", self.name);
+                        }
+                    }
                 }
-                Err(e) => {
-                    error!("Tcp connection accept error = {e}, app = {}", self.name);
-                    continue;
+                // line = cc, if self.connected_client.is_some() => {
+                //     match line {
+                //         Some(Ok(line)) => {
+                //             if let Err(e) = self.handle_incoming_line(line).await {
+                //                 error!("Couldn't process incoming line: {e:?}");
+                //             }
+                //         },
+                //         _ => {
+                //             self.connected_client = None;
+                //         }
+                //     }
+                // }
+                action = self.actions_rx.as_mut().unwrap_or(&mut mock_action_receiver).recv_async(), if self.buffered_action.is_none() => {
+                    let action = action?;
+                    if self.connected_client.is_some() {
+                        match serde_json::to_string(&action) {
+                            Ok(data) => self.connected_client.as_mut().unwrap().send(data).await?,
+                            Err(e) => {
+                                error!("Serialization error = {e}, app = {}", self.name);
+                                continue
+                            }
+                        }
+                    } else {
+                        self.buffered_action = Some((action, tokio::time::sleep(Duration::from_secs(5))));
+                    }
                 }
-            };
-
-            if let Some(handle) = handle {
-                handle.abort();
+                // _ = &mut self.buffered_action.as_mut().map(|(_, timer)| timer).unwrap_or(&mut end), if self.buffered_action.is_some() && self.connected_client.is_none() => {
+                //
+                // }
             }
-
-            let tcpjson = self.clone();
-            handle = Some(spawn(async move {
-                if let Err(e) = tcpjson.collect(framed).await {
-                    error!("TcpJson failed. app = {}, Error = {e}", tcpjson.name);
-                }
-            }));
+            // let framed = match listener.accept().await {
+            //     Ok((stream, addr)) => {
+            //         info!("Accepted connection from app = {} on {addr}", self.name);
+            //         Framed::new(stream, LinesCodec::new())
+            //     }
+            //     Err(e) => {
+            //         error!("Tcp connection accept error = {e}, app = {}", self.name);
+            //         continue;
+            //     }
+            // };
+            //
+            // if let Some(handle) = handle {
+            //     handle.abort();
+            // }
+            //
+            // let tcpjson = self.clone();
+            // handle = Some(spawn(async move {
+            //     if let Err(e) = tcpjson.collect(framed).await {
+            //         error!("TcpJson failed. app = {}, Error = {e}", tcpjson.name);
+            //     }
+            // }));
         }
     }
 
