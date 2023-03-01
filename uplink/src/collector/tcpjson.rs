@@ -54,7 +54,7 @@ impl TcpJson {
             tokio::spawn(async move {
                 while let Ok(action) = actions_rx_task.recv_async().await {
                     // send "waiting" responses until a client connects and receives the action
-                    while let Err(_) = actions_tx_task.try_send(action.clone()) {
+                    while actions_tx_task.try_send(action.clone()).is_err() {
                         bridge_task.send_action_response(
                             ActionResponse::progress(&action.action_id, "Waiting for client app", 0)
                         ).await;
