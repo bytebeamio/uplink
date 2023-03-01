@@ -387,7 +387,7 @@ mod tests {
 
     use std::{sync::Arc, time::Duration};
 
-    use flume::bounded;
+    use flume::{bounded, Receiver, Sender};
     use tokio::{runtime::Runtime, select};
 
     use crate::{
@@ -395,22 +395,17 @@ mod tests {
         Action, ActionResponse, Config,
     };
 
-    use super::{stream::Stream, Bridge};
+    use super::{stream::Stream, Bridge, BridgeTx, Package};
 
-    fn default_config() -> Config {
-        Config {
+    fn start_bridge() -> (BridgeTx, Sender<Action>, Receiver<Box<dyn Package>>) {
+        let config = Arc::new(Config {
             stream_metrics: StreamMetricsConfig {
                 enabled: false,
                 timeout: 10,
                 ..Default::default()
             },
             ..Default::default()
-        }
-    }
-
-    #[tokio::test]
-    async fn timeout_on_diff_routes() {
-        let config = Arc::new(default_config());
+        });
         let (package_tx, package_rx) = bounded(10);
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
@@ -418,11 +413,24 @@ mod tests {
 
         let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status);
         let bridge_tx = bridge.tx();
+
         std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async { bridge.start().await.unwrap() });
         });
 
+        (bridge_tx, actions_tx, package_rx)
+    }
+
+    fn recv_response(package_rx: &Receiver<Box<dyn Package>>) -> ActionResponse {
+        let status = package_rx.recv().unwrap().serialize().unwrap();
+        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
+        status[0].clone()
+    }
+
+    #[tokio::test]
+    async fn timeout_on_diff_routes() {
+        let (bridge_tx, actions_tx, package_rx) = start_bridge();
         let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
         let route_1_rx = bridge_tx.register_action_route(route_1).await;
 
@@ -459,17 +467,11 @@ mod tests {
         };
         actions_tx.send(action_1).unwrap();
 
-        let status = package_rx.recv().unwrap().serialize().unwrap();
-        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
-        let status = &status[0];
-
+        let status = recv_response(&package_rx);
         assert_eq!(status.state, "Received".to_owned());
         let start = status.timestamp;
 
-        let status = package_rx.recv().unwrap().serialize().unwrap();
-        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
-        let status = &status[0];
-
+        let status = recv_response(&package_rx);
         // verify response is timeout failure
         assert!(status.is_failed());
         assert_eq!(status.action_id, "1".to_owned());
@@ -487,17 +489,11 @@ mod tests {
         };
         actions_tx.send(action_2).unwrap();
 
-        let status = package_rx.recv().unwrap().serialize().unwrap();
-        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
-        let status = &status[0];
-
+        let status = recv_response(&package_rx);
         assert_eq!(status.state, "Received".to_owned());
         let start = status.timestamp;
 
-        let status = package_rx.recv().unwrap().serialize().unwrap();
-        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
-        let status = &status[0];
-
+        let status = recv_response(&package_rx);
         // verify response is timeout failure
         assert!(status.is_failed());
         assert_eq!(status.action_id, "2".to_owned());
@@ -509,18 +505,7 @@ mod tests {
 
     #[tokio::test]
     async fn recv_action_while_current_action_exists() {
-        let config = Arc::new(default_config());
-        let (package_tx, package_rx) = bounded(10);
-        let (metrics_tx, _) = bounded(10);
-        let (actions_tx, actions_rx) = bounded(10);
-        let action_status = Stream::dynamic_with_size("", "", "", 1, package_tx.clone());
-
-        let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status);
-        let bridge_tx = bridge.tx();
-        std::thread::spawn(move || {
-            let rt = Runtime::new().unwrap();
-            rt.block_on(async { bridge.start().await.unwrap() });
-        });
+        let (bridge_tx, actions_tx, package_rx) = start_bridge();
 
         let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
         let action_rx = bridge_tx.register_action_route(test_route).await;
@@ -541,10 +526,7 @@ mod tests {
         };
         actions_tx.send(action_1).unwrap();
 
-        let status = package_rx.recv().unwrap().serialize().unwrap();
-        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
-        let status = &status[0];
-
+        let status = recv_response(&package_rx);
         assert_eq!(status.action_id, "1".to_owned());
         assert_eq!(status.state, "Received".to_owned());
 
@@ -557,10 +539,7 @@ mod tests {
         };
         actions_tx.send(action_2).unwrap();
 
-        let status = package_rx.recv().unwrap().serialize().unwrap();
-        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
-        let status = &status[0];
-
+        let status = recv_response(&package_rx);
         // verify response is uplink occupied failure
         assert!(status.is_failed());
         assert_eq!(status.action_id, "2".to_owned());
