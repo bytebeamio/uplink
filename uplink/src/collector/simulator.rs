@@ -609,12 +609,18 @@ pub async fn start(bridge_tx: BridgeTx, simulator_config: &SimulatorConfig) -> R
             time = Instant::now();
         }
 
-        select! {
-            action = actions_rx.recv_async() => {
-                let action = action?;
-                generate_action_events(action, &mut events);
+        if let Some(actions_rx) = &actions_rx {
+            select! {
+                action = actions_rx.recv_async() => {
+                    let action = action?;
+                    generate_action_events(action, &mut events);
+                }
+                _ = process_events(&mut events, &bridge_tx) => {
+                }
             }
-            _ = process_events(&mut events, &bridge_tx) => {
+        } else {
+            loop {
+                process_events(&mut events, &bridge_tx).await
             }
         }
     }

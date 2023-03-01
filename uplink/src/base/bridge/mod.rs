@@ -351,11 +351,15 @@ impl BridgeTx {
     pub async fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item = R>>(
         &self,
         routes: V,
-    ) -> Receiver<Action> {
+    ) -> Option<Receiver<Action>> {
+        let routes: Vec<ActionRoute> = routes.into_iter().map(|n| n.into()).collect();
+        if routes.is_empty() {
+            return None;
+        }
+
         let (actions_tx, actions_rx) = bounded(0);
 
         for route in routes {
-            let route = route.into();
             let duration = Duration::from_secs(route.timeout);
             let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
             let event = Event::RegisterActionRoute(route.name, action_router);
@@ -363,7 +367,7 @@ impl BridgeTx {
             self.events_tx.send_async(event).await.unwrap();
         }
 
-        actions_rx
+        Some(actions_rx)
     }
 
     pub async fn send_payload(&self, payload: Payload) {

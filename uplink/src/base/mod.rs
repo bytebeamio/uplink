@@ -1,8 +1,9 @@
 use std::{collections::HashMap, fmt::Debug};
 
+use serde::{Deserialize, Serialize};
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use crate::collector::logging::LoggerConfig;
-use serde::{Deserialize, Serialize};
 
 pub mod actions;
 pub mod bridge;
@@ -73,8 +74,9 @@ pub struct SimulatorConfig {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct DownloaderConfig {
-    pub actions: Vec<ActionRoute>,
     pub path: String,
+    #[serde(default)]
+    pub actions: Vec<ActionRoute>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -101,6 +103,7 @@ pub struct MqttMetricsConfig {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AppConfig {
     pub port: u16,
+    #[serde(default)]
     pub actions: Vec<ActionRoute>,
 }
 
@@ -141,6 +144,7 @@ pub struct Config {
     pub authentication: Option<Authentication>,
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
+    #[serde(default)]
     pub processes: Vec<ActionRoute>,
     #[serde(skip)]
     pub actions_subscription: String,
@@ -153,6 +157,7 @@ pub struct Config {
     pub downloader: DownloaderConfig,
     pub stats: Stats,
     pub simulator: Option<SimulatorConfig>,
+    #[serde(default)]
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,

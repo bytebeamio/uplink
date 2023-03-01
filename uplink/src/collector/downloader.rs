@@ -131,7 +131,10 @@ impl FileDownloader {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) -> Result<(), Error> {
         let routes = &self.config.actions;
-        let download_rx = self.bridge_tx.register_action_routes(routes).await;
+        let download_rx = match self.bridge_tx.register_action_routes(routes).await {
+            Some(r) => r,
+            _ => return Ok(()),
+        };
         loop {
             self.sequence = 0;
             // The 0 sized channel only allows one action to be in execution at a time. Only one action is accepted below,
