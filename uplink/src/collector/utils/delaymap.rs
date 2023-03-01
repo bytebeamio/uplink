@@ -50,3 +50,9 @@ impl<T: Eq + Hash + Clone + Display> DelayMap<T> {
         !self.queue.is_empty()
     }
 }
+
+impl<T: Eq + Hash + Clone + Display> Default for DelayMap<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}

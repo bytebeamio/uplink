@@ -1,5 +1,5 @@
 pub mod metrics;
-pub mod serializer;
+pub mod serializer_impl;
 
 pub use metrics::SerializerMetrics;
-pub use serializer::Serializer;
+pub use serializer_impl::Serializer;

@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
+use crate::collector::logging::LoggerConfig;
 
 pub mod actions;
 pub mod bridge;
@@ -67,13 +68,6 @@ pub struct SimulatorConfig {
     pub actions: Vec<String>,
     #[serde(skip)]
     pub actions_subscriptions: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct JournalctlConfig {
-    pub tags: Vec<String>,
-    pub priority: u8,
-    pub stream_size: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -148,8 +142,5 @@ pub struct Config {
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
-    #[cfg(target_os = "linux")]
-    pub journalctl: Option<JournalctlConfig>,
-    #[cfg(target_os = "android")]
-    pub run_logcat: bool,
+    pub logging: Option<LoggerConfig>,
 }

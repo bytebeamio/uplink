@@ -14,6 +14,7 @@ use crate::base::bridge::BridgeTx;
 use crate::base::AppConfig;
 use crate::{Action, ActionResponse, Payload};
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Io error {0}")]
@@ -44,7 +45,7 @@ pub struct TcpJson {
 
 impl TcpJson {
     pub async fn new(name: String, config: AppConfig, bridge: BridgeTx) -> TcpJson {
-        let actions_rx = if config.actions.len() > 0 {
+        let actions_rx = if ! config.actions.is_empty() {
             // TODO: Return Option<Receiver> while registering multiple actions
             bridge.register_action_routes(&config.actions).await
         } else {

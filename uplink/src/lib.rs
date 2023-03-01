@@ -260,7 +260,7 @@ impl Uplink {
         let mut bridge = Bridge::new(
             self.config.clone(),
             self.data_tx.clone(),
-            self.stream_metrics_tx().clone(),
+            self.stream_metrics_tx(),
             self.action_rx.clone(),
             self.action_status(),
         );
@@ -340,7 +340,7 @@ impl Uplink {
 
         let monitor = Monitor::new(
             self.config.clone(),
-            mqtt_client.clone(),
+            mqtt_client,
             self.stream_metrics_rx.clone(),
             self.serializer_metrics_rx.clone(),
             mqtt_metrics_rx,
