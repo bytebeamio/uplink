@@ -1,4 +1,4 @@
-use flume::{Receiver, RecvError, SendError};
+use flume::{bounded, Receiver, RecvError, SendError};
 use futures_util::SinkExt;
 use log::{error, info, trace};
 use thiserror::Error;
@@ -9,6 +9,7 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::io;
+use std::time::Duration;
 
 use crate::base::bridge::BridgeTx;
 use crate::base::AppConfig;
@@ -47,7 +48,20 @@ impl TcpJson {
     pub async fn new(name: String, config: AppConfig, bridge: BridgeTx) -> TcpJson {
         let actions_rx = if ! config.actions.is_empty() {
             // TODO: Return Option<Receiver> while registering multiple actions
-            let actions_rx = bridge.register_action_routes(&config.actions).await;
+            let actions_rx_task = bridge.register_action_routes(&config.actions).await;
+            let (actions_tx_task, actions_rx) = bounded(0);
+            let bridge_task = bridge.clone();
+            tokio::spawn(async move {
+                while let Ok(action) = actions_rx_task.recv_async().await {
+                    // send "waiting" responses until a client connects and receives the action
+                    while let Err(_) = actions_tx_task.try_send(action.clone()) {
+                        bridge_task.send_action_response(
+                            ActionResponse::progress(&action.action_id, "Waiting for client app", 0)
+                        ).await;
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
+                }
+            });
             Some(actions_rx)
         } else {
             None

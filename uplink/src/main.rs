@@ -172,6 +172,7 @@ fn main() -> Result<(), Error> {
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
+        .enable_time()
         .thread_name("tcpjson")
         .build()
         .unwrap();
