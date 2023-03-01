@@ -65,14 +65,14 @@ pub struct SimulatorConfig {
     /// path to directory containing files with gps paths to be used in simulation
     pub gps_paths: String,
     /// actions that are to be routed to simulator
-    pub actions: Vec<String>,
+    pub actions: Vec<ActionRoute>,
     #[serde(skip)]
     pub actions_subscriptions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct DownloaderConfig {
-    pub actions: Vec<String>,
+    pub actions: Vec<ActionRoute>,
     pub path: String,
 }
 
@@ -97,10 +97,10 @@ pub struct MqttMetricsConfig {
     pub topic: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct AppConfig {
     pub port: u16,
-    pub actions: Vec<String>,
+    pub actions: Vec<ActionRoute>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -117,6 +117,19 @@ pub struct MqttConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct ActionRoute {
+    pub name: String,
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+}
+
+impl From<&ActionRoute> for ActionRoute {
+    fn from(value: &ActionRoute) -> Self {
+        value.clone()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -127,7 +140,7 @@ pub struct Config {
     pub authentication: Option<Authentication>,
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
-    pub processes: Vec<String>,
+    pub processes: Vec<ActionRoute>,
     #[serde(skip)]
     pub actions_subscription: String,
     pub persistence: Option<Persistence>,
