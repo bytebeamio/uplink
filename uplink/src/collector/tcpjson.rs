@@ -45,12 +45,7 @@ pub struct TcpJson {
 
 impl TcpJson {
     pub async fn new(name: String, config: AppConfig, bridge: BridgeTx) -> TcpJson {
-        let actions_rx = if ! config.actions.is_empty() {
-            // TODO: Return Option<Receiver> while registering multiple actions
-            bridge.register_action_routes(&config.actions).await
-        } else {
-            None
-        };
+        let actions_rx = bridge.register_action_routes(&config.actions).await;
 
         // Note: We can register `TcpJson` itself as an app to direct actions to it
         TcpJson { name, config, bridge, actions_rx }
