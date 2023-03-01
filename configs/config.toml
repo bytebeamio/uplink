@@ -1,7 +1,8 @@
 # Collection of binaries which uplink can spawn as a process
 # This ensures that user is protected against random actions
 # triggered from cloud.
-processes = ["echo"]
+processes = [{ name = "echo", timeout = 10 }]
+
 action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
 
 # MQTT client configuration
@@ -20,10 +21,11 @@ keep_alive = 30
 # TCP applications that detail applications which connect with uplink
 # Required Parameters
 # - port: TCP/IP Port on which application can connect to uplink over
-# - actions: A list of actions that uplink can forward to the app
+# - actions: A list of actions that uplink can forward to the app,
+#   with configurable timeouts
 [tcpapps.1]
 port = 5555
-actions = ["install_update", "load_file"]
+actions = [{ name = "install_update" }, { name = "load_file" }]
 
 [tcpapps.2]
 port = 5556
@@ -95,10 +97,10 @@ buf_size = 1
 # If left unconfigured, downloader will be disabled.
 #
 # Required Parameters
-# - actions: List of actions names that can trigger the downloader
+# - actions: List of actions names that can trigger the downloader, with configurable timeouts
 # - path: Location in fs where the files are downloaded into
 [downloader]
-actions = ["update_firmware", "send_file"]
+actions = [{ name = "update_firmware" }, { name = "send_file" }]
 path = "/var/tmp/ota-file"
 
 # Configurations associated with the system stats module of uplink, if enabled

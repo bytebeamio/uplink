@@ -4,6 +4,7 @@ use std::thread;
 
 use anyhow::Error;
 
+use base::bridge::stream::Stream;
 use base::monitor::Monitor;
 use collector::downloader::FileDownloader;
 use collector::process::ProcessHandler;
@@ -54,11 +55,6 @@ pub mod config {
     const DEFAULT_CONFIG: &str = r#"
     run_logcat = true
 
-    # Whitelist of binaries which uplink can spawn as a process
-    # This makes sure that user is protected against random actions
-    # triggered from cloud.
-    actions = ["tunshell"]
-
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -69,7 +65,7 @@ pub mod config {
 
     # Downloader config
     [downloader]
-    actions = ["update_firmware", "send_file"]
+    actions = [{ name = "update_firmware", timeout = 60 }, { name = "send_file", timeout = 60 }]
     path = "/var/tmp/ota-file"
 
     [stream_metrics]
@@ -212,7 +208,7 @@ pub mod config {
 }
 
 pub use base::actions::{Action, ActionResponse};
-use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, Stream, StreamMetrics};
+use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::Config;

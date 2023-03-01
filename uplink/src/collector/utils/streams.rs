@@ -6,7 +6,8 @@ use flume::Sender;
 use log::{error, info, trace};
 use tokio::time::{interval, Interval};
 
-use crate::base::bridge::{self, StreamMetrics, StreamStatus};
+use crate::base::bridge::stream::StreamStatus;
+use crate::base::bridge::{self, StreamMetrics};
 use crate::{Config, Package, Payload, Stream};
 
 use super::delaymap::DelayMap;
@@ -96,14 +97,16 @@ impl Streams {
     }
 
     // Flush stream/partitions that timeout
-    pub async fn flush_stream(&mut self, stream: &str) -> Result<(), bridge::Error> {
+    pub async fn flush_stream(&mut self, stream: &str) -> Result<(), bridge::stream::Error> {
         let stream = self.map.get_mut(stream).unwrap();
         stream.flush().await?;
         Ok(())
     }
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
-    pub fn check_and_flush_metrics(&mut self) -> Result<(), Box<flume::TrySendError<StreamMetrics>>> {
+    pub fn check_and_flush_metrics(
+        &mut self,
+    ) -> Result<(), Box<flume::TrySendError<StreamMetrics>>> {
         for (buffer_name, data) in self.map.iter_mut() {
             let metrics = data.metrics.clone();
 
