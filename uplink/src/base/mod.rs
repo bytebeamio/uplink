@@ -1,7 +1,9 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use crate::collector::logging::LoggerConfig;
 use serde::{Deserialize, Serialize};
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use crate::collector::logging::LoggerConfig;
 
 pub mod actions;
 pub mod bridge;
@@ -159,5 +161,6 @@ pub struct Config {
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub logging: Option<LoggerConfig>,
 }
