@@ -197,7 +197,7 @@ impl FileDownloader {
         // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
         let mut download_path = PathBuf::from(self.config.path.clone());
         download_path.push(name);
-        remove_dir_all(&download_path)?;
+        let _ = remove_dir_all(&download_path);
         create_dir_all(&download_path)?;
 
         let mut file_path = download_path.to_owned();
