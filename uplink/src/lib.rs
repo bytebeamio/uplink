@@ -92,9 +92,9 @@ pub mod config {
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     buf_size = 1
 
-    [stats]
+    [system_stats]
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stats/jsonarray"
-    enabled = false
+    enabled = true
     process_names = ["uplink"]
     update_period = 30
 "#;
@@ -135,7 +135,7 @@ pub mod config {
         //     }
         // }
 
-        if config.stats.enabled {
+        if config.system_stats.enabled {
             for stream_name in [
                 "uplink_disk_stats",
                 "uplink_network_stats",
@@ -149,7 +149,7 @@ pub mod config {
                     topic: format!(
                         "/tenants/{tenant_id}/devices/{device_id}/{stream_name}/jsonarray"
                     ),
-                    buf_size: config.stats.stream_size.unwrap_or(100),
+                    buf_size: config.system_stats.stream_size.unwrap_or(100),
                     flush_period: u64::MAX,
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
@@ -325,7 +325,7 @@ impl Uplink {
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
 
-        if config.stats.enabled {
+        if config.system_stats.enabled {
             let stat_collector = StatCollector::new(config.clone(), bridge_tx.clone());
             thread::spawn(move || stat_collector.start());
         }
