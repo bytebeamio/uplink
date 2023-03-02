@@ -70,7 +70,8 @@ where
         config: &StreamConfig,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx);
+        // this unwrap is safe because all `None` topics are replaced with default value in `initialize_config()`
+        let mut stream = Stream::new(name, config.topic.as_ref().unwrap(), config.buf_size, tx);
         stream.flush_period = Duration::from_secs(config.flush_period);
         stream
     }

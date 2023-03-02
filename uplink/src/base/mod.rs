@@ -28,7 +28,7 @@ fn default_file_count() -> usize {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamConfig {
-    pub topic: String,
+    pub topic: Option<String>,
     pub buf_size: usize,
     #[serde(default = "default_timeout")]
     /// Duration(in seconds) that bridge collector waits from

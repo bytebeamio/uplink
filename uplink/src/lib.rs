@@ -118,11 +118,19 @@ pub mod config {
         // replace placeholders with device/tenant ID
         let tenant_id = config.project_id.trim();
         let device_id = config.device_id.trim();
-        for config in config.streams.values_mut() {
-            replace_topic_placeholders(&mut config.topic, tenant_id, device_id);
+        for (stream_name, stream_config) in config.streams.iter_mut() {
+            if stream_config.topic.is_none() {
+                stream_config.topic = Some(format!("/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"));
+            } else {
+                replace_topic_placeholders(stream_config.topic.as_mut().unwrap(), tenant_id, device_id);
+            }
         }
 
-        replace_topic_placeholders(&mut config.action_status.topic, tenant_id, device_id);
+        if config.action_status.topic.is_none() {
+            config.action_status.topic = Some(format!("/tenants/{tenant_id}/devices/{device_id}/events/action_status/jsonarray"));
+        } else {
+            replace_topic_placeholders(config.action_status.topic.as_mut().unwrap(), tenant_id, device_id);
+        }
         replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.serializer_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.mqtt_metrics.topic, tenant_id, device_id);
@@ -146,9 +154,9 @@ pub mod config {
             ] {
                 config.stream_metrics.blacklist.push(stream_name.to_owned());
                 let stream_config = StreamConfig {
-                    topic: format!(
+                    topic: Some(format!(
                         "/tenants/{tenant_id}/devices/{device_id}/{stream_name}/jsonarray"
-                    ),
+                    )),
                     buf_size: config.stats.stream_size.unwrap_or(100),
                     flush_period: u64::MAX,
                 };
@@ -236,7 +244,8 @@ impl Uplink {
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
 
         let action_status_topic = &config.action_status.topic;
-        let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
+        // this unwrap is safe because all `None` topics are replaced with default value in `initialize_config()`
+        let action_status = Stream::new("action_status", action_status_topic.as_ref().unwrap(), 1, data_tx.clone());
         Ok(Uplink {
             config,
             action_rx,
