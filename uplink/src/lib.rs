@@ -53,8 +53,6 @@ pub mod config {
     }
 
     const DEFAULT_CONFIG: &str = r#"
-    run_logcat = true
-
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -93,7 +91,6 @@ pub mod config {
     buf_size = 1
 
     [system_stats]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stats/jsonarray"
     enabled = true
     process_names = ["uplink"]
     update_period = 30
