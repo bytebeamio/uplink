@@ -147,7 +147,7 @@ pub mod config {
                 config.stream_metrics.blacklist.push(stream_name.to_owned());
                 let stream_config = StreamConfig {
                     topic: format!(
-                        "/tenants/{tenant_id}/devices/{device_id}/{stream_name}/jsonarray"
+                        "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
                     ),
                     buf_size: config.system_stats.stream_size.unwrap_or(100),
                     flush_period: u64::MAX,
