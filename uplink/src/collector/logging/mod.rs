@@ -2,9 +2,9 @@ use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::{process::Command, time::Duration};
 
-use flume::{Receiver, Sender};
+use flume::Sender;
 use serde::Deserialize;
-use crate::{Action, Config, Package, Payload, Stream};
+use crate::{Config, Package, Payload, Stream};
 
 #[cfg(target_os = "linux")]
 mod journalctl;
@@ -15,6 +15,8 @@ mod logcat;
 pub use journalctl::{new_journalctl, LogEntry};
 #[cfg(target_os = "android")]
 pub use logcat::{new_logcat, LogEntry};
+use crate::base::ActionRoute;
+use crate::base::bridge::BridgeTx;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -28,7 +30,7 @@ pub struct LoggerInstance {
     config: Arc<Config>,
     log_stream: Stream<Payload>,
     kill_switch: Arc<Mutex<bool>>,
-    log_rx: Receiver<Action>,
+    bridge: BridgeTx,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -49,7 +51,7 @@ impl LoggerInstance {
     pub fn new(
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
-        log_rx: Receiver<Action>,
+        bridge: BridgeTx,
     ) -> Self {
         let buf_size = config.logging.as_ref().and_then(|c| c.stream_size).unwrap_or(32);
 
@@ -62,13 +64,14 @@ impl LoggerInstance {
         );
         let kill_switch = Arc::new(Mutex::new(true));
 
-        Self { config, log_stream, kill_switch, log_rx }
+        Self { config, log_stream, kill_switch, bridge }
     }
 
     /// On an android system, starts a logcat instance and a journalctl instance for a linux system that
     /// reports to the logs stream for a given device+project id, that logcat instance is killed when
     /// this object is dropped. On any other system, it's a noop.
-    pub fn start(mut self) -> Result<(), Error> {
+    #[tokio::main(flavor = "current_thread")]
+    pub async fn start(mut self) -> Result<(), Error> {
         if let Some(config) = &self.config.logging {
             #[cfg(target_os = "linux")]
             self.spawn_logger(new_journalctl(config));
@@ -76,8 +79,13 @@ impl LoggerInstance {
             self.spawn_logger(new_logcat(config));
         }
 
+        let log_rx = self.bridge.register_action_route(ActionRoute {
+            name: "logging_config".to_string(),
+            timeout: 10,
+        }).await;
+
         loop {
-            let action = self.log_rx.recv()?;
+            let action = log_rx.recv()?;
             let mut config = serde_json::from_str::<LoggerConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
 
