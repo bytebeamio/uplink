@@ -132,8 +132,8 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
         println!("    persistence_max_segment_count: {}", persistence.max_file_count);
     }
     println!("    download_path: {}", config.downloader.path);
-    if config.stats.enabled {
-        println!("    processes: {:?}", config.stats.process_names);
+    if config.system_stats.enabled {
+        println!("    processes: {:?}", config.system_stats.process_names);
     }
     if config.apis.enabled {
         println!("    tracing: http://localhost:{}", config.apis.port);

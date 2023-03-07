@@ -538,7 +538,7 @@ impl StatCollector {
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
     pub fn start(mut self) {
         loop {
-            std::thread::sleep(Duration::from_secs(self.config.stats.update_period));
+            std::thread::sleep(Duration::from_secs(self.config.system_stats.update_period));
 
             if let Err(e) = self.update() {
                 error!("Faced error while refreshing system statistics: {}", e);
@@ -612,7 +612,7 @@ impl StatCollector {
         for (&id, p) in self.sys.processes() {
             let name = p.name().to_owned();
 
-            if self.config.stats.process_names.contains(&name) {
+            if self.config.system_stats.process_names.contains(&name) {
                 let payload = self.processes.push(id.as_u32(), p, name, timestamp);
                 self.bridge_tx.send_payload_sync(payload);
             }

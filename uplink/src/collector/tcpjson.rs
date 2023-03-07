@@ -14,7 +14,6 @@ use crate::base::bridge::BridgeTx;
 use crate::base::AppConfig;
 use crate::{Action, ActionResponse, Payload};
 
-#[allow(clippy::large_enum_variant)]
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Io error {0}")]

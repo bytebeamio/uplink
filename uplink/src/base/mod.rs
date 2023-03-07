@@ -155,7 +155,7 @@ pub struct Config {
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
     pub downloader: DownloaderConfig,
-    pub stats: Stats,
+    pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
     #[serde(default)]
     pub action_redirections: HashMap<String, String>,

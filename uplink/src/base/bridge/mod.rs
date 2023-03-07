@@ -222,7 +222,6 @@ impl Bridge {
     }
 
     /// Handle received actions
-    #[allow(clippy::result_large_err)]
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
         match self.action_routes.get(&action.name) {
             Some(app_tx) => {
