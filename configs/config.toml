@@ -110,10 +110,10 @@ path = "/var/tmp/ota-file"
 # - enabled: A boolean to determine if the feature must be enabled
 # - process_names: List of process names that are to be tracked with system stats
 # - update_period: Time in seconds between each collection/publish of system stats
-[stats]
-enabled = false
-process_names = ["uplink"]
-update_period = 30
+# [stats]
+# enabled = false
+# process_names = ["uplink"]
+# update_period = 30
 
 # Define port that accepts tracing control messges, if enabled
 [apis]

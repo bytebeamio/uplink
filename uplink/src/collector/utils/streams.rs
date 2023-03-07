@@ -88,7 +88,7 @@ impl Streams {
             match state {
                 StreamStatus::Flushed => self.stream_timeouts.remove(&stream_id),
                 StreamStatus::Init(flush_period) => {
-                    trace!("Initialized stream buffer for {stream_id}");
+                    info!("Initialized stream buffer for {stream_id} {flush_period:?}");
                     self.stream_timeouts.insert(&stream_id, flush_period);
                 }
                 StreamStatus::Partial(_l) => {}
