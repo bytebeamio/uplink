@@ -2,12 +2,16 @@
 name: "Build uplink:cloud and Push to CR"
 
 on:
-  push:
+  workflow_dispatch:
     branches:
       - main
+    paths:
+      - "**"
+      - .github/workflows/argonaut-stage-simulator.yaml
+      - Dockerfile
+      - .art/argonaut-stage-stage-simulator.yaml
     tags:
       - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
-  workflow_dispatch:
 
 
 
