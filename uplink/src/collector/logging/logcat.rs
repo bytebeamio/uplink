@@ -133,7 +133,7 @@ pub fn new_logcat(logging_config: &LoggerConfig) -> Command {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
         let millis = timestamp % 1000;
         let seconds = timestamp / 1000;
-        format!("{seconds}.{:03}", millis)
+        format!("{seconds}.{millis:03}")
     };
     // silence everything
     let mut logcat_args = ["-v", "time", "-T", now.as_str(), "*:S"].map(String::from).to_vec();

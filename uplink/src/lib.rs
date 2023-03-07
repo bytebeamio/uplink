@@ -53,8 +53,6 @@ pub mod config {
     }
 
     const DEFAULT_CONFIG: &str = r#"
-    run_logcat = true
-
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -92,9 +90,8 @@ pub mod config {
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     buf_size = 1
 
-    [stats]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stats/jsonarray"
-    enabled = false
+    [system_stats]
+    enabled = true
     process_names = ["uplink"]
     update_period = 30
 "#;
@@ -135,7 +132,7 @@ pub mod config {
         //     }
         // }
 
-        if config.stats.enabled {
+        if config.system_stats.enabled {
             for stream_name in [
                 "uplink_disk_stats",
                 "uplink_network_stats",
@@ -147,9 +144,9 @@ pub mod config {
                 config.stream_metrics.blacklist.push(stream_name.to_owned());
                 let stream_config = StreamConfig {
                     topic: format!(
-                        "/tenants/{tenant_id}/devices/{device_id}/{stream_name}/jsonarray"
+                        "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
                     ),
-                    buf_size: config.stats.stream_size.unwrap_or(100),
+                    buf_size: config.system_stats.stream_size.unwrap_or(100),
                     flush_period: u64::MAX,
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
@@ -329,7 +326,7 @@ impl Uplink {
         let logger = LoggerInstance::new(config.clone(), self.data_tx.clone(), bridge_tx.clone());
         thread::spawn(move || logger.start());
 
-        if config.stats.enabled {
+        if config.system_stats.enabled {
             let stat_collector = StatCollector::new(config.clone(), bridge_tx.clone());
             thread::spawn(move || stat_collector.start());
         }
