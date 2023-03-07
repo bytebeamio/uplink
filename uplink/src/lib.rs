@@ -17,7 +17,7 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
-    use crate::base::StreamConfig;
+    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     pub use crate::base::{Config, Persistence, Stats};
     use config::{Environment, File, FileFormat};
     use std::fs;
@@ -147,7 +147,7 @@ pub mod config {
                         "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
                     ),
                     buf_size: config.system_stats.stream_size.unwrap_or(100),
-                    flush_period: u64::MAX,
+                    flush_period: DEFAULT_TIMEOUT,
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
             }
