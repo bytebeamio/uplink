@@ -323,6 +323,7 @@ pub struct ActionRouter {
 }
 
 impl ActionRouter {
+    #[allow(clippy::result_large_err)]
     pub fn try_send(&self, action: Action) -> Result<Duration, TrySendError<Action>> {
         self.actions_tx.try_send(action)?;
 
