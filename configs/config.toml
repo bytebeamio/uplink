@@ -1,6 +1,11 @@
 # Collection of binaries which uplink can spawn as a process
 # This ensures that user is protected against random actions
 # triggered from cloud.
+# 
+# Action Route Parameters
+# - name: name associated with action
+# - timeout(optional): seconds from receiving an action after which it must complete or be reported as having failed to the platform.
+# - retries(optional): number of times an action can be retried on receiving the associated failure response.
 processes = [{ name = "echo", timeout = 10 }]
 
 action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
@@ -100,7 +105,7 @@ buf_size = 1
 # - actions: List of actions names that can trigger the downloader, with configurable timeouts
 # - path: Location in fs where the files are downloaded into
 [downloader]
-actions = [{ name = "update_firmware" }, { name = "send_file" }]
+actions = [{ name = "update_firmware", retries = 3 }, { name = "send_file" }]
 path = "/var/tmp/ota-file"
 
 # Configurations associated with the system stats module of uplink, if enabled
