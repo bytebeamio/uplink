@@ -239,6 +239,7 @@ impl Bridge {
     }
 
     async fn forward_action_response(&mut self, response: ActionResponse) {
+        info!("Action response = {:?}", response);
         let inflight_action = match &mut self.current_action {
             Some(v) => v,
             None => {
@@ -256,18 +257,21 @@ impl Bridge {
         let action_failed = response.is_failed();
         let action_done = response.is_done();
 
-        info!("Action response = {:?}", response);
-        if let Err(e) = self.action_status.fill(response.clone()).await {
-            error!("Failed to fill. Error = {:?}", e);
-        }
-
         if action_completed {
             self.clear_current_action();
+            // Forward successful action response
+            if let Err(e) = self.action_status.fill(response.clone()).await {
+                error!("Failed to fill. Error = {:?}", e);
+            }
             return;
         } else if action_failed {
             let action = match inflight_action.retry() {
                 Some(action) => action,
                 _ => {
+                    // Forward failure response only if no retries left
+                    if let Err(e) = self.action_status.fill(response.clone()).await {
+                        error!("Failed to fill. Error = {:?}", e);
+                    }
                     self.clear_current_action();
                     return;
                 }
@@ -284,6 +288,11 @@ impl Bridge {
                 self.forward_action_error(action, e).await;
             }
             return;
+        }
+
+        // Forward all other action responses
+        if let Err(e) = self.action_status.fill(response.clone()).await {
+            error!("Failed to fill. Error = {:?}", e);
         }
 
         // Forward actions included in the config to the appropriate forward route, when
