@@ -270,6 +270,12 @@ impl Bridge {
                 }
             };
 
+            warn!("Action {} has {} retries left", action.action_id, inflight_action.retries);
+            let response = ActionResponse::progress(&inflight_action.id, "Retrying", 0);
+            if let Err(e) = self.action_status.fill(response).await {
+                error!("Failed to fill. Error = {:?}", e);
+            }
+
             if let Err(e) = self.try_route_action(action.clone()) {
                 error!("Failed to route action to app. Error = {:?}", e);
                 self.forward_action_error(action, e).await;
