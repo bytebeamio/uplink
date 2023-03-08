@@ -225,9 +225,9 @@ impl Bridge {
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
         match self.action_routes.get(&action.name) {
             Some(app_tx) => {
-                let duration =
+                let (duration, retries) =
                     app_tx.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
-                self.current_action = Some(CurrentAction::new(action, duration));
+                self.current_action = Some(CurrentAction::new(action, duration, retries));
 
                 Ok(())
             }
@@ -258,8 +258,22 @@ impl Bridge {
             error!("Failed to fill. Error = {:?}", e);
         }
 
-        if action_completed || action_failed {
+        if action_completed {
             self.clear_current_action();
+            return;
+        } else if action_failed {
+            let action = match inflight_action.retry() {
+                Some(action) => action,
+                _ => {
+                    self.clear_current_action();
+                    return;
+                }
+            };
+
+            if let Err(e) = self.try_route_action(action.clone()) {
+                error!("Failed to route action to app. Error = {:?}", e);
+                self.forward_action_error(action, e).await;
+            }
             return;
         }
 
@@ -303,15 +317,27 @@ struct CurrentAction {
     pub id: String,
     pub action: Action,
     pub timeout: Pin<Box<Sleep>>,
+    retries: u8,
 }
 
 impl CurrentAction {
-    pub fn new(action: Action, duration: Duration) -> CurrentAction {
+    pub fn new(action: Action, duration: Duration, retries: u8) -> CurrentAction {
         CurrentAction {
             id: action.action_id.clone(),
             action,
+            retries,
             timeout: Box::pin(time::sleep(duration)),
         }
+    }
+
+    fn retry(&mut self) -> Option<Action> {
+        if self.retries == 0 {
+            return None;
+        }
+
+        self.retries -= 1;
+
+        Some(self.action.clone())
     }
 }
 
@@ -319,14 +345,15 @@ impl CurrentAction {
 pub struct ActionRouter {
     actions_tx: Sender<Action>,
     duration: Duration,
+    retries: u8,
 }
 
 impl ActionRouter {
     #[allow(clippy::result_large_err)]
-    pub fn try_send(&self, action: Action) -> Result<Duration, TrySendError<Action>> {
+    pub fn try_send(&self, action: Action) -> Result<(Duration, u8), TrySendError<Action>> {
         self.actions_tx.try_send(action)?;
 
-        Ok(self.duration)
+        Ok((self.duration, self.retries))
     }
 }
 
@@ -340,7 +367,7 @@ impl BridgeTx {
     pub async fn register_action_route(&self, route: ActionRoute) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(0);
         let duration = Duration::from_secs(route.timeout);
-        let action_router = ActionRouter { actions_tx, duration };
+        let action_router = ActionRouter { actions_tx, duration, retries: route.retries };
         let event = Event::RegisterActionRoute(route.name, action_router);
 
         // Bridge should always be up and hence unwrap is ok
@@ -361,7 +388,8 @@ impl BridgeTx {
 
         for route in routes {
             let duration = Duration::from_secs(route.timeout);
-            let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
+            let action_router =
+                ActionRouter { actions_tx: actions_tx.clone(), duration, retries: route.retries };
             let event = Event::RegisterActionRoute(route.name, action_router);
             // Bridge should always be up and hence unwrap is ok
             self.events_tx.send_async(event).await.unwrap();
@@ -435,10 +463,10 @@ mod tests {
     #[tokio::test]
     async fn timeout_on_diff_routes() {
         let (bridge_tx, actions_tx, package_rx) = start_bridge();
-        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
+        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10, retries: 0 };
         let route_1_rx = bridge_tx.register_action_route(route_1).await;
 
-        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: 30 };
+        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: 30, retries: 0 };
         let route_2_rx = bridge_tx.register_action_route(route_2).await;
 
         std::thread::spawn(move || {
@@ -511,7 +539,7 @@ mod tests {
     async fn recv_action_while_current_action_exists() {
         let (bridge_tx, actions_tx, package_rx) = start_bridge();
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: 30, retries: 0 };
         let action_rx = bridge_tx.register_action_route(test_route).await;
 
         std::thread::spawn(move || loop {
