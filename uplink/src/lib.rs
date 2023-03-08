@@ -17,8 +17,8 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
-    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     pub use crate::base::{Config, Persistence, Stats};
+    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     use config::{Environment, File, FileFormat};
     use std::fs;
     use structopt::StructOpt;
@@ -63,7 +63,7 @@ pub mod config {
 
     # Downloader config
     [downloader]
-    actions = [{ name = "update_firmware", timeout = 60 }, { name = "send_file", timeout = 60 }]
+    actions = [{ name = "update_firmware", retries = 3 }, { name = "send_file", timeout = 30, retries = 3 }]
     path = "/var/tmp/ota-file"
 
     [stream_metrics]
@@ -322,9 +322,13 @@ impl Uplink {
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
 
-        #[cfg(any(target_os="linux", target_os="android"))]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         {
-            let logger = collector::logging::LoggerInstance::new(config.clone(), self.data_tx.clone(), bridge_tx.clone());
+            let logger = collector::logging::LoggerInstance::new(
+                config.clone(),
+                self.data_tx.clone(),
+                bridge_tx.clone(),
+            );
             thread::spawn(move || logger.start());
         }
 
