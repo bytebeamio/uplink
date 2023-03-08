@@ -227,8 +227,11 @@ impl Bridge {
             Some(app_tx) => {
                 let (duration, retries) =
                     app_tx.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
+                let retries = match &self.current_action {
+                    Some(a) => a.retries,
+                    _ => retries,
+                };
                 self.current_action = Some(CurrentAction::new(action, duration, retries));
-
                 Ok(())
             }
             None => Err(Error::NoRoute(action.name)),
