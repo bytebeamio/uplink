@@ -270,7 +270,13 @@ impl Bridge {
                 Some(n) => n,
                 None => {
                     // NOTE: send success reponse for actions that don't have redirections configured
-                    let response = ActionResponse::success(&inflight_action.id);
+                    let warning = format!(
+                        "Action redirection for {} not configured",
+                        inflight_action.action.name
+                    );
+                    warn!("{warning}");
+                    let mut response = ActionResponse::success(&inflight_action.id);
+                    response.errors.push(warning);
                     if let Err(e) = self.action_status.fill(response).await {
                         error!("Failed to send status. Error = {:?}", e);
                     }
