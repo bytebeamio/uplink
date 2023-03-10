@@ -95,7 +95,7 @@ impl OTAInstaller {
 
         loop {
             select! {
-                 Ok(Some(line)) = stdout.next_line() => {
+                Ok(Some(line)) = stdout.next_line() => {
                     let status: ActionResponse = match serde_json::from_str(&line) {
                         Ok(status) => status,
                         Err(e) => ActionResponse::failure(&action.action_id, e.to_string()),
@@ -103,9 +103,12 @@ impl OTAInstaller {
 
                     debug!("Action status: {:?}", status);
                     self.bridge_tx.send_action_response(status).await;
-                 }
-                 status = child.wait() => info!("Action done!! Status = {:?}", status),
-                 _ = &mut timeout => return Ok(())
+                }
+                status = child.wait() => {
+                    info!("Action done!! Status = {:?}", status);
+                    return Ok(())
+                },
+                _ = &mut timeout => return Ok(())
             }
         }
     }
