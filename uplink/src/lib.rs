@@ -18,8 +18,8 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
-    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     pub use crate::base::{Config, Persistence, Stats};
+    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     use config::{Environment, File, FileFormat};
     use std::fs;
     use structopt::StructOpt;
@@ -335,9 +335,13 @@ impl Uplink {
         let ota_installer = OTAInstaller::new(config.clone(), bridge_tx.clone());
         thread::spawn(move || ota_installer.start());
 
-        #[cfg(any(target_os="linux", target_os="android"))]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         {
-            let logger = collector::logging::LoggerInstance::new(config.clone(), self.data_tx.clone(), bridge_tx.clone());
+            let logger = collector::logging::LoggerInstance::new(
+                config.clone(),
+                self.data_tx.clone(),
+                bridge_tx.clone(),
+            );
             thread::spawn(move || logger.start());
         }
 
