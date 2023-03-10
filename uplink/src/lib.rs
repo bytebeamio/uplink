@@ -95,6 +95,9 @@ pub mod config {
     enabled = true
     process_names = ["uplink"]
     update_period = 30
+
+    [tcpapps.1]
+    port = 5555
 "#;
 
     /// Reads config file to generate config struct and replaces places holders
