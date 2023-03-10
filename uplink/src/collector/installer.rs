@@ -72,8 +72,8 @@ impl OTAInstaller {
     // Run `update.sh` from extracted tarball
     async fn installer(&self, action: &Action) -> Result<(), Error> {
         let script_path = PathBuf::from(self.config.path.clone()).join("update.sh");
-        let mut cmd = Command::new(script_path);
-        cmd.arg(&action.action_id).kill_on_drop(true).stdout(Stdio::piped());
+        let mut cmd = Command::new("/bin/sh");
+        cmd.arg(script_path).arg(&action.action_id).kill_on_drop(true).stdout(Stdio::piped());
         let child = cmd.spawn()?;
 
         self.spawn_and_capture_stdout(child, action).await?;
