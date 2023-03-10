@@ -1,6 +1,5 @@
 use std::{fs::File, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 
-use flate2::read::GzDecoder;
 use log::{debug, error, info};
 use tar::Archive;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -43,13 +42,13 @@ impl OTAInstaller {
 
         while let Ok(action) = actions_rx.recv_async().await {
             if let Err(e) = self.extractor(&action) {
-                error!("Error extracting zip: {e}");
+                error!("Error extracting tarball: {e}");
                 self.forward_action_error(action, e).await;
                 continue;
             }
 
             if let Err(e) = self.installer(&action).await {
-                error!("Error installing: {e}");
+                error!("Error installing ota update: {e}");
                 self.forward_action_error(action, e).await;
             }
         }
@@ -64,8 +63,7 @@ impl OTAInstaller {
         let info: DownloadFile = serde_json::from_str(&action.payload)?;
         let path = info.download_path.ok_or(Error::MissingPath)?;
         let tar_gz = File::open(path)?;
-        let tar = GzDecoder::new(tar_gz);
-        let mut archive = Archive::new(tar);
+        let mut archive = Archive::new(tar_gz);
         archive.unpack(&self.config.path)?;
 
         Ok(())
