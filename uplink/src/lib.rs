@@ -7,6 +7,7 @@ use anyhow::Error;
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
 use collector::downloader::FileDownloader;
+use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellSession;
@@ -321,6 +322,9 @@ impl Uplink {
 
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
+
+        let ota_installer = OTAInstaller::new(config.clone(), bridge_tx.clone());
+        thread::spawn(move || ota_installer.start());
 
         #[cfg(any(target_os="linux", target_os="android"))]
         {

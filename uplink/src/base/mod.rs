@@ -79,6 +79,13 @@ pub struct DownloaderConfig {
     pub actions: Vec<ActionRoute>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct InstallerConfig {
+    pub path: String,
+    #[serde(default)]
+    pub actions: Vec<ActionRoute>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamMetricsConfig {
     pub enabled: bool,
@@ -157,6 +164,7 @@ pub struct Config {
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
+    pub ota_installer: InstallerConfig,
     #[serde(default)]
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]
