@@ -367,6 +367,12 @@ pub struct ActionRouter {
 }
 
 impl ActionRouter {
+    pub fn new(route: &ActionRoute, actions_tx: Sender<Action>) -> Self {
+        let duration = Duration::from_secs(route.timeout);
+
+        Self { actions_tx, duration, retries: route.retries }
+    }
+
     #[allow(clippy::result_large_err)]
     pub fn try_send(&self, action: Action) -> Result<(Duration, u8), TrySendError<Action>> {
         self.actions_tx.try_send(action)?;
@@ -383,9 +389,10 @@ pub struct BridgeTx {
 
 impl BridgeTx {
     pub async fn register_action_route(&self, route: ActionRoute) -> Receiver<Action> {
-        let (actions_tx, actions_rx) = bounded(0);
-        let duration = Duration::from_secs(route.timeout);
-        let action_router = ActionRouter { actions_tx, duration, retries: route.retries };
+        // NOTE: not using rendezvous channel to ensure action isn't failed due to unresponsive receiver.
+        // Edge Case: An action being receieved and never being processed, blocking uplink from ever getting to do anything.
+        let (actions_tx, actions_rx) = bounded(1);
+        let action_router = ActionRouter::new(&route, actions_tx);
         let event = Event::RegisterActionRoute(route.name, action_router);
 
         // Bridge should always be up and hence unwrap is ok
@@ -402,12 +409,12 @@ impl BridgeTx {
             return None;
         }
 
-        let (actions_tx, actions_rx) = bounded(0);
+        // NOTE: not using rendezvous channel to ensure action isn't failed due to unresponsive receiver.
+        // Edge Case: An action being receieved and never being processed, blocking uplink from ever getting to do anything.
+        let (actions_tx, actions_rx) = bounded(1);
 
         for route in routes {
-            let duration = Duration::from_secs(route.timeout);
-            let action_router =
-                ActionRouter { actions_tx: actions_tx.clone(), duration, retries: route.retries };
+            let action_router = ActionRouter::new(&route, actions_tx.clone());
             let event = Event::RegisterActionRoute(route.name, action_router);
             // Bridge should always be up and hence unwrap is ok
             self.events_tx.send_async(event).await.unwrap();
