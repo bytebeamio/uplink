@@ -54,6 +54,8 @@ pub mod config {
     }
 
     const DEFAULT_CONFIG: &str = r#"
+    action_redirections = { "update_firmware" = "install_firmware" }
+    
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -98,6 +100,10 @@ pub mod config {
 
     [tcpapps.1]
     port = 5555
+
+    [ota_installer]
+    path = "/var/tmp/ota"
+    actions = [{ name = "install_firmware", timeout = 60 }]
 "#;
 
     /// Reads config file to generate config struct and replaces places holders
