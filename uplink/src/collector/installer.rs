@@ -75,7 +75,7 @@ impl OTAInstaller {
     async fn installer(&self, action: &Action) -> Result<(), Error> {
         let script_path = PathBuf::from(self.config.path.clone()).join("update.sh");
         let mut cmd = Command::new(script_path);
-        cmd.kill_on_drop(true).stdout(Stdio::piped());
+        cmd.arg(&action.action_id).kill_on_drop(true).stdout(Stdio::piped());
         let child = cmd.spawn()?;
 
         self.spawn_and_capture_stdout(child, action).await?;
