@@ -115,7 +115,7 @@ impl TcpJson {
     }
 
     async fn handle_incoming_line(&self, line: String) -> Result<(), Error> {
-        trace!("{}: Received line = {:?}", self.name, line);
+        info!("{}: Received line = {:?}", self.name, line);
         let data = serde_json::from_str::<Payload>(&line)?;
 
         if data.stream == "action_status" {
