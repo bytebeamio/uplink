@@ -282,7 +282,7 @@ impl From<&mut Processor> for Payload {
         let Processor { sequence, timestamp, name, frequency, usage } = value;
 
         Payload {
-            stream: "uplink_process_stats".to_owned(),
+            stream: "uplink_processor_stats".to_owned(),
             device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
