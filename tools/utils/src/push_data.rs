@@ -6,11 +6,14 @@ use tokio::time::sleep;
 use tokio_util::codec::{Framed, LinesCodec};
 
 #[derive(Debug, Serialize)]
-struct SquarePayload {
+struct ShadowPayload {
     stream: String,
     sequence: u32,
     timestamp: u64,
-    result: u32,
+    a: bool,
+    b: bool,
+    c: bool,
+    d: String,
 }
 
 #[tokio::main]
@@ -21,11 +24,14 @@ async fn main() {
     loop {
         idx += 1;
         // calculate and send consecutive squares
-        let data = SquarePayload {
-            stream: "square_stream".to_string(),
+        let data = ShadowPayload {
+            stream: "device_shadow".to_string(),
             sequence: idx,
             timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
-            result: idx * idx,
+            a: idx % 2 == 0,
+            b: idx % 3 == 0,
+            c: idx % 5 == 0,
+            d: idx.to_string(),
         };
         let data_s = serde_json::to_string(&data).unwrap();
         println!("Sending: {}", data_s);
