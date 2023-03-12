@@ -13,6 +13,7 @@ pub(crate) mod stream;
 use crate::{base::ActionRoute, collector::utils::Streams, Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 use stream::Stream;
+use crate::base::DEFAULT_TIMEOUT;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -249,23 +250,26 @@ impl Bridge {
             return;
         }
 
-        let action_completed = response.is_completed();
-        let action_failed = response.is_failed();
-        let action_done = response.is_done();
-
         info!("Action response = {:?}", response);
         if let Err(e) = self.action_status.fill(response.clone()).await {
             error!("Failed to fill. Error = {:?}", e);
         }
 
-        if action_completed || action_failed {
+        if response.state == "Completed" || response.state == "Failed" {
             self.clear_current_action();
             return;
         }
+        inflight_action.timeout = Box::pin(
+            time::sleep(
+                self.action_routes.get(&inflight_action.action.name)
+                    .map(|a| a.duration)
+                    .unwrap_or(Duration::from_secs(DEFAULT_TIMEOUT)),
+            )
+        );
 
         // Forward actions included in the config to the appropriate forward route, when
         // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
-        if action_done {
+        if response.progress == 100 {
             let fwd_name = match self.action_redirections.get(&inflight_action.action.name) {
                 Some(n) => n,
                 None => {
@@ -348,7 +352,7 @@ impl BridgeTx {
         actions_rx
     }
 
-    pub async fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item = R>>(
+    pub async fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item=R>>(
         &self,
         routes: V,
     ) -> Option<Receiver<Action>> {
@@ -388,7 +392,6 @@ impl BridgeTx {
 
 #[cfg(test)]
 mod tests {
-
     use std::{sync::Arc, time::Duration};
 
     use flume::{bounded, Receiver, Sender};
