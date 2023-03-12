@@ -255,7 +255,7 @@ impl Bridge {
             error!("Failed to fill. Error = {:?}", e);
         }
 
-        if response.state == "Completed" || response.state == "Failed" {
+        if response.is_completed() || response.is_failed() {
             self.clear_current_action();
             return;
         }
@@ -269,7 +269,7 @@ impl Bridge {
 
         // Forward actions included in the config to the appropriate forward route, when
         // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
-        if response.progress == 100 {
+        if response.is_done() {
             let fwd_name = match self.action_redirections.get(&inflight_action.action.name) {
                 Some(n) => n,
                 None => {
