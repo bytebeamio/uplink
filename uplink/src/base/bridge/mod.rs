@@ -273,6 +273,13 @@ impl Bridge {
             let fwd_name = match self.action_redirections.get(&inflight_action.action.name) {
                 Some(n) => n,
                 None => {
+                    // NOTE: send success reponse for actions that don't have redirections configured
+                    warn!("Action redirection for {} not configured", inflight_action.action.name);
+                    let response = ActionResponse::success(&inflight_action.id);
+                    if let Err(e) = self.action_status.fill(response).await {
+                        error!("Failed to send status. Error = {:?}", e);
+                    }
+
                     self.clear_current_action();
                     return;
                 }
@@ -404,15 +411,18 @@ mod tests {
 
     use super::{stream::Stream, Bridge, BridgeTx, Package};
 
-    fn start_bridge() -> (BridgeTx, Sender<Action>, Receiver<Box<dyn Package>>) {
-        let config = Arc::new(Config {
+    fn default_config() -> Config {
+        Config {
             stream_metrics: StreamMetricsConfig {
                 enabled: false,
                 timeout: 10,
                 ..Default::default()
             },
             ..Default::default()
-        });
+        }
+    }
+
+    fn start_bridge(config: Arc<Config>) -> (BridgeTx, Sender<Action>, Receiver<Box<dyn Package>>) {
         let (package_tx, package_rx) = bounded(10);
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
@@ -437,7 +447,8 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_on_diff_routes() {
-        let (bridge_tx, actions_tx, package_rx) = start_bridge();
+        let config = Arc::new(default_config());
+        let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
         let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
         let route_1_rx = bridge_tx.register_action_route(route_1).await;
 
@@ -512,7 +523,8 @@ mod tests {
 
     #[tokio::test]
     async fn recv_action_while_current_action_exists() {
-        let (bridge_tx, actions_tx, package_rx) = start_bridge();
+        let config = Arc::new(default_config());
+        let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
         let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
         let action_rx = bridge_tx.register_action_route(test_route).await;
@@ -551,5 +563,100 @@ mod tests {
         assert!(status.is_failed());
         assert_eq!(status.action_id, "2".to_owned());
         assert_eq!(status.errors, ["Another action is currently being processed"]);
+    }
+
+    #[tokio::test]
+    async fn complete_response_on_no_redirection() {
+        let config = Arc::new(default_config());
+        let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
+
+        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let action_rx = bridge_tx.register_action_route(test_route).await;
+
+        std::thread::spawn(move || loop {
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "1".to_owned());
+            std::thread::sleep(Duration::from_secs(1));
+            let response = ActionResponse::progress("1", "Tested", 100);
+            Runtime::new().unwrap().block_on(bridge_tx.send_action_response(response));
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            device_id: None,
+            action_id: "1".to_string(),
+            kind: "test".to_string(),
+            name: "test".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        let status = recv_response(&package_rx);
+        assert_eq!(status.state, "Received".to_owned());
+
+        let status = recv_response(&package_rx);
+        assert!(status.is_done());
+        assert_eq!(status.state, "Tested");
+
+        let status = recv_response(&package_rx);
+        assert!(status.is_completed());
+    }
+
+    #[tokio::test]
+    async fn no_complete_response_between_redirection() {
+        let mut config = default_config();
+        config.action_redirections.insert("test".to_string(), "redirect".to_string());
+        let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
+        let bridge_tx_clone = bridge_tx.clone();
+
+        std::thread::spawn(move || loop {
+            let rt = Runtime::new().unwrap();
+            let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "1".to_owned());
+            std::thread::sleep(Duration::from_secs(1));
+            let response = ActionResponse::progress("1", "Tested", 100);
+            rt.block_on(bridge_tx.send_action_response(response));
+        });
+
+        std::thread::spawn(move || loop {
+            let rt = Runtime::new().unwrap();
+            let test_route = ActionRoute { name: "redirect".to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "1".to_owned());
+            let response = ActionResponse::progress("1", "Redirected", 0);
+            rt.block_on(bridge_tx_clone.send_action_response(response));
+            std::thread::sleep(Duration::from_secs(1));
+            let response = ActionResponse::success("1");
+            rt.block_on(bridge_tx_clone.send_action_response(response));
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            device_id: None,
+            action_id: "1".to_string(),
+            kind: "test".to_string(),
+            name: "test".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        let status = recv_response(&package_rx);
+        assert_eq!(status.state, "Received".to_owned());
+
+        let status = recv_response(&package_rx);
+        assert!(status.is_done());
+        assert_eq!(status.state, "Tested");
+
+        let status = recv_response(&package_rx);
+        assert!(!status.is_completed());
+        assert_eq!(status.state, "Redirected");
+
+        let status = recv_response(&package_rx);
+        assert!(status.is_completed());
     }
 }
