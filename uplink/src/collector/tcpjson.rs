@@ -1,6 +1,6 @@
 use flume::{Receiver, RecvError, SendError};
 use futures_util::SinkExt;
-use log::{error, info};
+use log::{debug, error, info};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
@@ -115,7 +115,7 @@ impl TcpJson {
     }
 
     async fn handle_incoming_line(&self, line: String) -> Result<(), Error> {
-        info!("{}: Received line = {:?}", self.name, line);
+        debug!("{}: Received line = {:?}", self.name, line);
         let data = serde_json::from_str::<Payload>(&line)?;
 
         if data.stream == "action_status" {
