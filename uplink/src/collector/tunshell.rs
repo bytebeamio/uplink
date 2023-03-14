@@ -65,7 +65,7 @@ impl TunshellSession {
 
             //TODO(RT): Findout why this is spawned. We want to send other action's with shell?
             tokio::spawn(async move {
-                let response = ActionResponse::progress(&action_id, "ShellSpawned", 100);
+                let response = ActionResponse::progress(&action_id, "ShellSpawned", 90);
                 status_tx.send_action_response(response).await;
 
                 match client.start_session().compat().await {
