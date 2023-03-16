@@ -84,7 +84,7 @@ pub struct InstallerConfig {
     pub path: String,
     #[serde(default)]
     pub actions: Vec<ActionRoute>,
-    pub uplink_addr: String,
+    pub uplink_port: u16,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]

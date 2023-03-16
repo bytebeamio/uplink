@@ -104,7 +104,7 @@ pub mod config {
     [ota_installer]
     path = "/var/tmp/ota"
     actions = [{ name = "install_firmware", timeout = 60 }]
-    uplink_addr = "localhost:5555"
+    uplink_port = 5555
 "#;
 
     /// Reads config file to generate config struct and replaces places holders
