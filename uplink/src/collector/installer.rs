@@ -1,10 +1,8 @@
-use std::{fs::File, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
+use std::{fs::File, path::PathBuf, sync::Arc};
 
-use log::{debug, error, info};
+use log::error;
 use tar::Archive;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
-use tokio::{pin, select, time};
+use tokio::process::Command;
 
 use super::downloader::DownloadFile;
 use crate::base::{bridge::BridgeTx, InstallerConfig};
@@ -73,43 +71,9 @@ impl OTAInstaller {
     async fn installer(&self, action: &Action) -> Result<(), Error> {
         let script_path = PathBuf::from(self.config.path.clone()).join("update.sh");
         let mut cmd = Command::new("/bin/sh");
-        cmd.arg(script_path).arg(&action.action_id).kill_on_drop(true).stdout(Stdio::piped());
-        let child = cmd.spawn()?;
-
-        self.spawn_and_capture_stdout(child, action).await?;
+        cmd.arg(script_path).arg(&self.config.uplink_addr).arg(&action.action_id);
+        cmd.spawn()?;
 
         Ok(())
-    }
-
-    /// Capture stdout from running update script and push to cloud
-    pub async fn spawn_and_capture_stdout(
-        &self,
-        mut child: Child,
-        action: &Action,
-    ) -> Result<(), Error> {
-        let stdout = child.stdout.take().ok_or(Error::NoStdout)?;
-        let mut stdout = BufReader::new(stdout).lines();
-
-        let timeout = time::sleep(Duration::from_secs(10));
-        pin!(timeout);
-
-        loop {
-            select! {
-                Ok(Some(line)) = stdout.next_line() => {
-                    let status: ActionResponse = match serde_json::from_str(&line) {
-                        Ok(status) => status,
-                        Err(e) => ActionResponse::failure(&action.action_id, e.to_string()),
-                    };
-
-                    debug!("Action status: {:?}", status);
-                    self.bridge_tx.send_action_response(status).await;
-                }
-                status = child.wait() => {
-                    info!("Action done!! Status = {:?}", status);
-                    return Ok(())
-                },
-                _ = &mut timeout => return Ok(())
-            }
-        }
     }
 }
