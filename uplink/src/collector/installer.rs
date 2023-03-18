@@ -1,6 +1,6 @@
 use std::{fs::File, path::PathBuf, sync::Arc};
 
-use log::error;
+use log::{debug, error, warn};
 use tar::Archive;
 use tokio::process::Command;
 
@@ -60,9 +60,16 @@ impl OTAInstaller {
     fn extractor(&self, action: &Action) -> Result<(), Error> {
         let info: DownloadFile = serde_json::from_str(&action.payload)?;
         let path = info.download_path.ok_or(Error::MissingPath)?;
+
+        debug!("Extracting tar from:{path}; to: {}", self.config.path);
+        let dst = PathBuf::from(&self.config.path);
+        if dst.exists() {
+            warn!("Cleaning up {}", &self.config.path);
+            std::fs::remove_dir_all(&dst)?;
+        }
         let tar_gz = File::open(path)?;
         let mut archive = Archive::new(tar_gz);
-        archive.unpack(&self.config.path)?;
+        archive.unpack(dst)?;
 
         Ok(())
     }
@@ -70,11 +77,10 @@ impl OTAInstaller {
     // Run `update.sh` from extracted tarball
     async fn installer(&self, action: &Action) -> Result<(), Error> {
         let script_path = PathBuf::from(self.config.path.clone()).join("update.sh");
-        let mut cmd = Command::new("sh");
-        cmd.arg("-C")
-            .arg(script_path)
-            .arg(&action.action_id)
-            .arg(self.config.uplink_port.to_string());
+        debug!("Running script: {}/update.sh", self.config.path);
+
+        let mut cmd = Command::new("bash");
+        cmd.arg(script_path).arg(&action.action_id).arg(self.config.uplink_port.to_string());
         cmd.spawn()?;
 
         Ok(())
