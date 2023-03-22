@@ -13,7 +13,6 @@ pub(crate) mod stream;
 use crate::{base::ActionRoute, collector::utils::Streams, Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 use stream::Stream;
-use crate::base::DEFAULT_TIMEOUT;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -259,13 +258,6 @@ impl Bridge {
             self.clear_current_action();
             return;
         }
-        inflight_action.timeout = Box::pin(
-            time::sleep(
-                self.action_routes.get(&inflight_action.action.name)
-                    .map(|a| a.duration)
-                    .unwrap_or(Duration::from_secs(DEFAULT_TIMEOUT)),
-            )
-        );
 
         // Forward actions included in the config to the appropriate forward route, when
         // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
