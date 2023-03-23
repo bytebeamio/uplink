@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build: [linux, macos, linux-arm-gnu]
+        build: [linux, macos, linux-arm-gnu, windows]
         include:
           - build: linux
             os: ubuntu-latest
@@ -36,6 +36,10 @@ jobs:
             os: ubuntu-latest
             rust: stable
             target: aarch64-unknown-linux-gnu
+          - build: windows
+            os: ubuntu-latest
+            rust: stable
+            target: x86_64-pc-windows-gnu
     steps:
       - uses: actions/checkout@v3
 
