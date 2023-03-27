@@ -273,7 +273,7 @@ pub struct DownloadFile {
     #[serde(alias = "version")]
     file_name: String,
     /// Path to location in fs where file will be stored
-    download_path: Option<String>,
+    pub download_path: Option<String>,
 }
 
 #[cfg(test)]

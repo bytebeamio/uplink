@@ -7,6 +7,7 @@ use anyhow::Error;
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
 use collector::downloader::FileDownloader;
+use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellSession;
@@ -17,8 +18,8 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
-    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     pub use crate::base::{Config, Persistence, Stats};
+    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     use config::{Environment, File, FileFormat};
     use std::fs;
     use structopt::StructOpt;
@@ -53,6 +54,8 @@ pub mod config {
     }
 
     const DEFAULT_CONFIG: &str = r#"
+    action_redirections = { "update_firmware" = "install_firmware" }
+    
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -94,6 +97,14 @@ pub mod config {
     enabled = true
     process_names = ["uplink"]
     update_period = 30
+
+    [tcpapps.1]
+    port = 5555
+
+    [ota_installer]
+    path = "/var/tmp/ota"
+    actions = [{ name = "install_firmware", timeout = 60 }]
+    uplink_port = 5555
 "#;
 
     /// Reads config file to generate config struct and replaces places holders
@@ -322,9 +333,16 @@ impl Uplink {
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
 
-        #[cfg(any(target_os="linux", target_os="android"))]
+        let ota_installer = OTAInstaller::new(config.clone(), bridge_tx.clone());
+        thread::spawn(move || ota_installer.start());
+
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         {
-            let logger = collector::logging::LoggerInstance::new(config.clone(), self.data_tx.clone(), bridge_tx.clone());
+            let logger = collector::logging::LoggerInstance::new(
+                config.clone(),
+                self.data_tx.clone(),
+                bridge_tx.clone(),
+            );
             thread::spawn(move || logger.start());
         }
 
