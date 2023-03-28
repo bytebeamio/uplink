@@ -1,6 +1,8 @@
+use axum::{http::Request, routing::post, Router};
 use log::info;
-use rouille::input::plain_text_body;
-use rouille::{start_server, try_or_400, Response};
+use reqwest::StatusCode;
+
+use std::sync::Arc;
 
 use crate::ReloadHandle;
 
@@ -8,12 +10,21 @@ pub fn start(port: u16, handle: ReloadHandle) {
     let address = format!("0.0.0.0:{port}");
     info!("Starting tracing server: {address}");
 
-    start_server(address, move |request| {
-        let data = try_or_400!(plain_text_body(request));
-        info!("Reloading tracing filter = {data:?}");
-        if handle.reload(&data).is_err() {
-            return Response::empty_400();
-        }
-        Response::text(data)
-    });
+    let handle = Arc::new(handle);
+
+    Router::<(), String>::new().route(
+        "/logs",
+        post({
+            let handle = Arc::clone(&handle);
+            move |body| reload_loglevel(handle, body)
+        }),
+    );
+}
+
+async fn reload_loglevel(handle: Arc<ReloadHandle>, request: Request<String>) -> StatusCode {
+    if handle.reload(request.body()).is_err() {
+        return StatusCode::OK;
+    }
+
+    StatusCode::INTERNAL_SERVER_ERROR
 }
