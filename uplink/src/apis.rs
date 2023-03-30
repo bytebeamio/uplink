@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::ReloadHandle;
 
+#[tokio::main]
 pub async fn start(port: u16, handle: ReloadHandle) {
     let address = format!("0.0.0.0:{port}");
     info!("Starting tracing server: {address}");
