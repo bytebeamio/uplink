@@ -5,10 +5,10 @@ authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2021"
 
 [dependencies]
+axum = "0.6"
 structopt = "0.3"
 config = { version = "0.13.2", default-features = false, features = ["toml", "json"] }
 log = "0.4"
-rouille = "3.1.1"
 tracing = { version="0.1", features=["log"] }
 tracing-subscriber = { version="=0.3.14", features=["env-filter"] }
 time = "0.3"
