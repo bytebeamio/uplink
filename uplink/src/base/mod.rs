@@ -2,6 +2,9 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use crate::collector::logging::LoggerConfig;
+
 pub mod actions;
 pub mod bridge;
 pub mod monitor;
@@ -64,22 +67,24 @@ pub struct SimulatorConfig {
     /// path to directory containing files with gps paths to be used in simulation
     pub gps_paths: String,
     /// actions that are to be routed to simulator
-    pub actions: Vec<String>,
+    pub actions: Vec<ActionRoute>,
     #[serde(skip)]
     pub actions_subscriptions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct JournalctlConfig {
-    pub tags: Vec<String>,
-    pub priority: u8,
-    pub stream_size: Option<usize>,
+pub struct DownloaderConfig {
+    pub path: String,
+    #[serde(default)]
+    pub actions: Vec<ActionRoute>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct DownloaderConfig {
-    pub actions: Vec<String>,
+pub struct InstallerConfig {
     pub path: String,
+    #[serde(default)]
+    pub actions: Vec<ActionRoute>,
+    pub uplink_port: u16,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -103,10 +108,11 @@ pub struct MqttMetricsConfig {
     pub topic: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct AppConfig {
     pub port: u16,
-    pub actions: Vec<String>,
+    #[serde(default)]
+    pub actions: Vec<ActionRoute>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -123,6 +129,19 @@ pub struct MqttConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct ActionRoute {
+    pub name: String,
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+}
+
+impl From<&ActionRoute> for ActionRoute {
+    fn from(value: &ActionRoute) -> Self {
+        value.clone()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -133,7 +152,8 @@ pub struct Config {
     pub authentication: Option<Authentication>,
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
-    pub processes: Vec<String>,
+    #[serde(default)]
+    pub processes: Vec<ActionRoute>,
     #[serde(skip)]
     pub actions_subscription: String,
     pub persistence: Option<Persistence>,
@@ -143,13 +163,13 @@ pub struct Config {
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
     pub downloader: DownloaderConfig,
-    pub stats: Stats,
+    pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
+    pub ota_installer: InstallerConfig,
+    #[serde(default)]
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
-    #[cfg(target_os = "linux")]
-    pub journalctl: Option<JournalctlConfig>,
-    #[cfg(target_os = "android")]
-    pub run_logcat: bool,
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub logging: Option<LoggerConfig>,
 }

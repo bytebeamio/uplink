@@ -99,7 +99,7 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     ░░▀▀▀░█░░░░▀▀░▀▀▀░▀░░▀░▀░▀
     "#;
 
-    println!("{}", B);
+    println!("{B}");
     println!("    version: {}", commandline.version);
     println!("    profile: {}", commandline.profile);
     println!("    commit_sha: {}", commandline.commit_sha);
@@ -131,9 +131,16 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
         println!("    persistence_max_segment_size: {}", persistence.max_file_size);
         println!("    persistence_max_segment_count: {}", persistence.max_file_count);
     }
-    println!("    download_path: {}", config.downloader.path);
-    if config.stats.enabled {
-        println!("    processes: {:?}", config.stats.process_names);
+    println!(
+        "    downloader:\n\tpath: {}\n\tactions: {:?}",
+        config.downloader.path, config.downloader.actions
+    );
+    println!(
+        "    installer:\n\tpath: {}\n\tactions: {:?}",
+        config.ota_installer.path, config.ota_installer.actions
+    );
+    if config.system_stats.enabled {
+        println!("    processes: {:?}", config.system_stats.process_names);
     }
     if config.apis.enabled {
         println!("    tracing: http://localhost:{}", config.apis.port);
@@ -166,9 +173,8 @@ fn main() -> Result<(), Error> {
     }
 
     if config.apis.enabled {
-        let handle = reload_handle.clone();
         let port = config.apis.port;
-        thread::spawn(move || apis::start(port, handle));
+        thread::spawn(move || apis::start(port, reload_handle));
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()

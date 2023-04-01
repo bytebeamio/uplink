@@ -1,6 +1,6 @@
 use flume::{Receiver, RecvError, SendError};
 use futures_util::SinkExt;
-use log::{error, info, trace};
+use log::{debug, error, info};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
@@ -44,13 +44,7 @@ pub struct TcpJson {
 
 impl TcpJson {
     pub async fn new(name: String, config: AppConfig, bridge: BridgeTx) -> TcpJson {
-        let actions_rx = if config.actions.len() > 0 {
-            // TODO: Return Option<Receiver> while registering multiple actions
-            let actions_rx = bridge.register_action_routes(&config.actions).await;
-            Some(actions_rx)
-        } else {
-            None
-        };
+        let actions_rx = bridge.register_action_routes(&config.actions).await;
 
         // Note: We can register `TcpJson` itself as an app to direct actions to it
         TcpJson { name, config, bridge, actions_rx }
@@ -121,7 +115,7 @@ impl TcpJson {
     }
 
     async fn handle_incoming_line(&self, line: String) -> Result<(), Error> {
-        trace!("{}: Received line = {:?}", self.name, line);
+        debug!("{}: Received line = {:?}", self.name, line);
         let data = serde_json::from_str::<Payload>(&line)?;
 
         if data.stream == "action_status" {

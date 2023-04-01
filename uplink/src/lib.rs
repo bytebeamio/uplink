@@ -4,8 +4,10 @@ use std::thread;
 
 use anyhow::Error;
 
+use base::bridge::stream::Stream;
 use base::monitor::Monitor;
 use collector::downloader::FileDownloader;
+use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellSession;
@@ -16,8 +18,8 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
-    use crate::base::StreamConfig;
     pub use crate::base::{Config, Persistence, Stats};
+    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     use config::{Environment, File, FileFormat};
     use std::fs;
     use structopt::StructOpt;
@@ -52,13 +54,8 @@ pub mod config {
     }
 
     const DEFAULT_CONFIG: &str = r#"
-    run_logcat = true
-
-    # Whitelist of binaries which uplink can spawn as a process
-    # This makes sure that user is protected against random actions
-    # triggered from cloud.
-    actions = ["tunshell"]
-
+    action_redirections = { "update_firmware" = "install_firmware" }
+    
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -69,7 +66,7 @@ pub mod config {
 
     # Downloader config
     [downloader]
-    actions = ["update_firmware", "send_file"]
+    actions = [{ name = "update_firmware", timeout = 60 }, { name = "send_file", timeout = 60 }]
     path = "/var/tmp/ota-file"
 
     [stream_metrics]
@@ -96,11 +93,18 @@ pub mod config {
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     buf_size = 1
 
-    [stats]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stats/jsonarray"
-    enabled = false
+    [system_stats]
+    enabled = true
     process_names = ["uplink"]
     update_period = 30
+
+    [tcpapps.1]
+    port = 5555
+
+    [ota_installer]
+    path = "/var/tmp/ota"
+    actions = [{ name = "install_firmware", timeout = 60 }]
+    uplink_port = 5555
 "#;
 
     /// Reads config file to generate config struct and replaces places holders
@@ -139,7 +143,7 @@ pub mod config {
         //     }
         // }
 
-        if config.stats.enabled {
+        if config.system_stats.enabled {
             for stream_name in [
                 "uplink_disk_stats",
                 "uplink_network_stats",
@@ -151,10 +155,10 @@ pub mod config {
                 config.stream_metrics.blacklist.push(stream_name.to_owned());
                 let stream_config = StreamConfig {
                     topic: format!(
-                        "/tenants/{tenant_id}/devices/{device_id}/{stream_name}/jsonarray"
+                        "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
                     ),
-                    buf_size: config.stats.stream_size.unwrap_or(100),
-                    flush_period: u64::MAX,
+                    buf_size: config.system_stats.stream_size.unwrap_or(100),
+                    flush_period: DEFAULT_TIMEOUT,
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
             }
@@ -212,7 +216,7 @@ pub mod config {
 }
 
 pub use base::actions::{Action, ActionResponse};
-use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, Stream, StreamMetrics};
+use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::Config;
@@ -260,7 +264,7 @@ impl Uplink {
         let mut bridge = Bridge::new(
             self.config.clone(),
             self.data_tx.clone(),
-            self.stream_metrics_tx().clone(),
+            self.stream_metrics_tx(),
             self.action_rx.clone(),
             self.action_status(),
         );
@@ -329,7 +333,20 @@ impl Uplink {
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
 
-        if config.stats.enabled {
+        let ota_installer = OTAInstaller::new(config.clone(), bridge_tx.clone());
+        thread::spawn(move || ota_installer.start());
+
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            let logger = collector::logging::LoggerInstance::new(
+                config.clone(),
+                self.data_tx.clone(),
+                bridge_tx.clone(),
+            );
+            thread::spawn(move || logger.start());
+        }
+
+        if config.system_stats.enabled {
             let stat_collector = StatCollector::new(config.clone(), bridge_tx.clone());
             thread::spawn(move || stat_collector.start());
         }
@@ -340,7 +357,7 @@ impl Uplink {
 
         let monitor = Monitor::new(
             self.config.clone(),
-            mqtt_client.clone(),
+            mqtt_client,
             self.stream_metrics_rx.clone(),
             self.serializer_metrics_rx.clone(),
             mqtt_metrics_rx,

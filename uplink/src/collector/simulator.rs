@@ -391,7 +391,7 @@ pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payloa
 pub fn read_gps_paths(paths_dir: &str) -> Vec<Arc<Vec<Location>>> {
     (0..10)
         .map(|i| {
-            let file_name = format!("{}/path{}.json", paths_dir, i);
+            let file_name = format!("{paths_dir}/path{i}.json");
 
             let contents = fs::read_to_string(file_name).expect("Oops, failed ot read path");
 
@@ -569,8 +569,8 @@ pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
     }
 
     events.push(Event::ActionResponseEvent(ActionResponseEvent {
-        action_id: action_id.clone(),
-        device_id: device_id.clone(),
+        action_id,
+        device_id,
         progress: 100,
         status: String::from("Completed"),
         timestamp: now + Duration::from_secs(100),
@@ -609,12 +609,18 @@ pub async fn start(bridge_tx: BridgeTx, simulator_config: &SimulatorConfig) -> R
             time = Instant::now();
         }
 
-        select! {
-            action = actions_rx.recv_async() => {
-                let action = action?;
-                generate_action_events(action, &mut events);
+        if let Some(actions_rx) = &actions_rx {
+            select! {
+                action = actions_rx.recv_async() => {
+                    let action = action?;
+                    generate_action_events(action, &mut events);
+                }
+                _ = process_events(&mut events, &bridge_tx) => {
+                }
             }
-            _ = process_events(&mut events, &bridge_tx) => {
+        } else {
+            loop {
+                process_events(&mut events, &bridge_tx).await
             }
         }
     }

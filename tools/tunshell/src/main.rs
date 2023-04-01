@@ -47,7 +47,7 @@ fn main() {
 
     // parsing arguments
     let config: Config = Config::parse();
-    let relay = "https://".to_string() +  &config.relay + "/api/sessions";
+    let relay = "https://".to_string() + &config.relay + "/api/sessions";
     let publish_topic: String = "/tenants/".to_string() + &config.project_id + "/devices/" + &config.device_id + "/actions";
     let subscribe_topic: String = publish_topic.clone() + "/status";
 
@@ -75,7 +75,7 @@ fn main() {
             relay: "eu.relay.tunshell.com".to_string(),
             encryption: encrytion_key.clone(),
         })
-        .unwrap(),
+            .unwrap(),
     };
 
     std::thread::spawn(move || {
@@ -131,6 +131,6 @@ fn generate_encryption_key() -> String {
             .take(22)
             .collect::<Vec<u8>>(),
     )
-    .unwrap()
-    .to_owned()
+        .unwrap()
+        .to_owned()
 }

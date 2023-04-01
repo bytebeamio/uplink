@@ -6,6 +6,7 @@ use tokio::process::{Child, Command};
 use tokio::{pin, select, time};
 
 use crate::base::bridge::BridgeTx;
+use crate::base::ActionRoute;
 use crate::{ActionResponse, Package};
 
 use std::io;
@@ -84,8 +85,11 @@ impl ProcessHandler {
         Ok(())
     }
 
-    pub async fn start(mut self, processes: Vec<String>) -> Result<(), Error> {
-        let action_rx = self.bridge_tx.register_action_routes(processes).await;
+    pub async fn start(mut self, processes: Vec<ActionRoute>) -> Result<(), Error> {
+        let action_rx = match self.bridge_tx.register_action_routes(processes).await {
+            Some(r) => r,
+            _ => return Ok(()),
+        };
 
         loop {
             let action = action_rx.recv_async().await?;

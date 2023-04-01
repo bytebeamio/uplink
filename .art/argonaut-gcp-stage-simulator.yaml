@@ -1,0 +1,176 @@
+---
+version: "v1"
+appName: "simulator"
+image: "asia-south1-docker.pkg.dev/stagebb/argonaut-gar-adf1286c/simulator-stage"
+imageTag: "latest"
+
+
+argonaut:
+  env: stage
+  region: asia-south1
+  cluster: stage
+  imageRegistry: argonaut-gar-adf1286c # corresponding to the image that is to be deployed
+  serviceType: "stateless" # One of {stateful, stateless, managed}
+  repoName: uplink
+  git-provider: github
+persistentStorage:
+  []
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512M"
+  limits:
+    cpu: "1000m"
+    memory: "1500M"
+#########################################################################################
+# Everything below this is optional and advanced configuration                          #
+# and irrelevant in most scenarios.                                                     #
+#########################################################################################
+
+# Keda configuration
+externalServices: []
+podAnnotations:
+  {}
+  # iam.amazonaws.com/role: myapp-cluster
+# additionals labels
+labels: {
+  argonaut.dev/git-provider: github
+}
+
+# Allows you to load environment variables from kubernetes secret or config map
+envFrom: []
+# - secretRef:
+#     name: env-secret
+# - configMapRef:
+#     name: config-map
+# A list of secrets and their paths to mount inside the pod
+# This is useful for mounting certificates for security
+secretMounts:
+  []
+  # - name: beamd-cert
+  #   secretName: beamd-cert
+  #   path: /usr/share/myapp/config/certs
+sidecarResources:
+  {}
+  # limits:
+  #   cpu: "25m"
+  #   # memory: "128Mi"
+  # requests:
+  #   cpu: "25m"
+  #   memory: "128Mi"
+# networkHost: "0.0.0.0"
+# The default value of 1 will make sure that kubernetes won't allow more than 1
+# of your pods to be unavailable during maintenance
+# maxUnavailable: 25%
+updateStrategy: RollingUpdate
+# How long to wait for myapp to stop gracefully
+terminationGracePeriod: 30
+lifecycle:
+  {}
+  # preStop:
+  #   exec:
+  #     command: ["/bin/sh", "-c", "echo Hello from the postStart handler > /usr/share/message"]
+  # postStart:
+  #   exec:
+  #     command: ["/bin/sh", "-c", "echo Hello from the postStart handler > /usr/share/message"]
+rbac:
+  create: false
+  serviceAccountAnnotations: {}
+  serviceAccountName: ""
+# This is the PriorityClass settings as defined in
+# https://kubernetes.io/docs/concepts/configuration/pod-priority-preemption/#priorityclass
+priorityClassName: ""
+# By default this will make sure two pods don't end up on the same node
+# Changing this to a region would allow you to spread pods across regions
+# This doesn't apply if antiAffinity is not set
+antiAffinityTopologyKey: "kubernetes.io/hostname"
+# "hard" means that by default pods will only be scheduled if there are enough nodes for them
+# and that they will never end up on the same node. Setting this to "soft" will do this best effort
+antiAffinity: ""
+# This is the node affinity settings as defined in
+# https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#node-affinity-beta-feature
+nodeAffinity: {}
+# The default is to deploy all pods serially. By setting this to parallel all pods are started at
+# the same time when bootstrapping the cluster
+podManagementPolicy: "Parallel"
+podSecurityContext:
+  {}
+  # fsGroup: 1000
+  # runAsUser: 1000
+securityContext:
+  {}
+  # capabilities:
+  #   drop:
+  #     - ALL
+  # # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+## Use an alternate scheduler.
+## ref: https://kubernetes.io/docs/tasks/administer-cluster/configure-multiple-schedulers/
+##
+schedulerName: ""
+nodeSelector: {}
+tolerations: []
+initContainer:
+  enabled: false
+  # command: ["echo", "I am an initContainer"]
+  # image: nginx
+initResources:
+  {}
+  # limits:
+  #   cpu: "25m"
+  #   # memory: "128Mi"
+  # requests:
+  #   cpu: "25m"
+  #   memory: "128Mi"
+extraInitContainers:
+  []
+  # - name: do-something
+  #   image: busybox
+  #   command: ['do', 'something']
+extraVolumes:
+  []
+  # - name: extras
+  #   emptyDir: {}
+extraVolumeMounts:
+  []
+  # - name: extras
+  #   mountPath: /usr/share/extras
+  #   readOnly: true
+extraContainers:
+  []
+  # - name: do-something
+  #   image: busybox
+  #   command: ['do', 'something']
+# Allows you to add any config files in /usr/share/myapp/config/
+# as a ConfigMap
+extraConfig:
+  []
+  # - name: configName
+  #   path: "/path/to/config/folder/"
+  #   readOnly: true
+  #   data:
+  #     pokedex.yaml: |
+  #       pokemonName: Pikachu
+  #       pokemonType: Lightning
+  #     battle.yaml: |
+  #       pokemon1: Pikachu
+  #       pokemon2: MewTwo
+  # - name: configName2
+  #   path: "/path/to/config/anotherfolder/"
+  #   readOnly: true
+  #   data:
+  #     pokedex.yaml: |
+  #       pokemonName: Pikachu
+  #       pokemonType: Lightning
+  #     battle.yaml: |
+  #       pokemon1: Pikachu
+  #       pokemon2: MewTwo
+# Extra environment variables to append to this nodeGroup
+# This will be appended to the current 'env:' key. You can use any of the kubernetes env
+# syntax here
+extraEnvs: []
+#  - name: MY_ENVIRONMENT_VAR
+#    value: the_value_goes_here
+
+# Generated at 2023-03-25 13:22:35.980817533 +0000 UTC

@@ -49,7 +49,7 @@ use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
-use std::fs::{create_dir_all, File};
+use std::fs::{create_dir_all, File, remove_dir_all};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
@@ -131,7 +131,10 @@ impl FileDownloader {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) -> Result<(), Error> {
         let routes = &self.config.actions;
-        let download_rx = self.bridge_tx.register_action_routes(routes).await;
+        let download_rx = match self.bridge_tx.register_action_routes(routes).await {
+            Some(r) => r,
+            _ => return Ok(()),
+        };
         loop {
             self.sequence = 0;
             // The 0 sized channel only allows one action to be in execution at a time. Only one action is accepted below,
@@ -173,7 +176,7 @@ impl FileDownloader {
         let url = update.url.clone();
 
         // Create file to actually download into
-        let (file, file_path) = self.create_file(&action.name, &url, &update.version)?;
+        let (file, file_path) = self.create_file(&action.name, &update.file_name)?;
 
         // Create handler to perform download from URL
         // TODO: Error out for 1XX/3XX responses
@@ -193,16 +196,14 @@ impl FileDownloader {
     }
 
     /// Creates file to download into
-    fn create_file(&self, name: &str, url: &str, version: &str) -> Result<(File, String), Error> {
+    fn create_file(&self, name: &str, file_name: &str) -> Result<(File, String), Error> {
         // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
         let mut download_path = PathBuf::from(self.config.path.clone());
         download_path.push(name);
-        download_path.push(version);
+        let _ = remove_dir_all(&download_path);
         create_dir_all(&download_path)?;
 
         let mut file_path = download_path.to_owned();
-        let file_name =
-            url.split('/').last().ok_or_else(|| Error::FileNameMissing(url.to_owned()))?;
         file_path.push(file_name);
         let file_path = file_path.as_path();
         let file = File::create(file_path)?;
@@ -261,18 +262,18 @@ impl FileDownloader {
 pub struct DownloadFile {
     url: String,
     #[serde(alias = "content-length")]
-    content_length: usize,
-    #[serde(alias = "file_name")]
-    version: String,
+    content_length: usize,-
+    #[serde(alias = "version")]
+    file_name: String,
     /// Path to location in fs where file will be stored
-    download_path: Option<String>,
+    pub download_path: Option<String>,
 }
 
 #[cfg(test)]
 mod test {
     use std::{collections::HashMap, time::Duration};
 
-    use crate::base::{bridge::Event, DownloaderConfig, MqttConfig};
+    use crate::base::{bridge::Event, DownloaderConfig, MqttConfig, ActionRoute};
 
     use super::*;
     use serde_json::json;
@@ -297,12 +298,10 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let downloader_cfg = DownloaderConfig {
-            actions: vec!["firmware_update".to_owned()],
-            path: format!("{DOWNLOAD_DIR}/uplink-test"),
-        };
+        let downloader_cfg =
+            DownloaderConfig { actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }], path: format!("{DOWNLOAD_DIR}/uplink-test") };
         let config = config(downloader_cfg.clone());
-        let (events_tx, events_rx) = flume::bounded(1);
+        let (events_tx, events_rx) = flume::bounded(2);
         let bridge_tx = BridgeTx { events_tx };
 
         // Create channels to forward and push action_status on
@@ -315,12 +314,11 @@ mod test {
         let download_update = DownloadFile {
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
             content_length: 296658,
-            version: "1.0".to_string(),
+            file_name: "test.txt".to_string(),
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path =
-            Some(downloader_cfg.path + "/firmware_update/1.0/logo.png");
+        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
         let download_action = Action {
             device_id: None,
             action_id: "1".to_string(),
@@ -365,6 +363,58 @@ mod test {
             } else if status.is_failed() {
                 break;
             }
+        }
+    }
+
+    #[test]
+    fn multiple_actions_at_once() {
+        // Ensure path exists
+        std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
+        // Prepare config
+        let downloader_cfg = DownloaderConfig {
+            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
+            path: format!("{}/download", DOWNLOAD_DIR),
+        };
+        let config = config(downloader_cfg.clone());
+        let (events_tx, events_rx) = flume::bounded(3);
+        let bridge_tx = BridgeTx { events_tx };
+
+        // Create channels to forward and push action_status on
+        let downloader = FileDownloader::new(Arc::new(config), bridge_tx).unwrap();
+
+        // Start FileDownloader in separate thread
+        std::thread::spawn(|| downloader.start().unwrap());
+
+        // Create a firmware update action
+        let download_update = DownloadFile {
+            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
+            file_name: "1.0".to_string(),
+            download_path: None,
+        };
+        let mut expected_forward = download_update.clone();
+        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
+        let download_action = Action {
+            device_id: None,
+            action_id: "1".to_string(),
+            kind: "firmware_update".to_string(),
+            name: "firmware_update".to_string(),
+            payload: json!(download_update).to_string(),
+        };
+
+        let download_tx = match events_rx.recv().unwrap() {
+            Event::RegisterActionRoute(_, download_tx) => download_tx,
+            e => unreachable!("Unexpected event: {e:#?}"),
+        };
+
+        std::thread::sleep(Duration::from_millis(10));
+
+        // Send action to FileDownloader with Sender<Action>
+        download_tx.try_send(download_action.clone()).unwrap();
+
+        // Send action to FileDownloader immediately after, this must fail
+        match download_tx.try_send(download_action).unwrap_err() {
+            TrySendError::Full(_) => {}
+            TrySendError::Disconnected(_) => panic!("Unexpected disconnect"),
         }
     }
 }

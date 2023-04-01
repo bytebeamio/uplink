@@ -282,7 +282,7 @@ impl From<&mut Processor> for Payload {
         let Processor { sequence, timestamp, name, frequency, usage } = value;
 
         Payload {
-            stream: "uplink_process_stats".to_owned(),
+            stream: "uplink_processor_stats".to_owned(),
             device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
@@ -538,7 +538,7 @@ impl StatCollector {
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
     pub fn start(mut self) {
         loop {
-            std::thread::sleep(Duration::from_secs(self.config.stats.update_period));
+            std::thread::sleep(Duration::from_secs(self.config.system_stats.update_period));
 
             if let Err(e) = self.update() {
                 error!("Faced error while refreshing system statistics: {}", e);
@@ -610,9 +610,12 @@ impl StatCollector {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for (&id, p) in self.sys.processes() {
-            let name = p.name().to_owned();
+            let name = p.cmd()
+                .get(0)
+                .map(|s| s.to_string())
+                .unwrap_or(p.name().to_string());
 
-            if self.config.stats.process_names.contains(&name) {
+            if self.config.system_stats.process_names.contains(&name) {
                 let payload = self.processes.push(id.as_u32(), p, name, timestamp);
                 self.bridge_tx.send_payload_sync(payload);
             }

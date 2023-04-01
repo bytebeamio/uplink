@@ -2,20 +2,21 @@ use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::{process::Command, time::Duration};
 
+use flume::Sender;
+use serde::Deserialize;
+use crate::{Config, Package, Payload, Stream};
+
 #[cfg(target_os = "linux")]
 mod journalctl;
 #[cfg(target_os = "android")]
 mod logcat;
 
-use flume::{Receiver, Sender};
-
-#[cfg(target_os = "linux")]
-use crate::base::JournalctlConfig;
-use crate::{Action, Config, Package, Payload, Stream};
 #[cfg(target_os = "linux")]
 pub use journalctl::{new_journalctl, LogEntry};
 #[cfg(target_os = "android")]
 pub use logcat::{new_logcat, LogEntry};
+use crate::base::ActionRoute;
+use crate::base::bridge::BridgeTx;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -25,17 +26,18 @@ pub enum Error {
     Recv(#[from] flume::RecvError),
 }
 
-#[derive(Debug, serde::Deserialize)]
-pub struct LoggingConfig {
-    pub tags: Vec<String>,
-    pub min_level: u8,
-}
-
 pub struct LoggerInstance {
     config: Arc<Config>,
     log_stream: Stream<Payload>,
     kill_switch: Arc<Mutex<bool>>,
-    log_rx: Receiver<Action>,
+    bridge: BridgeTx,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LoggerConfig {
+    pub tags: Vec<String>,
+    pub min_level: u8,
+    pub stream_size: Option<usize>,
 }
 
 impl Drop for LoggerInstance {
@@ -49,12 +51,9 @@ impl LoggerInstance {
     pub fn new(
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
-        log_rx: Receiver<Action>,
+        bridge: BridgeTx,
     ) -> Self {
-        #[cfg(target_os = "linux")]
-        let buf_size = config.journalctl.as_ref().and_then(|c| c.stream_size).unwrap_or(32);
-        #[cfg(not(target_os = "linux"))]
-        let buf_size = 32;
+        let buf_size = config.logging.as_ref().and_then(|c| c.stream_size).unwrap_or(32);
 
         let log_stream = Stream::dynamic_with_size(
             "logs",
@@ -65,30 +64,30 @@ impl LoggerInstance {
         );
         let kill_switch = Arc::new(Mutex::new(true));
 
-        Self { config, log_stream, kill_switch, log_rx }
+        Self { config, log_stream, kill_switch, bridge }
     }
 
     /// On an android system, starts a logcat instance and a journalctl instance for a linux system that
     /// reports to the logs stream for a given device+project id, that logcat instance is killed when
     /// this object is dropped. On any other system, it's a noop.
-    pub fn start(mut self) -> Result<(), Error> {
-        #[cfg(target_os = "linux")]
-        if let Some(JournalctlConfig { priority, tags, stream_size: _ }) = &self.config.journalctl {
-            let config = LoggingConfig { tags: tags.clone(), min_level: *priority };
-            self.spawn_logger(new_journalctl(&config));
+    #[tokio::main(flavor = "current_thread")]
+    pub async fn start(mut self) -> Result<(), Error> {
+        if let Some(config) = &self.config.logging {
+            #[cfg(target_os = "linux")]
+            self.spawn_logger(new_journalctl(config));
+            #[cfg(target_os = "android")]
+            self.spawn_logger(new_logcat(config));
         }
 
-        #[cfg(target_os = "android")]
-        if self.config.run_logcat {
-            let config = LoggingConfig { tags: vec!["*".to_string()], min_level: 1 };
-            self.spawn_logger(new_logcat(&config));
-        }
+        let log_rx = self.bridge.register_action_route(ActionRoute {
+            name: "logging_config".to_string(),
+            timeout: 10,
+        }).await;
 
         loop {
-            let action = self.log_rx.recv()?;
-            let mut config = serde_json::from_str::<LoggingConfig>(action.payload.as_str())?;
+            let action = log_rx.recv()?;
+            let mut config = serde_json::from_str::<LoggerConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
-            log::info!("restarting journalctl with following config: {:?}", config);
 
             // Ensure any logger child process created earlier gets killed
             self.kill_last();
@@ -157,7 +156,7 @@ impl LoggerInstance {
                         continue;
                     }
                 };
-                log::debug!("Log entry {:?}", payload);
+                log::trace!("Log entry {:?}", payload);
                 log_stream.push(payload).unwrap();
                 log_index += 1;
             }
