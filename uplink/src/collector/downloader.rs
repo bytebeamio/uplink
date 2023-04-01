@@ -49,7 +49,7 @@ use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
-use std::fs::{create_dir_all, File, remove_dir_all};
+use std::fs::{create_dir_all, remove_dir_all, File};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
@@ -262,7 +262,7 @@ impl FileDownloader {
 pub struct DownloadFile {
     url: String,
     #[serde(alias = "content-length")]
-    content_length: usize,-
+    content_length: usize,
     #[serde(alias = "version")]
     file_name: String,
     /// Path to location in fs where file will be stored
@@ -271,12 +271,13 @@ pub struct DownloadFile {
 
 #[cfg(test)]
 mod test {
+    use flume::TrySendError;
+    use serde_json::json;
+
     use std::{collections::HashMap, time::Duration};
 
-    use crate::base::{bridge::Event, DownloaderConfig, MqttConfig, ActionRoute};
-
     use super::*;
-    use serde_json::json;
+    use crate::base::{bridge::Event, ActionRoute, DownloaderConfig, MqttConfig};
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 
@@ -298,8 +299,10 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let downloader_cfg =
-            DownloaderConfig { actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }], path: format!("{DOWNLOAD_DIR}/uplink-test") };
+        let downloader_cfg = DownloaderConfig {
+            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
+            path: format!("{DOWNLOAD_DIR}/uplink-test"),
+        };
         let config = config(downloader_cfg.clone());
         let (events_tx, events_rx) = flume::bounded(2);
         let bridge_tx = BridgeTx { events_tx };
@@ -387,6 +390,7 @@ mod test {
 
         // Create a firmware update action
         let download_update = DownloadFile {
+            content_length: 0,
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
             file_name: "1.0".to_string(),
             download_path: None,
