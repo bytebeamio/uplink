@@ -348,7 +348,7 @@ pub struct BridgeTx {
 
 impl BridgeTx {
     pub async fn register_action_route(&self, route: ActionRoute) -> Receiver<Action> {
-        let (actions_tx, actions_rx) = bounded(0);
+        let (actions_tx, actions_rx) = bounded(1);
         let duration = Duration::from_secs(route.timeout);
         let action_router = ActionRouter { actions_tx, duration };
         let event = Event::RegisterActionRoute(route.name, action_router);
@@ -367,7 +367,7 @@ impl BridgeTx {
             return None;
         }
 
-        let (actions_tx, actions_rx) = bounded(0);
+        let (actions_tx, actions_rx) = bounded(1);
 
         for route in routes {
             let duration = Duration::from_secs(route.timeout);
