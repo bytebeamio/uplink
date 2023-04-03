@@ -610,10 +610,7 @@ impl StatCollector {
         let timestamp =
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for (&id, p) in self.sys.processes() {
-            let name = p.cmd()
-                .get(0)
-                .map(|s| s.to_string())
-                .unwrap_or(p.name().to_string());
+            let name = p.cmd().get(0).map(|s| s.to_string()).unwrap_or(p.name().to_string());
 
             if self.config.system_stats.process_names.contains(&name) {
                 let payload = self.processes.push(id.as_u32(), p, name, timestamp);

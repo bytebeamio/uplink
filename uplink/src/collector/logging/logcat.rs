@@ -1,7 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
 use super::LoggerConfig;
 use crate::Payload;
 
@@ -90,12 +91,18 @@ lazy_static::lazy_static! {
 pub fn parse_logcat_time(s: &str) -> Option<u64> {
     let matches = LOGCAT_TIME_RE.captures(s)?;
     let date = time::OffsetDateTime::now_utc()
-        .replace_month(matches.get(1)?.as_str().parse::<u8>().ok()?.try_into().ok()?).ok()?
-        .replace_day(matches.get(2)?.as_str().parse::<u8>().ok()?).ok()?
-        .replace_hour(matches.get(3)?.as_str().parse::<u8>().ok()?).ok()?
-        .replace_minute(matches.get(4)?.as_str().parse::<u8>().ok()?).ok()?
-        .replace_second(matches.get(5)?.as_str().parse::<u8>().ok()?).ok()?
-        .replace_microsecond(matches.get(6)?.as_str().parse::<u32>().ok()? * 1_000_000).ok()?;
+        .replace_month(matches.get(1)?.as_str().parse::<u8>().ok()?.try_into().ok()?)
+        .ok()?
+        .replace_day(matches.get(2)?.as_str().parse::<u8>().ok()?)
+        .ok()?
+        .replace_hour(matches.get(3)?.as_str().parse::<u8>().ok()?)
+        .ok()?
+        .replace_minute(matches.get(4)?.as_str().parse::<u8>().ok()?)
+        .ok()?
+        .replace_second(matches.get(5)?.as_str().parse::<u8>().ok()?)
+        .ok()?
+        .replace_microsecond(matches.get(6)?.as_str().parse::<u32>().ok()? * 1_000_000)
+        .ok()?;
     Some(date.unix_timestamp() as _)
 }
 
@@ -106,7 +113,8 @@ impl LogEntry {
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_millis() as u64;
-        let log_timestamp = parse_logcat_time(matches.get(1).ok_or(Error::Timestamp)?.as_str()).unwrap_or(timestamp);
+        let log_timestamp = parse_logcat_time(matches.get(1).ok_or(Error::Timestamp)?.as_str())
+            .unwrap_or(timestamp);
         let level =
             LogLevel::from_str(matches.get(2).ok_or(Error::Level)?.as_str()).ok_or(Error::Level)?;
         let tag = matches.get(3).ok_or(Error::Tag)?.as_str().to_string();
