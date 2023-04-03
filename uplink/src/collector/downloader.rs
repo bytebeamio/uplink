@@ -44,7 +44,7 @@ use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
-use std::fs::{create_dir_all, remove_dir_all, File};
+use std::fs::{create_dir_all, metadata, remove_dir_all, File};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
@@ -188,15 +188,17 @@ impl FileDownloader {
 
     /// Creates file to download into
     fn create_file(&self, name: &str, file_name: &str) -> Result<(File, String), Error> {
-        // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
+        // Ensure that directory for downloading file into, exists
         let mut download_path = PathBuf::from(self.config.path.clone());
         download_path.push(name);
-        let _ = remove_dir_all(&download_path);
         create_dir_all(&download_path)?;
 
         let mut file_path = download_path.to_owned();
         file_path.push(file_name);
         let file_path = file_path.as_path();
+        if metadata(&file_path)?.is_dir() {
+            remove_dir_all(&file_path)?;
+        }
         let file = File::create(file_path)?;
         let file_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
 
