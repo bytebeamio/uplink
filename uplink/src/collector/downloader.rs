@@ -160,7 +160,7 @@ impl FileDownloader {
             DownloadFile { file_name, .. } if file_name.is_empty() => {
                 return Err(Error::EmptyFileName)
             }
-            DownloadFile { content_length: 0, .. } => return Err(Error::EmptyFile),
+            // DownloadFile { content_length: 0, .. } => return Err(Error::EmptyFile),
             _ => {}
         }
 
