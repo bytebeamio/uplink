@@ -1,46 +1,41 @@
-//! Contains definitions necessary to download files such as OTA updates, as notified by a download file [`Action`]
+//! Contains the handler and definitions necessary to download files such as OTA updates, as notified by a download file [`Action`]
 //!
-//! The thread running [`Actions`] forwards the appropriate `Action`s to the [`FileDownloader`] with a _rendezvous channel_(A channel bounded to 0).
-//! The `Action` is sent only when a receiver is awaiting on the otherside and fails otherwise. This allows us to instantly recognize that another
-//! download is currently being performed.
+//! The thread running [`Bridge`] forwards the appropriate `Action`s to the [`FileDownloader`].
 //!
 //! Download file `Action`s contain JSON formatted [`payload`] which can be deserialized into an object of type [`DownloadFile`].
-//! This object contains information such as the `url` where the download file is accessible from, the `version` number associated
-//! with the downloaded file and a field which must be updated with the location in file-system where the file is stored into.
+//! This object contains information such as the `url` where the download file is accessible from, the `file_name` or `version` number
+//! associated with the downloaded file and a field which must be updated with the location in file-system where the file is stored into.
 //!
 //! The `FileDownloader` also updates the state of a downloading `Action` using periodic [`ActionResponse`]s containing
 //! progress information. On completion of a download, the received `Action`'s `payload` is updated to contain information
-//! about where the file was downloaded into, within the file-system.
+//! about where the file was downloaded into, within the file-system. This action is then sent back to bridge as part of
+//! the final "Completed" response through use of the [`done_response`].
 //!
 //! ```text
-//! ┌───────┐                                              ┌──────────────┐
-//! │Actions│                                              │FileDownloader│
-//! └───┬───┘                                              └──────┬───────┘
-//!     │                                                         │
-//!     │ .try_send()                                     .recv() │
-//!     │  1  ┌──────────────┐             ┌────────────────┐  1  │
-//!     ├─────►Sender<Action>├──────x──────►Receiver<Action>├────►│───────┐
-//!     │     └───▲─────▲────┘             └───────┬────────┘     │       │          ┌─────────────┐
-//!     │  2      │     │                          │              ├──ActionResponse──►action_status│
-//!     ├─Action──┘     │                          │              │       │          └─────────────┘
-//!     │               │                          │              ├───────┤
-//!     │  3            │                          │              │-------│-┐
-//!     ├───────────────┘                          │              │   1   │ '
-//!     │                                          │     3        │       │ '          ┌─────────┐
-//!     │                                          └─────────────►│───────┤ ├--Action--►bridge_tx│
-//!     │                                                         │       │ '          └─────────┘
-//!     │                                                         ├───────┘ '
-//!     │                                                         │---------┘
-//!                                                                   3
+//!                                     ┌──────────────┐
+//!                                     │FileDownloader│
+//!                                     └──────┬───────┘
+//!                                            │
+//!                              .recv_async() │
+//!     ┌──────┐        ┌────────────────┐  1  │
+//!     │Bridge├────────►Receiver<Action>├────►│───────┐
+//!     └──────┘        └───────┬────────┘     │       │          ┌─────────────┐
+//!                             │              ├──ActionResponse──►action_status│
+//!                             │              │       │     '    └─────────────┘
+//!                             │              ├───────┤     '
+//!                             │              │-------│-----┤
+//!                             │              │   1   │     ' done_response
+//!                             │     3        │       │     '
+//!                             └─────────────►│───────┤     '
+//!                                            │       │     '          
+//!                                            ├───────┘     '
+//!                                            └-------------┘
+//!                                                     3
 //! ```
 //!
-//! **NOTE:** The [`Actions`] thread will block between sending a `Some(..)` and a `None` onto the download channel.
-//!
-//! [`Actions`]: crate::Actions
+//! [`Bridge`]: crate::Bridge
 //! [`payload`]: Action#structfield.payload
-//! [`send()`]: Sender::send()
-//! [`try_send()`]: Sender::try_send()
-//! [`Error::Downloading`]: crate::base::actions::Error::Downloading
+//! [`done_response`]: ActionResponse#structfield.done_response
 
 use bytes::BytesMut;
 use flume::RecvError;
@@ -99,8 +94,7 @@ pub struct FileDownloader {
 }
 
 impl FileDownloader {
-    /// Create a struct to manage downloads, runs on a separate thread. Also returns a [`Sender`]
-    /// end of a "One" channel to send associated actions onto.
+    /// Creates a handler for download actions within uplink and uses HTTP to download files.
     pub fn new(config: Arc<Config>, bridge_tx: BridgeTx) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
@@ -127,7 +121,7 @@ impl FileDownloader {
     }
 
     /// Spawn a thread to handle downloading files as notified by download actions and for forwarding the updated actions
-    /// to bridge for further processing, e.g. OTA update installation.
+    /// back to bridge for further processing, e.g. OTA update installation.
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) -> Result<(), Error> {
         let routes = &self.config.actions;
@@ -137,12 +131,11 @@ impl FileDownloader {
         };
         loop {
             self.sequence = 0;
-            // The 0 sized channel only allows one action to be in execution at a time. Only one action is accepted below,
-            // all download actions before and after, till the next recv() won't get executed and will be reported to cloud.
             let action = download_rx.recv_async().await?;
             self.action_id = action.action_id.clone();
 
             let mut error = None;
+            // NOTE: retry mechanism tries atleast 3 times before returning an error
             for _ in 0..3 {
                 match self.run(action.clone()).await {
                     Ok(_) => {
