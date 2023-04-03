@@ -63,8 +63,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Error receiving action: {0}")]
     Recv(#[from] RecvError),
-    #[error("Missing file name: {0}")]
-    FileNameMissing(String),
+    #[error("Empty file name")]
+    EmptyFileName,
     #[error("Missing file path")]
     FilePathMissing,
     #[error("Download failed, content length zero")]
@@ -156,6 +156,14 @@ impl FileDownloader {
 
         // Extract url information from action payload
         let mut update = serde_json::from_str::<DownloadFile>(&action.payload)?;
+        match update {
+            DownloadFile { file_name, .. } if file_name.is_empty() => {
+                return Err(Error::EmptyFileName)
+            }
+            DownloadFile { content_length: 0, .. } => return Err(Error::EmptyFile),
+            _ => {}
+        }
+
         let url = update.url.clone();
 
         // Create file to actually download into
