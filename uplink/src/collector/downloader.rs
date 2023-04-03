@@ -44,7 +44,7 @@ use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
-use std::fs::{create_dir_all, File, remove_dir_all};
+use std::fs::{create_dir_all, remove_dir_all, File};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
@@ -61,8 +61,6 @@ pub enum Error {
     Reqwest(#[from] reqwest::Error),
     #[error("File io Error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Error forwarding download Action to bridge: {0}")]
-    TrySend(Box<flume::TrySendError<Action>>),
     #[error("Error receiving action: {0}")]
     Recv(#[from] RecvError),
     #[error("Missing file name: {0}")]
@@ -71,14 +69,6 @@ pub enum Error {
     FilePathMissing,
     #[error("Download failed, content length zero")]
     EmptyFile,
-    #[error("Couldn't install apk")]
-    InstallationError(String),
-}
-
-impl From<flume::TrySendError<Action>> for Error {
-    fn from(e: flume::TrySendError<Action>) -> Self {
-        Self::TrySend(Box::new(e))
-    }
 }
 
 /// This struct contains the necessary components to download and store file as notified by a download file
@@ -273,7 +263,7 @@ pub struct DownloadFile {
 mod test {
     use std::{collections::HashMap, time::Duration};
 
-    use crate::base::{bridge::Event, DownloaderConfig, MqttConfig, ActionRoute};
+    use crate::base::{bridge::Event, ActionRoute, DownloaderConfig, MqttConfig};
 
     use super::*;
     use flume::TrySendError;
@@ -299,8 +289,10 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let downloader_cfg =
-            DownloaderConfig { actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }], path: format!("{DOWNLOAD_DIR}/uplink-test") };
+        let downloader_cfg = DownloaderConfig {
+            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
+            path: format!("{DOWNLOAD_DIR}/uplink-test"),
+        };
         let config = config(downloader_cfg.clone());
         let (events_tx, events_rx) = flume::bounded(2);
         let bridge_tx = BridgeTx { events_tx };
