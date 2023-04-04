@@ -155,14 +155,13 @@ impl FileDownloader {
         self.bridge_tx.send_action_response(status).await;
 
         // Extract url information from action payload
-        let mut update = serde_json::from_str::<DownloadFile>(&action.payload)?;
-        match update {
+        let mut update = match serde_json::from_str::<DownloadFile>(&action.payload)? {
             DownloadFile { file_name, .. } if file_name.is_empty() => {
                 return Err(Error::EmptyFileName)
             }
             // DownloadFile { content_length: 0, .. } => return Err(Error::EmptyFile),
-            _ => {}
-        }
+            u => u,
+        };
 
         let url = update.url.clone();
 
