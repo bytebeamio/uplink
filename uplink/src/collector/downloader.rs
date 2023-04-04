@@ -195,8 +195,11 @@ impl FileDownloader {
         let mut file_path = download_path.to_owned();
         file_path.push(file_name);
         let file_path = file_path.as_path();
-        if metadata(file_path)?.is_dir() {
-            remove_dir_all(file_path)?;
+        // NOTE: if file_path is occupied by a directory due to previous working of uplink, remove it
+        if let Ok(f) = metadata(file_path) {
+            if f.is_dir() {
+                remove_dir_all(file_path)?;
+            }
         }
         let file = File::create(file_path)?;
         let file_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
