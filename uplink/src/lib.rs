@@ -53,9 +53,7 @@ pub mod config {
         pub modules: Vec<String>,
     }
 
-    const DEFAULT_CONFIG: &str = r#"
-    action_redirections = { "update_firmware" = "install_firmware" }
-    
+    const DEFAULT_CONFIG: &str = r#"    
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -101,7 +99,7 @@ pub mod config {
     [ota_installer]
     path = "/var/tmp/ota"
     actions = [{ name = "install_firmware", timeout = 60 }]
-    uplink_port = 5555
+    uplink_port = 0
 "#;
 
     /// Reads config file to generate config struct and replaces places holders
