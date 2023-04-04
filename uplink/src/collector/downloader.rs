@@ -49,7 +49,7 @@ use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
-use std::fs::{create_dir_all, File, remove_dir_all};
+use std::fs::{create_dir_all, remove_dir_all, File};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
@@ -182,7 +182,7 @@ impl FileDownloader {
         // TODO: Error out for 1XX/3XX responses
         let resp = self.client.get(&url).send().await?.error_for_status()?;
         info!("Downloading from {} into {}", url, file_path);
-        self.download(resp, file).await?;
+        self.download(resp, file, update.content_length).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.download_path = Some(file_path.clone());
@@ -213,14 +213,12 @@ impl FileDownloader {
     }
 
     /// Downloads from server and stores into file
-    async fn download(&mut self, resp: Response, mut file: File) -> Result<(), Error> {
-        // Error out in case of 0 sized files, but handle situation where file size is not
-        // reported by the webserver in response by incrementing count 0..100 over and over.
-        let content_length = match resp.content_length() {
-            None => None,
-            Some(0) => return Err(Error::EmptyFile),
-            Some(l) => Some(l as usize),
-        };
+    async fn download(
+        &mut self,
+        resp: Response,
+        mut file: File,
+        content_length: usize,
+    ) -> Result<(), Error> {
         let mut downloaded = 0;
         let mut next = 1;
         let mut stream = resp.bytes_stream();
@@ -231,18 +229,11 @@ impl FileDownloader {
             downloaded += chunk.len();
             file.write_all(&chunk)?;
 
-            // NOTE: ensure lesser frequency of action responses, once every 100KB
-            if downloaded / 102400 > next {
+            // Calculate percentage on the basis of content_length
+            let percentage = 99 * downloaded / content_length;
+            // NOTE: ensure lesser frequency of action responses, once every percentage points
+            if percentage >= next {
                 next += 1;
-                // Calculate percentage on the basis of content_length if available,
-                // else increment 0..100 till task is completed.
-                let percentage = match content_length {
-                    Some(content_length) => 100 * downloaded / content_length,
-                    None => {
-                        downloaded = (downloaded + 1) % 101;
-                        downloaded
-                    }
-                };
 
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
@@ -270,6 +261,8 @@ impl FileDownloader {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct DownloadFile {
     url: String,
+    #[serde(alias = "content-length")]
+    content_length: usize,
     #[serde(alias = "version")]
     file_name: String,
     /// Path to location in fs where file will be stored
@@ -278,13 +271,13 @@ pub struct DownloadFile {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashMap, time::Duration};
-
-    use crate::base::{bridge::Event, DownloaderConfig, MqttConfig, ActionRoute};
-
-    use super::*;
     use flume::TrySendError;
     use serde_json::json;
+
+    use std::{collections::HashMap, time::Duration};
+
+    use super::*;
+    use crate::base::{bridge::Event, ActionRoute, DownloaderConfig, MqttConfig};
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 
@@ -306,8 +299,10 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let downloader_cfg =
-            DownloaderConfig { actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }], path: format!("{DOWNLOAD_DIR}/uplink-test") };
+        let downloader_cfg = DownloaderConfig {
+            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
+            path: format!("{DOWNLOAD_DIR}/uplink-test"),
+        };
         let config = config(downloader_cfg.clone());
         let (events_tx, events_rx) = flume::bounded(2);
         let bridge_tx = BridgeTx { events_tx };
@@ -321,6 +316,7 @@ mod test {
         // Create a firmware update action
         let download_update = DownloadFile {
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
+            content_length: 296658,
             file_name: "test.txt".to_string(),
             download_path: None,
         };
@@ -350,20 +346,25 @@ mod test {
             e => unreachable!("Unexpected event: {e:#?}"),
         };
         assert_eq!(status.state, "Downloading");
+        let mut progress = 0;
 
         // Collect and ensure forwarded action contains expected info
         loop {
-            match dbg!(events_rx.recv().unwrap()) {
-                Event::ActionResponse(ActionResponse {
-                    done_response: Some(Action { payload, .. }),
-                    ..
-                }) => {
-                    let forward: DownloadFile = serde_json::from_str(&payload).unwrap();
-                    assert_eq!(forward, expected_forward);
-                    break;
-                }
-                Event::ActionResponse(response) if response.is_failed() => break,
-                _ => {}
+            let status = match events_rx.recv().unwrap() {
+                Event::ActionResponse(status) => status,
+                e => unreachable!("Unexpected event: {e:#?}"),
+            };
+
+            assert!(progress <= status.progress);
+            progress = status.progress;
+
+            if status.is_done() {
+                let fwd_action = status.done_response.unwrap();
+                let fwd = serde_json::from_str(&fwd_action.payload).unwrap();
+                assert_eq!(expected_forward, fwd);
+                break;
+            } else if status.is_failed() {
+                break;
             }
         }
     }
@@ -389,6 +390,7 @@ mod test {
 
         // Create a firmware update action
         let download_update = DownloadFile {
+            content_length: 0,
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
             file_name: "1.0".to_string(),
             download_path: None,
