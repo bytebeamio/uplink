@@ -99,12 +99,12 @@ pub mod config {
     update_period = 30
 
     [tcpapps.1]
-    port = 5555
+    port = 6789
 
     [ota_installer]
     path = "/var/tmp/ota"
     actions = [{ name = "install_firmware", timeout = 60 }]
-    uplink_port = 5555
+    uplink_port = 9876
 "#;
 
     /// Reads config file to generate config struct and replaces places holders
