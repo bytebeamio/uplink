@@ -1,12 +1,13 @@
 #!/bin/bash
 
 start_devices() {
-    limit=${1:?"Missing device count"}
+    start=${1:?"Missing start id"}
+    stop=${2:?"Missing end id"}
     kill_devices;
     mkdir -p devices
 
     echo "Starting uplink and simulator"
-    for id in $(seq 1 $limit)
+    for id in $(seq $start $stop)
     do 
         download_auth_config $id
         create_uplink_config $id
