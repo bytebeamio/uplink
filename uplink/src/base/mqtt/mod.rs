@@ -10,8 +10,8 @@ use std::path::Path;
 
 use crate::{Action, Config};
 use rumqttc::{
-    AsyncClient, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS, TlsConfiguration,
-    Transport,
+    AsyncClient, Event, EventLoop, Incoming, Key, MqttOptions, NetworkOptions, Publish, QoS,
+    TlsConfiguration, Transport,
 };
 use std::sync::Arc;
 
@@ -58,8 +58,13 @@ impl Mqtt {
         metrics_tx: Sender<MqttMetrics>,
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
-        let options = mqttoptions(&config);
-        let (client, eventloop) = AsyncClient::new(options, 10);
+        let mqtt_options = mqttoptions(&config);
+        let mut network_options = NetworkOptions::new();
+        network_options.set_connection_timeout(15);
+
+        let (client, mut eventloop) = AsyncClient::new(mqtt_options, 10);
+        eventloop.set_network_options(network_options);
+
         let mut actions_subscriptions = vec![config.actions_subscription.clone()];
         if let Some(sim_cfg) = &config.simulator {
             actions_subscriptions.extend_from_slice(&sim_cfg.actions_subscriptions);
