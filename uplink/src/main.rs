@@ -45,10 +45,7 @@ use std::sync::Arc;
 use std::thread;
 
 use anyhow::Error;
-
 use structopt::StructOpt;
-use tokio::task::JoinSet;
-
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
 use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
@@ -184,19 +181,15 @@ fn main() -> Result<(), Error> {
         .unwrap();
 
     rt.block_on(async {
-        let mut handles = JoinSet::new();
         for (app, cfg) in config.tcpapps.iter() {
             let tcpjson = TcpJson::new(app.to_owned(), cfg.clone(), bridge.clone()).await;
-            handles.spawn(async move {
+            tokio::task::spawn(async move {
                 if let Err(e) = tcpjson.start().await {
                     error!("App failed. Error = {:?}", e);
                 }
             });
         }
-
-        while let Some(Err(e)) = handles.join_next().await {
-            error!("App failed. Error = {:?}", e);
-        }
     });
-    Ok(())
+
+    loop {}
 }

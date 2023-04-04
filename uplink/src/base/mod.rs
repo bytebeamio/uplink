@@ -150,6 +150,7 @@ pub struct Config {
     #[serde(default)]
     pub apis: TracingConfig,
     pub authentication: Option<Authentication>,
+    #[serde(default)]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
     #[serde(default)]

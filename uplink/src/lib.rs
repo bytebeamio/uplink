@@ -98,9 +98,6 @@ pub mod config {
     process_names = ["uplink"]
     update_period = 30
 
-    [tcpapps.1]
-    port = 5555
-
     [ota_installer]
     path = "/var/tmp/ota"
     actions = [{ name = "install_firmware", timeout = 60 }]
