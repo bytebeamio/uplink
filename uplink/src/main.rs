@@ -43,6 +43,7 @@ mod apis;
 
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use anyhow::Error;
 use structopt::StructOpt;
@@ -191,5 +192,7 @@ fn main() -> Result<(), Error> {
         }
     });
 
-    loop {}
+    loop {
+        thread::sleep(Duration::from_secs(100));
+    }
 }
