@@ -212,11 +212,11 @@ impl FileDownloader {
             downloaded += chunk.len();
             file.write_all(&chunk)?;
 
-            // NOTE: ensure lesser frequency of action responses, once every 100KB
-            if downloaded / 100 * 1024 > next {
+            // Calculate percentage on the basis of content_length
+            let percentage = 99 * downloaded / content_length;
+            // NOTE: ensure lesser frequency of action responses, once every percentage points
+            if percentage >= next {
                 next += 1;
-                // Calculate percentage on the basis of content_length
-                let percentage = 99 * downloaded / content_length;
 
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
