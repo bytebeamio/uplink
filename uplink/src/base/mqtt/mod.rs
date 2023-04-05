@@ -60,7 +60,7 @@ impl Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let mqtt_options = mqttoptions(&config);
         let mut network_options = NetworkOptions::new();
-        network_options.set_connection_timeout(15);
+        network_options.set_connection_timeout(30);
 
         let (client, mut eventloop) = AsyncClient::new(mqtt_options, 10);
         eventloop.set_network_options(network_options);
@@ -141,7 +141,7 @@ impl Mqtt {
                 }
                 Err(e) => {
                     self.metrics.add_reconnection();
-                    self.check_disconnection_metrics();
+                    self.check_disconnection_metrics(e.to_string());
                     debug!("Connection error = {:?}", e.to_string());
                     tokio::time::sleep(Duration::from_secs(3)).await;
                     continue;
@@ -177,11 +177,11 @@ impl Mqtt {
     }
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
-    pub fn check_disconnection_metrics(&mut self) {
+    pub fn check_disconnection_metrics(&mut self, error: String) {
         let metrics = self.metrics.clone();
         error!(
-            "{:>35}: reconnects = {:<3} publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3}",
-            "disconnected",
+            "disconnected {:>20}: reconnects = {:<3} publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3}",
+            error,
             metrics.connection_retries,
             metrics.publishes,
             metrics.pubacks,

@@ -3,47 +3,47 @@
 set -e
 
 function proxies() {
-  http http://localhost:8474/proxies
+	http http://localhost:8474/proxies
 }
 
 function clean() {
-  http DELETE http://localhost:8474/proxies/toxic-broker
+	http DELETE http://localhost:8474/proxies/toxic-broker
 }
 
 function reset {
-  http POST http://localhost:8474/reset
+	http POST http://localhost:8474/reset
 }
 
 # Example
 # proxy 4444 cloud.bytebeam.io:1883
 # https://github.com/Shopify/toxiproxy#http-api
 function proxy() {
-  data='{
+	data='{
     "name":"toxic-broker",
     "enabled":true,
-    "listen":"0.0.0.0:1883",
-    "upstream":"stage.bytebeam.io:1883"
+    "listen":"0.0.0.0:8883",
+    "upstream":"cloud.bytebeam.io:8883"
   }'
 
-  echo $data | http http://localhost:8474/proxies
+	echo $data | http http://localhost:8474/proxies
 }
 
 function slowdown() {
-  data='{
+	data='{
     "name": "slowdown",
     "type": "bandwidth",
     "toxicity": 1,
     "stream": "downstream",
     "attributes": {
-        "rate": 1
+        "rate": 0
     }
   }'
 
-  echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
+	echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
 }
 
 function slowup() {
-  data='{
+	data='{
     "name": "slowup",
     "type": "bandwidth",
     "toxicity": 1,
@@ -53,13 +53,13 @@ function slowup() {
     }
   }'
 
-  echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
+	echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
 }
 
 function 3g() {
-  reset
+	reset
 
-  data='{
+	data='{
     "name": "3gup",
     "type": "bandwidth",
     "toxicity": 1,
@@ -69,9 +69,9 @@ function 3g() {
     }
   }'
 
-  echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
+	echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
 
-  data='{
+	data='{
     "name": "3gdown",
     "type": "bandwidth",
     "toxicity": 1,
@@ -81,13 +81,13 @@ function 3g() {
     }
   }'
 
-  echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
+	echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
 }
 
 function 2g() {
-  reset
+	reset
 
-  data='{
+	data='{
     "name": "2gup",
     "type": "bandwidth",
     "toxicity": 1,
@@ -97,9 +97,9 @@ function 2g() {
     }
   }'
 
-  echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
+	echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
 
-  data='{
+	data='{
     "name": "2gdown",
     "type": "bandwidth",
     "toxicity": 1,
@@ -109,7 +109,7 @@ function 2g() {
     }
   }'
 
-  echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
+	echo $data | http http://localhost:8474/proxies/toxic-broker/toxics
 }
 
 "$@"
