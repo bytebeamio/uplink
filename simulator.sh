@@ -9,12 +9,13 @@ start_devices() {
     echo "Starting uplink and simulator"
     for id in $(seq $start $stop)
     do 
+        printf -v port "50%03d" $id
         download_auth_config $id
-        create_uplink_config $id
+        create_uplink_config $id $port
         start_uplink $id
 
         sleep 1
-        start_simulaotr $id
+        start_simulator $id $port
     done
     echo DONE
 
@@ -26,7 +27,9 @@ start_devices() {
 }
 
 create_uplink_config() {
-    printf "processes = [] \naction_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" } \n\n[tcpapps.1] \nport = 500$1 \nactions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }] \n\n[downloader] \nactions= [{ name = \"send_file\" }, { name = \"update_firmware\" }] \npath = \"/var/tmp/ota/$1\"" > devices/device_$1.toml
+    id=${1:?"Missing id"}
+    port=${2:?"Missing port number"}
+    printf "processes = [] \naction_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" } \n\n[tcpapps.1] \nport = $port \nactions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }] \n\n[downloader] \nactions= [{ name = \"send_file\" }, { name = \"update_firmware\" }] \npath = \"/var/tmp/ota/$id\"" > devices/device_$id.toml
 }
 
 download_auth_config() {
@@ -44,8 +47,10 @@ start_uplink() {
     echo $! >> devices/pids
 }
 
-start_simulaotr() {
-    nohup simulator -p 500$1 -g ./paths -vvv > devices/simulator_$1.log 2>&1 &
+start_simulator() {
+    id=${1:?"Missing id"}
+    port=${2:?"Missing port number"}
+    nohup simulator -p $port -g ./paths -vvv > devices/simulator_$id.log 2>&1 &
     echo $! >> devices/pids
 }
 
