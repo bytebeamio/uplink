@@ -54,7 +54,7 @@ use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
-use std::fs::{create_dir_all, remove_dir_all, File};
+use std::fs::{create_dir_all, metadata, remove_dir_all, File};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
@@ -73,8 +73,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Error receiving action: {0}")]
     Recv(#[from] RecvError),
-    #[error("Missing file name: {0}")]
-    FileNameMissing(String),
+    #[error("Empty file name")]
+    EmptyFileName,
     #[error("Missing file path")]
     FilePathMissing,
     #[error("Download failed, content length zero")]
@@ -165,7 +165,14 @@ impl FileDownloader {
         self.bridge_tx.send_action_response(status).await;
 
         // Extract url information from action payload
-        let mut update = serde_json::from_str::<DownloadFile>(&action.payload)?;
+        let mut update = match serde_json::from_str::<DownloadFile>(&action.payload)? {
+            DownloadFile { file_name, .. } if file_name.is_empty() => {
+                return Err(Error::EmptyFileName)
+            }
+            DownloadFile { content_length: 0, .. } => return Err(Error::EmptyFile),
+            u => u,
+        };
+
         let url = update.url.clone();
 
         // Create file to actually download into
@@ -190,15 +197,20 @@ impl FileDownloader {
 
     /// Creates file to download into
     fn create_file(&self, name: &str, file_name: &str) -> Result<(File, String), Error> {
-        // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
+        // Ensure that directory for downloading file into, exists
         let mut download_path = PathBuf::from(self.config.path.clone());
         download_path.push(name);
-        let _ = remove_dir_all(&download_path);
         create_dir_all(&download_path)?;
 
         let mut file_path = download_path.to_owned();
         file_path.push(file_name);
         let file_path = file_path.as_path();
+        // NOTE: if file_path is occupied by a directory due to previous working of uplink, remove it
+        if let Ok(f) = metadata(file_path) {
+            if f.is_dir() {
+                remove_dir_all(file_path)?;
+            }
+        }
         let file = File::create(file_path)?;
         let file_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
 
