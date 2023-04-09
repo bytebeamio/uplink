@@ -13,8 +13,8 @@ tracing = { version="0.1", features=["log"] }
 tracing-subscriber = { version="=0.3.14", features=["env-filter"] }
 time = "0.3"
 bridge = { path = "../bridge" }
-disk = { path = "../disk" }
 protocol = { path = "../protocol" }
+serializer = { path = "../serializer" }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec", "time"] }
 tokio-stream = "0.1"
@@ -30,7 +30,6 @@ rand = "0.8"
 tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch" }
 reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
 futures-util = "0.3"
-async-trait = "0.1"
 sysinfo = "0.26"
 lazy_static = "1.4.0"
 glob = "0.3"

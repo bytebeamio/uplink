@@ -1,18 +1,17 @@
-use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::VecDeque, io};
 
 use bytes::Bytes;
-use disk::Storage;
 use flume::{Receiver, RecvError, Sender};
 use log::{debug, error, info, trace};
 use rumqttc::*;
+use serde::Deserialize;
 use thiserror::Error;
 use tokio::{select, time};
 
 pub mod metrics;
 
-use crate::Config;
+use disk::Storage;
 pub use metrics::SerializerMetrics;
 use protocol::Package;
 
@@ -139,6 +138,29 @@ impl MqttClient for AsyncClient {
     }
 }
 
+fn default_file_size() -> usize {
+    104857600 // 100MB
+}
+
+fn default_file_count() -> usize {
+    3
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Persistence {
+    pub path: String,
+    #[serde(default = "default_file_size")]
+    pub max_file_size: usize,
+    #[serde(default = "default_file_count")]
+    pub max_file_count: usize,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct Config {
+    pub max_packet_size: usize,
+    pub persistence: Option<Persistence>,
+}
+
 /// The uplink Serializer is the component that deals with sending data to the Bytebeam platform.
 /// In case of network issues, the Serializer enters various states depending on severeness, managed by `Serializer::start()`.                                                                                       
 ///
@@ -166,7 +188,7 @@ impl MqttClient for AsyncClient {
 ///
 ///```
 pub struct Serializer<C: MqttClient> {
-    config: Arc<Config>,
+    config: Config,
     collector_rx: Receiver<Box<dyn Package>>,
     client: C,
     storage: Option<Storage>,
@@ -177,7 +199,7 @@ pub struct Serializer<C: MqttClient> {
 
 impl<C: MqttClient> Serializer<C> {
     pub fn new(
-        config: Arc<Config>,
+        config: Config,
         collector_rx: Receiver<Box<dyn Package>>,
         client: C,
         metrics_tx: Sender<SerializerMetrics>,
@@ -305,7 +327,7 @@ impl<C: MqttClient> Serializer<C> {
         let mut interval = time::interval(METRICS_INTERVAL);
         self.metrics.set_mode("catchup");
 
-        let max_packet_size = self.config.mqtt.max_packet_size;
+        let max_packet_size = self.config.max_packet_size;
         let client = self.client.clone();
 
         loop {
@@ -624,12 +646,9 @@ pub fn flush_metrics(
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
-
     use serde_json::Value;
 
     use super::*;
-    use crate::base::{MqttConfig, Persistence};
     use bridge::Stream;
     use protocol::Payload;
 
@@ -710,17 +729,7 @@ mod test {
     }
 
     fn default_config() -> Config {
-        Config {
-            broker: "localhost".to_owned(),
-            port: 1883,
-            bridge: bridge::Config {
-                device_id: "123".to_owned(),
-                streams: HashMap::new(),
-                ..Default::default()
-            },
-            mqtt: MqttConfig { max_packet_size: 1024 * 1024, ..Default::default() },
-            ..Default::default()
-        }
+        Config { max_packet_size: 1024 * 1024, ..Default::default() }
     }
 
     fn config_with_persistence(path: String) -> Config {
@@ -736,7 +745,7 @@ mod test {
     }
 
     fn defaults(
-        config: Arc<Config>,
+        config: Config,
     ) -> (Serializer<MockClient>, flume::Sender<Box<dyn Package>>, Receiver<Request>) {
         let (data_tx, data_rx) = flume::bounded(1);
         let (net_tx, net_rx) = flume::bounded(1);
@@ -781,7 +790,7 @@ mod test {
     // Force runs serializer in normal mode, without persistence
     fn normal_to_slow() {
         let config = default_config();
-        let (mut serializer, data_tx, net_rx) = defaults(Arc::new(config));
+        let (mut serializer, data_tx, net_rx) = defaults(config);
 
         // Slow Network, takes packets only once in 10s
         std::thread::spawn(move || loop {
@@ -810,7 +819,7 @@ mod test {
     #[test]
     // Force write publish to storage and verify by reading back
     fn read_write_storage() {
-        let config = Arc::new(config_with_persistence(format!("{}/disk", PERSIST_FOLDER)));
+        let config = config_with_persistence(format!("{}/disk", PERSIST_FOLDER));
         std::fs::create_dir_all(&config.persistence.as_ref().unwrap().path).unwrap();
 
         let (mut serializer, _, _) = defaults(config);
@@ -823,8 +832,7 @@ mod test {
         );
         write_to_disk(publish.clone(), &mut storage).unwrap();
 
-        let stored_publish =
-            read_from_storage(&mut storage, serializer.config.mqtt.max_packet_size);
+        let stored_publish = read_from_storage(&mut storage, serializer.config.max_packet_size);
 
         // Ensure publish.pkid is 1, as written to disk
         publish.pkid = 1;
@@ -834,7 +842,7 @@ mod test {
     #[test]
     // Force runs serializer in disk mode, with network returning
     fn disk_to_catchup() {
-        let config = Arc::new(config_with_persistence(format!("{}/disk_catchup", PERSIST_FOLDER)));
+        let config = config_with_persistence(format!("{}/disk_catchup", PERSIST_FOLDER));
 
         let (mut serializer, data_tx, net_rx) = defaults(config);
 
@@ -867,7 +875,7 @@ mod test {
     #[test]
     // Force runs serializer in disk mode, with crashed network
     fn disk_to_crash() {
-        let config = Arc::new(config_with_persistence(format!("{}/disk_crash", PERSIST_FOLDER)));
+        let config = config_with_persistence(format!("{}/disk_crash", PERSIST_FOLDER));
 
         let (mut serializer, data_tx, _) = defaults(config);
 
@@ -899,7 +907,7 @@ mod test {
     #[test]
     // Force runs serializer in catchup mode, with empty persistence
     fn catchup_to_normal_empty_persistence() {
-        let config = Arc::new(config_with_persistence(format!("{}/catchup_empty", PERSIST_FOLDER)));
+        let config = config_with_persistence(format!("{}/catchup_empty", PERSIST_FOLDER));
 
         let (mut serializer, _, _) = defaults(config);
 
@@ -911,8 +919,7 @@ mod test {
     #[test]
     // Force runs serializer in catchup mode, with data already in persistence
     fn catchup_to_normal_with_persistence() {
-        let config =
-            Arc::new(config_with_persistence(format!("{}/catchup_normal", PERSIST_FOLDER)));
+        let config = config_with_persistence(format!("{}/catchup_normal", PERSIST_FOLDER));
 
         let (mut serializer, data_tx, net_rx) = defaults(config);
         let mut storage = serializer.storage.take().unwrap();
@@ -961,7 +968,7 @@ mod test {
     #[test]
     // Force runs serializer in catchup mode, with persistence and crashed network
     fn catchup_to_crash_with_persistence() {
-        let config = Arc::new(config_with_persistence(format!("{}/catchup_crash", PERSIST_FOLDER)));
+        let config = config_with_persistence(format!("{}/catchup_crash", PERSIST_FOLDER));
 
         std::fs::create_dir_all(&config.persistence.as_ref().unwrap().path).unwrap();
 

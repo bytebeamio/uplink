@@ -4,12 +4,12 @@ use std::sync::Arc;
 use bridge::StreamMetrics;
 use flume::{Receiver, RecvError};
 use rumqttc::{AsyncClient, ClientError, QoS, Request};
+use serializer::SerializerMetrics;
 use tokio::select;
 
 use crate::Config;
 
 use super::mqtt::MqttMetrics;
-use super::serializer::SerializerMetrics;
 
 /// Interface implementing MQTT protocol to communicate with broker
 pub struct Monitor {

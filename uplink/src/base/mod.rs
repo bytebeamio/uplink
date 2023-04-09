@@ -8,24 +8,6 @@ use crate::collector::logging::LoggerConfig;
 
 pub mod monitor;
 pub mod mqtt;
-pub mod serializer;
-
-fn default_file_size() -> usize {
-    104857600 // 100MB
-}
-
-fn default_file_count() -> usize {
-    3
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Persistence {
-    pub path: String,
-    #[serde(default = "default_file_size")]
-    pub max_file_size: usize,
-    #[serde(default = "default_file_count")]
-    pub max_file_count: usize,
-}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Authentication {
@@ -106,6 +88,8 @@ pub struct MqttConfig {
 pub struct Config {
     #[serde(flatten)]
     pub bridge: bridge::Config,
+    #[serde(flatten)]
+    pub serializer: serializer::Config,
     pub broker: String,
     pub port: u16,
     #[serde(default)]
@@ -117,7 +101,6 @@ pub struct Config {
     pub processes: Vec<ActionRoute>,
     #[serde(skip)]
     pub actions_subscription: String,
-    pub persistence: Option<Persistence>,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
     pub downloader: DownloaderConfig,

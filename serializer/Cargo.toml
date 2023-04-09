@@ -1,0 +1,21 @@
+[package]
+name = "serializer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = "0.1"
+bytes = "1"
+disk = { path = "../disk" }
+flume = "0.10"
+log = "0.4"
+pretty-bytes = "0.2.2"
+protocol = { path = "../protocol" }
+rumqttc = { git = "https://github.com/bytebeamio/rumqtt" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+bridge = { path = "../bridge" }

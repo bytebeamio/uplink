@@ -18,7 +18,7 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
-    pub use crate::base::{Config, Persistence, Stats};
+    pub use crate::base::{Config, Stats};
     use bridge::StreamConfig;
     use config::{Environment, File, FileFormat};
     use protocol::DEFAULT_TIMEOUT;
@@ -120,7 +120,7 @@ pub mod config {
 
         let mut config: Config = config.try_deserialize()?;
 
-        if let Some(persistence) = &config.persistence {
+        if let Some(persistence) = &config.serializer.persistence {
             fs::create_dir_all(&persistence.path)?;
         }
 
@@ -217,11 +217,10 @@ pub mod config {
 }
 
 use base::mqtt::Mqtt;
-use base::serializer::{Serializer, SerializerMetrics};
 pub use base::Config;
 pub use collector::{simulator, tcpjson::TcpJson};
-pub use disk::Storage;
 use protocol::{Action, ActionResponse, Package};
+use serializer::{Serializer, SerializerMetrics};
 
 pub struct Uplink {
     config: Arc<Config>,
@@ -291,7 +290,7 @@ impl Uplink {
         let mqtt_client = mqtt.client();
 
         let serializer = Serializer::new(
-            self.config.clone(),
+            self.config.serializer.clone(),
             self.data_rx.clone(),
             mqtt_client.clone(),
             self.serializer_metrics_tx(),
