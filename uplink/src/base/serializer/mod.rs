@@ -1,7 +1,3 @@
-pub mod metrics;
-
-pub use metrics::SerializerMetrics;
-
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::VecDeque, io};
@@ -14,7 +10,11 @@ use rumqttc::*;
 use thiserror::Error;
 use tokio::{select, time};
 
-use crate::{Config, Package};
+pub mod metrics;
+
+use crate::Config;
+pub use metrics::SerializerMetrics;
+use protocol::Package;
 
 const METRICS_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -624,13 +624,14 @@ pub fn flush_metrics(
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use serde_json::Value;
 
     use super::*;
     use crate::base::bridge::stream::Stream;
-    use crate::base::MqttConfig;
-    use crate::{config::Persistence, Payload};
-    use std::collections::HashMap;
+    use crate::base::{MqttConfig, Persistence};
+    use protocol::Payload;
 
     #[derive(Clone)]
     pub struct MockClient {

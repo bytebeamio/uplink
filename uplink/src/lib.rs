@@ -21,6 +21,7 @@ pub mod config {
     pub use crate::base::{Config, Persistence, Stats};
     use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     use config::{Environment, File, FileFormat};
+    use protocol::DEFAULT_TIMEOUT;
     use std::fs;
     use structopt::StructOpt;
 
@@ -215,13 +216,13 @@ pub mod config {
     }
 }
 
-pub use base::actions::{Action, ActionResponse};
-use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::Config;
+use base::bridge::{Bridge, BridgeTx, StreamMetrics};
 pub use collector::{simulator, tcpjson::TcpJson};
 pub use disk::Storage;
+use protocol::{Action, ActionResponse, Package};
 
 pub struct Uplink {
     config: Arc<Config>,

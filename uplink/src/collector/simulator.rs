@@ -11,7 +11,7 @@ use std::{cmp::Ordering, fs, io, sync::Arc};
 
 use crate::base::bridge::BridgeTx;
 use crate::base::SimulatorConfig;
-use crate::{Action, ActionResponse, Payload};
+use protocol::{Action, ActionResponse, Payload};
 
 use rand::Rng;
 

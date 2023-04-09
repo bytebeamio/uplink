@@ -1,6 +1,5 @@
+use protocol::clock;
 use serde::Serialize;
-
-use crate::collector::utils::{self, clock};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct SerializerMetrics {
@@ -43,7 +42,7 @@ impl SerializerMetrics {
     pub fn add_batch(&mut self) {
         self.batches += 1;
         if self.batches == 1 {
-            self.timestamp = utils::clock();
+            self.timestamp = clock();
         }
     }
 

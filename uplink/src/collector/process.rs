@@ -7,7 +7,7 @@ use tokio::{pin, select, time};
 
 use crate::base::bridge::BridgeTx;
 use crate::base::ActionRoute;
-use crate::{ActionResponse, Package};
+use protocol::{ActionResponse, Package};
 
 use std::io;
 use std::process::Stdio;

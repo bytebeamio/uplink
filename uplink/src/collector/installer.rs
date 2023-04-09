@@ -1,12 +1,13 @@
 use std::{fs::File, path::PathBuf, sync::Arc};
 
 use log::{debug, error, warn};
+use protocol::{Action, ActionResponse};
 use tar::Archive;
 use tokio::process::Command;
 
 use super::downloader::DownloadFile;
 use crate::base::{bridge::BridgeTx, InstallerConfig};
-use crate::{Action, ActionResponse, Config};
+use crate::Config;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

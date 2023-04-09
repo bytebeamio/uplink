@@ -11,11 +11,12 @@ mod journalctl;
 mod logcat;
 
 use crate::base::{bridge::BridgeTx, ActionRoute};
-use crate::{Config, Package, Payload, Stream};
+use crate::{Config, Stream};
 #[cfg(target_os = "linux")]
 pub use journalctl::{new_journalctl, LogEntry};
 #[cfg(target_os = "android")]
 pub use logcat::{new_logcat, LogEntry};
+use protocol::{Package, Payload};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

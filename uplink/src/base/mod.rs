@@ -5,18 +5,10 @@ use serde::{Deserialize, Serialize};
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use crate::collector::logging::LoggerConfig;
 
-pub mod actions;
 pub mod bridge;
 pub mod monitor;
 pub mod mqtt;
 pub mod serializer;
-
-pub const DEFAULT_TIMEOUT: u64 = 60;
-
-#[inline]
-fn default_timeout() -> u64 {
-    DEFAULT_TIMEOUT
-}
 
 fn default_file_size() -> usize {
     104857600 // 100MB
