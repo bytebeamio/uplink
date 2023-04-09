@@ -124,6 +124,8 @@ pub mod config {
             fs::create_dir_all(&persistence.path)?;
         }
 
+        config.serializer.max_packet_size = config.mqtt.max_packet_size;
+
         // replace placeholders with device/tenant ID
         let tenant_id = config.bridge.project_id.trim();
         let device_id = config.bridge.device_id.trim();
