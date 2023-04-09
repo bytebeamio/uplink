@@ -207,7 +207,7 @@ impl Mqtt {
 
 fn mqttoptions(config: &Config) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
-    let mut mqttoptions = MqttOptions::new(&config.device_id, &config.broker, config.port);
+    let mut mqttoptions = MqttOptions::new(&config.bridge.device_id, &config.broker, config.port);
     mqttoptions.set_max_packet_size(config.mqtt.max_packet_size, config.mqtt.max_packet_size);
     mqttoptions.set_keep_alive(Duration::from_secs(config.mqtt.keep_alive));
     mqttoptions.set_inflight(config.mqtt.max_inflight);

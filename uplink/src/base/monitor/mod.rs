@@ -1,11 +1,11 @@
 use std::io;
 use std::sync::Arc;
 
+use bridge::StreamMetrics;
 use flume::{Receiver, RecvError};
 use rumqttc::{AsyncClient, ClientError, QoS, Request};
 use tokio::select;
 
-use crate::base::bridge::StreamMetrics;
 use crate::Config;
 
 use super::mqtt::MqttMetrics;
@@ -37,7 +37,7 @@ impl Monitor {
     }
 
     pub async fn start(&self) -> Result<(), Error> {
-        let stream_metrics_config = self.config.stream_metrics.clone();
+        let stream_metrics_config = self.config.bridge.stream_metrics.clone();
         let stream_metrics_topic = stream_metrics_config.topic;
         let mut stream_metrics = Vec::with_capacity(10);
 

@@ -1,11 +1,11 @@
 use std::{collections::HashMap, fmt::Debug};
 
+use bridge::ActionRoute;
 use serde::{Deserialize, Serialize};
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use crate::collector::logging::LoggerConfig;
 
-pub mod bridge;
 pub mod monitor;
 pub mod mqtt;
 pub mod serializer;
@@ -16,16 +16,6 @@ fn default_file_size() -> usize {
 
 fn default_file_count() -> usize {
     3
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub struct StreamConfig {
-    pub topic: String,
-    pub buf_size: usize,
-    #[serde(default = "default_timeout")]
-    /// Duration(in seconds) that bridge collector waits from
-    /// receiving first element, before the stream gets flushed.
-    pub flush_period: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -80,14 +70,6 @@ pub struct InstallerConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub struct StreamMetricsConfig {
-    pub enabled: bool,
-    pub topic: String,
-    pub blacklist: Vec<String>,
-    pub timeout: u64,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SerializerMetricsConfig {
     pub enabled: bool,
     pub topic: String,
@@ -121,22 +103,9 @@ pub struct MqttConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct ActionRoute {
-    pub name: String,
-    #[serde(default = "default_timeout")]
-    pub timeout: u64,
-}
-
-impl From<&ActionRoute> for ActionRoute {
-    fn from(value: &ActionRoute) -> Self {
-        value.clone()
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
-    pub project_id: String,
-    pub device_id: String,
+    #[serde(flatten)]
+    pub bridge: bridge::Config,
     pub broker: String,
     pub port: u16,
     #[serde(default)]
@@ -149,19 +118,12 @@ pub struct Config {
     #[serde(skip)]
     pub actions_subscription: String,
     pub persistence: Option<Persistence>,
-    pub streams: HashMap<String, StreamConfig>,
-    pub action_status: StreamConfig,
-    pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
     pub ota_installer: InstallerConfig,
-    #[serde(default)]
-    pub action_redirections: HashMap<String, String>,
-    #[serde(default)]
-    pub ignore_actions_if_no_clients: bool,
     #[cfg(any(target_os = "linux", target_os = "android"))]
     pub logging: Option<LoggerConfig>,
 }

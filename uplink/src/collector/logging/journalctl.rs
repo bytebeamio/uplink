@@ -1,9 +1,9 @@
+use protocol::Payload;
 use serde::{Deserialize, Serialize};
 
 use std::process::{Command, Stdio};
 
 use super::LoggerConfig;
-use crate::Payload;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {

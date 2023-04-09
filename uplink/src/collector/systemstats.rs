@@ -12,7 +12,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::{base::bridge::BridgeTx, Config};
+use crate::Config;
+use bridge::BridgeTx;
 use protocol::Payload;
 
 #[derive(thiserror::Error, Debug)]

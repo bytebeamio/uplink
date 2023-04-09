@@ -104,12 +104,12 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    profile: {}", commandline.profile);
     println!("    commit_sha: {}", commandline.commit_sha);
     println!("    commit_date: {}", commandline.commit_date);
-    println!("    project_id: {}", config.project_id);
-    println!("    device_id: {}", config.device_id);
+    println!("    project_id: {}", config.bridge.project_id);
+    println!("    device_id: {}", config.bridge.device_id);
     println!("    remote: {}:{}", config.broker, config.port);
-    if !config.action_redirections.is_empty() {
+    if !config.bridge.action_redirections.is_empty() {
         println!("    action redirections:");
-        for (action, redirection) in config.action_redirections.iter() {
+        for (action, redirection) in config.bridge.action_redirections.iter() {
             println!("        {action} -> {redirection}");
         }
     }

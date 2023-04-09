@@ -10,8 +10,8 @@ mod journalctl;
 #[cfg(target_os = "android")]
 mod logcat;
 
-use crate::base::{bridge::BridgeTx, ActionRoute};
 use crate::{Config, Stream};
+use bridge::{ActionRoute, BridgeTx};
 #[cfg(target_os = "linux")]
 pub use journalctl::{new_journalctl, LogEntry};
 #[cfg(target_os = "android")]
@@ -53,8 +53,8 @@ impl LoggerInstance {
 
         let log_stream = Stream::dynamic_with_size(
             "logs",
-            &config.project_id,
-            &config.device_id,
+            &config.bridge.project_id,
+            &config.bridge.device_id,
             buf_size,
             data_tx,
         );

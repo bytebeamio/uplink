@@ -4,8 +4,8 @@ use std::thread;
 
 use anyhow::Error;
 
-use base::bridge::stream::Stream;
 use base::monitor::Monitor;
+use bridge::{Bridge, BridgeTx, Stream, StreamMetrics};
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
@@ -19,7 +19,7 @@ pub mod collector;
 
 pub mod config {
     pub use crate::base::{Config, Persistence, Stats};
-    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
+    use bridge::StreamConfig;
     use config::{Environment, File, FileFormat};
     use protocol::DEFAULT_TIMEOUT;
     use std::fs;
@@ -125,14 +125,14 @@ pub mod config {
         }
 
         // replace placeholders with device/tenant ID
-        let tenant_id = config.project_id.trim();
-        let device_id = config.device_id.trim();
-        for config in config.streams.values_mut() {
+        let tenant_id = config.bridge.project_id.trim();
+        let device_id = config.bridge.device_id.trim();
+        for config in config.bridge.streams.values_mut() {
             replace_topic_placeholders(&mut config.topic, tenant_id, device_id);
         }
 
-        replace_topic_placeholders(&mut config.action_status.topic, tenant_id, device_id);
-        replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.bridge.action_status.topic, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.bridge.stream_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.serializer_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.mqtt_metrics.topic, tenant_id, device_id);
 
@@ -153,7 +153,7 @@ pub mod config {
                 "uplink_component_stats",
                 "uplink_system_stats",
             ] {
-                config.stream_metrics.blacklist.push(stream_name.to_owned());
+                config.bridge.stream_metrics.blacklist.push(stream_name.to_owned());
                 let stream_config = StreamConfig {
                     topic: format!(
                         "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
@@ -161,7 +161,7 @@ pub mod config {
                     buf_size: config.system_stats.stream_size.unwrap_or(100),
                     flush_period: DEFAULT_TIMEOUT,
                 };
-                config.streams.insert(stream_name.to_owned(), stream_config);
+                config.bridge.streams.insert(stream_name.to_owned(), stream_config);
             }
         }
 
@@ -219,7 +219,6 @@ pub mod config {
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::Config;
-use base::bridge::{Bridge, BridgeTx, StreamMetrics};
 pub use collector::{simulator, tcpjson::TcpJson};
 pub use disk::Storage;
 use protocol::{Action, ActionResponse, Package};
@@ -244,7 +243,7 @@ impl Uplink {
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
 
-        let action_status_topic = &config.action_status.topic;
+        let action_status_topic = &config.bridge.action_status.topic;
         let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
         Ok(Uplink {
             config,
@@ -263,7 +262,7 @@ impl Uplink {
     pub fn spawn(&mut self) -> Result<BridgeTx, Error> {
         let config = self.config.clone();
         let mut bridge = Bridge::new(
-            self.config.clone(),
+            self.config.bridge.clone(),
             self.data_tx.clone(),
             self.stream_metrics_tx(),
             self.action_rx.clone(),

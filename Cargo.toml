@@ -3,6 +3,7 @@ serial = { git = "https://github.com/bytebeamio/serial-rs", branch = "android_fi
 
 [workspace]
 members = [
+    "bridge",
     "disk",
     "protocol",
     "uplink",

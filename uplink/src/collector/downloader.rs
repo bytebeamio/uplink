@@ -59,8 +59,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
 
-use crate::base::bridge::BridgeTx;
 use crate::{base::DownloaderConfig, Config};
+use bridge::BridgeTx;
 use protocol::{Action, ActionResponse};
 
 #[derive(thiserror::Error, Debug)]
@@ -276,13 +276,14 @@ pub struct DownloadFile {
 
 #[cfg(test)]
 mod test {
+    use bridge::{ActionRoute, Event};
     use flume::TrySendError;
     use serde_json::json;
 
     use std::{collections::HashMap, time::Duration};
 
     use super::*;
-    use crate::base::{bridge::Event, ActionRoute, DownloaderConfig, MqttConfig};
+    use crate::base::{DownloaderConfig, MqttConfig};
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 
@@ -290,8 +291,11 @@ mod test {
         Config {
             broker: "localhost".to_owned(),
             port: 1883,
-            device_id: "123".to_owned(),
-            streams: HashMap::new(),
+            bridge: bridge::Config {
+                device_id: "123".to_owned(),
+                streams: HashMap::new(),
+                ..Default::default()
+            },
             mqtt: MqttConfig { max_packet_size: 1024 * 1024, ..Default::default() },
             downloader,
             ..Default::default()

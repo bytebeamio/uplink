@@ -629,8 +629,8 @@ mod test {
     use serde_json::Value;
 
     use super::*;
-    use crate::base::bridge::stream::Stream;
     use crate::base::{MqttConfig, Persistence};
+    use bridge::Stream;
     use protocol::Payload;
 
     #[derive(Clone)]
@@ -713,8 +713,11 @@ mod test {
         Config {
             broker: "localhost".to_owned(),
             port: 1883,
-            device_id: "123".to_owned(),
-            streams: HashMap::new(),
+            bridge: bridge::Config {
+                device_id: "123".to_owned(),
+                streams: HashMap::new(),
+                ..Default::default()
+            },
             mqtt: MqttConfig { max_packet_size: 1024 * 1024, ..Default::default() },
             ..Default::default()
         }
@@ -748,7 +751,7 @@ mod test {
         #[error("Serde error {0}")]
         Serde(#[from] serde_json::Error),
         #[error("Stream error {0}")]
-        Base(#[from] crate::base::bridge::stream::Error),
+        Stream(#[from] bridge::stream::Error),
     }
 
     struct MockCollector {
