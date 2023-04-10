@@ -29,7 +29,7 @@ start_devices() {
 create_uplink_config() {
     id=${1:?"Missing id"}
     port=${2:?"Missing port number"}
-    printf "processes = [] \naction_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" } \n\n[tcpapps.1] \nport = $port \nactions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }] \n\n[downloader] \nactions= [{ name = \"send_file\" }, { name = \"update_firmware\" }] \npath = \"/var/tmp/ota/$id\"" > devices/device_$id.toml
+    printf "processes = [] \naction_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" } \n\n[persistence]\npath = \"/var/tmp/persistence/$id\" \nmax_file_size = 104857600 \nmax_file_count = 3 \n\n[tcpapps.1] \nport = $port \nactions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }] \n\n[downloader] \nactions= [{ name = \"send_file\" }, { name = \"update_firmware\" }] \npath = \"/var/tmp/ota/$id\"" > devices/device_$id.toml
 }
 
 download_auth_config() {
