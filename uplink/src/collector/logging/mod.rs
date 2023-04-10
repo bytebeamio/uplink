@@ -1,5 +1,4 @@
 use flume::Sender;
-use serde::Deserialize;
 
 use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
@@ -10,7 +9,7 @@ mod journalctl;
 #[cfg(target_os = "android")]
 mod logcat;
 
-use crate::{Config, Stream};
+use crate::{config::LoggerConfig, Config, Stream};
 use bridge::{ActionRoute, BridgeTx};
 #[cfg(target_os = "linux")]
 pub use journalctl::{new_journalctl, LogEntry};
@@ -31,13 +30,6 @@ pub struct LoggerInstance {
     log_stream: Stream<Payload>,
     kill_switch: Arc<Mutex<bool>>,
     bridge: BridgeTx,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct LoggerConfig {
-    pub tags: Vec<String>,
-    pub min_level: u8,
-    pub stream_size: Option<usize>,
 }
 
 impl Drop for LoggerInstance {

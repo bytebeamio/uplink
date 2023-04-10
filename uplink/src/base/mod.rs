@@ -3,11 +3,16 @@ use std::{collections::HashMap, fmt::Debug};
 use bridge::ActionRoute;
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
-use crate::collector::logging::LoggerConfig;
-
 pub mod monitor;
 pub mod mqtt;
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[derive(Debug, Clone, Deserialize)]
+pub struct LoggerConfig {
+    pub tags: Vec<String>,
+    pub min_level: u8,
+    pub stream_size: Option<usize>,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Authentication {
