@@ -6,7 +6,7 @@ use tar::Archive;
 use tokio::process::Command;
 
 use super::downloader::DownloadFile;
-use crate::{base::InstallerConfig, Config};
+use crate::config::{Config, InstallerConfig};
 use bridge::BridgeTx;
 
 #[derive(thiserror::Error, Debug)]

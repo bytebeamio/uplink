@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
-use crate::base;
+use crate::config;
 use bridge::{ActionRoute, BridgeTx};
 use protocol::ActionResponse;
 
@@ -17,13 +17,13 @@ pub struct Keys {
 }
 
 pub struct TunshellSession {
-    _config: Arc<base::Config>,
+    _config: Arc<config::Config>,
     echo_stdout: bool,
     bridge: BridgeTx,
 }
 
 impl TunshellSession {
-    pub fn new(config: Arc<base::Config>, echo_stdout: bool, bridge: BridgeTx) -> Self {
+    pub fn new(config: Arc<config::Config>, echo_stdout: bool, bridge: BridgeTx) -> Self {
         Self { _config: config, echo_stdout, bridge }
     }
 

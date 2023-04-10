@@ -59,7 +59,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
 
-use crate::{base::DownloaderConfig, Config};
+use crate::config::{Config, DownloaderConfig};
 use bridge::BridgeTx;
 use protocol::{Action, ActionResponse};
 
@@ -283,7 +283,7 @@ mod test {
     use std::{collections::HashMap, time::Duration};
 
     use super::*;
-    use crate::base::{DownloaderConfig, MqttConfig};
+    use crate::config::{DownloaderConfig, MqttConfig};
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 

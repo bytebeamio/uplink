@@ -9,7 +9,7 @@ use std::collections::BinaryHeap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
-use crate::base::SimulatorConfig;
+use crate::config::SimulatorConfig;
 use bridge::BridgeTx;
 use protocol::{Action, ActionResponse, Payload};
 

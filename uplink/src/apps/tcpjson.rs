@@ -10,7 +10,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::io;
 
-use crate::base::AppConfig;
+use crate::config::AppConfig;
 use bridge::BridgeTx;
 use protocol::{Action, ActionResponse, Payload};
 
