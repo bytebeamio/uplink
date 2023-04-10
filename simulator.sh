@@ -43,14 +43,14 @@ download_auth_config() {
 }
 
 start_uplink() {
-    nohup uplink -a devices/device_$1.json -c devices/device_$1.toml -vv > devices/uplink_$1.log 2>&1 &
+    nohup uplink -a devices/device_$1.json -c devices/device_$1.toml > devices/uplink_$1.log 2>&1 &
     echo $! >> devices/pids
 }
 
 start_simulator() {
     id=${1:?"Missing id"}
     port=${2:?"Missing port number"}
-    nohup simulator -p $port -g ./paths -vvv > devices/simulator_$id.log 2>&1 &
+    nohup simulator -p $port -g ./paths > devices/simulator_$id.log 2>&1 &
     echo $! >> devices/pids
 }
 
