@@ -2,6 +2,6 @@
 
 cd /usr/share/bytebeam/uplink
 
-exec ./simulator.sh start_devices 1 500
+exec ./simulator.sh start_devices 250 500
 echo "Check devices directory for uplink and simulator logs"
 echo "Run ./simulator.sh kill_devices to stop simulator"
