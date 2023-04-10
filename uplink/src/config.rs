@@ -3,9 +3,6 @@ use std::{collections::HashMap, fmt::Debug};
 use bridge::ActionRoute;
 use serde::{Deserialize, Serialize};
 
-pub mod monitor;
-pub mod mqtt;
-
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[derive(Debug, Clone, Deserialize)]
 pub struct LoggerConfig {

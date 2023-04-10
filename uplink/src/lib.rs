@@ -6,19 +6,21 @@ use anyhow::Error;
 use flume::{bounded, Receiver, Sender};
 use log::error;
 
-use base::monitor::Monitor;
+pub mod apps;
+pub mod config;
+mod monitor;
+mod mqtt;
+
+pub use crate::config::Config;
 use bridge::{Bridge, BridgeTx, Stream, StreamMetrics};
-use collector::downloader::FileDownloader;
-use collector::installer::OTAInstaller;
-use collector::process::ProcessHandler;
-use collector::systemstats::StatCollector;
-use collector::tunshell::TunshellSession;
-
-pub mod collector;
-
-use base::mqtt::Mqtt;
-pub use base::Config;
-pub use collector::{simulator, tcpjson::TcpJson};
+use apps::downloader::FileDownloader;
+use apps::installer::OTAInstaller;
+use apps::process::ProcessHandler;
+use apps::systemstats::StatCollector;
+use apps::tunshell::TunshellSession;
+pub use apps::{simulator, tcpjson::TcpJson};
+use monitor::Monitor;
+use mqtt::Mqtt;
 use protocol::{Action, ActionResponse, Package};
 use serializer::{Serializer, SerializerMetrics};
 
@@ -137,7 +139,7 @@ impl Uplink {
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
         {
-            let logger = collector::logging::LoggerInstance::new(
+            let logger = apps::logging::LoggerInstance::new(
                 config.clone(),
                 self.data_tx.clone(),
                 bridge_tx.clone(),

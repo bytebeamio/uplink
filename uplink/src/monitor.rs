@@ -11,6 +11,35 @@ use crate::Config;
 
 use super::mqtt::MqttMetrics;
 
+#[derive(thiserror::Error, Debug)]
+pub enum MqttError {
+    #[error("SendError(..)")]
+    Send(Request),
+    #[error("TrySendError(..)")]
+    TrySend(Request),
+}
+
+impl From<ClientError> for MqttError {
+    fn from(e: ClientError) -> Self {
+        match e {
+            ClientError::Request(r) => MqttError::Send(r),
+            ClientError::TryRequest(r) => MqttError::TrySend(r),
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Collector recv error {0}")]
+    Collector(#[from] RecvError),
+    #[error("Serde error {0}")]
+    Serde(#[from] serde_json::Error),
+    #[error("Io error {0}")]
+    Io(#[from] io::Error),
+    #[error("Mqtt client error {0}")]
+    Client(#[from] MqttError),
+}
+
 /// Interface implementing MQTT protocol to communicate with broker
 pub struct Monitor {
     /// Uplink config
@@ -81,33 +110,4 @@ impl Monitor {
             }
         }
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum MqttError {
-    #[error("SendError(..)")]
-    Send(Request),
-    #[error("TrySendError(..)")]
-    TrySend(Request),
-}
-
-impl From<ClientError> for MqttError {
-    fn from(e: ClientError) -> Self {
-        match e {
-            ClientError::Request(r) => MqttError::Send(r),
-            ClientError::TryRequest(r) => MqttError::TrySend(r),
-        }
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("Collector recv error {0}")]
-    Collector(#[from] RecvError),
-    #[error("Serde error {0}")]
-    Serde(#[from] serde_json::Error),
-    #[error("Io error {0}")]
-    Io(#[from] io::Error),
-    #[error("Mqtt client error {0}")]
-    Client(#[from] MqttError),
 }

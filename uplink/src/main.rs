@@ -56,9 +56,10 @@ use tracing_subscriber::{EnvFilter, Registry};
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
+use bridge::StreamConfig;
 use protocol::DEFAULT_TIMEOUT;
-use uplink::base::AppConfig;
-use uplink::{simulator, Config, TcpJson, Uplink};
+use uplink::config::{AppConfig, Config};
+use uplink::{simulator, TcpJson, Uplink};
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "uplink", about = "collect, batch, compress, publish")]
