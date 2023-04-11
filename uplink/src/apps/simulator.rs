@@ -37,7 +37,6 @@ pub struct Location {
 
 #[derive(Clone)]
 pub struct DeviceData {
-    device_id: String,
     path: Arc<Vec<Location>>,
     path_offset: u32,
     time_offset: Duration,
@@ -65,7 +64,6 @@ pub struct DataEvent {
 pub struct ActionResponseEvent {
     timestamp: Instant,
     action_id: String,
-    device_id: String,
     status: String,
     progress: u8,
 }
@@ -81,9 +79,7 @@ impl PartialEq for Event {
         match self {
             Event::DataEvent(e1) => match other {
                 Event::DataEvent(e2) => {
-                    e1.timestamp == e2.timestamp
-                        && e1.event_type == e2.event_type
-                        && e1.device.device_id == e2.device.device_id
+                    e1.timestamp == e2.timestamp && e1.event_type == e2.event_type
                 }
                 Event::ActionResponseEvent(_) => false,
             },
@@ -125,13 +121,7 @@ pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
     let path_index = ((device.path_offset + sequence) % path_len) as usize;
     let position = device.path.get(path_index).unwrap();
 
-    Payload {
-        timestamp,
-        device_id: Some(device.device_id.to_owned()),
-        sequence,
-        stream: "gps".to_string(),
-        payload: json!(position),
-    }
+    Payload { timestamp, sequence, stream: "gps".to_string(), payload: json!(position) }
 }
 
 pub fn generate_float(start: f64, end: f64) -> f64 {
@@ -197,7 +187,7 @@ struct Bms {
     pack_status: i32,
 }
 
-pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
+pub fn generate_bms_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let payload = Bms {
         periodicity_ms: 250,
@@ -243,13 +233,7 @@ pub fn generate_bms_data(device: &DeviceData, sequence: u32) -> Payload {
         pack_status: 1,
     };
 
-    Payload {
-        timestamp,
-        device_id: Some(device.device_id.to_owned()),
-        sequence,
-        stream: "bms".to_string(),
-        payload: json!(payload),
-    }
+    Payload { timestamp, sequence, stream: "bms".to_string(), payload: json!(payload) }
 }
 
 #[derive(Debug, Serialize)]
@@ -265,7 +249,7 @@ struct Imu {
     magz: f64,
 }
 
-pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
+pub fn generate_imu_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let payload = Imu {
         ax: generate_float(1f64, 2.8f64),
@@ -279,13 +263,7 @@ pub fn generate_imu_data(device: &DeviceData, sequence: u32) -> Payload {
         magz: generate_float(-45f64, -15f64),
     };
 
-    Payload {
-        timestamp,
-        device_id: Some(device.device_id.to_owned()),
-        sequence,
-        stream: "imu".to_string(),
-        payload: json!(payload),
-    }
+    Payload { timestamp, sequence, stream: "imu".to_string(), payload: json!(payload) }
 }
 
 #[derive(Debug, Serialize)]
@@ -298,7 +276,7 @@ struct Motor {
     motor_rpm: i64,
 }
 
-pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
+pub fn generate_motor_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let payload = Motor {
         motor_temperature1: generate_float(40f64, 45f64),
@@ -310,13 +288,7 @@ pub fn generate_motor_data(device: &DeviceData, sequence: u32) -> Payload {
         motor_rpm: generate_int(1000, 9000),
     };
 
-    Payload {
-        timestamp,
-        device_id: Some(device.device_id.to_owned()),
-        sequence,
-        stream: "motor".to_string(),
-        payload: json!(payload),
-    }
+    Payload { timestamp, sequence, stream: "motor".to_string(), payload: json!(payload) }
 }
 
 #[derive(Debug, Serialize)]
@@ -332,7 +304,7 @@ struct PeripheralState {
     right_brake: String,
 }
 
-pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Payload {
+pub fn generate_peripheral_state_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let payload = PeripheralState {
         gps_status: generate_bool_string(0.99),
@@ -346,13 +318,7 @@ pub fn generate_peripheral_state_data(device: &DeviceData, sequence: u32) -> Pay
         right_brake: generate_bool_string(0.1),
     };
 
-    Payload {
-        timestamp,
-        device_id: Some(device.device_id.to_owned()),
-        sequence,
-        stream: "peripheral_state".to_string(),
-        payload: json!(payload),
-    }
+    Payload { timestamp, sequence, stream: "peripheral_state".to_string(), payload: json!(payload) }
 }
 
 #[derive(Debug, Serialize)]
@@ -367,7 +333,7 @@ struct DeviceShadow {
     soc: f64,
 }
 
-pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payload {
+pub fn generate_device_shadow_data(sequence: u32) -> Payload {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let payload = DeviceShadow {
         mode: "economy".to_owned(),
@@ -379,13 +345,7 @@ pub fn generate_device_shadow_data(device: &DeviceData, sequence: u32) -> Payloa
         soc: generate_float(50f64, 90f64),
     };
 
-    Payload {
-        timestamp,
-        device_id: Some(device.device_id.to_owned()),
-        sequence,
-        stream: "device_shadow".to_string(),
-        payload: json!(payload),
-    }
+    Payload { timestamp, sequence, stream: "device_shadow".to_string(), payload: json!(payload) }
 }
 
 pub fn read_gps_paths(paths_dir: &str) -> Vec<Arc<Vec<Location>>> {
@@ -402,7 +362,7 @@ pub fn read_gps_paths(paths_dir: &str) -> Vec<Arc<Vec<Location>>> {
         .collect::<Vec<_>>()
 }
 
-pub fn new_device_data(device_id: String, paths: &[Arc<Vec<Location>>]) -> DeviceData {
+pub fn new_device_data(paths: &[Arc<Vec<Location>>]) -> DeviceData {
     let mut rng = rand::thread_rng();
 
     let n = rng.gen_range(0..10);
@@ -410,7 +370,6 @@ pub fn new_device_data(device_id: String, paths: &[Arc<Vec<Location>>]) -> Devic
     let path_index = rng.gen_range(0..path.len()) as u32;
 
     DeviceData {
-        device_id,
         path,
         path_offset: path_index,
         time_offset: Duration::from_millis(rng.gen_range(0..10000)),
@@ -420,53 +379,51 @@ pub fn new_device_data(device_id: String, paths: &[Arc<Vec<Location>>]) -> Devic
 pub fn generate_initial_events(
     events: &mut BinaryHeap<Event>,
     timestamp: Instant,
-    devices: &[DeviceData],
+    device: DeviceData,
 ) {
-    for device in devices.iter() {
-        let timestamp = timestamp + device.time_offset;
+    let timestamp = timestamp + device.time_offset;
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateGPS,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
+    events.push(Event::DataEvent(DataEvent {
+        event_type: DataEventType::GenerateGPS,
+        device: device.clone(),
+        timestamp,
+        sequence: 1,
+    }));
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateVehicleData,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
+    events.push(Event::DataEvent(DataEvent {
+        event_type: DataEventType::GenerateVehicleData,
+        device: device.clone(),
+        timestamp,
+        sequence: 1,
+    }));
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GeneratePeripheralData,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
+    events.push(Event::DataEvent(DataEvent {
+        event_type: DataEventType::GeneratePeripheralData,
+        device: device.clone(),
+        timestamp,
+        sequence: 1,
+    }));
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateMotor,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
+    events.push(Event::DataEvent(DataEvent {
+        event_type: DataEventType::GenerateMotor,
+        device: device.clone(),
+        timestamp,
+        sequence: 1,
+    }));
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateBMS,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
+    events.push(Event::DataEvent(DataEvent {
+        event_type: DataEventType::GenerateBMS,
+        device: device.clone(),
+        timestamp,
+        sequence: 1,
+    }));
 
-        events.push(Event::DataEvent(DataEvent {
-            event_type: DataEventType::GenerateIMU,
-            device: device.clone(),
-            timestamp,
-            sequence: 1,
-        }));
-    }
+    events.push(Event::DataEvent(DataEvent {
+        event_type: DataEventType::GenerateIMU,
+        device,
+        timestamp,
+        sequence: 1,
+    }));
 }
 
 pub fn next_event_duration(event_type: DataEventType) -> Duration {
@@ -487,15 +444,11 @@ pub async fn process_data_event(
 ) {
     let data = match event.event_type {
         DataEventType::GenerateGPS => generate_gps_data(&event.device, event.sequence),
-        DataEventType::GenerateIMU => generate_imu_data(&event.device, event.sequence),
-        DataEventType::GenerateVehicleData => {
-            generate_device_shadow_data(&event.device, event.sequence)
-        }
-        DataEventType::GeneratePeripheralData => {
-            generate_peripheral_state_data(&event.device, event.sequence)
-        }
-        DataEventType::GenerateMotor => generate_motor_data(&event.device, event.sequence),
-        DataEventType::GenerateBMS => generate_bms_data(&event.device, event.sequence),
+        DataEventType::GenerateIMU => generate_imu_data(event.sequence),
+        DataEventType::GenerateVehicleData => generate_device_shadow_data(event.sequence),
+        DataEventType::GeneratePeripheralData => generate_peripheral_state_data(event.sequence),
+        DataEventType::GenerateMotor => generate_motor_data(event.sequence),
+        DataEventType::GenerateBMS => generate_bms_data(event.sequence),
     };
 
     bridge_tx.send_payload(data).await;
@@ -511,14 +464,10 @@ pub async fn process_data_event(
 }
 
 async fn process_action_response_event(event: &ActionResponseEvent, bridge_tx: &BridgeTx) {
-    //info!("Sending action response {:?} {} {} {}", event.device_id, event.action_id, event.progress, event.status);
-    let mut response = ActionResponse::progress(&event.action_id, &event.status, event.progress);
-    response.device_id = Some(event.device_id.to_owned());
+    //info!("Sending action response {:?} {} {} {}", event.action_id, event.progress, event.status);
+    let response = ActionResponse::progress(&event.action_id, &event.status, event.progress);
 
-    info!(
-        "Sending action response {:?} {} {} {}",
-        event.device_id, event.action_id, event.progress, event.status
-    );
+    info!("Sending action response {} {} {}", event.action_id, event.progress, event.status);
 
     bridge_tx.send_action_response(response).await;
     info!("Successfully sent action response");
@@ -553,15 +502,13 @@ pub async fn process_events(events: &mut BinaryHeap<Event>, bridge_tx: &BridgeTx
 
 pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
     let action_id = action.action_id;
-    let device_id = action.device_id.unwrap();
 
-    info!("Generating action events for action: {action_id} on device: {device_id}");
+    info!("Generating action events for action: {action_id}");
     let now = Instant::now() + Duration::from_millis(rand::thread_rng().gen_range(0..5000));
 
     for i in 1..100 {
         events.push(Event::ActionResponseEvent(ActionResponseEvent {
             action_id: action_id.clone(),
-            device_id: device_id.clone(),
             progress: i,
             status: String::from("in_progress"),
             timestamp: now + Duration::from_secs(i as u64),
@@ -570,7 +517,6 @@ pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
 
     events.push(Event::ActionResponseEvent(ActionResponseEvent {
         action_id,
-        device_id,
         progress: 100,
         status: String::from("Completed"),
         timestamp: now + Duration::from_secs(100),
@@ -580,15 +526,11 @@ pub fn generate_action_events(action: Action, events: &mut BinaryHeap<Event>) {
 #[tokio::main(flavor = "current_thread")]
 pub async fn start(bridge_tx: BridgeTx, simulator_config: &SimulatorConfig) -> Result<(), Error> {
     let paths = read_gps_paths(&simulator_config.gps_paths);
-    let num_devices = simulator_config.num_devices;
     let actions_rx = bridge_tx.register_action_routes(&simulator_config.actions).await;
-
-    let devices =
-        (1..(num_devices + 1)).map(|i| new_device_data(i.to_string(), &paths)).collect::<Vec<_>>();
 
     let mut events = BinaryHeap::new();
 
-    generate_initial_events(&mut events, Instant::now(), &devices);
+    generate_initial_events(&mut events, Instant::now(), new_device_data(&paths));
     let mut time = Instant::now();
     let mut i = 0;
 
@@ -599,9 +541,9 @@ pub async fn start(bridge_tx: BridgeTx, simulator_config: &SimulatorConfig) -> R
                 let timestamp = event_timestamp(event);
 
                 if current_time > timestamp {
-                    trace!("Time delta {:?} {:?} {:?}", num_devices, current_time - timestamp, i);
+                    trace!("Time delta {:?} {:?}", current_time - timestamp, i);
                 } else {
-                    trace!("Time delta {:?} -{:?} {:?}", num_devices, timestamp - current_time, i);
+                    trace!("Time delta -{:?} {:?}", timestamp - current_time, i);
                 }
 
                 i += 1;

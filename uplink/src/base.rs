@@ -40,8 +40,6 @@ pub trait Package: Send + Debug {
 pub struct Payload {
     #[serde(skip_serializing)]
     pub stream: String,
-    #[serde(skip)]
-    pub device_id: Option<String>,
     pub sequence: u32,
     pub timestamp: u64,
     #[serde(flatten)]
@@ -63,8 +61,6 @@ impl Point for Payload {
 /// said device, in this case, uplink.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
-    #[serde(skip)]
-    pub device_id: Option<String>,
     // action id
     #[serde(alias = "id")]
     pub action_id: String,
@@ -80,8 +76,6 @@ pub struct Action {
 pub struct ActionResponse {
     #[serde(alias = "id")]
     pub action_id: String,
-    #[serde(skip)]
-    pub device_id: Option<String>,
     // sequence number
     pub sequence: u32,
     // timestamp
@@ -100,7 +94,6 @@ impl ActionResponse {
     fn new(id: &str, state: &str, progress: u8, errors: Vec<String>) -> Self {
         ActionResponse {
             action_id: id.to_owned(),
-            device_id: None,
             sequence: 0,
             timestamp: clock() as u64,
             state: state.to_owned(),
@@ -164,7 +157,6 @@ impl From<&ActionResponse> for Payload {
     fn from(resp: &ActionResponse) -> Self {
         Self {
             stream: "action_status".to_owned(),
-            device_id: resp.device_id.to_owned(),
             sequence: resp.sequence,
             timestamp: resp.timestamp,
             payload: json!({

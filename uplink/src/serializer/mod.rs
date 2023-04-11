@@ -632,14 +632,14 @@ pub fn check_and_flush_metrics(
     Ok(())
 }
 
-pub fn flush_metrics(
-    metrics: &mut SerializerMetrics,
-    metrics_tx: &Sender<SerializerMetrics>,
-) -> Result<(), flume::TrySendError<SerializerMetrics>> {
-    metrics_tx.try_send(metrics.clone())?;
-    metrics.prepare_next();
-    Ok(())
-}
+// pub fn flush_metrics(
+//     metrics: &mut SerializerMetrics,
+//     metrics_tx: &Sender<SerializerMetrics>,
+// ) -> Result<(), flume::TrySendError<SerializerMetrics>> {
+//     metrics_tx.try_send(metrics.clone())?;
+//     metrics.prepare_next();
+//     Ok(())
+// }
 
 // TODO(RT): Test cases
 // - Restart with no internet but files on disk
@@ -775,7 +775,6 @@ mod test {
         fn send(&mut self, i: u32) -> Result<(), Error> {
             let payload = Payload {
                 stream: "hello".to_owned(),
-                device_id: None,
                 sequence: i,
                 timestamp: 0,
                 payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,
