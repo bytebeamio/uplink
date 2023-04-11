@@ -1,5 +1,4 @@
 use flume::Sender;
-use serde::Deserialize;
 
 use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
@@ -10,8 +9,9 @@ mod journalctl;
 #[cfg(target_os = "android")]
 mod logcat;
 
-use crate::base::{bridge::BridgeTx, ActionRoute};
-use crate::{Config, Package, Payload, Stream};
+use crate::base::{Package, Payload};
+use crate::bridge::{ActionRoute, BridgeTx};
+use crate::{config::LoggerConfig, Config, Stream};
 #[cfg(target_os = "linux")]
 pub use journalctl::{new_journalctl, LogEntry};
 #[cfg(target_os = "android")]
@@ -32,13 +32,6 @@ pub struct LoggerInstance {
     bridge: BridgeTx,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct LoggerConfig {
-    pub tags: Vec<String>,
-    pub min_level: u8,
-    pub stream_size: Option<usize>,
-}
-
 impl Drop for LoggerInstance {
     // Ensure last running logger process is killed when dropped
     fn drop(&mut self) {
@@ -52,8 +45,8 @@ impl LoggerInstance {
 
         let log_stream = Stream::dynamic_with_size(
             "logs",
-            &config.project_id,
-            &config.device_id,
+            &config.bridge.project_id,
+            &config.bridge.device_id,
             buf_size,
             data_tx,
         );

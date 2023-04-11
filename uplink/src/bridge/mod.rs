@@ -1,19 +1,19 @@
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tokio::select;
 use tokio::time::{self, interval, Sleep};
 
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
 
 mod metrics;
-pub(crate) mod stream;
+pub mod stream;
+mod utils;
 
-use crate::base::{ActionRoute, DEFAULT_TIMEOUT};
-use crate::{collector::utils::Streams, Action, ActionResponse, Config};
+use crate::base::{default_timeout, Action, ActionResponse, Package, Payload, DEFAULT_TIMEOUT};
 pub use metrics::StreamMetrics;
-use stream::Stream;
+pub use stream::Stream;
+use stream::Streams;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -29,47 +29,48 @@ pub enum Error {
     Busy,
 }
 
-pub trait Point: Send + Debug {
-    fn sequence(&self) -> u32;
-    fn timestamp(&self) -> u64;
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ActionRoute {
+    pub name: String,
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
 }
 
-pub trait Package: Send + Debug {
-    fn topic(&self) -> Arc<String>;
-    fn stream(&self) -> Arc<String>;
-    // TODO: Implement a generic Return type that can wrap
-    // around custom serialization error types.
-    fn serialize(&self) -> serde_json::Result<Vec<u8>>;
-    fn anomalies(&self) -> Option<(String, usize)>;
-    fn len(&self) -> usize;
-    fn latency(&self) -> u64;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+impl From<&ActionRoute> for ActionRoute {
+    fn from(value: &ActionRoute) -> Self {
+        value.clone()
     }
 }
 
-// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
-// TODO which cloud will double deserialize (Batch 1st and messages next)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Payload {
-    #[serde(skip_serializing)]
-    pub stream: String,
-    #[serde(skip)]
-    pub device_id: Option<String>,
-    pub sequence: u32,
-    pub timestamp: u64,
-    #[serde(flatten)]
-    pub payload: Value,
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct StreamConfig {
+    pub topic: String,
+    pub buf_size: usize,
+    #[serde(default = "default_timeout")]
+    /// Duration(in seconds) that bridge collector waits from
+    /// receiving first element, before the stream gets flushed.
+    pub flush_period: u64,
 }
 
-impl Point for Payload {
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct StreamMetricsConfig {
+    pub enabled: bool,
+    pub topic: String,
+    pub blacklist: Vec<String>,
+    pub timeout: u64,
+}
 
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct Config {
+    pub project_id: String,
+    pub device_id: String,
+    pub streams: HashMap<String, StreamConfig>,
+    pub action_status: StreamConfig,
+    pub stream_metrics: StreamMetricsConfig,
+    #[serde(default)]
+    pub action_redirections: HashMap<String, String>,
+    #[serde(default)]
+    pub ignore_actions_if_no_clients: bool,
 }
 
 #[derive(Debug)]
@@ -110,7 +111,7 @@ pub struct Bridge {
 
 impl Bridge {
     pub fn new(
-        config: Arc<Config>,
+        config: Config,
         package_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
@@ -118,6 +119,7 @@ impl Bridge {
     ) -> Bridge {
         let (bridge_tx, bridge_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
+        let config = Arc::new(config);
 
         Bridge {
             action_status,
@@ -343,7 +345,7 @@ impl ActionRouter {
 #[derive(Debug, Clone)]
 pub struct BridgeTx {
     // Handle for apps to send events to bridge
-    pub(crate) events_tx: Sender<Event>,
+    pub events_tx: Sender<Event>,
 }
 
 impl BridgeTx {
@@ -398,17 +400,13 @@ impl BridgeTx {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
+    use std::time::Duration;
 
     use flume::{bounded, Receiver, Sender};
     use tokio::{runtime::Runtime, select};
 
-    use crate::{
-        base::{ActionRoute, StreamMetricsConfig},
-        Action, ActionResponse, Config,
-    };
-
-    use super::{stream::Stream, Bridge, BridgeTx, Package};
+    use super::{stream::Stream, ActionRoute, Bridge, BridgeTx, Config, StreamMetricsConfig};
+    use crate::base::{Action, ActionResponse, Package};
 
     fn default_config() -> Config {
         Config {
@@ -421,7 +419,7 @@ mod tests {
         }
     }
 
-    fn start_bridge(config: Arc<Config>) -> (BridgeTx, Sender<Action>, Receiver<Box<dyn Package>>) {
+    fn start_bridge(config: Config) -> (BridgeTx, Sender<Action>, Receiver<Box<dyn Package>>) {
         let (package_tx, package_rx) = bounded(10);
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
@@ -446,7 +444,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_on_diff_routes() {
-        let config = Arc::new(default_config());
+        let config = default_config();
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
         let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
         let route_1_rx = bridge_tx.register_action_route(route_1).await;
@@ -522,7 +520,7 @@ mod tests {
 
     #[tokio::test]
     async fn recv_action_while_current_action_exists() {
-        let config = Arc::new(default_config());
+        let config = default_config();
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
         let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
@@ -566,7 +564,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_response_on_no_redirection() {
-        let config = Arc::new(default_config());
+        let config = default_config();
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
         let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
@@ -606,7 +604,7 @@ mod tests {
     async fn no_complete_response_between_redirection() {
         let mut config = default_config();
         config.action_redirections.insert("test".to_string(), "redirect".to_string());
-        let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
+        let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
         let bridge_tx_clone = bridge_tx.clone();
 
         std::thread::spawn(move || loop {

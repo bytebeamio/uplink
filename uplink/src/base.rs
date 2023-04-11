@@ -1,9 +1,62 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{fmt::Debug, sync::Arc};
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
-use crate::{Payload, Point};
+pub fn clock() -> u128 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
+}
+
+pub const DEFAULT_TIMEOUT: u64 = 60;
+
+#[inline]
+pub fn default_timeout() -> u64 {
+    DEFAULT_TIMEOUT
+}
+
+pub trait Point: Send + Debug {
+    fn sequence(&self) -> u32;
+    fn timestamp(&self) -> u64;
+}
+
+pub trait Package: Send + Debug {
+    fn topic(&self) -> Arc<String>;
+    fn stream(&self) -> Arc<String>;
+    // TODO: Implement a generic Return type that can wrap
+    // around custom serialization error types.
+    fn serialize(&self) -> serde_json::Result<Vec<u8>>;
+    fn anomalies(&self) -> Option<(String, usize)>;
+    fn len(&self) -> usize;
+    fn latency(&self) -> u64;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
+// TODO which cloud will double deserialize (Batch 1st and messages next)
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Payload {
+    #[serde(skip_serializing)]
+    pub stream: String,
+    #[serde(skip)]
+    pub device_id: Option<String>,
+    pub sequence: u32,
+    pub timestamp: u64,
+    #[serde(flatten)]
+    pub payload: Value,
+}
+
+impl Point for Payload {
+    fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+}
 
 /// On the Bytebeam platform, an Action is how beamd and through it,
 /// the end-user, can communicate the tasks they want to perform on
@@ -45,16 +98,11 @@ pub struct ActionResponse {
 
 impl ActionResponse {
     fn new(id: &str, state: &str, progress: u8, errors: Vec<String>) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::from_secs(0))
-            .as_millis() as u64;
-
         ActionResponse {
             action_id: id.to_owned(),
             device_id: None,
             sequence: 0,
-            timestamp,
+            timestamp: clock() as u64,
             state: state.to_owned(),
             progress,
             errors,

@@ -1,7 +1,6 @@
+use crate::base::clock;
 use serde::Serialize;
 use std::time::Instant;
-
-use crate::collector::utils;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct StreamMetrics {
@@ -24,7 +23,7 @@ impl StreamMetrics {
     pub fn new(name: &str, max_batch_points: usize) -> Self {
         StreamMetrics {
             stream: name.to_owned(),
-            timestamp: utils::clock(),
+            timestamp: clock(),
             sequence: 1,
             points: 0,
             batches: 0,
@@ -48,7 +47,7 @@ impl StreamMetrics {
     pub fn add_point(&mut self) {
         self.points += 1;
         if self.points == 1 {
-            self.timestamp = utils::clock();
+            self.timestamp = clock();
         }
     }
 
@@ -63,7 +62,7 @@ impl StreamMetrics {
     }
 
     pub fn prepare_next(&mut self) {
-        self.timestamp = utils::clock();
+        self.timestamp = clock();
         self.sequence += 1;
         self.batches = 0;
         self.points = 0;

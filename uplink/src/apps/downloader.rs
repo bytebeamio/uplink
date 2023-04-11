@@ -10,7 +10,7 @@
 //! progress information. On completion of a download, the received `Action`'s `payload` is updated to contain information
 //! about where the file was downloaded into, within the file-system. This action is then sent back to bridge as part of
 //! the final "Completed" response through use of the [`done_response`].
-//! 
+//!
 //! As illustrated in the following diagram, the [`Bridge`] forwards download actions to the [`FileDownloader`] where it is downloaded and
 //! intermediate [`ActionResponse`]s are sent back to bridge as progress notifications. On completion of a download, the action response
 //! also includes a modified action with the [`done_response`], where the action received by the downloader is suitably modified to include
@@ -59,9 +59,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
 
-use crate::base::bridge::BridgeTx;
-use crate::base::DownloaderConfig;
-use crate::{Action, ActionResponse, Config};
+use crate::base::{Action, ActionResponse};
+use crate::bridge::BridgeTx;
+use crate::config::{Config, DownloaderConfig};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -276,13 +276,14 @@ pub struct DownloadFile {
 
 #[cfg(test)]
 mod test {
+    use crate::bridge::{ActionRoute, Event};
     use flume::TrySendError;
     use serde_json::json;
 
     use std::{collections::HashMap, time::Duration};
 
     use super::*;
-    use crate::base::{bridge::Event, ActionRoute, DownloaderConfig, MqttConfig};
+    use crate::config::{DownloaderConfig, MqttConfig};
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 
@@ -290,8 +291,11 @@ mod test {
         Config {
             broker: "localhost".to_owned(),
             port: 1883,
-            device_id: "123".to_owned(),
-            streams: HashMap::new(),
+            bridge: crate::bridge::Config {
+                device_id: "123".to_owned(),
+                streams: HashMap::new(),
+                ..Default::default()
+            },
             mqtt: MqttConfig { max_packet_size: 1024 * 1024, ..Default::default() },
             downloader,
             ..Default::default()

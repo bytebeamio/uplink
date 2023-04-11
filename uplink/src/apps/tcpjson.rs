@@ -10,9 +10,9 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::io;
 
-use crate::base::bridge::BridgeTx;
-use crate::base::AppConfig;
-use crate::{Action, ActionResponse, Payload};
+use crate::base::{Action, ActionResponse, Payload};
+use crate::bridge::BridgeTx;
+use crate::config::AppConfig;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -29,7 +29,7 @@ pub enum Error {
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
     #[error("Couldn't fill stream")]
-    Stream(#[from] crate::base::bridge::Error),
+    Stream(#[from] crate::bridge::Error),
 }
 
 #[derive(Debug, Clone)]

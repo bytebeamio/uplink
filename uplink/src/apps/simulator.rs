@@ -9,9 +9,9 @@ use std::collections::BinaryHeap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{cmp::Ordering, fs, io, sync::Arc};
 
-use crate::base::bridge::BridgeTx;
-use crate::base::SimulatorConfig;
-use crate::{Action, ActionResponse, Payload};
+use crate::base::{Action, ActionResponse, Payload};
+use crate::bridge::BridgeTx;
+use crate::config::SimulatorConfig;
 
 use rand::Rng;
 

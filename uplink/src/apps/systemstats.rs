@@ -12,10 +12,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::{
-    base::bridge::{BridgeTx, Payload},
-    Config,
-};
+use crate::base::Payload;
+use crate::bridge::BridgeTx;
+use crate::Config;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
