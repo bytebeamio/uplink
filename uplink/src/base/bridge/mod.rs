@@ -10,7 +10,8 @@ use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration}
 mod metrics;
 pub(crate) mod stream;
 
-use crate::{base::ActionRoute, collector::utils::Streams, Action, ActionResponse, Config};
+use crate::base::{ActionRoute, DEFAULT_TIMEOUT};
+use crate::{collector::utils::Streams, Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 use stream::Stream;
 
@@ -341,7 +342,7 @@ pub struct BridgeTx {
 
 impl BridgeTx {
     pub async fn register_action_route(&self, route: ActionRoute) -> Receiver<Action> {
-        let (actions_tx, actions_rx) = bounded(0);
+        let (actions_tx, actions_rx) = bounded(1);
         let duration = Duration::from_secs(route.timeout);
         let action_router = ActionRouter { actions_tx, duration };
         let event = Event::RegisterActionRoute(route.name, action_router);
@@ -351,7 +352,7 @@ impl BridgeTx {
         actions_rx
     }
 
-    pub async fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item=R>>(
+    pub async fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item = R>>(
         &self,
         routes: V,
     ) -> Option<Receiver<Action>> {
@@ -360,7 +361,7 @@ impl BridgeTx {
             return None;
         }
 
-        let (actions_tx, actions_rx) = bounded(0);
+        let (actions_tx, actions_rx) = bounded(1);
 
         for route in routes {
             let duration = Duration::from_secs(route.timeout);

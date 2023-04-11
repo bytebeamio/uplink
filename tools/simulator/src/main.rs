@@ -143,6 +143,15 @@ impl Dummy<BoolString> for String {
     }
 }
 
+struct VerString;
+
+impl Dummy<VerString> for String {
+    fn dummy_with_rng<R: Rng + ?Sized>(_: &VerString, rng: &mut R) -> String {
+        const NAMES: &[&str] = &["v0.0.1", "v0.5.0", "v1.0.1"];
+        NAMES.choose(rng).unwrap().to_string()
+    }
+}
+
 #[derive(Debug, Serialize, Dummy)]
 struct Bms {
     #[dummy(faker = "250")]
@@ -355,9 +364,9 @@ struct DeviceShadow {
     mode: String,
     #[dummy(faker = "BoolString")]
     status: String,
-    #[dummy(faker = "BoolString")]
+    #[dummy(faker = "VerString")]
     firmware_version: String,
-    #[dummy(faker = "BoolString")]
+    #[dummy(faker = "VerString")]
     config_version: String,
     #[dummy(faker = "20000..30000")]
     distance_travelled: i64,
@@ -572,7 +581,7 @@ pub fn generate_action_events(action: Action, events: &mut DelayQueue<Event>) {
     let duration = Duration::from_secs(10);
     events.insert(
         Event::ActionResponseEvent(ActionResponseEvent {
-            action_id: action_id.clone(),
+            action_id,
             progress: 100,
             status: String::from("Completed"),
             timestamp: now + duration,

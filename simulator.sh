@@ -1,19 +1,21 @@
 #!/bin/bash
 
 start_devices() {
-    limit=${1:?"Missing device count"}
+    start=${1:?"Missing start id"}
+    stop=${2:?"Missing end id"}
     kill_devices;
     mkdir -p devices
 
     echo "Starting uplink and simulator"
-    for id in $(seq 1 $limit)
+    for id in $(seq $start $stop)
     do 
+        printf -v port "50%03d" $id
         download_auth_config $id
-        create_uplink_config $id
+        create_uplink_config $id $port
         start_uplink $id
 
         sleep 1
-        start_simulaotr $id
+        start_simulator $id $port
     done
     echo DONE
 
@@ -25,7 +27,9 @@ start_devices() {
 }
 
 create_uplink_config() {
-    printf "processes = [] \naction_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" } \n\n[tcpapps.1] \nport = 500$1 \nactions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }] \n\n[downloader] \nactions= [{ name = \"send_file\" }, { name = \"update_firmware\" }] \npath = \"/var/tmp/ota/$1\"" > devices/device_$1.toml
+    id=${1:?"Missing id"}
+    port=${2:?"Missing port number"}
+    printf "processes = [] \naction_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" } \n\n[persistence]\npath = \"/var/tmp/persistence/$id\" \nmax_file_size = 104857600 \nmax_file_count = 3 \n\n[tcpapps.1] \nport = $port \nactions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }] \n\n[downloader] \nactions= [{ name = \"send_file\" }, { name = \"update_firmware\" }] \npath = \"/var/tmp/ota/$id\"" > devices/device_$id.toml
 }
 
 download_auth_config() {
@@ -39,12 +43,14 @@ download_auth_config() {
 }
 
 start_uplink() {
-    nohup uplink -a devices/device_$1.json -c devices/device_$1.toml -vv > devices/uplink_$1.log 2>&1 &
+    nohup uplink -a devices/device_$1.json -c devices/device_$1.toml > devices/uplink_$1.log 2>&1 &
     echo $! >> devices/pids
 }
 
-start_simulaotr() {
-    nohup simulator -p 500$1 -g ./paths -vvv > devices/simulator_$1.log 2>&1 &
+start_simulator() {
+    id=${1:?"Missing id"}
+    port=${2:?"Missing port number"}
+    nohup simulator -p $port -g ./paths > devices/simulator_$id.log 2>&1 &
     echo $! >> devices/pids
 }
 

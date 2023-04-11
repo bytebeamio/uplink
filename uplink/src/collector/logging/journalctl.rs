@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
+
 use std::process::{Command, Stdio};
 
-use serde::{Deserialize, Serialize};
 use super::LoggerConfig;
 use crate::Payload;
 

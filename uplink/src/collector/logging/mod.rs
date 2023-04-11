@@ -1,22 +1,21 @@
+use flume::Sender;
+use serde::Deserialize;
+
 use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::{process::Command, time::Duration};
-
-use flume::Sender;
-use serde::Deserialize;
-use crate::{Config, Package, Payload, Stream};
 
 #[cfg(target_os = "linux")]
 mod journalctl;
 #[cfg(target_os = "android")]
 mod logcat;
 
+use crate::base::{bridge::BridgeTx, ActionRoute};
+use crate::{Config, Package, Payload, Stream};
 #[cfg(target_os = "linux")]
 pub use journalctl::{new_journalctl, LogEntry};
 #[cfg(target_os = "android")]
 pub use logcat::{new_logcat, LogEntry};
-use crate::base::ActionRoute;
-use crate::base::bridge::BridgeTx;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -48,11 +47,7 @@ impl Drop for LoggerInstance {
 }
 
 impl LoggerInstance {
-    pub fn new(
-        config: Arc<Config>,
-        data_tx: Sender<Box<dyn Package>>,
-        bridge: BridgeTx,
-    ) -> Self {
+    pub fn new(config: Arc<Config>, data_tx: Sender<Box<dyn Package>>, bridge: BridgeTx) -> Self {
         let buf_size = config.logging.as_ref().and_then(|c| c.stream_size).unwrap_or(32);
 
         let log_stream = Stream::dynamic_with_size(
@@ -79,10 +74,10 @@ impl LoggerInstance {
             self.spawn_logger(new_logcat(config));
         }
 
-        let log_rx = self.bridge.register_action_route(ActionRoute {
-            name: "logging_config".to_string(),
-            timeout: 10,
-        }).await;
+        let log_rx = self
+            .bridge
+            .register_action_route(ActionRoute { name: "logging_config".to_string(), timeout: 10 })
+            .await;
 
         loop {
             let action = log_rx.recv()?;

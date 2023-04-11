@@ -1,46 +1,51 @@
-//! Contains definitions necessary to download files such as OTA updates, as notified by a download file [`Action`]
+//! Contains the handler and definitions necessary to download files such as OTA updates, as notified by a download file [`Action`]
 //!
-//! The thread running [`Actions`] forwards the appropriate `Action`s to the [`FileDownloader`] with a _rendezvous channel_(A channel bounded to 0).
-//! The `Action` is sent only when a receiver is awaiting on the otherside and fails otherwise. This allows us to instantly recognize that another
-//! download is currently being performed.
+//! The thread running [`Bridge`] forwards the appropriate `Action`s to the [`FileDownloader`].
 //!
 //! Download file `Action`s contain JSON formatted [`payload`] which can be deserialized into an object of type [`DownloadFile`].
-//! This object contains information such as the `url` where the download file is accessible from, the `version` number associated
-//! with the downloaded file and a field which must be updated with the location in file-system where the file is stored into.
+//! This object contains information such as the `url` where the download file is accessible from, the `file_name` or `version` number
+//! associated with the downloaded file and a field which must be updated with the location in file-system where the file is stored into.
 //!
 //! The `FileDownloader` also updates the state of a downloading `Action` using periodic [`ActionResponse`]s containing
 //! progress information. On completion of a download, the received `Action`'s `payload` is updated to contain information
-//! about where the file was downloaded into, within the file-system.
+//! about where the file was downloaded into, within the file-system. This action is then sent back to bridge as part of
+//! the final "Completed" response through use of the [`done_response`].
+//! 
+//! As illustrated in the following diagram, the [`Bridge`] forwards download actions to the [`FileDownloader`] where it is downloaded and
+//! intermediate [`ActionResponse`]s are sent back to bridge as progress notifications. On completion of a download, the action response
+//! also includes a modified action with the [`done_response`], where the action received by the downloader is suitably modified to include
+//! information such as the path into which the file was downloaded. As seen in the diagram, two actions with [`action_id`] `"1"` and `"3"` are
+//! forwarded from bridge. In the case of `action_id = 1` we can see that 3 action responses containing progress information are sent back
+//! to bridge and on completion of download, action response containing the done_response is also sent to the bridge from where it might be
+//! forwarded with help of [`action_redirections`]. The same is repeated in the case of `action_id = 3`.
 //!
 //! ```text
-//! ┌───────┐                                              ┌──────────────┐
-//! │Actions│                                              │FileDownloader│
-//! └───┬───┘                                              └──────┬───────┘
-//!     │                                                         │
-//!     │ .try_send()                                     .recv() │
-//!     │  1  ┌──────────────┐             ┌────────────────┐  1  │
-//!     ├─────►Sender<Action>├──────x──────►Receiver<Action>├────►│───────┐
-//!     │     └───▲─────▲────┘             └───────┬────────┘     │       │          ┌─────────────┐
-//!     │  2      │     │                          │              ├──ActionResponse──►action_status│
-//!     ├─Action──┘     │                          │              │       │          └─────────────┘
-//!     │               │                          │              ├───────┤
-//!     │  3            │                          │              │-------│-┐
-//!     ├───────────────┘                          │              │   1   │ '
-//!     │                                          │     3        │       │ '          ┌─────────┐
-//!     │                                          └─────────────►│───────┤ ├--Action--►bridge_tx│
-//!     │                                                         │       │ '          └─────────┘
-//!     │                                                         ├───────┘ '
-//!     │                                                         │---------┘
-//!                                                                   3
+//!                                 ┌──────────────┐
+//!                                 │FileDownloader│
+//!                                 └──────┬───────┘
+//!                                        │
+//!                          .recv_async() │
+//!     ┌──────┐    ┌────────────────┐  1  │
+//!     │Bridge├────►Receiver<Action>├────►├───────┐
+//!     └───▲──┘    └───────┬────────┘     │       │
+//!         │               │              ├───────┤
+//!         │               │              │       | progress = x%
+//!         │               │              ├───────┤
+//!         │               │              ├-------┼-----┐
+//!         │               │              │   1   │     '
+//!         │               │     3        │       │     '
+//!         │               └─────────────►├───────┤     ' done_response = Some(action)
+//!         │                              │       │     '
+//!         │                              ├───────┘     '
+//!         └───────ActionResponse─────────┴-------------┘
+//!                                                3
 //! ```
 //!
-//! **NOTE:** The [`Actions`] thread will block between sending a `Some(..)` and a `None` onto the download channel.
-//!
-//! [`Actions`]: crate::Actions
+//! [`Bridge`]: crate::Bridge
+//! [`action_id`]: Action#structfield.action_id
 //! [`payload`]: Action#structfield.payload
-//! [`send()`]: Sender::send()
-//! [`try_send()`]: Sender::try_send()
-//! [`Error::Downloading`]: crate::base::actions::Error::Downloading
+//! [`done_response`]: ActionResponse#structfield.done_response
+//! [`action_redirections`]: Config#structfield.action_redirections
 
 use bytes::BytesMut;
 use flume::RecvError;
@@ -49,7 +54,7 @@ use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
-use std::fs::{create_dir_all, File, remove_dir_all};
+use std::fs::{create_dir_all, metadata, remove_dir_all, File};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
@@ -66,24 +71,14 @@ pub enum Error {
     Reqwest(#[from] reqwest::Error),
     #[error("File io Error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Error forwarding download Action to bridge: {0}")]
-    TrySend(Box<flume::TrySendError<Action>>),
     #[error("Error receiving action: {0}")]
     Recv(#[from] RecvError),
-    #[error("Missing file name: {0}")]
-    FileNameMissing(String),
+    #[error("Empty file name")]
+    EmptyFileName,
     #[error("Missing file path")]
     FilePathMissing,
     #[error("Download failed, content length zero")]
     EmptyFile,
-    #[error("Couldn't install apk")]
-    InstallationError(String),
-}
-
-impl From<flume::TrySendError<Action>> for Error {
-    fn from(e: flume::TrySendError<Action>) -> Self {
-        Self::TrySend(Box::new(e))
-    }
 }
 
 /// This struct contains the necessary components to download and store file as notified by a download file
@@ -99,8 +94,7 @@ pub struct FileDownloader {
 }
 
 impl FileDownloader {
-    /// Create a struct to manage downloads, runs on a separate thread. Also returns a [`Sender`]
-    /// end of a "One" channel to send associated actions onto.
+    /// Creates a handler for download actions within uplink and uses HTTP to download files.
     pub fn new(config: Arc<Config>, bridge_tx: BridgeTx) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
@@ -127,7 +121,7 @@ impl FileDownloader {
     }
 
     /// Spawn a thread to handle downloading files as notified by download actions and for forwarding the updated actions
-    /// to bridge for further processing, e.g. OTA update installation.
+    /// back to bridge for further processing, e.g. OTA update installation.
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) -> Result<(), Error> {
         let routes = &self.config.actions;
@@ -137,12 +131,11 @@ impl FileDownloader {
         };
         loop {
             self.sequence = 0;
-            // The 0 sized channel only allows one action to be in execution at a time. Only one action is accepted below,
-            // all download actions before and after, till the next recv() won't get executed and will be reported to cloud.
             let action = download_rx.recv_async().await?;
             self.action_id = action.action_id.clone();
 
             let mut error = None;
+            // NOTE: retry mechanism tries atleast 3 times before returning an error
             for _ in 0..3 {
                 match self.run(action.clone()).await {
                     Ok(_) => {
@@ -172,7 +165,14 @@ impl FileDownloader {
         self.bridge_tx.send_action_response(status).await;
 
         // Extract url information from action payload
-        let mut update = serde_json::from_str::<DownloadFile>(&action.payload)?;
+        let mut update = match serde_json::from_str::<DownloadFile>(&action.payload)? {
+            DownloadFile { file_name, .. } if file_name.is_empty() => {
+                return Err(Error::EmptyFileName)
+            }
+            DownloadFile { content_length: 0, .. } => return Err(Error::EmptyFile),
+            u => u,
+        };
+
         let url = update.url.clone();
 
         // Create file to actually download into
@@ -182,7 +182,7 @@ impl FileDownloader {
         // TODO: Error out for 1XX/3XX responses
         let resp = self.client.get(&url).send().await?.error_for_status()?;
         info!("Downloading from {} into {}", url, file_path);
-        self.download(resp, file).await?;
+        self.download(resp, file, update.content_length).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.download_path = Some(file_path.clone());
@@ -197,15 +197,20 @@ impl FileDownloader {
 
     /// Creates file to download into
     fn create_file(&self, name: &str, file_name: &str) -> Result<(File, String), Error> {
-        // Ensure that directory for downloading file into, of the format `path/to/{version}/`, exists
+        // Ensure that directory for downloading file into, exists
         let mut download_path = PathBuf::from(self.config.path.clone());
         download_path.push(name);
-        let _ = remove_dir_all(&download_path);
         create_dir_all(&download_path)?;
 
         let mut file_path = download_path.to_owned();
         file_path.push(file_name);
         let file_path = file_path.as_path();
+        // NOTE: if file_path is occupied by a directory due to previous working of uplink, remove it
+        if let Ok(f) = metadata(file_path) {
+            if f.is_dir() {
+                remove_dir_all(file_path)?;
+            }
+        }
         let file = File::create(file_path)?;
         let file_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
 
@@ -213,14 +218,12 @@ impl FileDownloader {
     }
 
     /// Downloads from server and stores into file
-    async fn download(&mut self, resp: Response, mut file: File) -> Result<(), Error> {
-        // Error out in case of 0 sized files, but handle situation where file size is not
-        // reported by the webserver in response by incrementing count 0..100 over and over.
-        let content_length = match resp.content_length() {
-            None => None,
-            Some(0) => return Err(Error::EmptyFile),
-            Some(l) => Some(l as usize),
-        };
+    async fn download(
+        &mut self,
+        resp: Response,
+        mut file: File,
+        content_length: usize,
+    ) -> Result<(), Error> {
         let mut downloaded = 0;
         let mut next = 1;
         let mut stream = resp.bytes_stream();
@@ -231,18 +234,11 @@ impl FileDownloader {
             downloaded += chunk.len();
             file.write_all(&chunk)?;
 
-            // NOTE: ensure lesser frequency of action responses, once every 100KB
-            if downloaded / 102400 > next {
+            // Calculate percentage on the basis of content_length
+            let percentage = 99 * downloaded / content_length;
+            // NOTE: ensure lesser frequency of action responses, once every percentage points
+            if percentage >= next {
                 next += 1;
-                // Calculate percentage on the basis of content_length if available,
-                // else increment 0..100 till task is completed.
-                let percentage = match content_length {
-                    Some(content_length) => 100 * downloaded / content_length,
-                    None => {
-                        downloaded = (downloaded + 1) % 101;
-                        downloaded
-                    }
-                };
 
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
@@ -270,21 +266,23 @@ impl FileDownloader {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct DownloadFile {
     url: String,
+    #[serde(alias = "content-length")]
+    content_length: usize,
     #[serde(alias = "version")]
     file_name: String,
     /// Path to location in fs where file will be stored
-    download_path: Option<String>,
+    pub download_path: Option<String>,
 }
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashMap, time::Duration};
-
-    use crate::base::{bridge::Event, DownloaderConfig, MqttConfig, ActionRoute};
-
-    use super::*;
     use flume::TrySendError;
     use serde_json::json;
+
+    use std::{collections::HashMap, time::Duration};
+
+    use super::*;
+    use crate::base::{bridge::Event, ActionRoute, DownloaderConfig, MqttConfig};
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 
@@ -306,8 +304,10 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
-        let downloader_cfg =
-            DownloaderConfig { actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }], path: format!("{DOWNLOAD_DIR}/uplink-test") };
+        let downloader_cfg = DownloaderConfig {
+            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
+            path: format!("{DOWNLOAD_DIR}/uplink-test"),
+        };
         let config = config(downloader_cfg.clone());
         let (events_tx, events_rx) = flume::bounded(2);
         let bridge_tx = BridgeTx { events_tx };
@@ -321,6 +321,7 @@ mod test {
         // Create a firmware update action
         let download_update = DownloadFile {
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
+            content_length: 296658,
             file_name: "test.txt".to_string(),
             download_path: None,
         };
@@ -350,20 +351,25 @@ mod test {
             e => unreachable!("Unexpected event: {e:#?}"),
         };
         assert_eq!(status.state, "Downloading");
+        let mut progress = 0;
 
         // Collect and ensure forwarded action contains expected info
         loop {
-            match dbg!(events_rx.recv().unwrap()) {
-                Event::ActionResponse(ActionResponse {
-                    done_response: Some(Action { payload, .. }),
-                    ..
-                }) => {
-                    let forward: DownloadFile = serde_json::from_str(&payload).unwrap();
-                    assert_eq!(forward, expected_forward);
-                    break;
-                }
-                Event::ActionResponse(response) if response.is_failed() => break,
-                _ => {}
+            let status = match events_rx.recv().unwrap() {
+                Event::ActionResponse(status) => status,
+                e => unreachable!("Unexpected event: {e:#?}"),
+            };
+
+            assert!(progress <= status.progress);
+            progress = status.progress;
+
+            if status.is_done() {
+                let fwd_action = status.done_response.unwrap();
+                let fwd = serde_json::from_str(&fwd_action.payload).unwrap();
+                assert_eq!(expected_forward, fwd);
+                break;
+            } else if status.is_failed() {
+                break;
             }
         }
     }
@@ -389,6 +395,7 @@ mod test {
 
         // Create a firmware update action
         let download_update = DownloadFile {
+            content_length: 0,
             url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
             file_name: "1.0".to_string(),
             download_path: None,
