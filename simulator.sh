@@ -7,9 +7,9 @@ start_devices() {
     mkdir -p devices
 
     echo "Starting uplink and simulator"
-    devices=$(seq $start $stop)
-    first=${devices:0:1}
-    rest=${devices:1}
+    devices=($(seq $start $stop))
+    first=${devices[0]}
+    rest=${devices[@]:1}
     printf -v port "50%03d" $first
     download_auth_config $first
     create_uplink_config $first $port
