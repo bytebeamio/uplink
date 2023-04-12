@@ -40,7 +40,24 @@ start_devices() {
 create_uplink_config() {
     id=${1:?"Missing id"}
     port=${2:?"Missing port number"}
-    printf "processes = [] \naction_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" } \n\n[persistence]\npath = \"/var/tmp/persistence/$id\" \nmax_file_size = 104857600 \nmax_file_count = 3 \n\n[tcpapps.1] \nport = $port \nactions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }] \n\n[downloader] \nactions= [{ name = \"send_file\" }, { name = \"update_firmware\" }] \npath = \"/var/tmp/ota/$id\"" > devices/device_$id.toml
+    printf "$(cat << EOF
+processes = [] 
+action_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" }
+
+[persistence]
+path = \"/var/tmp/persistence/$id\"
+max_file_size = 104857600
+max_file_count = 3
+
+[tcpapps.1]
+port = $port
+actions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }]
+
+[downloader]
+actions= [{ name = \"send_file\" }, { name = \"update_firmware\" }]
+path = \"/var/tmp/ota/$id\"
+EOF
+)" > devices/device_$id.toml
 }
 
 download_auth_config() {
@@ -54,9 +71,10 @@ download_auth_config() {
 }
 
 run() {
-    echo "running: $2 $3 > $4"
+    printf "running: $2 $3"
     if [ $1 -eq 1 ]
     then
+        echo " > $4"
         nohup $2 $3 > $4 2>&1 &
     else
         $2 &
@@ -64,6 +82,7 @@ run() {
 }
 
 start_uplink() {
+    echo "Starting uplink with device_id: $2"
     cmd="uplink -a devices/device_$2.json -c devices/device_$2.toml"
     run $1 "$cmd" "$3" "$4"
     echo $! >> devices/pids
