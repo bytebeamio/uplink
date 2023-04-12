@@ -7,15 +7,26 @@ start_devices() {
     mkdir -p devices
 
     echo "Starting uplink and simulator"
-    for id in $(seq $start $stop)
+    devices=$(seq $start $stop)
+    first=${devices:0:1}
+    rest=${devices:1}
+    printf -v port "50%03d" $first
+    download_auth_config $first
+    create_uplink_config $first $port
+    start_uplink 1 $first "-vv" "devices/uplink_$first.log"
+
+    sleep 1
+    start_simulator 1 $first $port "-vv" "devices/simulator_$first.log"
+
+    for id in $rest
     do 
         printf -v port "50%03d" $id
         download_auth_config $id
         create_uplink_config $id $port
-        start_uplink $id
+        start_uplink 0 $id
 
         sleep 1
-        start_simulator $id $port
+        start_simulator 0 $id $port
     done
     echo DONE
 
@@ -42,15 +53,28 @@ download_auth_config() {
         --header "x-bytebeam-api-key: $BYTEBEAM_API_KEY" > devices/device_$id.json
 }
 
+run() {
+    echo "running: $2 $3 > $4"
+    if [ $1 -eq 1 ]
+    then
+        nohup $2 $3 > $4 2>&1 &
+    else
+        $2 &
+    fi
+}
+
 start_uplink() {
-    nohup uplink -a devices/device_$1.json -c devices/device_$1.toml > devices/uplink_$1.log 2>&1 &
+    cmd="uplink -a devices/device_$2.json -c devices/device_$2.toml"
+    run $1 "$cmd" "$3" "$4"
     echo $! >> devices/pids
 }
 
 start_simulator() {
-    id=${1:?"Missing id"}
-    port=${2:?"Missing port number"}
-    nohup simulator -p $port -g ./paths > devices/simulator_$id.log 2>&1 &
+    nohup=$1
+    id=${2:?"Missing id"}
+    port=${3:?"Missing port number"}
+    cmd="simulator -p $port -g ./paths"
+    run $1 "$cmd" "$4" "$5"
     echo $! >> devices/pids
 }
 
