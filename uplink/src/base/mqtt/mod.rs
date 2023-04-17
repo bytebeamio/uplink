@@ -60,7 +60,7 @@ impl Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let (client, mut eventloop) = AsyncClient::new(options, 10);
-        eventloop.network_options.set_connection_timeout(30);
+        eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
         let mut actions_subscriptions = vec![config.actions_subscription.clone()];
         if let Some(sim_cfg) = &config.simulator {
             actions_subscriptions.extend_from_slice(&sim_cfg.actions_subscriptions);

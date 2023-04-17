@@ -126,6 +126,7 @@ pub struct MqttConfig {
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub keep_alive: u64,
+    pub network_timeout: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
