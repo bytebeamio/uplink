@@ -5,6 +5,10 @@ processes = [{ name = "echo", timeout = 10 }]
 
 action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
 
+# Uplink supports compressing the data payload with the lz4 scheme, this
+# feature can be enabled by including the following configuration detail.
+enable_compression = true
+
 # MQTT client configuration
 # 
 # Required Parameters
