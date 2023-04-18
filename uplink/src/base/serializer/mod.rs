@@ -5,6 +5,7 @@ use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
+use ::time::Instant;
 use bytes::Bytes;
 use disk::Storage;
 use flume::{Receiver, RecvError, Sender};
@@ -516,6 +517,7 @@ fn compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
 
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
 fn construct_publish(data: Box<dyn Package>, is_compressible: bool) -> Result<Publish, Error> {
+    let instant = Instant::now();
     let stream = data.stream().as_ref().to_owned();
     let point_count = data.len();
     let batch_latency = data.latency();
@@ -524,10 +526,19 @@ fn construct_publish(data: Box<dyn Package>, is_compressible: bool) -> Result<Pu
     let mut topic = data.topic().to_string();
     let mut payload = data.serialize()?;
 
+    let size_before = payload.len() as f64;
+    info!("Payload size before - {}", size_before);
+
     if is_compressible {
+        let compress_instant = Instant::now();
         compress(&mut payload, &mut topic)?;
+        info!("Time spent in compress - {}", compress_instant.elapsed());
+        let size_after = payload.len() as f64;
+        info!("Payload size after - {}", size_after);
+        info!("Compressed by {}%", (size_before - size_after) / size_before * 100.0);
     }
 
+    info!("Time spent in construct publish - {}", instant.elapsed());
     Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
 }
 

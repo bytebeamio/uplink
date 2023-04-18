@@ -2,6 +2,7 @@
 processes = [{ name = "echo" }]
 
 action_redirections = { "update_firmware" = "install_update", "send_file" = "load_file" }
+enable_compression = true
 
 [tcpapps.1]
 port = 5555
