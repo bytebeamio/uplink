@@ -168,6 +168,16 @@ pub mod config {
             }
         }
 
+        let stream_config =
+            config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
+                topic: format!("/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"),
+                buf_size: 32,
+                flush_period: DEFAULT_TIMEOUT,
+            });
+        if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+            stream_config.buf_size = buf_size;
+        }
+
         let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/actions";
         let mut device_action_topic = action_topic_template.to_string();
         replace_topic_placeholders(&mut device_action_topic, tenant_id, device_id);
