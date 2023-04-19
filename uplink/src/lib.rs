@@ -93,6 +93,10 @@ pub mod config {
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     buf_size = 1
 
+    [streams.logs]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+    buf_size = 32
+
     [system_stats]
     enabled = true
     process_names = ["uplink"]
@@ -338,11 +342,7 @@ impl Uplink {
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
         {
-            let logger = collector::logging::LoggerInstance::new(
-                config.clone(),
-                self.data_tx.clone(),
-                bridge_tx.clone(),
-            );
+            let logger = collector::logging::LoggerInstance::new(config.clone(), bridge_tx.clone());
             thread::spawn(move || logger.start());
         }
 
