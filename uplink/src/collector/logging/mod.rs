@@ -93,6 +93,9 @@ impl LoggerInstance {
             self.spawn_logger(new_journalctl(&config));
             #[cfg(target_os = "android")]
             self.spawn_logger(new_logcat(&config));
+
+            let response = ActionResponse::success(&action.action_id);
+            self.bridge.send_action_response(response).await;
         }
     }
 
