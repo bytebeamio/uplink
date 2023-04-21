@@ -38,13 +38,14 @@ pub struct Payload {
 
 pub struct Stream {
     count: usize,
+    size: usize,
     start: u64,
     end: u64,
 }
 
 impl Default for Stream {
     fn default() -> Self {
-        Self { count: 0, start: u64::MAX, end: 0 }
+        Self { count: 0, size: 0, start: u64::MAX, end: 0 }
     }
 }
 
@@ -81,12 +82,11 @@ fn main() -> Result<(), Error> {
                 break;
             }
         };
+        let stream = streams.entry(publish.topic.to_string()).or_insert_with(|| Stream::default());
+        stream.size += publish.payload.len();
 
         let payloads: Vec<Payload> = serde_json::from_slice(&publish.payload)?;
         for payload in payloads {
-            let stream =
-                streams.entry(publish.topic.to_string()).or_insert_with(|| Stream::default());
-
             let timestamp = payload.timestamp;
             stream.count += 1;
             if stream.start > timestamp {
@@ -99,9 +99,10 @@ fn main() -> Result<(), Error> {
         }
     }
 
-    println!("topic: count, [start, end]");
-    for (stream, Stream { count, start, end }) in streams {
-        println!("{}: {}, [{}, {}]", stream, count, start, end);
+    println!("topic: count, size(bytes), rate(/second) [start, end]");
+    for (stream, Stream { count, size, start, end }) in streams {
+        let rate = (count * 1000) as f32 / (end - start) as f32;
+        println!("{}: {}, {}, {} [{}, {}]", stream, count, size, rate, start, end);
     }
 
     Ok(())
