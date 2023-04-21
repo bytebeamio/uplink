@@ -773,7 +773,7 @@ mod test {
 
     impl MockCollector {
         fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
-            MockCollector { stream: Stream::new("hello", "hello/world", 1, data_tx, false) }
+            MockCollector { stream: Stream::new("hello", "hello/world", 1, data_tx, true) }
         }
 
         fn send(&mut self, i: u32) -> Result<(), Error> {
