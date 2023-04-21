@@ -1,6 +1,7 @@
-use std::string::FromUtf8Error;
+use std::{collections::HashMap, string::FromUtf8Error};
 
 use rumqttc::{read, Packet};
+use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
@@ -13,7 +14,7 @@ pub struct CommandLine {
     #[structopt(short = "c", help = "max file count")]
     pub max_file_count: usize,
     /// max packet size
-    #[structopt(short = "s", help = "max packet size")]
+    #[structopt(short = "p", help = "max packet size")]
     pub max_packet_size: usize,
     /// backup directory
     #[structopt(short = "d", help = "backup directory")]
@@ -26,6 +27,25 @@ pub enum Error {
     Disk(#[from] disk::Error),
     #[error("From UTF8 error {0}")]
     FromUtf8(#[from] FromUtf8Error),
+    #[error("Serde error {0}")]
+    Serde(#[from] serde_json::Error),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Payload {
+    timestamp: u64,
+}
+
+pub struct Stream {
+    count: usize,
+    start: u64,
+    end: u64,
+}
+
+impl Default for Stream {
+    fn default() -> Self {
+        Self { count: 0, start: u64::MAX, end: 0 }
+    }
 }
 
 fn main() -> Result<(), Error> {
@@ -35,12 +55,15 @@ fn main() -> Result<(), Error> {
         commandline.max_file_size,
         commandline.max_file_count,
     )?;
+    storage.non_destructive_read = true;
 
-    loop {
+    let mut streams: HashMap<String, Stream> = HashMap::new();
+
+    'outer: loop {
         loop {
             match storage.reload_on_eof() {
                 // Done reading all the pending files
-                Ok(true) => return Ok(()),
+                Ok(true) => break 'outer,
                 Ok(false) => break,
                 // Reload again on encountering a corrupted file
                 Err(e) => {
@@ -54,12 +77,32 @@ fn main() -> Result<(), Error> {
             Ok(Packet::Publish(publish)) => publish,
             Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
             Err(e) => {
-                eprintln!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
-                continue;
+                eprintln!("Failed to read from storage. Error = {:?}", e);
+                break;
             }
         };
 
-        let payload = String::from_utf8(publish.payload.to_vec())?;
-        println!("{}", payload)
+        let payloads: Vec<Payload> = serde_json::from_slice(&publish.payload)?;
+        for payload in payloads {
+            let stream =
+                streams.entry(publish.topic.to_string()).or_insert_with(|| Stream::default());
+
+            let timestamp = payload.timestamp;
+            stream.count += 1;
+            if stream.start > timestamp {
+                stream.start = timestamp
+            }
+
+            if stream.end < timestamp {
+                stream.end = timestamp
+            }
+        }
     }
+
+    println!("topic: count, [start, end]");
+    for (stream, Stream { count, start, end }) in streams {
+        println!("{}: {}, [{}, {}]", stream, count, start, end);
+    }
+
+    Ok(())
 }
