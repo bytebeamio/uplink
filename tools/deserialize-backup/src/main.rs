@@ -149,7 +149,7 @@ fn main() -> Result<(), Error> {
     let mut table = Table::new(entries);
     table.with(Style::rounded());
     println!("{}", table);
-    println!("NOTE: timestamps are relative to UNIX epoch and in milliseconds and data_rate is in units of points/second");
+    println!("NOTE: timestamps are relative to UNIX epoch and in milliseconds and message_rate is in units of points/second");
 
     println!("\nAggregated values");
     let mut table = Table::new(vec![Entry::new("//////total/jsonarray", &total)]);
