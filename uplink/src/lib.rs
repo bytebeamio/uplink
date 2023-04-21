@@ -60,6 +60,7 @@ pub mod config {
     max_packet_size = 256000
     max_inflight = 100
     keep_alive = 30
+    network_timeout = 30
 
     # Create empty streams map
     [streams]
