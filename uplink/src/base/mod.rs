@@ -34,6 +34,8 @@ pub struct StreamConfig {
     /// Duration(in seconds) that bridge collector waits from
     /// receiving first element, before the stream gets flushed.
     pub flush_period: u64,
+    #[serde(default)]
+    pub is_compressible: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
