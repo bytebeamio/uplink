@@ -4,7 +4,10 @@ use human_bytes::human_bytes;
 use rumqttc::{read, Packet};
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
-use tabled::{settings::Style, Table, Tabled};
+use tabled::{
+    settings::{locator::ByColumnName, Disable, Style},
+    Table, Tabled,
+};
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "simulator", about = "simulates a demo device")]
@@ -153,7 +156,10 @@ fn main() -> Result<(), Error> {
 
     println!("\nAggregated values");
     let mut table = Table::new(vec![Entry::new("//////total/jsonarray", &total)]);
-    table.with(Style::rounded());
+    table
+        .with(Style::rounded())
+        .with(Disable::column(ByColumnName::new("stream_name")))
+        .with(Disable::column(ByColumnName::new("serialization_format")));
     println!("{}", table);
 
     Ok(())
