@@ -77,12 +77,15 @@ max_file_count = 3
 #   unconfigured, stream will be created dynamically.
 # - flush-period(optional): Duration in seconds after a data point enters the stream
 #   and WILL be flushed by collector. Defaults to 60s in case not configured.
+# - is_persistable(optional): a boolean value that is used to configure if a stream
+#   should be persisted to disk in case of network outage. Defaults to true.
 #
-# In the following config for the device_shadow stream we set buf_size to 1. streams is
-# internally constructed as a map of Name -> Config
+# In the following config for the device_shadow stream we set buf_size to 1 and mark
+# it as non-persistent. streams are internally constructed as a map of Name -> Config
 [streams.device_shadow]
 topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
 buf_size = 1
+is_persistable = false
 
 # Built-in streams: action status is a special case of stream and should be configured separately,
 # outside of the streams map. The action_status stream is used to push progress of Actions in
