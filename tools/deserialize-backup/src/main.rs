@@ -4,7 +4,7 @@ use human_bytes::human_bytes;
 use rumqttc::{read, Packet};
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
-use tabled::{Table, Tabled};
+use tabled::{settings::Style, Table, Tabled};
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "simulator", about = "simulates a demo device")]
@@ -50,10 +50,12 @@ struct Entry {
     stream_name: String,
     serialization_format: String,
     count: usize,
+    message_rate: String,
     data_size: String,
     data_rate: String,
     start_timestamp: u64,
     end_timestamp: u64,
+    milliseconds: u64,
 }
 
 impl Entry {
@@ -61,18 +63,21 @@ impl Entry {
         let tokens: Vec<&str> = topic.split("/").collect();
         let stream_name = tokens[6].to_string();
         let serialization_format = tokens[7].to_string();
-        let data_rate =
-            format!("{} /s", (stream.count * 1000) as f32 / (stream.end - stream.start) as f32);
+        let milliseconds = stream.end - stream.start;
+        let message_rate = format!("{} /s", (stream.count * 1000) as f32 / milliseconds as f32);
         let data_size = human_bytes(stream.size as f64);
+        let data_rate = human_bytes((stream.size * 1000) as f32 / milliseconds as f32) + "/s";
 
         Self {
             stream_name,
             serialization_format,
             count: stream.count,
+            message_rate,
             data_size,
             data_rate,
             start_timestamp: stream.start,
             end_timestamp: stream.end,
+            milliseconds,
         }
     }
 }
@@ -130,7 +135,8 @@ fn main() -> Result<(), Error> {
         entries.push(entry);
     }
 
-    let table = Table::new(entries);
+    let mut table = Table::new(entries);
+    table.with(Style::rounded());
     println!("{}", table);
     println!("NOTE: timestamps are relative to UNIX epoch and in milliseconds and data_rate is in units of points/second");
 
