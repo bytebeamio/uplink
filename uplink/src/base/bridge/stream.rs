@@ -33,6 +33,7 @@ pub struct Stream<T> {
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
     pub metrics: StreamMetrics,
+    pub is_persistable: bool,
 }
 
 impl<T> Stream<T>
@@ -45,10 +46,11 @@ where
         topic: S,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
+        is_persistable: bool,
     ) -> Stream<T> {
         let name = Arc::new(stream.into());
         let topic = Arc::new(topic.into());
-        let buffer = Buffer::new(name.clone(), topic.clone());
+        let buffer = Buffer::new(name.clone(), topic.clone(), is_persistable);
         let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
         let metrics = StreamMetrics::new(&name, max_buffer_size);
 
@@ -62,6 +64,7 @@ where
             buffer,
             tx,
             metrics,
+            is_persistable,
         }
     }
 
@@ -70,7 +73,8 @@ where
         config: &StreamConfig,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx);
+        let mut stream =
+            Stream::new(name, &config.topic, config.buf_size, tx, config.is_persistable);
         stream.flush_period = Duration::from_secs(config.flush_period);
         stream
     }
@@ -94,7 +98,7 @@ where
             + &stream
             + "/jsonarray";
 
-        Stream::new(stream, topic, max_buffer_size, tx)
+        Stream::new(stream, topic, max_buffer_size, tx, true)
     }
 
     pub fn dynamic<S: Into<String>>(
@@ -147,7 +151,7 @@ where
         let topic = self.topic.clone();
         trace!("Flushing stream name: {}, topic: {}", name, topic);
 
-        mem::replace(&mut self.buffer, Buffer::new(name, topic))
+        mem::replace(&mut self.buffer, Buffer::new(name, topic, self.is_persistable))
     }
 
     /// Triggers flush and async channel send if not empty
@@ -218,16 +222,18 @@ pub struct Buffer<T> {
     pub buffer: Vec<T>,
     pub anomalies: String,
     pub anomaly_count: usize,
+    pub is_persistable: bool,
 }
 
 impl<T> Buffer<T> {
-    pub fn new(stream: Arc<String>, topic: Arc<String>) -> Buffer<T> {
+    pub fn new(stream: Arc<String>, topic: Arc<String>, is_persistable: bool) -> Buffer<T> {
         Buffer {
             stream,
             topic,
             buffer: vec![],
             anomalies: String::with_capacity(100),
             anomaly_count: 0,
+            is_persistable,
         }
     }
 
@@ -292,10 +298,15 @@ where
     fn latency(&self) -> u64 {
         0
     }
+
+    fn is_persistable(&self) -> bool {
+        self.is_persistable
+    }
 }
 
 impl<T> Clone for Stream<T> {
     fn clone(&self) -> Self {
+        let is_persistable = self.is_persistable;
         Stream {
             name: self.name.clone(),
             flush_period: self.flush_period,
@@ -303,9 +314,14 @@ impl<T> Clone for Stream<T> {
             topic: self.topic.clone(),
             last_sequence: 0,
             last_timestamp: 0,
-            buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
+            buffer: Buffer::new(
+                self.buffer.stream.clone(),
+                self.buffer.topic.clone(),
+                is_persistable,
+            ),
             metrics: StreamMetrics::new(&self.name, self.max_buffer_size),
             tx: self.tx.clone(),
+            is_persistable,
         }
     }
 }

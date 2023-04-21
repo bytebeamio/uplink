@@ -26,6 +26,10 @@ fn default_file_count() -> usize {
     3
 }
 
+fn default_as_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamConfig {
     pub topic: String,
@@ -34,6 +38,8 @@ pub struct StreamConfig {
     /// Duration(in seconds) that bridge collector waits from
     /// receiving first element, before the stream gets flushed.
     pub flush_period: u64,
+    #[serde(default = "default_as_true")]
+    pub is_persistable: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -159,6 +159,7 @@ pub mod config {
                     ),
                     buf_size: config.system_stats.stream_size.unwrap_or(100),
                     flush_period: DEFAULT_TIMEOUT,
+                    is_persistable: false,
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
             }
@@ -244,7 +245,8 @@ impl Uplink {
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
 
         let action_status_topic = &config.action_status.topic;
-        let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
+        let action_status =
+            Stream::new("action_status", action_status_topic, 1, data_tx.clone(), true);
         Ok(Uplink {
             config,
             action_rx,
