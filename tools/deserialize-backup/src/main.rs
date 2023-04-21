@@ -1,5 +1,6 @@
 use std::{collections::HashMap, string::FromUtf8Error};
 
+use human_bytes::human_bytes;
 use rumqttc::{read, Packet};
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
@@ -49,8 +50,8 @@ struct Entry {
     stream_name: String,
     serialization_format: String,
     count: usize,
-    data_size: usize,
-    data_rate: f32,
+    data_size: String,
+    data_rate: String,
     start_timestamp: u64,
     end_timestamp: u64,
 }
@@ -60,13 +61,15 @@ impl Entry {
         let tokens: Vec<&str> = topic.split("/").collect();
         let stream_name = tokens[6].to_string();
         let serialization_format = tokens[7].to_string();
-        let data_rate = (stream.count * 1000) as f32 / (stream.end - stream.start) as f32;
+        let data_rate =
+            format!("{} /s", (stream.count * 1000) as f32 / (stream.end - stream.start) as f32);
+        let data_size = human_bytes(stream.size as f64);
 
         Self {
             stream_name,
             serialization_format,
             count: stream.count,
-            data_size: stream.size,
+            data_size,
             data_rate,
             start_timestamp: stream.start,
             end_timestamp: stream.end,
@@ -129,6 +132,7 @@ fn main() -> Result<(), Error> {
 
     let table = Table::new(entries);
     println!("{}", table);
+    println!("NOTE: timestamps are relative to UNIX epoch and in milliseconds and data_rate is in units of points/second");
 
     Ok(())
 }
