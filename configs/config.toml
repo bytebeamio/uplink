@@ -78,6 +78,8 @@ max_file_count = 3
 #   unconfigured, stream will be created dynamically.
 # - flush-period(optional): Duration in seconds after a data point enters the stream
 #   and WILL be flushed by collector. Defaults to 60s in case not configured.
+# - is_compressible(optional): a boolean to determine if serializer should compress
+#   data on the stream for transit. Defaults to false.
 #
 # In the following config for the device_shadow stream we set buf_size to 1. streams is
 # internally constructed as a map of Name -> Config
