@@ -3,18 +3,13 @@ use std::{collections::HashMap, string::FromUtf8Error};
 use rumqttc::{read, Packet};
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
+use tabled::{Table, Tabled};
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "simulator", about = "simulates a demo device")]
 pub struct CommandLine {
-    /// max file size
-    #[structopt(short = "s", help = "max file size")]
-    pub max_file_size: usize,
-    /// max file count
-    #[structopt(short = "c", help = "max file count")]
-    pub max_file_count: usize,
     /// max packet size
-    #[structopt(short = "p", help = "max packet size")]
+    #[structopt(short = "s", help = "max packet size")]
     pub max_packet_size: usize,
     /// backup directory
     #[structopt(short = "d", help = "backup directory")]
@@ -36,7 +31,7 @@ pub struct Payload {
     timestamp: u64,
 }
 
-pub struct Stream {
+struct Stream {
     count: usize,
     size: usize,
     start: u64,
@@ -49,13 +44,40 @@ impl Default for Stream {
     }
 }
 
+#[derive(Tabled)]
+struct Entry {
+    stream_name: String,
+    serialization_format: String,
+    count: usize,
+    data_size: usize,
+    data_rate: f32,
+    start_timestamp: u64,
+    end_timestamp: u64,
+}
+
+impl Entry {
+    fn new(topic: &str, stream: &Stream) -> Self {
+        let tokens: Vec<&str> = topic.split("/").collect();
+        let stream_name = tokens[6].to_string();
+        let serialization_format = tokens[7].to_string();
+        let data_rate = (stream.count * 1000) as f32 / (stream.end - stream.start) as f32;
+
+        Self {
+            stream_name,
+            serialization_format,
+            count: stream.count,
+            data_size: stream.size,
+            data_rate,
+            start_timestamp: stream.start,
+            end_timestamp: stream.end,
+        }
+    }
+}
+
 fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
-    let mut storage = disk::Storage::new(
-        commandline.directory,
-        commandline.max_file_size,
-        commandline.max_file_count,
-    )?;
+    // NOTE: max_file_size and max_file_count should not matter when reading non-destructively
+    let mut storage = disk::Storage::new(commandline.directory, 1048576, 3)?;
     storage.non_destructive_read = true;
 
     let mut streams: HashMap<String, Stream> = HashMap::new();
@@ -99,11 +121,14 @@ fn main() -> Result<(), Error> {
         }
     }
 
-    println!("topic: count, size(bytes), rate(/second) [start, end]");
-    for (stream, Stream { count, size, start, end }) in streams {
-        let rate = (count * 1000) as f32 / (end - start) as f32;
-        println!("{}: {}, {}, {} [{}, {}]", stream, count, size, rate, start, end);
+    let mut entries = vec![];
+    for (topic, stream) in streams.iter() {
+        let entry = Entry::new(topic, stream);
+        entries.push(entry);
     }
+
+    let table = Table::new(entries);
+    println!("{}", table);
 
     Ok(())
 }
