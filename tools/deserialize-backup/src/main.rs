@@ -129,9 +129,20 @@ fn main() -> Result<(), Error> {
         }
     }
 
-    let mut entries = vec![];
+    let mut total = Stream::default();
+    let mut entries: Vec<Entry> = vec![];
     for (topic, stream) in streams.iter() {
         let entry = Entry::new(topic, stream);
+        total.count += stream.count;
+        total.size += stream.size;
+
+        if total.start > stream.start {
+            total.start = stream.start;
+        }
+
+        if total.end < stream.end {
+            total.end = stream.end;
+        }
         entries.push(entry);
     }
 
@@ -139,6 +150,11 @@ fn main() -> Result<(), Error> {
     table.with(Style::rounded());
     println!("{}", table);
     println!("NOTE: timestamps are relative to UNIX epoch and in milliseconds and data_rate is in units of points/second");
+
+    println!("\nAggregated values");
+    let mut table = Table::new(vec![Entry::new("//////total/jsonarray", &total)]);
+    table.with(Style::rounded());
+    println!("{}", table);
 
     Ok(())
 }
