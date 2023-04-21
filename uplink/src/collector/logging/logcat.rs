@@ -129,7 +129,7 @@ impl LogEntry {
             device_id: None,
             sequence,
             timestamp: self.timestamp,
-            payload: json!({
+            payload: serde_json::json!({
                 "level": self.level,
                 "log_timestamp": self.log_timestamp,
                 "tag": self.tag,
