@@ -4,6 +4,7 @@ use serde::Deserialize;
 use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::{process::Command, time::Duration};
+use std::process::ChildStdout;
 
 #[cfg(target_os = "linux")]
 mod journalctl;
@@ -123,19 +124,12 @@ impl LoggerInstance {
                     logger.kill().unwrap();
                     break;
                 }
-                let mut next_line = String::new();
-                match buf_stdout.read_line(&mut next_line) {
-                    Ok(0) => {
-                        log::info!("logger output has ended");
-                        break;
-                    }
-                    Err(e) => {
-                        log::error!("error while reading logger output: {}", e);
-                        break;
-                    }
-                    _ => (),
-                };
-
+                let read_result = read_line_lossy(&mut buf_stdout);
+                if read_result.is_none() {
+                    log::info!("logger output has ended");
+                    break;
+                }
+                let next_line = read_result.unwrap();
                 let next_line = next_line.trim();
                 let entry = match LogEntry::from_string(next_line) {
                     Ok(entry) => entry,
@@ -156,5 +150,14 @@ impl LoggerInstance {
                 log_index += 1;
             }
         });
+    }
+}
+
+fn read_line_lossy(reader: &mut BufReader<ChildStdout>) -> Option<String> {
+    let mut buf = Vec::with_capacity(256);
+    if let Err(_) = reader.read_until(u8::try_from('\n').unwrap(), &mut buf) {
+        None
+    } else {
+        Some(String::from_utf8_lossy(buf.as_slice()).to_string())
     }
 }
