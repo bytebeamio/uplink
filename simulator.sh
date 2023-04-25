@@ -31,10 +31,10 @@ start_devices() {
     echo DONE
 
     # Wait on pids and block till atleast one uplink is running
-    while read pid
+    for file in $(find ./devices -type f -name "*.pid")
     do
-      tail --pid=$pid -f /dev/null
-    done < devices/pids
+      tail --pid=$(cat $file) -f /dev/null
+    done
 }
 
 create_uplink_config() {
@@ -89,7 +89,6 @@ start_uplink() {
 }
 
 start_simulator() {
-    nohup=$1
     id=${2:?"Missing id"}
     port=${3:?"Missing port number"}
     cmd="simulator -p $port -g ./paths"
@@ -99,8 +98,7 @@ start_simulator() {
 
 kill_devices() {
     echo "Killing all devices in pids file"
-    i=1
-    for file in $(find . -type f -name "*.pid")
+    for file in $(find ./devices -type f -name "*.pid")
     do
       kill_device $file
     done
