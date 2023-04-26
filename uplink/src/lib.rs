@@ -1,4 +1,46 @@
-#[doc = include_str ! ("../../README.md")]
+//! Uplink is a utility/library to interact with the Bytebeam platform. Its internal architecture is described in the diagram below.
+//!
+//! We use [`rumqttc`], which implements the MQTT protocol, to communicate with the platform. Communication is handled separately as ingress and egress
+//! by [`Mqtt`] and [`Serializer`] respectively. [`Action`]s are received and forwarded by [`Mqtt`] to the [`Bridge`] module, where it is handled
+//! depending on the [`name`], with [`Bridge`] forwarding it to one of many **Action Handlers**, configured with an [`ActionRoute`].
+//!
+//! Some of the action handlers are [`TcpJson`], [`ProcessHandler`], [`FileDownloader`] and [`TunshellSession`]. [`TcpJson`] forwards Actions received
+//! from the platform to the application connected to it through the [`port`] and collects response data from these devices, to forward to the platform.
+//! Response data can be of multiple types, of interest to us are [`ActionResponse`]s and data [`Payload`]s, which are forwarded to [`Bridge`] and from
+//! there to the [`Serializer`], where depending on the network, it may be persisted in-memory or on-disk with [`Storage`].
+//!
+//!```text
+//!                                      ┌───────────┐
+//!                                      │MQTT broker│
+//!                                      └────┐▲─────┘
+//!                                           ││
+//!                                    Action ││ ActionResponse
+//!                                           ││ / Data
+//!                                         ┌─▼└─┐
+//!                              ┌──────────┤Mqtt◄─────────┐
+//!                       Action │          └────┘         │ ActionResponse
+//!                              │                         │ / Data
+//!                              │                         │
+//!                           ┌──▼───┐ ActionResponse ┌────┴─────┐   Publish   ┌───────┐
+//!   ┌───────────────────────►Bridge├────────────────►Serializer◄─────────────►Storage|
+//!   │                       └┬─┬┬─┬┘    / Data      └──────────┘   Packets   └───────┘
+//!   │                        │ ││ │
+//!   │                        │ ││ | Action (BridgeTx)
+//!   │        ┌───────────────┘ ││ └────────────────────┐
+//!   │        │           ┌─────┘└───────┐              │
+//!   │  ------│-----------│--------------│--------------│------
+//!   │  '     │           │ Applications │              │     '
+//!   │  '┌────▼───┐   ┌───▼───┐   ┌──────▼───────┐  ┌───▼───┐ '    Action       ┌───────────┐
+//!   │  '│Tunshell│   │Process│   │FileDownloader│  │TcpJson◄───────────────────►Application│
+//!   │  '└────┬───┘   └───┬───┘   └──────┬───────┘  └───┬───┘ '  ActionResponse │ / Device  │
+//!   │  '     │           │              │              │     '    / Data       └───────────┘
+//!   │  ------│-----------│--------------│--------------│------         
+//!   │        │           │              │              │
+//!   └────────┴───────────┴──────────────┴──────────────┘
+//!                   ActionResponse / Data
+//!```
+//! [`port`]: base::AppConfig#structfield.port
+//! [`name`]: Action#structfield.name
 use std::sync::Arc;
 use std::thread;
 
@@ -220,7 +262,7 @@ pub use base::actions::{Action, ActionResponse};
 use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
-pub use base::Config;
+pub use base::{ActionRoute, Config};
 pub use collector::{simulator, tcpjson::TcpJson};
 pub use disk::Storage;
 
