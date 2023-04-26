@@ -82,15 +82,6 @@ pub trait MqttClient: Clone {
     where
         S: Into<String>,
         V: Into<Vec<u8>>;
-    async fn publish_bytes<S>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: Bytes,
-    ) -> Result<(), MqttError>
-    where
-        S: Into<String> + Send;
 }
 
 #[async_trait::async_trait]
@@ -122,19 +113,6 @@ impl MqttClient for AsyncClient {
         V: Into<Vec<u8>>,
     {
         self.try_publish(topic, qos, retain, payload)?;
-        Ok(())
-    }
-    async fn publish_bytes<S>(
-        &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: Bytes,
-    ) -> Result<(), MqttError>
-    where
-        S: Into<String> + Send,
-    {
-        self.publish_bytes(topic, qos, retain, payload).await?;
         Ok(())
     }
 }
@@ -503,7 +481,7 @@ async fn send_publish<C: MqttClient>(
     payload: Bytes,
 ) -> Result<C, MqttError> {
     debug!("publishing on {topic} with size = {}", payload.len());
-    client.publish_bytes(topic, QoS::AtLeastOnce, false, payload).await?;
+    client.publish(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
 }
 
@@ -670,23 +648,6 @@ mod test {
             publish.retain = retain;
             let publish = Request::Publish(publish);
             self.net_tx.try_send(publish).map_err(|e| MqttError::TrySend(e.into_inner()))?;
-            Ok(())
-        }
-
-        async fn publish_bytes<S>(
-            &self,
-            topic: S,
-            qos: QoS,
-            retain: bool,
-            payload: Bytes,
-        ) -> Result<(), MqttError>
-        where
-            S: Into<String> + Send,
-        {
-            let mut publish = Publish::from_bytes(topic, qos, payload);
-            publish.retain = retain;
-            let publish = Request::Publish(publish);
-            self.net_tx.send_async(publish).await.map_err(|e| MqttError::Send(e.into_inner()))?;
             Ok(())
         }
     }
