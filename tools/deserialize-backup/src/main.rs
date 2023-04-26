@@ -63,7 +63,7 @@ struct Entry {
 
 impl Entry {
     fn new(topic: &str, stream: &Stream) -> Self {
-        let tokens: Vec<&str> = topic.split("/").collect();
+        let tokens: Vec<&str> = topic.split('/').collect();
         let stream_name = tokens[6].to_string();
         let serialization_format = tokens[7].to_string();
         let milliseconds = stream.end - stream.start;
@@ -115,7 +115,7 @@ fn main() -> Result<(), Error> {
                 break;
             }
         };
-        let stream = streams.entry(publish.topic.to_string()).or_insert_with(|| Stream::default());
+        let stream = streams.entry(publish.topic.to_string()).or_default();
         stream.size += publish.payload.len();
 
         let payloads: Vec<Payload> = serde_json::from_slice(&publish.payload)?;
