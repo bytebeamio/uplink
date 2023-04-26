@@ -5,7 +5,7 @@ OS=$(uname -o)
 UPLINK_DIR=~/.uplink/
 
 case "${ARCH}, ${OS}" in
-    "x86_64, GNU/Linux") TARGET="x86_64-unknown-linux-gnu"
+    "x86_64, GNU/Linux") TARGET="x86_64-unknown-linux-musl"
         ;;
     "armv7, GNU/Linux") TARGET="armv7-unknown-linux-gnueabihf"
         ;;
