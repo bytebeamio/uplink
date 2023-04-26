@@ -534,7 +534,7 @@ fn write_to_disk(mut publish: Publish, storage: &mut Storage) -> Result<Option<u
     Ok(deleted)
 }
 
-pub fn check_metrics(metrics: &mut SerializerMetrics, storage: &Option<Storage>) {
+fn check_metrics(metrics: &mut SerializerMetrics, storage: &Option<Storage>) {
     use pretty_bytes::converter::convert;
 
     if let Some(s) = storage {
@@ -555,7 +555,7 @@ pub fn check_metrics(metrics: &mut SerializerMetrics, storage: &Option<Storage>)
     );
 }
 
-pub fn save_and_prepare_next_metrics(
+fn save_and_prepare_next_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut SerializerMetrics,
     storage: &Option<Storage>,
@@ -572,7 +572,7 @@ pub fn save_and_prepare_next_metrics(
 }
 
 // Enable actual metrics timers when there is data. This method is called every minute by the bridge
-pub fn check_and_flush_metrics(
+fn check_and_flush_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut SerializerMetrics,
     metrics_tx: &Sender<SerializerMetrics>,
@@ -612,15 +612,6 @@ pub fn check_and_flush_metrics(
         metrics.prepare_next();
     }
 
-    Ok(())
-}
-
-pub fn flush_metrics(
-    metrics: &mut SerializerMetrics,
-    metrics_tx: &Sender<SerializerMetrics>,
-) -> Result<(), flume::TrySendError<SerializerMetrics>> {
-    metrics_tx.try_send(metrics.clone())?;
-    metrics.prepare_next();
     Ok(())
 }
 
