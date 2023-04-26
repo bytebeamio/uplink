@@ -220,7 +220,7 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
-            if !data.is_persistable() {
+            if !data.persistance() {
                 warn!("Not persisting stream: {}", data.stream());
                 continue;
             }
@@ -257,7 +257,7 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     let data = data?;
-                    if !data.is_persistable() {
+                    if !data.persistance() {
                         warn!("Not persisting stream: {}", data.stream());
                         continue;
                     }
@@ -356,7 +356,7 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    if !data.is_persistable() {
+                    if !data.persistance() {
                         warn!("Not persisting stream: {}", data.stream());
                         continue;
                     }
@@ -442,7 +442,7 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    let is_persistable = data.is_persistable();
+                    let persistance = data.persistance();
                     let publish = construct_publish(data)?;
                     let payload_size = publish.payload.len();
                     debug!("publishing on {} with size = {}", publish.topic, payload_size);
@@ -453,7 +453,7 @@ impl<C: MqttClient> Serializer<C> {
                             continue;
                         }
                         // NOTE: move to SlowEventloop mode only when data is persistable
-                        Err(MqttError::TrySend(Request::Publish(publish))) => if is_persistable {
+                        Err(MqttError::TrySend(Request::Publish(publish))) => if persistance {
                                 return Ok(Status::SlowEventloop(publish))
                             } else {
                                 warn!("Not persisting stream: {}", publish.topic);

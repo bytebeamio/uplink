@@ -46,7 +46,7 @@ pub trait Package: Send + Debug {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn is_persistable(&self) -> bool;
+    fn persistance(&self) -> bool;
 }
 
 // TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json

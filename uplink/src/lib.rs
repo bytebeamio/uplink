@@ -159,7 +159,7 @@ pub mod config {
                     ),
                     buf_size: config.system_stats.stream_size.unwrap_or(100),
                     flush_period: DEFAULT_TIMEOUT,
-                    is_persistable: false,
+                    persistance: false,
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
             }

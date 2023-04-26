@@ -39,7 +39,7 @@ pub struct StreamConfig {
     /// receiving first element, before the stream gets flushed.
     pub flush_period: u64,
     #[serde(default = "default_as_true")]
-    pub is_persistable: bool,
+    pub persistance: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
