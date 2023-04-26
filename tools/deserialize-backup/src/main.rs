@@ -132,6 +132,12 @@ fn main() -> Result<(), Error> {
         }
     }
 
+    if streams.is_empty() {
+        eprintln!("Error: No data in persistence");
+
+        return Ok(());
+    }
+
     let mut total = Stream::default();
     let mut entries: Vec<Entry> = vec![];
     for (topic, stream) in streams.iter() {
