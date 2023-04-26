@@ -2,17 +2,26 @@ use serde::Serialize;
 
 use crate::collector::utils::{self, clock};
 
+/// Metrics information relating to the operation of the `Serializer`, all values are reset on metrics flush
 #[derive(Debug, Serialize, Clone)]
 pub struct SerializerMetrics {
     pub timestamp: u128,
     pub sequence: u32,
+    /// One of **Catchup**, **Normal**, **Slow** or **Crash**
     pub mode: String,
+    /// Number of batches serialized
     pub batches: usize,
+    /// Size of the write memory buffer within `Storage`
     pub write_memory: usize,
+    /// Size of the read memory buffer within `Storage`
     pub read_memory: usize,
+    /// Number of files that have been written to disk
     pub disk_files: usize,
+    /// Nuber of persistence files that had to deleted before being consumed
     pub lost_segments: usize,
+    /// Number of errors faced during serializer operation
     pub errors: usize,
+    /// Size in bytes, of serialized data sent onto network
     pub sent_size: usize,
 }
 

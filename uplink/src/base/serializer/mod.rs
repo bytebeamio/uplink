@@ -1,4 +1,4 @@
-pub mod metrics;
+mod metrics;
 
 pub use metrics::SerializerMetrics;
 
@@ -120,8 +120,20 @@ impl MqttClient for AsyncClient {
     }
 }
 
-/// The uplink Serializer is the component that deals with sending data to the Bytebeam platform.
-/// In case of network issues, the Serializer enters various states depending on severeness, managed by [`start()`].                                                                                       
+/// The uplink Serializer is the component that deals with serializing, compressing and writing data onto disk or Network.
+/// In case of network issues, the Serializer enters various states depending on the severeness, managed by [`start()`].                                                                                       
+///
+/// The Serializer writes data directly to network in **normal mode** with the [`try_publish()`] method on the MQTT client.
+/// In case of the network being slow, this fails and we are forced into **slow mode**, where-in new data gets written into
+/// [`Storage`] while consequently we await on a [`publish()`]. If the [`publish()`] succeeds, we move into **catchup mode**
+/// or if it fails we move to the **crash mode**. In **catchup mode**, we continuously write to [`Storage`] while also
+/// pushing data onto the network with a [`publish()`]. If a [`publish()`] succeds, we load the next [`Publish`] packet from
+/// [`Storage`], until it is empty. We can transition back into normal mode when [`Storage`] is empty during operation in
+/// the catchup mode.
+///
+/// P.S: We have a transition into **crash mode** when we are in catchup or slow mode and the thread running the MQTT client
+/// stalls and dies out. Here we merely write all data received, directly into disk. This is a failure mode that ideally the
+/// serializer should never be operated in.
 ///
 /// ```text
 ///
@@ -147,6 +159,8 @@ impl MqttClient for AsyncClient {
 ///
 ///```
 /// [`start()`]: Serializer::start
+/// [`try_publish()`]: AsyncClient::try_publish
+/// [`publish()`]: AsyncClient::publish
 pub struct Serializer<C: MqttClient> {
     config: Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
@@ -158,6 +172,8 @@ pub struct Serializer<C: MqttClient> {
 }
 
 impl<C: MqttClient> Serializer<C> {
+    /// Construct the uplink Serializer with the necessary configuration details, a receiver handle to accept data payloads from,
+    /// the handle to an MQTT client(This is constructed as such for testing purposes) and a handle to update serailizer metrics.
     pub fn new(
         config: Arc<Config>,
         collector_rx: Receiver<Box<dyn Package>>,
@@ -445,15 +461,7 @@ impl<C: MqttClient> Serializer<C> {
         }
     }
 
-    /// The Serializer writes data directly to network in **normal mode** by [`try_publish()`] on the MQTT client. In case of the
-    /// network being slow, this fails and we are forced into **slow mode**, where in new data is written into [`Storage`]
-    /// while consequently we await on a [`publish()`]. If the [`publish()`] succeeds, we move into **catchup mode** or otherwise,
-    /// if it fails we move to **crash mode**. In **catchup mode**, we continuously write to [`Storage`] while also pushing data
-    /// onto network by [`publish()`]. If a [`publish()`] succeds, we load the next [`Publish`] packet from [`Storage`], whereas
-    /// if it fails, we transition into **crash mode** where we merely write all data received, directly into disk.
-    ///
-    /// [`try_publish()`]: AsyncClient::try_publish
-    /// [`publish()`]: AsyncClient::publish
+    /// Starts operation of the uplink serializer, which can transition between the modes mentioned earlier.
     pub async fn start(mut self) -> Result<(), Error> {
         let mut status = Status::EventLoopReady;
 
@@ -507,7 +515,7 @@ fn write_to_disk(mut publish: Publish, storage: &mut Storage) -> Result<Option<u
     Ok(deleted)
 }
 
-pub fn check_metrics(metrics: &mut SerializerMetrics, storage: &Option<Storage>) {
+fn check_metrics(metrics: &mut SerializerMetrics, storage: &Option<Storage>) {
     use pretty_bytes::converter::convert;
 
     if let Some(s) = storage {
@@ -528,7 +536,7 @@ pub fn check_metrics(metrics: &mut SerializerMetrics, storage: &Option<Storage>)
     );
 }
 
-pub fn save_and_prepare_next_metrics(
+fn save_and_prepare_next_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut SerializerMetrics,
     storage: &Option<Storage>,
@@ -545,7 +553,7 @@ pub fn save_and_prepare_next_metrics(
 }
 
 // Enable actual metrics timers when there is data. This method is called every minute by the bridge
-pub fn check_and_flush_metrics(
+fn check_and_flush_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut SerializerMetrics,
     metrics_tx: &Sender<SerializerMetrics>,
@@ -585,15 +593,6 @@ pub fn check_and_flush_metrics(
         metrics.prepare_next();
     }
 
-    Ok(())
-}
-
-pub fn flush_metrics(
-    metrics: &mut SerializerMetrics,
-    metrics_tx: &Sender<SerializerMetrics>,
-) -> Result<(), flume::TrySendError<SerializerMetrics>> {
-    metrics_tx.try_send(metrics.clone())?;
-    metrics.prepare_next();
     Ok(())
 }
 
