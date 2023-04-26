@@ -175,8 +175,7 @@ impl Mqtt {
     pub fn check_disconnection_metrics(&mut self, error: ConnectionError) {
         let metrics = self.metrics.clone();
         error!(
-            "disconnected {:>20}: reconnects = {:<3} publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3}",
-            error,
+            "disconnected: reconnects = {:<3} publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3} error = \"{error:>20}\"",
             metrics.connection_retries,
             metrics.publishes,
             metrics.pubacks,
