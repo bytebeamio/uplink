@@ -1,4 +1,4 @@
-pub mod metrics;
+mod metrics;
 
 pub use metrics::SerializerMetrics;
 
