@@ -12,8 +12,8 @@ use tabled::{
 #[derive(StructOpt, Debug)]
 #[structopt(name = "simulator", about = "simulates a demo device")]
 pub struct CommandLine {
-    /// max packet size
-    #[structopt(short = "s", help = "max packet size")]
+    /// max packet size, defaults to 256MB
+    #[structopt(short = "s", default_value = "268435456", help = "max packet size")]
     pub max_packet_size: usize,
     /// backup directory
     #[structopt(short = "d", help = "backup directory")]
