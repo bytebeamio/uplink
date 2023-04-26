@@ -140,7 +140,7 @@ impl MqttClient for AsyncClient {
 }
 
 /// The uplink Serializer is the component that deals with sending data to the Bytebeam platform.
-/// In case of network issues, the Serializer enters various states depending on severeness, managed by `Serializer::start()`.                                                                                       
+/// In case of network issues, the Serializer enters various states depending on severeness, managed by [`start()`].                                                                                       
 ///
 /// ```text
 ///
@@ -165,6 +165,7 @@ impl MqttClient for AsyncClient {
 ///                         but continue trying to publish                                                              
 ///
 ///```
+/// [`start()`]: Serializer::start
 pub struct Serializer<C: MqttClient> {
     config: Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
@@ -463,19 +464,15 @@ impl<C: MqttClient> Serializer<C> {
         }
     }
 
-    /// The Serializer writes data directly to network in [normal mode] by [`try_publish()`]in on the MQTT client. In case
-    /// of the network being slow, this fails and we are forced into [slow mode], where in new data is written into ['Storage']
-    /// while consequently we await on a [`publish()`]. If the [`publish()`] succeeds, we move into [catchup mode] or otherwise,
-    /// if it fails we move to [crash mode]. In [catchup mode], we continuously write to ['Storage'] while also pushing data
-    /// onto network by [`publish()`]. If a [`publish()`] succeds, we load the next [`Publish`] packet from [`storage`], whereas
-    /// if it fails, we transition into [crash mode] where we merely write all data received, directly into disk.
+    /// The Serializer writes data directly to network in **normal mode** by [`try_publish()`] on the MQTT client. In case of the
+    /// network being slow, this fails and we are forced into **slow mode**, where in new data is written into [`Storage`]
+    /// while consequently we await on a [`publish()`]. If the [`publish()`] succeeds, we move into **catchup mode** or otherwise,
+    /// if it fails we move to **crash mode**. In **catchup mode**, we continuously write to [`Storage`] while also pushing data
+    /// onto network by [`publish()`]. If a [`publish()`] succeds, we load the next [`Publish`] packet from [`Storage`], whereas
+    /// if it fails, we transition into **crash mode** where we merely write all data received, directly into disk.
     ///
     /// [`try_publish()`]: AsyncClient::try_publish
     /// [`publish()`]: AsyncClient::publish
-    /// [normal mode]: Serializer::normal
-    /// [catchup mode]: Serializer::catchup
-    /// [slow mode]: Serializer::slow
-    /// [crash mode]: Serializer::crash
     pub async fn start(mut self) -> Result<(), Error> {
         let mut status = Status::EventLoopReady;
 
