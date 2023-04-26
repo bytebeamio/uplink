@@ -59,8 +59,10 @@ enum Status {
     EventLoopCrash(Publish),
 }
 
+/// Description of an interface that the [`Serializer`] expects to be provided by the MQTT client to publish the serialized data with.
 #[async_trait::async_trait]
 pub trait MqttClient: Clone {
+    /// Accept payload and resolve as an error only when the client has died(thread kill). Useful in Slow/Catchup mode.
     async fn publish<S, V>(
         &self,
         topic: S,
@@ -72,6 +74,7 @@ pub trait MqttClient: Clone {
         S: Into<String> + Send,
         V: Into<Vec<u8>> + Send;
 
+    /// Accept payload and resolve as an error if data can't be sent over network, immediately. Useful in Normal mode.
     fn try_publish<S, V>(
         &self,
         topic: S,
