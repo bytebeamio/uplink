@@ -442,7 +442,6 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    let persistance = data.persistance();
                     let publish = construct_publish(data)?;
                     let payload_size = publish.payload.len();
                     debug!("publishing on {} with size = {}", publish.topic, payload_size);
@@ -453,11 +452,9 @@ impl<C: MqttClient> Serializer<C> {
                             continue;
                         }
                         // NOTE: move to SlowEventloop mode only when data is persistable
-                        Err(MqttError::TrySend(Request::Publish(publish))) => if persistance {
-                                return Ok(Status::SlowEventloop(publish))
-                            } else {
-                                warn!("Not persisting stream: {}", publish.topic);
-                            },
+                        Err(MqttError::TrySend(Request::Publish(publish))) => {
+                            return Ok(Status::SlowEventloop(publish));
+                        }
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     }
 
