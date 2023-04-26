@@ -10,8 +10,8 @@ use std::path::Path;
 
 use crate::{Action, Config};
 use rumqttc::{
-    AsyncClient, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS, TlsConfiguration,
-    Transport,
+    AsyncClient, ConnectionError, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS,
+    TlsConfiguration, Transport,
 };
 use std::sync::Arc;
 
@@ -137,8 +137,7 @@ impl Mqtt {
                 }
                 Err(e) => {
                     self.metrics.add_reconnection();
-                    self.check_disconnection_metrics();
-                    debug!("Connection error = {:?}", e.to_string());
+                    self.check_disconnection_metrics(e);
                     tokio::time::sleep(Duration::from_secs(3)).await;
                     continue;
                 }
@@ -173,11 +172,11 @@ impl Mqtt {
     }
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
-    pub fn check_disconnection_metrics(&mut self) {
+    pub fn check_disconnection_metrics(&mut self, error: ConnectionError) {
         let metrics = self.metrics.clone();
         error!(
-            "{:>35}: reconnects = {:<3} publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3}",
-            "disconnected",
+            "disconnected {:>20}: reconnects = {:<3} publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3}",
+            error,
             metrics.connection_retries,
             metrics.publishes,
             metrics.pubacks,
