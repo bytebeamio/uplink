@@ -222,6 +222,33 @@ impl Bridge {
         }
     }
 
+    /// Save current action information in persistence
+    fn save_current_action(&mut self) -> Result<(), Error> {
+        let current_action = match self.current_action.take() {
+            Some(c) => c,
+            None => return Ok(()),
+        };
+        let mut path = PathBuf::from(&self.config.persistence.as_ref().unwrap().path);
+        fs::create_dir_all(&path).unwrap();
+        path.push("current_action");
+        info!("Storing current action in persistence; path: {}", path.display());
+        current_action.write_to_disk(path);
+
+        Ok(())
+    }
+
+    /// Load a saved action from persistence, performed on startup
+    fn load_saved_action(&mut self) {
+        let mut path = PathBuf::from(&self.config.persistence.as_ref().unwrap().path);
+        path.push("current_action");
+
+        if path.is_file() {
+            let current_action = CurrentAction::read_from_disk(path);
+            info!("Loading saved action from persistence; action_id: {}", current_action.id);
+            self.current_action = Some(current_action)
+        }
+    }
+
     /// Handle received actions
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
         match self.action_routes.get(&action.name) {
@@ -303,6 +330,13 @@ impl Bridge {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct SaveAction {
+    pub id: String,
+    pub action: Action,
+    pub timeout: Duration,
+}
+
 struct CurrentAction {
     pub id: String,
     pub action: Action,
@@ -315,6 +349,24 @@ impl CurrentAction {
             id: action.action_id.clone(),
             action,
             timeout: Box::pin(time::sleep(duration)),
+        }
+    }
+
+    pub fn write_to_disk(self, path: PathBuf) {
+        let timeout = Instant::from(self.timeout.as_ref().deadline()) - Instant::now();
+        let json = serde_json::to_string(&SaveAction { id: self.id, action: self.action, timeout })
+            .unwrap();
+
+        fs::write(path, json).unwrap();
+    }
+
+    pub fn read_from_disk(path: PathBuf) -> Self {
+        let json: SaveAction = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+
+        CurrentAction {
+            id: json.id,
+            action: json.action,
+            timeout: Box::pin(time::sleep(json.timeout)),
         }
     }
 }
