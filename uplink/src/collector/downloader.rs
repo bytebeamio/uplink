@@ -10,7 +10,7 @@
 //! progress information. On completion of a download, the received `Action`'s `payload` is updated to contain information
 //! about where the file was downloaded into, within the file-system. This action is then sent back to bridge as part of
 //! the final "Completed" response through use of the [`done_response`].
-//! 
+//!
 //! As illustrated in the following diagram, the [`Bridge`] forwards download actions to the [`FileDownloader`] where it is downloaded and
 //! intermediate [`ActionResponse`]s are sent back to bridge as progress notifications. On completion of a download, the action response
 //! also includes a modified action with the [`done_response`], where the action received by the downloader is suitably modified to include
@@ -276,7 +276,7 @@ pub struct DownloadFile {
 
 #[cfg(test)]
 mod test {
-    use flume::TrySendError;
+    use flume::{TrySendError, bounded};
     use serde_json::json;
 
     use std::{collections::HashMap, time::Duration};
@@ -310,7 +310,8 @@ mod test {
         };
         let config = config(downloader_cfg.clone());
         let (events_tx, events_rx) = flume::bounded(2);
-        let bridge_tx = BridgeTx { events_tx };
+        let (shutdown_handle, _) = bounded(1);
+        let bridge_tx = BridgeTx { events_tx, shutdown_handle };
 
         // Create channels to forward and push action_status on
         let downloader = FileDownloader::new(Arc::new(config), bridge_tx).unwrap();
@@ -385,7 +386,8 @@ mod test {
         };
         let config = config(downloader_cfg.clone());
         let (events_tx, events_rx) = flume::bounded(3);
-        let bridge_tx = BridgeTx { events_tx };
+        let (shutdown_handle, _) = bounded(1);
+        let bridge_tx = BridgeTx { events_tx, shutdown_handle };
 
         // Create channels to forward and push action_status on
         let downloader = FileDownloader::new(Arc::new(config), bridge_tx).unwrap();

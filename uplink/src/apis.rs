@@ -1,27 +1,40 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Router};
 use log::info;
-
-use std::sync::Arc;
+use uplink::base::bridge::BridgeTx;
 
 use crate::ReloadHandle;
 
+#[derive(Debug, Clone)]
+struct StateHandle {
+    reload_handle: ReloadHandle,
+    bridge_handle: BridgeTx,
+}
+
 #[tokio::main]
-pub async fn start(port: u16, handle: ReloadHandle) {
+pub async fn start(port: u16, reload_handle: ReloadHandle, bridge_handle: BridgeTx) {
     let address = format!("0.0.0.0:{port}");
     info!("Starting tracing server: {address}");
-    let app = Router::new().route("/", post(reload_loglevel)).with_state(Arc::new(handle));
+    let state = StateHandle { reload_handle, bridge_handle };
+    let app = Router::new()
+        .route("/logs", post(reload_loglevel))
+        .route("/shutdown", post(abrupt_shutdown))
+        .with_state(state);
 
     axum::Server::bind(&address.parse().unwrap()).serve(app.into_make_service()).await.unwrap();
 }
 
-async fn reload_loglevel(
-    State(handle): State<Arc<ReloadHandle>>,
-    filter: String,
-) -> impl IntoResponse {
+async fn reload_loglevel(State(state): State<StateHandle>, filter: String) -> impl IntoResponse {
     info!("Reloading tracing filter: {filter}");
-    if handle.reload(&filter).is_err() {
+    if state.reload_handle.reload(&filter).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
+
+    StatusCode::OK
+}
+
+async fn abrupt_shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
+    info!("Shutting down uplink");
+    state.bridge_handle.shutdown_handle.send_async(()).await.unwrap();
 
     StatusCode::OK
 }

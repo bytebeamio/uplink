@@ -133,7 +133,8 @@ fn main() -> Result<(), Error> {
 
     if config.apis.enabled {
         let port = config.apis.port;
-        thread::spawn(move || apis::start(port, reload_handle));
+        let bridge_handle = bridge.clone();
+        thread::spawn(move || apis::start(port, reload_handle, bridge_handle));
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -153,9 +154,8 @@ fn main() -> Result<(), Error> {
             });
         }
 
-        while let Some(Err(e)) = handles.join_next().await {
-            error!("App failed. Error = {:?}", e);
-        }
+        uplink.resolve_on_shutdown().await.unwrap();
     });
+
     Ok(())
 }

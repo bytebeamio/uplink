@@ -3,8 +3,10 @@ use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::select;
-use tokio::time::{self, interval, Sleep};
+use tokio::time::{self, interval, Instant, Sleep};
 
+use std::fs;
+use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
 
 mod metrics;
@@ -106,6 +108,9 @@ pub struct Bridge {
     action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
+    shutdown_rx: Receiver<()>,
+    shutdown_tx: Sender<()>,
+    shutdown_handle: Sender<()>,
 }
 
 impl Bridge {
@@ -115,9 +120,11 @@ impl Bridge {
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
+        shutdown_handle: Sender<()>,
     ) -> Bridge {
         let (bridge_tx, bridge_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
+        let (shutdown_tx, shutdown_rx) = bounded(1);
 
         Bridge {
             action_status,
@@ -130,11 +137,14 @@ impl Bridge {
             action_routes: HashMap::with_capacity(10),
             action_redirections,
             current_action: None,
+            shutdown_handle,
+            shutdown_rx,
+            shutdown_tx,
         }
     }
 
     pub fn tx(&mut self) -> BridgeTx {
-        BridgeTx { events_tx: self.bridge_tx.clone() }
+        BridgeTx { events_tx: self.bridge_tx.clone(), shutdown_handle: self.shutdown_tx.clone() }
     }
 
     fn clear_current_action(&mut self) {
@@ -147,6 +157,7 @@ impl Bridge {
             Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
                 .await;
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
+        self.load_saved_action();
 
         loop {
             select! {
@@ -217,6 +228,12 @@ impl Bridge {
                     if let Err(e) = streams.check_and_flush_metrics() {
                         debug!("Failed to flush stream metrics. Error = {}", e);
                     }
+                }
+                // Handle a shutdown signal
+                _ = self.shutdown_rx.recv_async() => {
+                    self.save_current_action()?;
+
+                    self.shutdown_handle.send(()).unwrap();
                 }
             }
         }
@@ -390,6 +407,7 @@ impl ActionRouter {
 pub struct BridgeTx {
     // Handle for apps to send events to bridge
     pub(crate) events_tx: Sender<Event>,
+    pub shutdown_handle: Sender<()>,
 }
 
 impl BridgeTx {
@@ -472,8 +490,10 @@ mod tests {
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
         let action_status = Stream::dynamic_with_size("", "", "", 1, package_tx.clone());
+        let (shutdown_handle, _) = bounded(1);
 
-        let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status);
+        let mut bridge =
+            Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status, shutdown_handle);
         let bridge_tx = bridge.tx();
 
         std::thread::spawn(move || {
