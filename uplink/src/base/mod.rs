@@ -181,6 +181,4 @@ pub struct Config {
     pub ignore_actions_if_no_clients: bool,
     #[cfg(any(target_os = "linux", target_os = "android"))]
     pub logging: Option<LoggerConfig>,
-    #[serde(default)]
-    pub enable_compression: bool,
 }
