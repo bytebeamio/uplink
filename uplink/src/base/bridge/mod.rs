@@ -370,7 +370,7 @@ impl CurrentAction {
     }
 
     pub fn write_to_disk(self, path: PathBuf) {
-        let timeout = Instant::from(self.timeout.as_ref().deadline()) - Instant::now();
+        let timeout = self.timeout.as_ref().deadline() - Instant::now();
         let json = serde_json::to_string(&SaveAction { id: self.id, action: self.action, timeout })
             .unwrap();
 
@@ -378,7 +378,8 @@ impl CurrentAction {
     }
 
     pub fn read_from_disk(path: PathBuf) -> Self {
-        let json: SaveAction = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        let json: SaveAction = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        fs::remove_file(path).unwrap();
 
         CurrentAction {
             id: json.id,
