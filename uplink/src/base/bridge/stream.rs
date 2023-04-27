@@ -4,7 +4,7 @@ use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::Serialize;
 
-use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
+use crate::base::{Compression, StreamConfig, DEFAULT_TIMEOUT};
 
 use super::{Package, Point, StreamMetrics};
 
@@ -33,7 +33,7 @@ pub struct Stream<T> {
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
     pub metrics: StreamMetrics,
-    is_compressible: bool,
+    compression: Compression,
 }
 
 impl<T> Stream<T>
@@ -46,11 +46,11 @@ where
         topic: S,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
-        is_compressible: bool,
+        compression: Compression,
     ) -> Stream<T> {
         let name = Arc::new(stream.into());
         let topic = Arc::new(topic.into());
-        let buffer = Buffer::new(name.clone(), topic.clone(), is_compressible);
+        let buffer = Buffer::new(name.clone(), topic.clone(), compression);
         let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
         let metrics = StreamMetrics::new(&name, max_buffer_size);
 
@@ -64,7 +64,7 @@ where
             buffer,
             tx,
             metrics,
-            is_compressible,
+            compression,
         }
     }
 
@@ -73,8 +73,7 @@ where
         config: &StreamConfig,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let mut stream =
-            Stream::new(name, &config.topic, config.buf_size, tx, config.is_compressible);
+        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx, config.compression);
         stream.flush_period = Duration::from_secs(config.flush_period);
         stream
     }
@@ -98,7 +97,7 @@ where
             + &stream
             + "/jsonarray";
 
-        Stream::new(stream, topic, max_buffer_size, tx, false)
+        Stream::new(stream, topic, max_buffer_size, tx, Compression::Disabled)
     }
 
     pub fn dynamic<S: Into<String>>(
@@ -151,7 +150,7 @@ where
         let topic = self.topic.clone();
         trace!("Flushing stream name: {}, topic: {}", name, topic);
 
-        mem::replace(&mut self.buffer, Buffer::new(name, topic, self.is_compressible))
+        mem::replace(&mut self.buffer, Buffer::new(name, topic, self.compression))
     }
 
     /// Triggers flush and async channel send if not empty
@@ -222,18 +221,18 @@ pub struct Buffer<T> {
     pub buffer: Vec<T>,
     pub anomalies: String,
     pub anomaly_count: usize,
-    pub is_compressible: bool,
+    pub compression: Compression,
 }
 
 impl<T> Buffer<T> {
-    pub fn new(stream: Arc<String>, topic: Arc<String>, is_compressible: bool) -> Buffer<T> {
+    pub fn new(stream: Arc<String>, topic: Arc<String>, compression: Compression) -> Buffer<T> {
         Buffer {
             stream,
             topic,
             buffer: vec![],
             anomalies: String::with_capacity(100),
             anomaly_count: 0,
-            is_compressible,
+            compression,
         }
     }
 
@@ -299,8 +298,8 @@ where
         0
     }
 
-    fn is_compressible(&self) -> bool {
-        self.is_compressible
+    fn compression(&self) -> Compression {
+        self.compression
     }
 }
 
@@ -316,11 +315,11 @@ impl<T> Clone for Stream<T> {
             buffer: Buffer::new(
                 self.buffer.stream.clone(),
                 self.buffer.topic.clone(),
-                self.is_compressible,
+                self.compression,
             ),
             metrics: StreamMetrics::new(&self.name, self.max_buffer_size),
             tx: self.tx.clone(),
-            is_compressible: self.is_compressible,
+            compression: self.compression,
         }
     }
 }

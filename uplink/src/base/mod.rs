@@ -26,6 +26,13 @@ fn default_file_count() -> usize {
     3
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default)]
+pub enum Compression {
+    #[default]
+    Disabled,
+    Lz4,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamConfig {
     pub topic: String,
@@ -35,7 +42,7 @@ pub struct StreamConfig {
     /// receiving first element, before the stream gets flushed.
     pub flush_period: u64,
     #[serde(default)]
-    pub is_compressible: bool,
+    pub compression: Compression,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -14,6 +14,7 @@ use rumqttc::*;
 use thiserror::Error;
 use tokio::{select, time};
 
+use crate::base::Compression;
 use crate::{Config, Package};
 pub use metrics::SerializerMetrics;
 
@@ -223,8 +224,7 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
-            let is_compressible = self.config.enable_compression && data.is_compressible();
-            let publish = construct_publish(data, is_compressible)?;
+            let publish = construct_publish(data)?;
             if let Err(e) = write_to_disk(publish, storage) {
                 error!("Crash loop: write error = {:?}", e);
             }
@@ -257,8 +257,7 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     let data = data?;
-                    let is_compressible = self.config.enable_compression && data.is_compressible();
-                    let publish = construct_publish(data, is_compressible)?;
+                    let publish = construct_publish(data)?;
                     match write_to_disk(publish, storage) {
                         Ok(deleted) => if deleted.is_some() {
                             self.metrics.increment_lost_segments();
@@ -353,8 +352,7 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    let is_compressible = self.config.enable_compression && data.is_compressible();
-                    let publish = construct_publish(data, is_compressible)?;
+                    let publish = construct_publish(data)?;
                     match write_to_disk(publish, storage) {
                         Ok(deleted) => if deleted.is_some() {
                             self.metrics.increment_lost_segments();
@@ -436,8 +434,7 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    let is_compressible = self.config.enable_compression && data.is_compressible();
-                    let publish = construct_publish(data, is_compressible)?;
+                    let publish = construct_publish(data)?;
                     let payload_size = publish.payload.len();
                     debug!("publishing on {} with size = {}", publish.topic, payload_size);
                     match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, publish.payload) {
@@ -518,7 +515,7 @@ fn compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
 }
 
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
-fn construct_publish(data: Box<dyn Package>, is_compressible: bool) -> Result<Publish, Error> {
+fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
     let stream = data.stream().as_ref().to_owned();
     let point_count = data.len();
     let batch_latency = data.latency();
@@ -527,7 +524,7 @@ fn construct_publish(data: Box<dyn Package>, is_compressible: bool) -> Result<Pu
     let mut topic = data.topic().to_string();
     let mut payload = data.serialize()?;
 
-    if is_compressible {
+    if let Compression::Lz4 = data.compression() {
         compress(&mut payload, &mut topic)?;
     }
 
@@ -775,7 +772,9 @@ mod test {
 
     impl MockCollector {
         fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
-            MockCollector { stream: Stream::new("hello", "hello/world", 1, data_tx, false) }
+            MockCollector {
+                stream: Stream::new("hello", "hello/world", 1, data_tx, Compression::Disabled),
+            }
         }
 
         fn send(&mut self, i: u32) -> Result<(), Error> {
