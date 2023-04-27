@@ -505,7 +505,7 @@ async fn send_publish<C: MqttClient>(
     Ok(client)
 }
 
-fn compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
+fn lz4_compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
     let mut compressor = FrameEncoder::new(vec![]);
     compressor.write_all(payload)?;
     *payload = compressor.finish()?;
@@ -525,7 +525,7 @@ fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
     let mut payload = data.serialize()?;
 
     if let Compression::Lz4 = data.compression() {
-        compress(&mut payload, &mut topic)?;
+        lz4_compress(&mut payload, &mut topic)?;
     }
 
     Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
