@@ -218,6 +218,7 @@ pub mod config {
                 topic: format!("/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"),
                 buf_size: 32,
                 flush_period: DEFAULT_TIMEOUT,
+                compression: Compression::Disabled,
             });
         if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
             stream_config.buf_size = buf_size;
