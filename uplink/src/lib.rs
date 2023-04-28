@@ -136,6 +136,10 @@ pub mod config {
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     buf_size = 1
 
+    [streams.logs]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+    buf_size = 32
+
     [system_stats]
     enabled = true
     process_names = ["uplink"]
@@ -205,6 +209,16 @@ pub mod config {
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
             }
+        }
+
+        let stream_config =
+            config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
+                topic: format!("/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"),
+                buf_size: 32,
+                flush_period: DEFAULT_TIMEOUT,
+            });
+        if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+            stream_config.buf_size = buf_size;
         }
 
         let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/actions";
@@ -381,11 +395,7 @@ impl Uplink {
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
         {
-            let logger = collector::logging::LoggerInstance::new(
-                config.clone(),
-                self.data_tx.clone(),
-                bridge_tx.clone(),
-            );
+            let logger = collector::logging::LoggerInstance::new(config.clone(), bridge_tx.clone());
             thread::spawn(move || logger.start());
         }
 
