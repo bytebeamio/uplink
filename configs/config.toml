@@ -5,10 +5,6 @@ processes = [{ name = "echo", timeout = 10 }]
 
 action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
 
-# Uplink supports compressing the data payload with the lz4 scheme, this
-# feature can be enabled by including the following configuration detail.
-enable_compression = true
-
 # MQTT client configuration
 # 
 # Required Parameters
@@ -78,12 +74,20 @@ max_file_count = 3
 #   unconfigured, stream will be created dynamically.
 # - flush-period(optional): Duration in seconds after a data point enters the stream
 #   and WILL be flushed by collector. Defaults to 60s in case not configured.
+# - compression(optional): an enum values to determine what compression the serializer
+#   should perform on the data transiting through the stream. Currently supported
+#   compression schemes are Lz4 and Disabled. Defaults to Disabled.
 #
 # In the following config for the device_shadow stream we set buf_size to 1. streams is
 # internally constructed as a map of Name -> Config
 [streams.device_shadow]
 topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
 buf_size = 1
+
+[streams.imu]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/imu/jsonarray"
+buf_size = 100
+compression = "Lz4"
 
 # Built-in streams: action status is a special case of stream and should be configured separately,
 # outside of the streams map. The action_status stream is used to push progress of Actions in

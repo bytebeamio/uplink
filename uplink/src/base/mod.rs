@@ -26,6 +26,13 @@ fn default_file_count() -> usize {
     3
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default)]
+pub enum Compression {
+    #[default]
+    Disabled,
+    Lz4,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamConfig {
     pub topic: String,
@@ -34,6 +41,8 @@ pub struct StreamConfig {
     /// Duration(in seconds) that bridge collector waits from
     /// receiving first element, before the stream gets flushed.
     pub flush_period: u64,
+    #[serde(default)]
+    pub compression: Compression,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -172,6 +181,4 @@ pub struct Config {
     pub ignore_actions_if_no_clients: bool,
     #[cfg(any(target_os = "linux", target_os = "android"))]
     pub logging: Option<LoggerConfig>,
-    #[serde(default)]
-    pub enable_compression: bool,
 }
