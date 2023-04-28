@@ -13,10 +13,13 @@ action_redirections = { "firmware_update" = "install_update", "send_file" = "loa
 #                 handled by uplink, at a time, requiring acknowledgedment.
 # - keep_alive: Number of seconds after which the MQTT client should ping
 #               the broker if there is no other data exchange.
+# - network_timeout: Number of seconds after which the MQTT client can timeout
+#                    while waiting for a network response.
 [mqtt]
 max_packet_size = 256000
 max_inflight = 100
 keep_alive = 30
+network_timeout = 30
 
 # TCP applications that detail applications which connect with uplink
 # Required Parameters

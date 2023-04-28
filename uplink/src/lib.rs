@@ -1,4 +1,46 @@
-#[doc = include_str ! ("../../README.md")]
+//! Uplink is a utility/library to interact with the Bytebeam platform. Its internal architecture is described in the diagram below.
+//!
+//! We use [`rumqttc`], which implements the MQTT protocol, to communicate with the platform. Communication is handled separately as ingress and egress
+//! by [`Mqtt`] and [`Serializer`] respectively. [`Action`]s are received and forwarded by [`Mqtt`] to the [`Bridge`] module, where it is handled
+//! depending on the [`name`], with [`Bridge`] forwarding it to one of many **Action Handlers**, configured with an [`ActionRoute`].
+//!
+//! Some of the action handlers are [`TcpJson`], [`ProcessHandler`], [`FileDownloader`] and [`TunshellSession`]. [`TcpJson`] forwards Actions received
+//! from the platform to the application connected to it through the [`port`] and collects response data from these devices, to forward to the platform.
+//! Response data can be of multiple types, of interest to us are [`ActionResponse`]s and data [`Payload`]s, which are forwarded to [`Bridge`] and from
+//! there to the [`Serializer`], where depending on the network, it may be persisted in-memory or on-disk with [`Storage`].
+//!
+//!```text
+//!                                      ┌───────────┐
+//!                                      │MQTT broker│
+//!                                      └────┐▲─────┘
+//!                                           ││
+//!                                    Action ││ ActionResponse
+//!                                           ││ / Data
+//!                                         ┌─▼└─┐
+//!                              ┌──────────┤Mqtt◄─────────┐
+//!                       Action │          └────┘         │ ActionResponse
+//!                              │                         │ / Data
+//!                              │                         │
+//!                           ┌──▼───┐ ActionResponse ┌────┴─────┐   Publish   ┌───────┐
+//!   ┌───────────────────────►Bridge├────────────────►Serializer◄─────────────►Storage|
+//!   │                       └┬─┬┬─┬┘    / Data      └──────────┘   Packets   └───────┘
+//!   │                        │ ││ │
+//!   │                        │ ││ | Action (BridgeTx)
+//!   │        ┌───────────────┘ ││ └────────────────────┐
+//!   │        │           ┌─────┘└───────┐              │
+//!   │  ------│-----------│--------------│--------------│------
+//!   │  '     │           │ Applications │              │     '
+//!   │  '┌────▼───┐   ┌───▼───┐   ┌──────▼───────┐  ┌───▼───┐ '    Action       ┌───────────┐
+//!   │  '│Tunshell│   │Process│   │FileDownloader│  │TcpJson◄───────────────────►Application│
+//!   │  '└────┬───┘   └───┬───┘   └──────┬───────┘  └───┬───┘ '  ActionResponse │ / Device  │
+//!   │  '     │           │              │              │     '    / Data       └───────────┘
+//!   │  ------│-----------│--------------│--------------│------         
+//!   │        │           │              │              │
+//!   └────────┴───────────┴──────────────┴──────────────┘
+//!                   ActionResponse / Data
+//!```
+//! [`port`]: base::AppConfig#structfield.port
+//! [`name`]: Action#structfield.name
 use std::sync::Arc;
 use std::thread;
 
@@ -61,6 +103,7 @@ pub mod config {
     max_packet_size = 256000
     max_inflight = 100
     keep_alive = 30
+    network_timeout = 30
 
     # Create empty streams map
     [streams]
@@ -93,6 +136,10 @@ pub mod config {
     [streams.device_shadow]
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     buf_size = 1
+
+    [streams.logs]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+    buf_size = 32
 
     [system_stats]
     enabled = true
@@ -166,6 +213,16 @@ pub mod config {
             }
         }
 
+        let stream_config =
+            config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
+                topic: format!("/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"),
+                buf_size: 32,
+                flush_period: DEFAULT_TIMEOUT,
+            });
+        if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+            stream_config.buf_size = buf_size;
+        }
+
         let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/actions";
         let mut device_action_topic = action_topic_template.to_string();
         replace_topic_placeholders(&mut device_action_topic, tenant_id, device_id);
@@ -221,7 +278,7 @@ pub use base::actions::{Action, ActionResponse};
 use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
-pub use base::Config;
+pub use base::{ActionRoute, Config};
 pub use collector::{simulator, tcpjson::TcpJson};
 pub use disk::Storage;
 
@@ -346,11 +403,7 @@ impl Uplink {
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
         {
-            let logger = collector::logging::LoggerInstance::new(
-                config.clone(),
-                self.data_tx.clone(),
-                bridge_tx.clone(),
-            );
+            let logger = collector::logging::LoggerInstance::new(config.clone(), bridge_tx.clone());
             thread::spawn(move || logger.start());
         }
 

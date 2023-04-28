@@ -1,4 +1,3 @@
-use flume::Sender;
 use serde::Deserialize;
 
 use std::io::{BufRead, BufReader};
@@ -11,7 +10,7 @@ mod journalctl;
 mod logcat;
 
 use crate::base::{bridge::BridgeTx, ActionRoute};
-use crate::{Config, Package, Payload, Stream};
+use crate::{ActionResponse, Config};
 #[cfg(target_os = "linux")]
 pub use journalctl::{new_journalctl, LogEntry};
 #[cfg(target_os = "android")]
@@ -27,7 +26,6 @@ pub enum Error {
 
 pub struct LoggerInstance {
     config: Arc<Config>,
-    log_stream: Stream<Payload>,
     kill_switch: Arc<Mutex<bool>>,
     bridge: BridgeTx,
 }
@@ -47,19 +45,10 @@ impl Drop for LoggerInstance {
 }
 
 impl LoggerInstance {
-    pub fn new(config: Arc<Config>, data_tx: Sender<Box<dyn Package>>, bridge: BridgeTx) -> Self {
-        let buf_size = config.logging.as_ref().and_then(|c| c.stream_size).unwrap_or(32);
-
-        let log_stream = Stream::dynamic_with_size(
-            "logs",
-            &config.project_id,
-            &config.device_id,
-            buf_size,
-            data_tx,
-        );
+    pub fn new(config: Arc<Config>, bridge: BridgeTx) -> Self {
         let kill_switch = Arc::new(Mutex::new(true));
 
-        Self { config, log_stream, kill_switch, bridge }
+        Self { config, kill_switch, bridge }
     }
 
     /// On an android system, starts a logcat instance and a journalctl instance for a linux system that
@@ -93,6 +82,9 @@ impl LoggerInstance {
             self.spawn_logger(new_journalctl(&config));
             #[cfg(target_os = "android")]
             self.spawn_logger(new_logcat(&config));
+
+            let response = ActionResponse::success(&action.action_id);
+            self.bridge.send_action_response(response).await;
         }
     }
 
@@ -104,7 +96,7 @@ impl LoggerInstance {
     // Spawn a thread to run the logger command
     fn spawn_logger(&mut self, mut logger: Command) {
         let kill_switch = self.kill_switch.clone();
-        let mut log_stream = self.log_stream.clone();
+        let bridge = self.bridge.clone();
 
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_micros(1_000_000));
@@ -152,7 +144,7 @@ impl LoggerInstance {
                     }
                 };
                 log::trace!("Log entry {:?}", payload);
-                log_stream.push(payload).unwrap();
+                bridge.send_payload_sync(payload);
                 log_index += 1;
             }
         });
