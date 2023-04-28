@@ -5,6 +5,7 @@ use std::thread;
 
 use anyhow::Error;
 
+use log::info;
 use structopt::StructOpt;
 use tokio::task::JoinSet;
 
@@ -155,6 +156,7 @@ fn main() -> Result<(), Error> {
         }
 
         uplink.resolve_on_shutdown().await.unwrap();
+        info!("Uplink shutting down");
     });
 
     Ok(())
