@@ -299,7 +299,10 @@ impl Bridge {
             error!("Failed to send status. Error = {:?}", e);
         }
 
-        self.clear_current_action();
+        match self.current_action.as_ref() {
+            Some(c) if c.id == action.action_id => self.clear_current_action(),
+            _ => {}
+        }
     }
 }
 
