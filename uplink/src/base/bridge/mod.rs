@@ -256,7 +256,10 @@ impl Bridge {
 
     /// Load a saved action from persistence, performed on startup
     fn load_saved_action(&mut self) {
-        let mut path = PathBuf::from(&self.config.persistence.as_ref().unwrap().path);
+        let mut path = match self.config.persistence.as_ref() {
+            Some(p) => PathBuf::from(&p.path),
+            None => return,
+        };
         path.push("current_action");
 
         if path.is_file() {
