@@ -126,6 +126,7 @@ pub struct MqttConfig {
     pub max_packet_size: usize,
     pub max_inflight: u16,
     pub keep_alive: u64,
+    pub network_timeout: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -166,7 +167,7 @@ pub struct Config {
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
-    pub ota_installer: InstallerConfig,
+    pub ota_installer: Option<InstallerConfig>,
     #[serde(default)]
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]

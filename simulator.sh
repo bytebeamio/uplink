@@ -7,26 +7,57 @@ start_devices() {
     mkdir -p devices
 
     echo "Starting uplink and simulator"
-    for id in $(seq $start $stop)
+    devices=($(seq $start $stop))
+    first=${devices[0]}
+    rest=${devices[@]:1}
+    printf -v port "50%03d" $first
+    download_auth_config $first
+    create_uplink_config $first $port
+    start_uplink 1 $first "-vv" "devices/uplink_$first.log"
+
+    sleep 1
+    start_simulator 1 $first $port "-vv" "devices/simulator_$first.log"
+
+    for id in $rest
     do 
+        printf -v port "50%03d" $id
         download_auth_config $id
-        create_uplink_config $id
-        start_uplink $id
+        create_uplink_config $id $port
+        start_uplink 0 $id
 
         sleep 1
-        start_simulaotr $id
+        start_simulator 0 $id $port
     done
     echo DONE
 
     # Wait on pids and block till atleast one uplink is running
-    while read pid
+    for file in $(find ./devices -type f -name "*.pid")
     do
-      tail --pid=$pid -f /dev/null
-    done < devices/pids
+      tail --pid=$(cat $file) -f /dev/null
+    done
 }
 
 create_uplink_config() {
-    printf "processes = [] \naction_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" } \n\n[tcpapps.1] \nport = 500$1 \nactions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }] \n\n[downloader] \nactions= [{ name = \"send_file\" }, { name = \"update_firmware\" }] \npath = \"/var/tmp/ota/$1\"" > devices/device_$1.toml
+    id=${1:?"Missing id"}
+    port=${2:?"Missing port number"}
+    printf "$(cat << EOF
+processes = [] 
+action_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" }
+
+[persistence]
+path = \"/var/tmp/persistence/$id\"
+max_file_size = 104857600
+max_file_count = 3
+
+[tcpapps.1]
+port = $port
+actions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }]
+
+[downloader]
+actions= [{ name = \"send_file\" }, { name = \"update_firmware\" }]
+path = \"/var/tmp/ota/$id\"
+EOF
+)" > devices/device_$id.toml
 }
 
 download_auth_config() {
@@ -39,28 +70,46 @@ download_auth_config() {
         --header "x-bytebeam-api-key: $BYTEBEAM_API_KEY" > devices/device_$id.json
 }
 
-start_uplink() {
-    nohup uplink -a devices/device_$1.json -c devices/device_$1.toml -vv > devices/uplink_$1.log 2>&1 &
-    echo $! >> devices/pids
+run() {
+    printf "running: $2 $3"
+    if [ $1 -eq 1 ]
+    then
+        echo " > $4"
+        nohup $2 $3 > $4 2>&1 &
+    else
+        $2 &
+    fi
 }
 
-start_simulaotr() {
-    nohup simulator -p 500$1 -g ./paths -vvv > devices/simulator_$1.log 2>&1 &
-    echo $! >> devices/pids
+start_uplink() {
+    echo "Starting uplink with device_id: $2"
+    cmd="uplink -a devices/device_$2.json -c devices/device_$2.toml"
+    run $1 "$cmd" "$3" "$4"
+    echo $! >> "devices/$2.pid"
+}
+
+start_simulator() {
+    id=${2:?"Missing id"}
+    port=${3:?"Missing port number"}
+    cmd="simulator -p $port -g ./paths"
+    run $1 "$cmd" "$4" "$5"
+    # simulator runs only as long as associated uplink instance runs and need not be tracked
 }
 
 kill_devices() {
     echo "Killing all devices in pids file"
-    i=1
-    while read pid
+    for file in $(find ./devices -type f -name "*.pid")
     do
-      echo -ne "$i"
-      kill $pid
-      i=`expr $i + 1`
-    done < devices/pids
+      kill_device $file
+    done
 
-    rm devices/pids
     echo DONE
+}
+
+kill_device() {
+    echo "Killing $1"
+    kill $(cat $1)
+    rm $1
 }
 
 ${1:?"Missing command"} ${@:2}

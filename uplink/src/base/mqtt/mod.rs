@@ -10,8 +10,8 @@ use std::path::Path;
 
 use crate::{Action, Config};
 use rumqttc::{
-    AsyncClient, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS, TlsConfiguration,
-    Transport,
+    AsyncClient, ConnectionError, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS,
+    TlsConfiguration, Transport,
 };
 use std::sync::Arc;
 
@@ -59,7 +59,8 @@ impl Mqtt {
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
-        let (client, eventloop) = AsyncClient::new(options, 10);
+        let (client, mut eventloop) = AsyncClient::new(options, 10);
+        eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
         let mut actions_subscriptions = vec![config.actions_subscription.clone()];
         if let Some(sim_cfg) = &config.simulator {
             actions_subscriptions.extend_from_slice(&sim_cfg.actions_subscriptions);
@@ -136,8 +137,7 @@ impl Mqtt {
                 }
                 Err(e) => {
                     self.metrics.add_reconnection();
-                    self.check_disconnection_metrics();
-                    debug!("Connection error = {:?}", e.to_string());
+                    self.check_disconnection_metrics(e);
                     tokio::time::sleep(Duration::from_secs(3)).await;
                     continue;
                 }
@@ -172,11 +172,10 @@ impl Mqtt {
     }
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
-    pub fn check_disconnection_metrics(&mut self) {
+    pub fn check_disconnection_metrics(&mut self, error: ConnectionError) {
         let metrics = self.metrics.clone();
         error!(
-            "{:>35}: reconnects = {:<3} publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3}",
-            "disconnected",
+            "disconnected: reconnects = {:<3} publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3} error = \"{error:>20}\"",
             metrics.connection_retries,
             metrics.publishes,
             metrics.pubacks,

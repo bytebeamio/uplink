@@ -1,4 +1,4 @@
-name: "bytebeam-gcp - Argonaut"
+name: "bytebeam - Argonaut"
 
 run-name: "${{inputs.arg_task_title}}"
 
@@ -8,7 +8,7 @@ on:
       arg_task_title:
         required: false
         type: string
-        default: "[Argonaut] [manual] a27dgr3fyi4etqlo build - manual"
+        default: "[Argonaut] [manual] bytebeam build - manual"
         description: task short title to be used for display, format [Argonaut] [<Task Id>] <organization> <steptype> - <stepname>
       arg_task_id:
         required: true
@@ -44,6 +44,6 @@ jobs:
           task-id: ${{ inputs.arg_task_id }}
           task-name: ${{ inputs.arg_task_name }}
           ref: ${{ inputs.arg_ref }}
-          auth-key: ${{ secrets.a27dgr3fyi4etqlo_ARGONAUT_KEY }}
-          auth-secret: ${{ secrets.a27dgr3fyi4etqlo_ARGONAUT_SECRET }}
+          auth-key: ${{ secrets.bytebeam_ARGONAUT_KEY }}
+          auth-secret: ${{ secrets.bytebeam_ARGONAUT_SECRET }}
           extra-args: ${{ inputs.arg_extra_vars }}
