@@ -94,10 +94,9 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
         "    downloader:\n\tpath: {}\n\tactions: {:?}",
         config.downloader.path, config.downloader.actions
     );
-    println!(
-        "    installer:\n\tpath: {}\n\tactions: {:?}",
-        config.ota_installer.path, config.ota_installer.actions
-    );
+    if let Some(installer) = &config.ota_installer {
+        println!("    installer:\n\tpath: {}\n\tactions: {:?}", installer.path, installer.actions);
+    }
     if config.system_stats.enabled {
         println!("    processes: {:?}", config.system_stats.process_names);
     }

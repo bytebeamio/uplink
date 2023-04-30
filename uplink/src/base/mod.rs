@@ -166,7 +166,7 @@ pub struct Config {
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
-    pub ota_installer: InstallerConfig,
+    pub ota_installer: Option<InstallerConfig>,
     #[serde(default)]
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]
