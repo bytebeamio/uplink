@@ -6,7 +6,7 @@ use flume::Sender;
 use log::{error, info, trace};
 use tokio::time::{interval, Interval};
 
-use super::stream::{self, StreamStatus};
+use super::stream::{self, StreamStatus, MAX_BUFFER_SIZE};
 use super::StreamMetrics;
 use crate::{Config, Package, Payload, Stream};
 
@@ -65,6 +65,7 @@ impl Streams {
                     stream_name,
                     &self.config.project_id,
                     &device_id,
+                    MAX_BUFFER_SIZE,
                     self.data_tx.clone(),
                 );
 

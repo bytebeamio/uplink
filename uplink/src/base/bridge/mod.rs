@@ -422,7 +422,7 @@ mod tests {
         let (package_tx, package_rx) = bounded(10);
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
-        let action_status = Stream::dynamic_with_size("", "", "", 1, package_tx.clone());
+        let action_status = Stream::dynamic("", "", "", 1, package_tx.clone());
 
         let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status);
         let bridge_tx = bridge.tx();
