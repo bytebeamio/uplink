@@ -6,14 +6,13 @@ use sysinfo::{
 };
 use tokio::time::Instant;
 
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
-    base::bridge::{BridgeTx, Payload},
+    base::{
+        bridge::{BridgeTx, Payload},
+        clock,
+    },
     Config,
 };
 
@@ -550,15 +549,13 @@ impl StatCollector {
     /// Update system information values and increment sequence numbers, while sending to specific data streams.
     fn update(&mut self) -> Result<(), Error> {
         self.sys.refresh_memory();
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let timestamp = clock() as u64;
         let payload = self.system.push(&self.sys, timestamp);
         self.bridge_tx.send_payload_sync(payload);
 
         // Refresh disk info
         self.sys.refresh_disks();
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let timestamp = clock() as u64;
         for disk_data in self.sys.disks() {
             let payload = self.disks.push(disk_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
@@ -566,8 +563,7 @@ impl StatCollector {
 
         // Refresh network byte rate info
         self.sys.refresh_networks();
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let timestamp = clock() as u64;
         for (net_name, net_data) in self.sys.networks() {
             let payload = self.networks.push(net_name.to_owned(), net_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
@@ -575,8 +571,7 @@ impl StatCollector {
 
         // Refresh processor info
         self.sys.refresh_cpu();
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let timestamp = clock() as u64;
         for proc_data in self.sys.cpus().iter() {
             let payload = self.processors.push(proc_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
@@ -584,8 +579,7 @@ impl StatCollector {
 
         // Refresh component info
         self.sys.refresh_components();
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let timestamp = clock() as u64;
         for comp_data in self.sys.components().iter() {
             let payload = self.components.push(comp_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
@@ -607,8 +601,7 @@ impl StatCollector {
         // at init and only collecting process information for them instead of iterating
         // over all running processes as is being done now.
         self.sys.refresh_processes();
-        let timestamp =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let timestamp = clock() as u64;
         for (&id, p) in self.sys.processes() {
             let name = p.cmd().get(0).map(|s| s.to_string()).unwrap_or(p.name().to_string());
 

@@ -7,4 +7,3 @@ pub mod simulator;
 pub mod systemstats;
 pub mod tcpjson;
 pub mod tunshell;
-pub mod utils;

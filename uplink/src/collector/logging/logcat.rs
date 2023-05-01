@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::LoggerConfig;
-use crate::Payload;
+use crate::{base::clock, Payload};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
@@ -109,10 +108,7 @@ pub fn parse_logcat_time(s: &str) -> Option<u64> {
 impl LogEntry {
     pub fn from_string(line: &str) -> anyhow::Result<Self> {
         let matches = LOGCAT_RE.captures(line).ok_or(Error::Parse)?;
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::from_secs(0))
-            .as_millis() as u64;
+        let timestamp = clock() as u64;
         let log_timestamp = parse_logcat_time(matches.get(1).ok_or(Error::Timestamp)?.as_str())
             .unwrap_or(timestamp);
         let level =
@@ -138,7 +134,7 @@ impl LogEntry {
 
 pub fn new_logcat(logging_config: &LoggerConfig) -> Command {
     let now = {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+        let timestamp = clock();
         let millis = timestamp % 1000;
         let seconds = timestamp / 1000;
         format!("{seconds}.{millis:03}")

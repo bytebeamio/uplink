@@ -7,13 +7,16 @@ use tokio::time::{self, interval, Sleep};
 
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
 
+mod delaymap;
 mod metrics;
 pub(crate) mod stream;
+mod streams;
 
 use crate::base::ActionRoute;
-use crate::{collector::utils::Streams, Action, ActionResponse, Config};
+use crate::{Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 use stream::Stream;
+use streams::Streams;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
