@@ -99,7 +99,7 @@ where
             + "/events/"
             + &stream
             + "/jsonarray";
-
+            
         Stream::new(stream, topic, max_buffer_size, tx, true)
     }
 
