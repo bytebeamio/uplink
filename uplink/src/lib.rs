@@ -95,9 +95,7 @@ pub mod config {
         pub modules: Vec<String>,
     }
 
-    const DEFAULT_CONFIG: &str = r#"
-    action_redirections = { "update_firmware" = "install_firmware" }
-    
+    const DEFAULT_CONFIG: &str = r#"    
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -109,7 +107,7 @@ pub mod config {
 
     # Downloader config
     [downloader]
-    actions = [{ name = "update_firmware", timeout = 60 }, { name = "send_file", timeout = 60 }]
+    actions = []
     path = "/var/tmp/ota-file"
 
     [stream_metrics]
@@ -144,14 +142,6 @@ pub mod config {
     enabled = true
     process_names = ["uplink"]
     update_period = 30
-
-    [tcpapps.1]
-    port = 5555
-
-    [ota_installer]
-    path = "/var/tmp/ota"
-    actions = []
-    uplink_port = 5555
 "#;
 
     /// Reads config file to generate config struct and replaces places holders
@@ -393,8 +383,10 @@ impl Uplink {
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
 
-        let ota_installer = OTAInstaller::new(config.clone(), bridge_tx.clone());
-        thread::spawn(move || ota_installer.start());
+        if let Some(config) = &config.ota_installer {
+            let ota_installer = OTAInstaller::new(config.clone(), bridge_tx.clone());
+            thread::spawn(move || ota_installer.start());
+        }
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
         {

@@ -32,6 +32,8 @@ pub struct Storage {
     current_read_file: BytesMut,
     /// id of file being read, delete it on read completion
     current_read_file_id: Option<u64>,
+    /// run through persistence without deleting files
+    pub non_destructive_read: bool,
 }
 
 impl Storage {
@@ -52,6 +54,7 @@ impl Storage {
             current_write_file: BytesMut::with_capacity(max_file_size * 2),
             current_read_file: BytesMut::with_capacity(max_file_size * 2),
             current_read_file_id: None,
+            non_destructive_read: false,
         })
     }
 
@@ -77,8 +80,13 @@ impl Storage {
 
     /// Removes a file with provided id
     fn remove(&self, id: u64) -> Result<(), Error> {
+        if self.non_destructive_read {
+            return Ok(());
+        }
+
         let path = self.get_read_file_path(id)?;
         fs::remove_file(path)?;
+
         Ok(())
     }
 
