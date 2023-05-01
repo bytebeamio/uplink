@@ -605,7 +605,7 @@ mod test {
 
     use super::*;
     use crate::base::bridge::stream::Stream;
-    use crate::base::MqttConfig;
+    use crate::base::{MqttConfig, StreamConfig, DEFAULT_TIMEOUT};
     use crate::{config::Persistence, Payload};
     use std::collections::HashMap;
 
@@ -716,7 +716,13 @@ mod test {
 
     impl MockCollector {
         fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
-            MockCollector { stream: Stream::new("hello", "hello/world", 1, data_tx) }
+            let stream = StreamConfig {
+                topic: "hello/world".to_string(),
+                buf_size: 1,
+                flush_period: DEFAULT_TIMEOUT,
+            };
+
+            MockCollector { stream: Stream::new("hello", stream, data_tx) }
         }
 
         fn send(&mut self, i: u32) -> Result<(), Error> {

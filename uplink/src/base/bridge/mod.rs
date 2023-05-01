@@ -401,7 +401,7 @@ mod tests {
     use tokio::{runtime::Runtime, select};
 
     use crate::{
-        base::{ActionRoute, StreamMetricsConfig},
+        base::{ActionRoute, StreamConfig, StreamMetricsConfig, DEFAULT_TIMEOUT},
         Action, ActionResponse, Config,
     };
 
@@ -422,7 +422,9 @@ mod tests {
         let (package_tx, package_rx) = bounded(10);
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
-        let action_status = Stream::dynamic("", "", "", 1, package_tx.clone());
+        let stream =
+            StreamConfig { topic: "".to_string(), buf_size: 1, flush_period: DEFAULT_TIMEOUT };
+        let action_status = Stream::new("", stream, package_tx.clone());
 
         let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status);
         let bridge_tx = bridge.tx();

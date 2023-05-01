@@ -8,6 +8,7 @@ use tokio::time::{interval, Interval};
 
 use super::stream::{self, StreamStatus, MAX_BUFFER_SIZE};
 use super::StreamMetrics;
+use crate::base::StreamConfig;
 use crate::{Config, Package, Payload, Stream};
 
 use super::delaymap::DelayMap;
@@ -30,7 +31,7 @@ impl Streams {
     ) -> Self {
         let mut map = HashMap::new();
         for (name, stream) in &config.streams {
-            let stream = Stream::with_config(name, stream, data_tx.clone());
+            let stream = Stream::new(name, stream.to_owned(), data_tx.clone());
             map.insert(name.to_owned(), stream);
         }
 
@@ -61,11 +62,15 @@ impl Streams {
                     return;
                 }
 
-                let stream = Stream::dynamic(
+                let stream = Stream::new(
                     stream_name,
-                    &self.config.project_id,
-                    &device_id,
-                    MAX_BUFFER_SIZE,
+                    StreamConfig::dynamic(
+                        "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray",
+                        stream_name,
+                        &self.config.project_id,
+                        &device_id,
+                        MAX_BUFFER_SIZE,
+                    ),
                     self.data_tx.clone(),
                 );
 

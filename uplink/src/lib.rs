@@ -290,8 +290,10 @@ impl Uplink {
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
 
-        let action_status_topic = &config.action_status.topic;
-        let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
+        let mut action_status = config.action_status.to_owned();
+        // NOTE: ActionResponses should be forwarded immediately
+        action_status.buf_size = 1;
+        let action_status = Stream::new("action_status", action_status, data_tx.clone());
         Ok(Uplink {
             config,
             action_rx,

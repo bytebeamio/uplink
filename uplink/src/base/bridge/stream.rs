@@ -4,9 +4,8 @@ use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::Serialize;
 
-use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
-
 use super::{Package, Point, StreamMetrics};
+use crate::base::StreamConfig;
 
 /// Signals status of stream buffer
 #[derive(Debug)]
@@ -43,20 +42,19 @@ where
     Buffer<T>: Package,
 {
     pub fn new(
-        stream: impl Into<String>,
-        topic: impl Into<String>,
-        max_buffer_size: usize,
+        name: impl Into<String>,
+        config: StreamConfig,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let name = Arc::new(stream.into());
-        let topic = Arc::new(topic.into());
+        let name = Arc::new(name.into());
+        let topic = Arc::new(config.topic);
         let buffer = Buffer::new(name.clone(), topic.clone());
-        let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
-        let metrics = StreamMetrics::new(&name, max_buffer_size);
+        let flush_period = Duration::from_secs(config.flush_period);
+        let metrics = StreamMetrics::new(&name, config.buf_size);
 
         Stream {
             name,
-            max_buffer_size,
+            max_buffer_size: config.buf_size,
             flush_period,
             topic,
             last_sequence: 0,
@@ -65,38 +63,6 @@ where
             tx,
             metrics,
         }
-    }
-
-    pub fn with_config(
-        name: &String,
-        config: &StreamConfig,
-        tx: Sender<Box<dyn Package>>,
-    ) -> Stream<T> {
-        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx);
-        stream.flush_period = Duration::from_secs(config.flush_period);
-        stream
-    }
-
-    pub fn dynamic(
-        stream: impl Into<String>,
-        project_id: impl Into<String>,
-        device_id: impl Into<String>,
-        max_buffer_size: usize,
-        tx: Sender<Box<dyn Package>>,
-    ) -> Stream<T> {
-        let stream = stream.into();
-        let project_id = project_id.into();
-        let device_id = device_id.into();
-
-        let topic = String::from("/tenants/")
-            + &project_id
-            + "/devices/"
-            + &device_id
-            + "/events/"
-            + &stream
-            + "/jsonarray";
-
-        Stream::new(stream, topic, max_buffer_size, tx)
     }
 
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {

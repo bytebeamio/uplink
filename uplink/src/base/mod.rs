@@ -41,6 +41,24 @@ pub struct StreamConfig {
     pub flush_period: u64,
 }
 
+impl StreamConfig {
+    pub fn dynamic(
+        topic_template: &str,
+        stream_name: &str,
+        tenant_id: &str,
+        device_id: &str,
+        buf_size: usize,
+    ) -> Self {
+        let mut topic = topic_template.to_owned();
+        topic = topic
+            .replace("{tenant_id}", tenant_id)
+            .replace("{device_id}", device_id)
+            .replace("{stream_name}", stream_name);
+
+        Self { topic, buf_size, flush_period: DEFAULT_TIMEOUT }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Persistence {
     pub path: String,
