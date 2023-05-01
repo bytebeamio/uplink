@@ -1,0 +1,17 @@
+[package]
+name = "storage"
+version = "0.1.0"
+authors = ["tekjar <raviteja@bytebeam.io>"]
+edition = "2021"
+
+[dependencies]
+bytes = "1"
+log = "0.4"
+seahash = "4"
+thiserror = "1"
+
+[dev-dependencies]
+tempdir = "0.3"
+rand = "0.7"
+mqttbytes = "0.1"
+pretty_env_logger = "0.4"
