@@ -171,6 +171,7 @@ pub struct Config {
     pub device_id: String,
     pub broker: String,
     pub port: u16,
+    pub topic_template: String,
     #[serde(default)]
     pub apis: TracingConfig,
     pub authentication: Option<Authentication>,

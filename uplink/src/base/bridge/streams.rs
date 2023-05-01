@@ -62,17 +62,14 @@ impl Streams {
                     return;
                 }
 
-                let stream = Stream::new(
+                let stream_config = StreamConfig::dynamic(
+                    &self.config.topic_template,
                     stream_name,
-                    StreamConfig::dynamic(
-                        "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray",
-                        stream_name,
-                        &self.config.project_id,
-                        &device_id,
-                        MAX_BUFFER_SIZE,
-                    ),
-                    self.data_tx.clone(),
+                    &self.config.project_id,
+                    &device_id,
+                    MAX_BUFFER_SIZE,
                 );
+                let stream = Stream::new(stream_name, stream_config, self.data_tx.clone());
 
                 self.map.entry(stream_id.to_owned()).or_insert(stream)
             }

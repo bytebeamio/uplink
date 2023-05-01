@@ -95,7 +95,9 @@ pub mod config {
         pub modules: Vec<String>,
     }
 
-    const DEFAULT_CONFIG: &str = r#"    
+    const DEFAULT_CONFIG: &str = r#"
+    topic_template = "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
+
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -190,10 +192,12 @@ pub mod config {
                 "uplink_system_stats",
             ] {
                 config.stream_metrics.blacklist.push(stream_name.to_owned());
+                let mut topic = config.topic_template.clone();
+                replace_topic_placeholders(&mut topic, tenant_id, device_id);
+                topic = topic.replace("{stream_name}", stream_name);
+
                 let stream_config = StreamConfig {
-                    topic: format!(
-                        "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
-                    ),
+                    topic,
                     buf_size: config.system_stats.stream_size.unwrap_or(100),
                     flush_period: DEFAULT_TIMEOUT,
                 };
@@ -201,12 +205,12 @@ pub mod config {
             }
         }
 
-        let stream_config =
-            config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
-                topic: format!("/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"),
-                buf_size: 32,
-                flush_period: DEFAULT_TIMEOUT,
-            });
+        let stream_config = config.streams.entry("logs".to_string()).or_insert_with(|| {
+            let mut topic = config.topic_template.clone();
+            replace_topic_placeholders(&mut topic, tenant_id, device_id);
+            topic = topic.replace("{stream_name}", "logs");
+            StreamConfig { topic, buf_size: 32, flush_period: DEFAULT_TIMEOUT }
+        });
         if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
             stream_config.buf_size = buf_size;
         }
