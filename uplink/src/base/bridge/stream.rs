@@ -22,6 +22,8 @@ pub enum Error {
     Send(#[from] SendError<Box<dyn Package>>),
 }
 
+pub const MAX_BUFFER_SIZE: usize = 100;
+
 #[derive(Debug)]
 pub struct Stream<T> {
     pub name: Arc<String>,
@@ -41,9 +43,9 @@ where
     T: Point + Debug + Send + 'static,
     Buffer<T>: Package,
 {
-    pub fn new<S: Into<String>>(
-        stream: S,
-        topic: S,
+    pub fn new(
+        stream: impl Into<String>,
+        topic: impl Into<String>,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
         compression: Compression,
@@ -78,10 +80,10 @@ where
         stream
     }
 
-    pub fn dynamic_with_size<S: Into<String>>(
-        stream: S,
-        project_id: S,
-        device_id: S,
+    pub fn dynamic(
+        stream: impl Into<String>,
+        project_id: impl Into<String>,
+        device_id: impl Into<String>,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
@@ -98,15 +100,6 @@ where
             + "/jsonarray";
 
         Stream::new(stream, topic, max_buffer_size, tx, Compression::Disabled)
-    }
-
-    pub fn dynamic<S: Into<String>>(
-        stream: S,
-        project_id: S,
-        device_id: S,
-        tx: Sender<Box<dyn Package>>,
-    ) -> Stream<T> {
-        Stream::dynamic_with_size(stream, project_id, device_id, 100, tx)
     }
 
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {

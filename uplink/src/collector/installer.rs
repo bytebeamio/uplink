@@ -1,4 +1,4 @@
-use std::{fs::File, path::PathBuf, sync::Arc};
+use std::{fs::File, path::PathBuf};
 
 use log::{debug, error, warn};
 use tar::Archive;
@@ -6,7 +6,7 @@ use tokio::process::Command;
 
 use super::downloader::DownloadFile;
 use crate::base::{bridge::BridgeTx, InstallerConfig};
-use crate::{Action, ActionResponse, Config};
+use crate::{Action, ActionResponse};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -26,8 +26,7 @@ pub struct OTAInstaller {
 }
 
 impl OTAInstaller {
-    pub fn new(config: Arc<Config>, bridge_tx: BridgeTx) -> Self {
-        let config = config.ota_installer.clone();
+    pub fn new(config: InstallerConfig, bridge_tx: BridgeTx) -> Self {
         Self { config, bridge_tx }
     }
 

@@ -1,3 +1,4 @@
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,10 @@ fn default_file_size() -> usize {
 
 fn default_file_count() -> usize {
     3
+}
+
+pub fn clock() -> u128 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Default)]
@@ -175,7 +180,7 @@ pub struct Config {
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
-    pub ota_installer: InstallerConfig,
+    pub ota_installer: Option<InstallerConfig>,
     #[serde(default)]
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]

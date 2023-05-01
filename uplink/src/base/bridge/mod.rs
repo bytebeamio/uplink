@@ -7,13 +7,16 @@ use tokio::time::{self, interval, Sleep};
 
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
 
+mod delaymap;
 mod metrics;
 pub(crate) mod stream;
+mod streams;
 
 use crate::base::ActionRoute;
-use crate::{collector::utils::Streams, Action, ActionResponse, Config};
+use crate::{Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 use stream::Stream;
+use streams::Streams;
 
 use super::Compression;
 
@@ -422,7 +425,7 @@ mod tests {
         let (package_tx, package_rx) = bounded(10);
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
-        let action_status = Stream::dynamic_with_size("", "", "", 1, package_tx.clone());
+        let action_status = Stream::dynamic("", "", "", 1, package_tx.clone());
 
         let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status);
         let bridge_tx = bridge.tx();
