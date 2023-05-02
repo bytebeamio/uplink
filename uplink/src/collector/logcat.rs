@@ -203,8 +203,8 @@ impl Logcat {
         // silence everything
         let mut logcat_args = ["-v", "time", "-T", now.as_str(), "*:S"].map(String::from).to_vec();
         // enable logging for requested tags
-        for tag in &self.config.tags {
-            let min_level = LogLevel::from_syslog_level(self.config.min_level)
+        for tag in &config.tags {
+            let min_level = LogLevel::from_syslog_level(config.min_level)
                 .expect("Couldn't figure out log level");
             logcat_args.push(format!("{}:{}", tag, min_level.to_str()));
         }
