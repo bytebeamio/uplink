@@ -18,44 +18,39 @@ pub enum Error {
 }
 
 pub struct Storage {
-    /// list of backlog file ids. Mutated only be the serialization part of the sender
-    backlog_file_ids: Vec<u64>,
-    /// persistence path
-    backup_path: PathBuf,
     /// maximum allowed file size
     max_file_size: usize,
-    /// maximum number of files before deleting old file
-    max_file_count: usize,
     /// current open file
     current_write_file: BytesMut,
     /// current_read_file
     current_read_file: BytesMut,
-    /// id of file being read, delete it on read completion
-    current_read_file_id: Option<u64>,
-    /// run through persistence without deleting files
-    pub non_destructive_read: bool,
+    /// disk persistence
+    persistence: Option<Persistence>,
 }
 
 impl Storage {
-    pub fn new<P: Into<PathBuf>>(
-        backlog_dir: P,
-        max_file_size: usize,
-        max_file_count: usize,
-    ) -> Result<Storage, Error> {
-        let backup_path = backlog_dir.into();
-        let backlog_file_ids = get_file_ids(&backup_path)?;
-        info!("List of file ids loaded from disk: {backlog_file_ids:?}");
-
-        Ok(Storage {
-            backlog_file_ids,
-            backup_path,
+    pub fn new(max_file_size: usize) -> Storage {
+        Storage {
             max_file_size,
-            max_file_count,
             current_write_file: BytesMut::with_capacity(max_file_size * 2),
             current_read_file: BytesMut::with_capacity(max_file_size * 2),
-            current_read_file_id: None,
-            non_destructive_read: false,
-        })
+            persistence: None,
+        }
+    }
+
+    pub fn set_persistence<P: Into<PathBuf>>(
+        &mut self,
+        backup_dir: P,
+        max_file_count: usize,
+    ) -> Result<(), Error> {
+        let backup_path = backup_dir.into();
+        let backlog_file_ids = get_file_ids(&backup_path)?;
+
+        info!("List of file ids loaded from disk: {backlog_file_ids:?}");
+
+        let persistence = Persistence::new(backup_dir, max_file_count);
+        self.persistence = Some(persistence);
+        Ok(())
     }
 
     pub fn writer(&mut self) -> &mut BytesMut {
@@ -67,7 +62,10 @@ impl Storage {
     }
 
     pub fn file_count(&self) -> usize {
-        self.backlog_file_ids.len()
+        match self.persistence {
+            Some(p) => p.ids.len(),
+            None => 0,
+        }
     }
 
     pub fn inmemory_read_size(&self) -> usize {
@@ -78,73 +76,11 @@ impl Storage {
         self.current_write_file.len()
     }
 
-    /// Removes a file with provided id
-    fn remove(&self, id: u64) -> Result<(), Error> {
-        if self.non_destructive_read {
-            return Ok(());
-        }
-
-        let path = self.get_read_file_path(id)?;
-        fs::remove_file(path)?;
-
-        Ok(())
-    }
-
-    /// Move corrupt file to special directory
-    fn handle_corrupt_file(&self) -> Result<(), Error> {
-        let id = self.current_read_file_id.expect("There is supposed to be a file here");
-        let path_src = self.get_read_file_path(id)?;
-        let dest_dir = self.backup_path.join("corrupted");
-        fs::create_dir_all(&dest_dir)?;
-
-        let file_name = path_src.file_name().expect("The file name should exist");
-        let path_dest = dest_dir.join(file_name);
-
-        warn!("Moving corrupted file from {path_src:?} to {path_dest:?}");
-        fs::rename(path_src, path_dest)?;
-
-        Ok(())
-    }
-
     /// Initializes read buffer before reading data from the file
     fn prepare_current_read_buffer(&mut self, file_len: usize) {
         self.current_read_file.clear();
         let init = vec![0u8; file_len];
         self.current_read_file.put_slice(&init);
-    }
-
-    /// Opens file to flush current inmemory write buffer to disk.
-    /// Also handles retention of previous files on disk
-    fn open_next_write_file(&mut self) -> Result<NextFile, Error> {
-        let next_file_id = self.backlog_file_ids.last().map_or(0, |id| id + 1);
-        let file_name = format!("backup@{next_file_id}");
-        let next_file_path = self.backup_path.join(file_name);
-        let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
-        self.backlog_file_ids.push(next_file_id);
-
-        let mut next = NextFile { path: next_file_path, file: next_file, deleted: None };
-
-        let mut backlog_files_count = self.backlog_file_ids.len();
-        // File being read is also to be considered
-        if self.current_read_file_id.is_some() {
-            backlog_files_count += 1
-        }
-        // Return next file details if backlog is within limits
-        if backlog_files_count <= self.max_file_count {
-            return Ok(next);
-        }
-
-        // Remove file being read, or first in backlog
-        // NOTE: keeps read buffer unchanged
-        let id = match self.current_read_file_id.take() {
-            Some(id) => id,
-            _ => self.backlog_file_ids.remove(0),
-        };
-        warn!("file limit reached. deleting backup@{}", id);
-        next.deleted = Some(id);
-        self.remove(id)?;
-
-        Ok(next)
     }
 
     /// Flushes what ever is in current write buffer into a new file on the disk
@@ -173,41 +109,6 @@ impl Storage {
         self.current_write_file.clear();
 
         f
-    }
-
-    fn get_read_file_path(&self, id: u64) -> Result<PathBuf, Error> {
-        let file_name = format!("backup@{id}");
-        let path = self.backup_path.join(file_name);
-
-        Ok(path)
-    }
-
-    fn load_next_read_file(&mut self) -> Result<(), Error> {
-        // Len always > 0 because of above if. Doesn't panic
-        let id = self.backlog_file_ids.remove(0);
-        let next_file_path = self.get_read_file_path(id)?;
-
-        let mut file = OpenOptions::new().read(true).open(&next_file_path)?;
-
-        // Load file into memory and store its id for deleting in the future
-        let metadata = fs::metadata(&next_file_path)?;
-        self.prepare_current_read_buffer(metadata.len() as usize);
-        file.read_exact(&mut self.current_read_file[..])?;
-        self.current_read_file_id = Some(id);
-
-        // Verify with checksum
-        if self.current_read_file.len() < 8 {
-            self.handle_corrupt_file()?;
-            return Err(Error::CorruptedFile);
-        }
-        let expected_hash = self.current_read_file.get_u64();
-        let actual_hash = hash(&self.current_read_file[..]);
-        if actual_hash != expected_hash {
-            self.handle_corrupt_file()?;
-            return Err(Error::CorruptedFile);
-        }
-
-        Ok(())
     }
 
     /// Reloads next buffer even if there is pending data in current buffer
@@ -291,6 +192,127 @@ struct NextFile {
     path: PathBuf,
     file: File,
     deleted: Option<u64>,
+}
+
+struct Persistence {
+    /// Backup path
+    path: PathBuf,
+    /// maximum number of files before deleting old file
+    max_file_count: usize,
+    /// list of backlog file ids. Mutated only be the serialization part of the sender
+    ids: Vec<u64>,
+    /// id of file being read, delete it on read completion
+    current_read_file_id: Option<u64>,
+    /// Deleted file id
+    deleted: Option<u64>,
+}
+
+impl Persistence {
+    fn new<P: Into<PathBuf>>(path: P, max_file_count: usize) -> Self {
+        Persistence {
+            path: path.into(),
+            max_file_count,
+            ids: Vec::new(),
+            current_read_file_id: None,
+            deleted: None,
+        }
+    }
+
+    fn path(&self, id: u64) -> Result<PathBuf, Error> {
+        let file_name = format!("backup@{id}");
+        let path = self.path.join(file_name);
+
+        Ok(path)
+    }
+
+    /// Removes a file with provided id
+    fn remove(&self, id: u64) -> Result<(), Error> {
+        let path = self.path(id)?;
+        fs::remove_file(path)?;
+
+        Ok(())
+    }
+
+    /// Move corrupt file to special directory
+    fn handle_corrupt_file(&self) -> Result<(), Error> {
+        let id = self.current_read_file_id.expect("There is supposed to be a file here");
+        let path_src = self.path(id)?;
+        let dest_dir = self.path.join("corrupted");
+        fs::create_dir_all(&dest_dir)?;
+
+        let file_name = path_src.file_name().expect("The file name should exist");
+        let path_dest = dest_dir.join(file_name);
+
+        warn!("Moving corrupted file from {path_src:?} to {path_dest:?}");
+        fs::rename(path_src, path_dest)?;
+
+        Ok(())
+    }
+
+    /// Opens file to flush current inmemory write buffer to disk.
+    /// Also handles retention of previous files on disk
+    fn open_next_write_file(&mut self) -> Result<NextFile, Error> {
+        let next_file_id = self.ids.last().map_or(0, |id| id + 1);
+        let file_name = format!("backup@{next_file_id}");
+        let next_file_path = self.path.join(file_name);
+        let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
+        self.ids.push(next_file_id);
+
+        let mut next = NextFile { path: next_file_path, file: next_file, deleted: None };
+
+        let mut backlog_files_count = self.ids.len();
+
+        // File being read is also to be considered
+        if self.current_read_file_id.is_some() {
+            backlog_files_count += 1
+        }
+        // Return next file details if backlog is within limits
+        if backlog_files_count <= self.max_file_count {
+            return Ok(next);
+        }
+
+        // Remove file being read, or first in backlog
+        // NOTE: keeps read buffer unchanged
+        let id = match self.current_read_file_id.take() {
+            Some(id) => id,
+            _ => self.ids.remove(0),
+        };
+
+        warn!("file limit reached. deleting backup@{}", id);
+        next.deleted = Some(id);
+        self.remove(id)?;
+
+        Ok(next)
+    }
+
+    fn load_next_read_file(&mut self, current_read_file: &mut BytesMut) -> Result<(), Error> {
+        // Len always > 0 because of above if. Doesn't panic
+        let id = self.ids.remove(0);
+        let next_file_path = self.path(id)?;
+
+        let mut file = OpenOptions::new().read(true).open(&next_file_path)?;
+
+        // Load file into memory and store its id for deleting in the future
+        let metadata = fs::metadata(&next_file_path)?;
+        self.prepare_current_read_buffer(metadata.len() as usize);
+        file.read_exact(&mut current_read_file[..])?;
+        self.current_read_file_id = Some(id);
+
+        // Verify with checksum
+        if current_read_file.len() < 8 {
+            self.handle_corrupt_file()?;
+            return Err(Error::CorruptedFile);
+        }
+
+        let expected_hash = current_read_file.get_u64();
+        let actual_hash = hash(&current_read_file[..]);
+        if actual_hash != expected_hash {
+            self.handle_corrupt_file()?;
+            return Err(Error::CorruptedFile);
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
