@@ -290,7 +290,7 @@ impl Persistence {
         // Load file into memory and store its id for deleting in the future
         let metadata = fs::metadata(&next_file_path)?;
 
-        /// Initialize next read file with 0s
+        // Initialize next read file with 0s
         current_read_file.clear();
         let init = vec![0u8; metadata.len() as usize];
         current_read_file.put_slice(&init);
@@ -361,7 +361,8 @@ mod test {
     fn flush_creates_new_file_after_size_limit() {
         // 1036 is the size of a publish message with topic = "hello", qos = 1, payload = 1024 bytes
         let backup = init_backup_folders();
-        let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
+        let mut storage = Storage::new(10 * 1036);
+        storage.set_persistence(backup.path(), 10).unwrap();
 
         // 2 files on disk and a partially filled in memory buffer
         write_n_publishes(&mut storage, 101);
@@ -377,7 +378,8 @@ mod test {
     #[test]
     fn old_file_is_deleted_after_limit() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
+        let mut storage = Storage::new(10 * 1036);
+        storage.set_persistence(backup.path(), 10).unwrap();
 
         // 11 files created. 10 on disk
         write_n_publishes(&mut storage, 110);
@@ -396,7 +398,8 @@ mod test {
     #[test]
     fn reload_loads_correct_file_into_memory() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
+        let mut storage = Storage::new(10 * 1036);
+        storage.set_persistence(backup.path(), 10).unwrap();
 
         // 10 files on disk
         write_n_publishes(&mut storage, 100);
@@ -413,7 +416,8 @@ mod test {
     #[test]
     fn reload_loads_partially_written_write_buffer_correctly() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
+        let mut storage = Storage::new(10 * 1036);
+        storage.set_persistence(backup.path(), 10).unwrap();
 
         // 10 files on disk and partially filled current write buffer
         write_n_publishes(&mut storage, 105);
@@ -431,27 +435,31 @@ mod test {
     #[test]
     fn ensure_file_remove_on_read_completion_only() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(backup.path(), 10 * 1036, 10).unwrap();
-
+        let mut storage = Storage::new(10 * 1036);
+        storage.set_persistence(backup.path(), 10).unwrap();
         // 10 files on disk and partially filled current write buffer, 10 publishes per file
         write_n_publishes(&mut storage, 105);
 
         // Initially not on a read file
-        assert_eq!(storage.current_read_file_id, None);
+        assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
         // Successfully read 10 files with files still in storage after 10 reads
         for i in 0..10 {
             read_n_publishes(&mut storage, 10);
-            let file_id = storage.current_read_file_id.unwrap();
+            let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
             assert_eq!(file_id, i);
             // Ensure file exists
-            let next_file_path =
-                storage.backup_path.join("backup@".to_owned() + &file_id.to_string());
+            let next_file_path = storage
+                .persistence
+                .as_ref()
+                .unwrap()
+                .path
+                .join("backup@".to_owned() + &file_id.to_string());
             assert!(Path::new(&next_file_path).exists());
         }
 
         // All read files should be deleted just after 1 more read
         read_n_publishes(&mut storage, 1);
-        assert_eq!(storage.current_read_file_id, None);
+        assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
     }
 }
