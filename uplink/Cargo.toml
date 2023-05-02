@@ -39,3 +39,6 @@ tar = "0.4"
 
 [build-dependencies]
 vergen = { version = "7", features = ["git", "build", "time"] }
+
+[dev-dependencies]
+tempdir = "0.3"

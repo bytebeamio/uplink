@@ -2840,6 +2840,7 @@ dependencies = [
  "structopt",
  "sysinfo",
  "tar",
+ "tempdir",
  "thiserror",
  "time",
  "tokio 1.22.0",

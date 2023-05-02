@@ -575,19 +575,30 @@ fn check_and_flush_metrics(
 #[cfg(test)]
 mod test {
     use serde_json::Value;
+    use tempdir::TempDir;
+
+    use std::collections::HashMap;
 
     use super::*;
     use crate::base::bridge::stream::Stream;
-    use crate::base::MqttConfig;
+    use crate::base::{Disk, MqttConfig};
     use crate::{config::Persistence, Payload};
-    use std::collections::HashMap;
+
+    fn init_backup_folders(suffix: &str) -> TempDir {
+        let path = format!("/tmp/uplink_test/{suffix}");
+        let backup = TempDir::new(&path).unwrap();
+
+        if !backup.path().is_dir() {
+            panic!("Folder does not exist");
+        }
+
+        backup
+    }
 
     #[derive(Clone)]
     pub struct MockClient {
         pub net_tx: flume::Sender<Request>,
     }
-
-    const PERSIST_FOLDER: &str = "/tmp/uplink_test";
 
     #[async_trait::async_trait]
     impl MqttClient for MockClient {
@@ -652,16 +663,15 @@ mod test {
         }
     }
 
-    fn config_with_persistence(path: String) -> Config {
+    fn config_with_persistence(path: String) -> Arc<Config> {
         std::fs::create_dir_all(&path).unwrap();
         let mut config = default_config();
-        config.persistence = Some(Persistence {
-            path: path.clone(),
+        config.persistence = Persistence {
             max_file_size: 10 * 1024 * 1024,
-            max_file_count: 3,
-        });
+            disk: Some(Disk { path: path.clone(), max_file_count: 3 }),
+        };
 
-        config
+        Arc::new(config)
     }
 
     fn defaults(
@@ -739,11 +749,13 @@ mod test {
     #[test]
     // Force write publish to storage and verify by reading back
     fn read_write_storage() {
-        let config = Arc::new(config_with_persistence(format!("{}/disk", PERSIST_FOLDER)));
-        std::fs::create_dir_all(&config.persistence.as_ref().unwrap().path).unwrap();
+        let backup_dir = init_backup_folders("disk");
+        let path = format!("{}", backup_dir.path().display());
+        let config = config_with_persistence(path);
+        std::fs::create_dir_all(&config.persistence.disk.as_ref().unwrap().path).unwrap();
 
-        let (mut serializer, _, _) = defaults(config);
-        let mut storage = serializer.storage.take().unwrap();
+        let (serializer, _, _) = defaults(config);
+        let mut storage = serializer.storage;
 
         let mut publish = Publish::new(
             "hello/world",
@@ -763,7 +775,9 @@ mod test {
     #[test]
     // Force runs serializer in disk mode, with network returning
     fn disk_to_catchup() {
-        let config = Arc::new(config_with_persistence(format!("{}/disk_catchup", PERSIST_FOLDER)));
+        let backup_dir = init_backup_folders("disk_catchup");
+        let path = format!("{}", backup_dir.path().display());
+        let config = config_with_persistence(path);
 
         let (mut serializer, data_tx, net_rx) = defaults(config);
 
@@ -796,8 +810,9 @@ mod test {
     #[test]
     // Force runs serializer in disk mode, with crashed network
     fn disk_to_crash() {
-        let config = Arc::new(config_with_persistence(format!("{}/disk_crash", PERSIST_FOLDER)));
-
+        let backup_dir = init_backup_folders("disk_crash");
+        let path = format!("{}", backup_dir.path().display());
+        let config = config_with_persistence(path);
         let (mut serializer, data_tx, _) = defaults(config);
 
         let mut collector = MockCollector::new(data_tx);
@@ -828,7 +843,9 @@ mod test {
     #[test]
     // Force runs serializer in catchup mode, with empty persistence
     fn catchup_to_normal_empty_persistence() {
-        let config = Arc::new(config_with_persistence(format!("{}/catchup_empty", PERSIST_FOLDER)));
+        let backup_dir = init_backup_folders("catchup_empty");
+        let path = format!("{}", backup_dir.path().display());
+        let config = config_with_persistence(path);
 
         let (mut serializer, _, _) = defaults(config);
 
@@ -840,11 +857,12 @@ mod test {
     #[test]
     // Force runs serializer in catchup mode, with data already in persistence
     fn catchup_to_normal_with_persistence() {
-        let config =
-            Arc::new(config_with_persistence(format!("{}/catchup_normal", PERSIST_FOLDER)));
+        let backup_dir = init_backup_folders("catchup_normal");
+        let path = format!("{}", backup_dir.path().display());
+        let config = config_with_persistence(path);
 
         let (mut serializer, data_tx, net_rx) = defaults(config);
-        let mut storage = serializer.storage.take().unwrap();
+        let mut storage = serializer.storage;
 
         let mut collector = MockCollector::new(data_tx);
         // Run a collector practically once
@@ -881,7 +899,7 @@ mod test {
         write_to_disk(publish.clone(), &mut storage).unwrap();
 
         // Replace storage into serializer
-        serializer.storage = Some(storage);
+        serializer.storage = storage;
         let status =
             tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap();
         assert_eq!(status, Status::Normal);
@@ -890,12 +908,14 @@ mod test {
     #[test]
     // Force runs serializer in catchup mode, with persistence and crashed network
     fn catchup_to_crash_with_persistence() {
-        let config = Arc::new(config_with_persistence(format!("{}/catchup_crash", PERSIST_FOLDER)));
+        let backup_dir = init_backup_folders("catchup_crash");
+        let path = format!("{}", backup_dir.path().display());
+        let config = config_with_persistence(path);
 
-        std::fs::create_dir_all(&config.persistence.as_ref().unwrap().path).unwrap();
+        std::fs::create_dir_all(&config.persistence.disk.as_ref().unwrap().path).unwrap();
 
         let (mut serializer, data_tx, _) = defaults(config);
-        let mut storage = serializer.storage.take().unwrap();
+        let mut storage = serializer.storage;
 
         let mut collector = MockCollector::new(data_tx);
         // Run a collector
@@ -915,7 +935,7 @@ mod test {
         write_to_disk(publish.clone(), &mut storage).unwrap();
 
         // Replace storage into serializer
-        serializer.storage = Some(storage);
+        serializer.storage = storage;
         match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
             Status::EventLoopCrash(Publish { topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
