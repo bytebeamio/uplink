@@ -1,20 +1,11 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::{process::Command, time::Duration};
+use std::{io::BufReader, time::Duration};
 
-#[cfg(target_os = "linux")]
-mod journalctl;
-#[cfg(target_os = "android")]
-mod logcat;
-
-use crate::base::{bridge::BridgeTx, ActionRoute};
-use crate::{ActionResponse, Config};
-#[cfg(target_os = "linux")]
-pub use journalctl::{new_journalctl, LogEntry};
-#[cfg(target_os = "android")]
-pub use logcat::{new_logcat, LogEntry};
+use crate::{base::bridge::BridgeTx, ActionResponse, ActionRoute, Payload};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -24,28 +15,102 @@ pub enum Error {
     Recv(#[from] flume::RecvError),
 }
 
-pub struct LoggerInstance {
-    config: Arc<Config>,
-    kill_switch: Arc<Mutex<bool>>,
-    bridge: BridgeTx,
-}
-
 #[derive(Debug, Clone, Deserialize)]
-pub struct LoggerConfig {
+pub struct JournalCtlConfig {
     pub tags: Vec<String>,
     pub min_level: u8,
     pub stream_size: Option<usize>,
 }
 
-impl Drop for LoggerInstance {
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LogLevel {
+    Emergency = 0,
+    Alert = 1,
+    Critical = 2,
+    Error = 3,
+    Warn = 4,
+    Notice = 5,
+    Info = 6,
+    Debug = 7,
+}
+
+impl LogLevel {
+    pub fn from_syslog_level(s: &str) -> LogLevel {
+        match s {
+            "0" => LogLevel::Emergency,
+            "1" => LogLevel::Alert,
+            "2" => LogLevel::Critical,
+            "3" => LogLevel::Error,
+            "4" => LogLevel::Warn,
+            "5" => LogLevel::Notice,
+            "6" => LogLevel::Info,
+            "7" => LogLevel::Debug,
+            _ => LogLevel::Info,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct JournaldEntry {
+    #[serde(rename = "PRIORITY")]
+    priority: String,
+
+    #[serde(rename = "__REALTIME_TIMESTAMP")]
+    log_timestamp: String,
+
+    #[serde(rename = "SYSLOG_IDENTIFIER")]
+    tag: String,
+
+    #[serde(rename = "MESSAGE")]
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LogEntry {
+    level: LogLevel,
+    log_timestamp: String,
+    tag: String,
+    message: String,
+    line: String,
+}
+
+impl LogEntry {
+    pub fn from_string(line: &str) -> anyhow::Result<Self> {
+        let entry: JournaldEntry = serde_json::from_str(line)?;
+
+        Ok(Self {
+            level: LogLevel::from_syslog_level(&entry.priority),
+            log_timestamp: entry.log_timestamp,
+            tag: entry.tag,
+            message: entry.message,
+            line: line.to_owned(),
+        })
+    }
+
+    pub fn to_payload(&self, sequence: u32) -> anyhow::Result<Payload> {
+        let payload = serde_json::to_value(self)?;
+        // Convert from microseconds to milliseconds
+        let timestamp = self.log_timestamp.parse::<u64>()? / 1000;
+
+        Ok(Payload { stream: "logs".to_string(), device_id: None, sequence, timestamp, payload })
+    }
+}
+
+pub struct JournalCtl {
+    config: JournalCtlConfig,
+    kill_switch: Arc<Mutex<bool>>,
+    bridge: BridgeTx,
+}
+
+impl Drop for JournalCtl {
     // Ensure last running logger process is killed when dropped
     fn drop(&mut self) {
         self.kill_last()
     }
 }
 
-impl LoggerInstance {
-    pub fn new(config: Arc<Config>, bridge: BridgeTx) -> Self {
+impl JournalCtl {
+    pub fn new(config: JournalCtlConfig, bridge: BridgeTx) -> Self {
         let kill_switch = Arc::new(Mutex::new(true));
 
         Self { config, kill_switch, bridge }
@@ -56,13 +121,6 @@ impl LoggerInstance {
     /// this object is dropped. On any other system, it's a noop.
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) -> Result<(), Error> {
-        if let Some(config) = &self.config.logging {
-            #[cfg(target_os = "linux")]
-            self.spawn_logger(new_journalctl(config));
-            #[cfg(target_os = "android")]
-            self.spawn_logger(new_logcat(config));
-        }
-
         let log_rx = self
             .bridge
             .register_action_route(ActionRoute { name: "logging_config".to_string(), timeout: 10 })
@@ -70,7 +128,7 @@ impl LoggerInstance {
 
         loop {
             let action = log_rx.recv()?;
-            let mut config = serde_json::from_str::<LoggerConfig>(action.payload.as_str())?;
+            let mut config = serde_json::from_str::<JournalCtlConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
 
             // Ensure any logger child process created earlier gets killed
@@ -78,10 +136,21 @@ impl LoggerInstance {
             // Use a new mutex kill_switch for future child process
             self.kill_switch = Arc::new(Mutex::new(true));
 
-            #[cfg(target_os = "linux")]
-            self.spawn_logger(new_journalctl(&config));
-            #[cfg(target_os = "android")]
-            self.spawn_logger(new_logcat(&config));
+            // silence everything
+            let mut journalctl_args =
+                ["-o", "json", "-f", "-p", &self.config.min_level.to_string()]
+                    .map(String::from)
+                    .to_vec();
+            // enable logging for requested tags
+            for tag in &self.config.tags {
+                let tag_args = ["-t", tag].map(String::from).to_vec();
+                journalctl_args.extend(tag_args);
+            }
+
+            log::info!("journalctl args: {:?}", journalctl_args);
+            let mut journalctl = Command::new("journalctl");
+            journalctl.args(journalctl_args).stdout(Stdio::piped());
+            self.spawn_logger(journalctl);
 
             let response = ActionResponse::success(&action.action_id);
             self.bridge.send_action_response(response).await;
