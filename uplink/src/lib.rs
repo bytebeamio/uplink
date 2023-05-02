@@ -156,8 +156,8 @@ pub mod config {
 
         let mut config: Config = config.try_deserialize()?;
 
-        if let Some(persistence) = &config.persistence {
-            fs::create_dir_all(&persistence.path)?;
+        if let Some(disk) = &config.persistence.disk {
+            fs::create_dir_all(&disk.path)?;
         }
 
         // replace placeholders with device/tenant ID

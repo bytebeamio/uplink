@@ -43,9 +43,21 @@ pub struct StreamConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Persistence {
-    pub path: String,
     #[serde(default = "default_file_size")]
     pub max_file_size: usize,
+    #[serde(flatten)]
+    pub disk: Option<Disk>,
+}
+
+impl Default for Persistence {
+    fn default() -> Self {
+        Persistence { max_file_size: default_file_size(), disk: None }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Disk {
+    pub path: String,
     #[serde(default = "default_file_count")]
     pub max_file_count: usize,
 }
@@ -162,7 +174,8 @@ pub struct Config {
     pub processes: Vec<ActionRoute>,
     #[serde(skip)]
     pub actions_subscription: String,
-    pub persistence: Option<Persistence>,
+    #[serde(default)]
+    pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
     pub stream_metrics: StreamMetricsConfig,
