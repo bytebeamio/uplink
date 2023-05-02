@@ -201,13 +201,16 @@ pub mod config {
             }
         }
 
-        let stream_config =
-            config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
-                topic: format!("/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"),
-                buf_size: 32,
-                flush_period: DEFAULT_TIMEOUT,
-            });
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+            let stream_config =
+                config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
+                    topic: format!(
+                        "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+                    ),
+                    buf_size: 32,
+                    flush_period: DEFAULT_TIMEOUT,
+                });
             stream_config.buf_size = buf_size;
         }
 
