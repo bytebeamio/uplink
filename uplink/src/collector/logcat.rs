@@ -171,7 +171,7 @@ impl Logcat {
     pub async fn start(mut self) -> Result<(), Error> {
         let log_rx = self
             .bridge
-            .register_action_route(ActionRoute { name: "logging_config".to_string(), timeout: 10 })
+            .register_action_route(ActionRoute { name: "logcat_config".to_string(), timeout: 10 })
             .await;
 
         loop {
