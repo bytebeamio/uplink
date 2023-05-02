@@ -200,6 +200,7 @@ impl Storage {
             self.handle_corrupt_file()?;
             return Err(Error::CorruptedFile);
         }
+
         let expected_hash = self.current_read_file.get_u64();
         let actual_hash = hash(&self.current_read_file[..]);
         if actual_hash != expected_hash {

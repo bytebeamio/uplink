@@ -48,7 +48,7 @@ impl Storage {
 
         info!("List of file ids loaded from disk: {backlog_file_ids:?}");
 
-        let persistence = Persistence::new(backup_dir, max_file_count);
+        let persistence = Persistence::new(backup_path, max_file_count);
         self.persistence = Some(persistence);
         Ok(())
     }
@@ -62,7 +62,7 @@ impl Storage {
     }
 
     pub fn file_count(&self) -> usize {
-        match self.persistence {
+        match &self.persistence {
             Some(p) => p.ids.len(),
             None => 0,
         }
@@ -76,27 +76,6 @@ impl Storage {
         self.current_write_file.len()
     }
 
-    /// Initializes read buffer before reading data from the file
-    fn prepare_current_read_buffer(&mut self, file_len: usize) {
-        self.current_read_file.clear();
-        let init = vec![0u8; file_len];
-        self.current_read_file.put_slice(&init);
-    }
-
-    /// Flushes what ever is in current write buffer into a new file on the disk
-    #[inline]
-    fn flush(&mut self) -> Result<Option<u64>, Error> {
-        let hash = hash(&self.current_write_file[..]);
-
-        let mut next_file = self.open_next_write_file()?;
-        info!("Flushing data to disk!! {:?}", next_file.path);
-        next_file.file.write_all(&hash.to_be_bytes())?;
-        next_file.file.write_all(&self.current_write_file[..])?;
-        next_file.file.flush()?;
-
-        Ok(next_file.deleted)
-    }
-
     /// Checks current write buffer size and flushes it to disk when the size
     /// exceeds configured size
     pub fn flush_on_overflow(&mut self) -> Result<Option<u64>, Error> {
@@ -104,31 +83,25 @@ impl Storage {
             return Ok(None);
         }
 
-        // Clear write buffer even if flush to file was unsuccessful
-        let f = self.flush();
-        self.current_write_file.clear();
+        match &mut self.persistence {
+            Some(persistence) => {
+                let hash = hash(&self.current_write_file[..]);
+                let mut next_file = persistence.open_next_write_file()?;
+                info!("Flushing data to disk!! {:?}", next_file.path);
 
-        f
-    }
-
-    /// Reloads next buffer even if there is pending data in current buffer
-    fn reload(&mut self) -> Result<bool, Error> {
-        // Swap read buffer with write buffer to read data in inmemory write
-        // buffer when all the backlog disk files are done
-        if self.backlog_file_ids.is_empty() {
-            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
-
-            // If read buffer is 0 after swapping, all the data is caught up
-            return if self.current_read_file.is_empty() { Ok(true) } else { Ok(false) };
+                next_file.file.write_all(&hash.to_be_bytes())?;
+                next_file.file.write_all(&self.current_write_file[..])?;
+                next_file.file.flush()?;
+                self.current_write_file.clear();
+                Ok(next_file.deleted)
+            }
+            None => {
+                // TODO(RT): Make sure that disk files starts with id 1 to represent in memory file
+                // with id 0
+                self.current_write_file.clear();
+                Ok(Some(0))
+            }
         }
-
-        if let Err(e) = self.load_next_read_file() {
-            self.current_read_file.clear();
-            self.current_read_file_id.take();
-            return Err(e);
-        }
-
-        Ok(false)
     }
 
     /// Loads head file to current inmemory read buffer. Deletes
@@ -142,12 +115,32 @@ impl Storage {
             return Ok(false);
         }
 
-        // Remove read file on completion
-        if let Some(id) = self.current_read_file_id.take() {
-            self.remove(id)?;
-        }
+        if let Some(persistence) = &mut self.persistence {
+            // Remove read file on completion
+            if let Some(id) = persistence.current_read_file_id.take() {
+                persistence.remove(id)?;
+            }
 
-        self.reload()
+            // Swap read buffer with write buffer to read data in inmemory write
+            // buffer when all the backlog disk files are done
+            if persistence.ids.is_empty() {
+                mem::swap(&mut self.current_read_file, &mut self.current_write_file);
+                // If read buffer is 0 after swapping, all the data is caught up
+                return if self.current_read_file.is_empty() { Ok(true) } else { Ok(false) };
+            }
+
+            if let Err(e) = persistence.load_next_read_file(&mut self.current_read_file) {
+                self.current_read_file.clear();
+                persistence.current_read_file_id.take();
+                return Err(e);
+            }
+
+            Ok(false)
+        } else {
+            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
+            // If read buffer is 0 after swapping, all the data is caught up
+            return if self.current_read_file.is_empty() { Ok(true) } else { Ok(false) };
+        }
     }
 }
 
@@ -256,16 +249,17 @@ impl Persistence {
         let file_name = format!("backup@{next_file_id}");
         let next_file_path = self.path.join(file_name);
         let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
+
         self.ids.push(next_file_id);
 
         let mut next = NextFile { path: next_file_path, file: next_file, deleted: None };
-
         let mut backlog_files_count = self.ids.len();
 
         // File being read is also to be considered
         if self.current_read_file_id.is_some() {
             backlog_files_count += 1
         }
+
         // Return next file details if backlog is within limits
         if backlog_files_count <= self.max_file_count {
             return Ok(next);
@@ -279,6 +273,7 @@ impl Persistence {
         };
 
         warn!("file limit reached. deleting backup@{}", id);
+
         next.deleted = Some(id);
         self.remove(id)?;
 
@@ -294,7 +289,12 @@ impl Persistence {
 
         // Load file into memory and store its id for deleting in the future
         let metadata = fs::metadata(&next_file_path)?;
-        self.prepare_current_read_buffer(metadata.len() as usize);
+
+        /// Initialize next read file with 0s
+        current_read_file.clear();
+        let init = vec![0u8; metadata.len() as usize];
+        current_read_file.put_slice(&init);
+
         file.read_exact(&mut current_read_file[..])?;
         self.current_read_file_id = Some(id);
 
