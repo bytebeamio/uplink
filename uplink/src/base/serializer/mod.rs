@@ -7,10 +7,10 @@ use std::time::Duration;
 use std::{collections::VecDeque, io};
 
 use bytes::Bytes;
-use disk::Storage;
 use flume::{Receiver, RecvError, Sender};
 use log::{debug, error, info, trace};
 use rumqttc::*;
+use storage::Storage;
 use thiserror::Error;
 use tokio::{select, time};
 
@@ -44,7 +44,7 @@ pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] io::Error),
     #[error("Disk error {0}")]
-    Disk(#[from] disk::Error),
+    Disk(#[from] storage::Error),
     #[error("Mqtt client error {0}")]
     Client(#[from] MqttError),
     #[error("Storage is disabled/missing")]
@@ -182,11 +182,8 @@ impl<C: MqttClient> Serializer<C> {
     ) -> Result<Serializer<C>, Error> {
         let storage = match &config.persistence {
             Some(persistence) => {
-                let storage = Storage::new(
-                    &persistence.path,
-                    persistence.max_file_size,
-                    persistence.max_file_count,
-                )?;
+                let mut storage = Storage::new(persistence.max_file_size);
+                storage.set_persistence(&persistence.path, persistence.max_file_count)?;
                 Some(storage)
             }
             None => None,
@@ -504,7 +501,10 @@ fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
 // Writes the provided publish packet to disk with [Storage], after setting its pkid to 1.
 // Updates serializer metrics with appropriate values on success, if asked to do so.
 // Returns size in memory, size in disk, number of files in disk,
-fn write_to_disk(mut publish: Publish, storage: &mut Storage) -> Result<Option<u64>, disk::Error> {
+fn write_to_disk(
+    mut publish: Publish,
+    storage: &mut Storage,
+) -> Result<Option<u64>, storage::Error> {
     publish.pkid = 1;
     if let Err(e) = publish.write(storage.writer()) {
         error!("Failed to fill disk buffer. Error = {:?}", e);

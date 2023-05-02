@@ -270,7 +270,7 @@ use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
 pub use collector::{simulator, tcpjson::TcpJson};
-pub use disk::Storage;
+pub use storage::Storage;
 
 pub struct Uplink {
     config: Arc<Config>,
