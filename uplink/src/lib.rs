@@ -387,14 +387,16 @@ impl Uplink {
 
         #[cfg(target_os = "linux")]
         if let Some(config) = &config.logging {
-            let logger = collector::journalctl::JournalCtl::new(config.clone(), bridge_tx.clone());
-            thread::spawn(move || logger.start());
+            let logger = collector::journalctl::JournalCtl::new(bridge_tx.clone());
+            let config = config.clone();
+            thread::spawn(move || logger.start(config));
         }
 
         #[cfg(target_os = "android")]
         if let Some(config) = &config.logging {
-            let logger = collector::logcat::Logcat::new(config.clone(), bridge_tx.clone());
-            thread::spawn(move || logger.start());
+            let logger = collector::logcat::Logcat::new(bridge_tx.clone());
+            let config = config.clone();
+            thread::spawn(move || logger.start(config));
         }
 
         if config.system_stats.enabled {

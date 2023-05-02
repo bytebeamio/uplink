@@ -97,7 +97,6 @@ impl LogEntry {
 }
 
 pub struct JournalCtl {
-    config: JournalCtlConfig,
     kill_switch: Arc<Mutex<bool>>,
     bridge: BridgeTx,
 }
@@ -110,20 +109,24 @@ impl Drop for JournalCtl {
 }
 
 impl JournalCtl {
-    pub fn new(config: JournalCtlConfig, bridge: BridgeTx) -> Self {
+    pub fn new(bridge: BridgeTx) -> Self {
         let kill_switch = Arc::new(Mutex::new(true));
 
-        Self { config, kill_switch, bridge }
+        Self { kill_switch, bridge }
     }
 
-    /// On an android system, starts a logcat instance and a journalctl instance for a linux system that
-    /// reports to the logs stream for a given device+project id, that logcat instance is killed when
-    /// this object is dropped. On any other system, it's a noop.
+    /// Starts a journalctl instance on a linux system which reports to the logs stream for a given device+project id,
+    /// that logcat instance is killed when this object is dropped. On any other system, it's a noop.
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(mut self) -> Result<(), Error> {
+    pub async fn start(mut self, config: JournalCtlConfig) -> Result<(), Error> {
+        self.spawn_logger(config).await;
+
         let log_rx = self
             .bridge
-            .register_action_route(ActionRoute { name: "journalctl_config".to_string(), timeout: 10 })
+            .register_action_route(ActionRoute {
+                name: "journalctl_config".to_string(),
+                timeout: 10,
+            })
             .await;
 
         loop {
@@ -131,26 +134,7 @@ impl JournalCtl {
             let mut config = serde_json::from_str::<JournalCtlConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
 
-            // Ensure any logger child process created earlier gets killed
-            self.kill_last();
-            // Use a new mutex kill_switch for future child process
-            self.kill_switch = Arc::new(Mutex::new(true));
-
-            // silence everything
-            let mut journalctl_args =
-                ["-o", "json", "-f", "-p", &self.config.min_level.to_string()]
-                    .map(String::from)
-                    .to_vec();
-            // enable logging for requested tags
-            for tag in &self.config.tags {
-                let tag_args = ["-t", tag].map(String::from).to_vec();
-                journalctl_args.extend(tag_args);
-            }
-
-            log::info!("journalctl args: {:?}", journalctl_args);
-            let mut journalctl = Command::new("journalctl");
-            journalctl.args(journalctl_args).stdout(Stdio::piped());
-            self.spawn_logger(journalctl);
+            self.spawn_logger(config).await;
 
             let response = ActionResponse::success(&action.action_id);
             self.bridge.send_action_response(response).await;
@@ -163,14 +147,32 @@ impl JournalCtl {
     }
 
     // Spawn a thread to run the logger command
-    fn spawn_logger(&mut self, mut logger: Command) {
+    async fn spawn_logger(&mut self, config: JournalCtlConfig) {
+        // silence everything
+        let mut journalctl_args =
+            ["-o", "json", "-f", "-p", &config.min_level.to_string()].map(String::from).to_vec();
+        // enable logging for requested tags
+        for tag in &config.tags {
+            let tag_args = ["-t", tag].map(String::from).to_vec();
+            journalctl_args.extend(tag_args);
+        }
+
+        log::info!("journalctl args: {:?}", journalctl_args);
+        let mut journalctl = Command::new("journalctl");
+        journalctl.args(journalctl_args).stdout(Stdio::piped());
+
+        // Ensure any logger child process created earlier gets killed
+        self.kill_last();
+        // Use a new mutex kill_switch for future child process
+        self.kill_switch = Arc::new(Mutex::new(true));
         let kill_switch = self.kill_switch.clone();
+
         let bridge = self.bridge.clone();
 
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_micros(1_000_000));
             let mut log_index = 1;
-            let mut logger = match logger.spawn() {
+            let mut logger = match journalctl.spawn() {
                 Ok(logger) => logger,
                 Err(e) => {
                     log::error!("failed to start logger: {}", e);

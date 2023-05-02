@@ -146,7 +146,6 @@ impl LogEntry {
 }
 
 pub struct Logcat {
-    config: LogcatConfig,
     kill_switch: Arc<Mutex<bool>>,
     bridge: BridgeTx,
 }
@@ -159,16 +158,18 @@ impl Drop for Logcat {
 }
 
 impl Logcat {
-    pub fn new(config: LogcatConfig, bridge: BridgeTx) -> Self {
+    pub fn new(bridge: BridgeTx) -> Self {
         let kill_switch = Arc::new(Mutex::new(true));
 
-        Self { config, kill_switch, bridge }
+        Self { kill_switch, bridge }
     }
 
     /// On an android system, starts a logcat instance that reports to the logs stream for a given device+project id,
     /// that logcat instance is killed when this object is dropped. On any other system, it's a noop.
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(mut self) -> Result<(), Error> {
+    pub async fn start(mut self, config: LogcatConfig) -> Result<(), Error> {
+        self.spawn_logger(config).await;
+
         let log_rx = self
             .bridge
             .register_action_route(ActionRoute { name: "logcat_config".to_string(), timeout: 10 })
@@ -179,31 +180,7 @@ impl Logcat {
             let mut config = serde_json::from_str::<LogcatConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
 
-            // Ensure any logger child process created earlier gets killed
-            self.kill_last();
-            // Use a new mutex kill_switch for future child process
-            self.kill_switch = Arc::new(Mutex::new(true));
-
-            let now = {
-                let timestamp = clock();
-                let millis = timestamp % 1000;
-                let seconds = timestamp / 1000;
-                format!("{seconds}.{millis:03}")
-            };
-            // silence everything
-            let mut logcat_args =
-                ["-v", "time", "-T", now.as_str(), "*:S"].map(String::from).to_vec();
-            // enable logging for requested tags
-            for tag in &self.config.tags {
-                let min_level = LogLevel::from_syslog_level(self.config.min_level)
-                    .expect("Couldn't figure out log level");
-                logcat_args.push(format!("{}:{}", tag, min_level.to_str()));
-            }
-
-            log::info!("logcat args: {:?}", logcat_args);
-            let mut logcat = Command::new("logcat");
-            logcat.args(logcat_args).stdout(Stdio::piped());
-            self.spawn_logger(logcat);
+            self.spawn_logger(config).await;
 
             let response = ActionResponse::success(&action.action_id);
             self.bridge.send_action_response(response).await;
@@ -216,14 +193,38 @@ impl Logcat {
     }
 
     // Spawn a thread to run the logger command
-    fn spawn_logger(&mut self, mut logger: Command) {
+    async fn spawn_logger(&mut self, config: LogcatConfig) {
+        let now = {
+            let timestamp = clock();
+            let millis = timestamp % 1000;
+            let seconds = timestamp / 1000;
+            format!("{seconds}.{millis:03}")
+        };
+        // silence everything
+        let mut logcat_args = ["-v", "time", "-T", now.as_str(), "*:S"].map(String::from).to_vec();
+        // enable logging for requested tags
+        for tag in &self.config.tags {
+            let min_level = LogLevel::from_syslog_level(self.config.min_level)
+                .expect("Couldn't figure out log level");
+            logcat_args.push(format!("{}:{}", tag, min_level.to_str()));
+        }
+
+        log::info!("logcat args: {:?}", logcat_args);
+        let mut logcat = Command::new("logcat");
+        logcat.args(logcat_args).stdout(Stdio::piped());
+
+        // Ensure any logger child process created earlier gets killed
+        self.kill_last();
+        // Use a new mutex kill_switch for future child process
+        self.kill_switch = Arc::new(Mutex::new(true));
         let kill_switch = self.kill_switch.clone();
+
         let bridge = self.bridge.clone();
 
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_micros(1_000_000));
             let mut log_index = 1;
-            let mut logger = match logger.spawn() {
+            let mut logger = match logcat.spawn() {
                 Ok(logger) => logger,
                 Err(e) => {
                     log::error!("failed to start logger: {}", e);
