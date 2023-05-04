@@ -326,6 +326,7 @@ impl Uplink {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .thread_name("bridge")
                 .enable_time()
+                .enable_io()
                 .build()
                 .unwrap();
 
