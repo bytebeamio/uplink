@@ -29,6 +29,8 @@ pub enum Error {
     Recv(#[from] RecvError),
     #[error("Io error {0}")]
     Io(#[from] std::io::Error),
+    #[error("Serde error {0}")]
+    Serde(#[from] serde_json::Error),
     #[error("Action receiver busy or down")]
     UnresponsiveReceiver,
     #[error("No route for action {0}")]
@@ -165,7 +167,7 @@ impl Bridge {
             Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
                 .await;
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
-        self.load_saved_action();
+        self.load_saved_action()?;
 
         let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT])?;
         let shutdown_tx = self.shutdown_tx.clone();
@@ -174,7 +176,7 @@ impl Bridge {
             // Handle a shutdown signal from POSIX
             while let Some(signal) = signals.next().await {
                 match signal {
-                    SIGTERM | SIGINT | SIGQUIT => shutdown_tx.send_async(()).await.unwrap(),
+                    SIGTERM | SIGINT | SIGQUIT => shutdown_tx.try_send(()).unwrap(),
                     _ => unreachable!(),
                 }
             }
@@ -266,28 +268,33 @@ impl Bridge {
             Some(c) => c,
             None => return Ok(()),
         };
-        let mut path = PathBuf::from(&self.config.persistence.as_ref().unwrap().path);
-        fs::create_dir_all(&path).unwrap();
+        let mut path = match &self.config.persistence {
+            Some(p) => PathBuf::from(&p.path),
+            _ => return Ok(()),
+        };
+        fs::create_dir_all(&path)?;
         path.push("current_action");
         info!("Storing current action in persistence; path: {}", path.display());
-        current_action.write_to_disk(path);
+        current_action.write_to_disk(path)?;
 
         Ok(())
     }
 
     /// Load a saved action from persistence, performed on startup
-    fn load_saved_action(&mut self) {
+    fn load_saved_action(&mut self) -> Result<(), Error> {
         let mut path = match self.config.persistence.as_ref() {
             Some(p) => PathBuf::from(&p.path),
-            None => return,
+            None => return Ok(()),
         };
         path.push("current_action");
 
         if path.is_file() {
-            let current_action = CurrentAction::read_from_disk(path);
+            let current_action = CurrentAction::read_from_disk(path)?;
             info!("Loading saved action from persistence; action_id: {}", current_action.id);
             self.current_action = Some(current_action)
         }
+
+        Ok(())
     }
 
     /// Handle received actions
@@ -393,23 +400,25 @@ impl CurrentAction {
         }
     }
 
-    pub fn write_to_disk(self, path: PathBuf) {
+    pub fn write_to_disk(self, path: PathBuf) -> Result<(), Error> {
         let timeout = self.timeout.as_ref().deadline() - Instant::now();
-        let json = serde_json::to_string(&SaveAction { id: self.id, action: self.action, timeout })
-            .unwrap();
+        let save_action = SaveAction { id: self.id, action: self.action, timeout };
+        let json = serde_json::to_string(&save_action)?;
+        fs::write(path, json)?;
 
-        fs::write(path, json).unwrap();
+        Ok(())
     }
 
-    pub fn read_from_disk(path: PathBuf) -> Self {
-        let json: SaveAction = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        fs::remove_file(path).unwrap();
+    pub fn read_from_disk(path: PathBuf) -> Result<Self, Error> {
+        let read = fs::read(&path)?;
+        let json: SaveAction = serde_json::from_slice(&read)?;
+        fs::remove_file(path)?;
 
-        CurrentAction {
+        Ok(CurrentAction {
             id: json.id,
             action: json.action,
             timeout: Box::pin(time::sleep(json.timeout)),
-        }
+        })
     }
 }
 
