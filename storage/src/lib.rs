@@ -126,7 +126,7 @@ impl Storage {
             if persistence.ids.is_empty() {
                 mem::swap(&mut self.current_read_file, &mut self.current_write_file);
                 // If read buffer is 0 after swapping, all the data is caught up
-                return if self.current_read_file.is_empty() { Ok(true) } else { Ok(false) };
+                return Ok(self.current_read_file.is_empty());
             }
 
             if let Err(e) = persistence.load_next_read_file(&mut self.current_read_file) {
@@ -139,7 +139,7 @@ impl Storage {
         } else {
             mem::swap(&mut self.current_read_file, &mut self.current_write_file);
             // If read buffer is 0 after swapping, all the data is caught up
-            return if self.current_read_file.is_empty() { Ok(true) } else { Ok(false) };
+            Ok(self.current_read_file.is_empty())
         }
     }
 }
