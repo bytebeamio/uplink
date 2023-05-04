@@ -1,7 +1,9 @@
 pub mod downloader;
 pub mod installer;
-#[cfg(any(target_os = "linux", target_os = "android"))]
-pub mod logging;
+#[cfg(target_os = "linux")]
+pub mod journalctl;
+#[cfg(target_os = "android")]
+pub mod logcat;
 pub mod process;
 pub mod simulator;
 pub mod systemstats;
