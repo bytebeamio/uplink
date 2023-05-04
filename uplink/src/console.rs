@@ -34,7 +34,7 @@ async fn reload_loglevel(State(state): State<StateHandle>, filter: String) -> im
 
 async fn abrupt_shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Shutting down uplink");
-    if state.bridge_handle.shutdown_handle.send_async(()).await.is_err() {
+    if state.bridge_handle.shutdown_handle.try_send(()).is_err() {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
 
