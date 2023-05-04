@@ -156,6 +156,7 @@ pub struct Config {
     #[serde(default)]
     pub console: ConsoleConfig,
     pub authentication: Option<Authentication>,
+    #[serde(default)]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
     #[serde(default)]
