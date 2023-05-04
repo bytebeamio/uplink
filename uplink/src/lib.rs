@@ -207,12 +207,11 @@ pub mod config {
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
         if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
-            let stream_config =
-                config.streams.entry("logs".to_string()).or_insert_with(|| {
-                    let mut topic = config.topic_template.clone();
-                    replace_topic_placeholders(&mut topic, tenant_id, device_id);
-                    topic = topic.replace("{stream_name}", "logs");
-                    StreamConfig { topic, buf_size: 32, flush_period: DEFAULT_TIMEOUT }
+            let stream_config = config.streams.entry("logs".to_string()).or_insert_with(|| {
+                let mut topic = config.topic_template.clone();
+                replace_topic_placeholders(&mut topic, tenant_id, device_id);
+                topic = topic.replace("{stream_name}", "logs");
+                StreamConfig { topic, buf_size: 32, flush_period: DEFAULT_TIMEOUT }
             });
             stream_config.buf_size = buf_size;
         }
