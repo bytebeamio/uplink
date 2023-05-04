@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::collector::utils::clock;
+use crate::base::clock;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct MqttMetrics {

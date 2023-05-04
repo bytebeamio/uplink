@@ -1,3 +1,4 @@
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,10 @@ fn default_file_size() -> usize {
 
 fn default_file_count() -> usize {
     3
+}
+
+pub fn clock() -> u128 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -116,7 +121,7 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct TracingConfig {
+pub struct ConsoleConfig {
     pub enabled: bool,
     pub port: u16,
 }
@@ -149,7 +154,7 @@ pub struct Config {
     pub broker: String,
     pub port: u16,
     #[serde(default)]
-    pub apis: TracingConfig,
+    pub console: ConsoleConfig,
     pub authentication: Option<Authentication>,
     #[serde(default)]
     pub tcpapps: HashMap<String, AppConfig>,

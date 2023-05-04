@@ -53,7 +53,7 @@ use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellSession;
-use flume::{bounded, Receiver, Sender};
+use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
 pub mod base;
@@ -201,13 +201,16 @@ pub mod config {
             }
         }
 
-        let stream_config =
-            config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
-                topic: format!("/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"),
-                buf_size: 32,
-                flush_period: DEFAULT_TIMEOUT,
-            });
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+            let stream_config =
+                config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
+                    topic: format!(
+                        "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+                    ),
+                    buf_size: 32,
+                    flush_period: DEFAULT_TIMEOUT,
+                });
             stream_config.buf_size = buf_size;
         }
 
@@ -281,6 +284,8 @@ pub struct Uplink {
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
     serializer_metrics_rx: Receiver<SerializerMetrics>,
+    shutdown_tx: Sender<()>,
+    shutdown_rx: Receiver<()>,
 }
 
 impl Uplink {
@@ -289,6 +294,7 @@ impl Uplink {
         let (data_tx, data_rx) = bounded(10);
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
+        let (shutdown_tx, shutdown_rx) = bounded(1);
 
         let action_status_topic = &config.action_status.topic;
         let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
@@ -303,6 +309,8 @@ impl Uplink {
             stream_metrics_rx,
             serializer_metrics_tx,
             serializer_metrics_rx,
+            shutdown_tx,
+            shutdown_rx,
         })
     }
 
@@ -314,6 +322,7 @@ impl Uplink {
             self.stream_metrics_tx(),
             self.action_rx.clone(),
             self.action_status(),
+            self.shutdown_tx.clone(),
         );
 
         let bridge_tx = bridge.tx();
@@ -324,6 +333,7 @@ impl Uplink {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .thread_name("bridge")
                 .enable_time()
+                .enable_io()
                 .build()
                 .unwrap();
 
@@ -444,5 +454,9 @@ impl Uplink {
 
     pub fn action_status(&self) -> Stream<ActionResponse> {
         self.action_status.clone()
+    }
+
+    pub async fn resolve_on_shutdown(&self) -> Result<(), RecvError> {
+        self.shutdown_rx.recv_async().await
     }
 }

@@ -36,6 +36,8 @@ pretty-bytes = "0.2.2"
 regex = "1.7.1"
 flate2 = "1"
 tar = "0.4"
+signal-hook = "0.3"
+signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 
 [build-dependencies]
 vergen = { version = "7", features = ["git", "build", "time"] }
