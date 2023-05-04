@@ -13,7 +13,7 @@ struct StateHandle {
 #[tokio::main]
 pub async fn start(port: u16, reload_handle: ReloadHandle, bridge_handle: BridgeTx) {
     let address = format!("0.0.0.0:{port}");
-    info!("Starting tracing server: {address}");
+    info!("Starting uplink console server: {address}");
     let state = StateHandle { reload_handle, bridge_handle };
     let app = Router::new()
         .route("/logs", post(reload_loglevel))

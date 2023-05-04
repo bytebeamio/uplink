@@ -1,4 +1,4 @@
-mod apis;
+mod console;
 
 use std::sync::Arc;
 use std::thread;
@@ -101,8 +101,8 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     if config.system_stats.enabled {
         println!("    processes: {:?}", config.system_stats.process_names);
     }
-    if config.apis.enabled {
-        println!("    tracing: http://localhost:{}", config.apis.port);
+    if config.console.enabled {
+        println!("    console: http://localhost:{}", config.console.port);
     }
     println!("\n");
 }
@@ -131,10 +131,10 @@ fn main() -> Result<(), Error> {
         });
     }
 
-    if config.apis.enabled {
-        let port = config.apis.port;
+    if config.console.enabled {
+        let port = config.console.port;
         let bridge_handle = bridge.clone();
-        thread::spawn(move || apis::start(port, reload_handle, bridge_handle));
+        thread::spawn(move || console::start(port, reload_handle, bridge_handle));
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()
