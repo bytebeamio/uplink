@@ -95,9 +95,7 @@ pub mod config {
         pub modules: Vec<String>,
     }
 
-    const DEFAULT_CONFIG: &str = r#"
-    action_redirections = { "update_firmware" = "install_firmware" }
-    
+    const DEFAULT_CONFIG: &str = r#"    
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -109,7 +107,7 @@ pub mod config {
 
     # Downloader config
     [downloader]
-    actions = [{ name = "update_firmware", timeout = 60 }, { name = "send_file", timeout = 60 }]
+    actions = []
     path = "/var/tmp/ota-file"
 
     [stream_metrics]
@@ -136,18 +134,14 @@ pub mod config {
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     buf_size = 1
 
+    [streams.logs]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+    buf_size = 32
+
     [system_stats]
     enabled = true
     process_names = ["uplink"]
     update_period = 30
-
-    [tcpapps.1]
-    port = 5555
-
-    [ota_installer]
-    path = "/var/tmp/ota"
-    actions = []
-    uplink_port = 5555
 "#;
 
     /// Reads config file to generate config struct and replaces places holders
@@ -205,6 +199,19 @@ pub mod config {
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
             }
+        }
+
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+            let stream_config =
+                config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
+                    topic: format!(
+                        "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+                    ),
+                    buf_size: 32,
+                    flush_period: DEFAULT_TIMEOUT,
+                });
+            stream_config.buf_size = buf_size;
         }
 
         let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/actions";
@@ -383,16 +390,14 @@ impl Uplink {
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
 
-        let ota_installer = OTAInstaller::new(config.clone(), bridge_tx.clone());
-        thread::spawn(move || ota_installer.start());
+        if let Some(config) = &config.ota_installer {
+            let ota_installer = OTAInstaller::new(config.clone(), bridge_tx.clone());
+            thread::spawn(move || ota_installer.start());
+        }
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
         {
-            let logger = collector::logging::LoggerInstance::new(
-                config.clone(),
-                self.data_tx.clone(),
-                bridge_tx.clone(),
-            );
+            let logger = collector::logging::LoggerInstance::new(config.clone(), bridge_tx.clone());
             thread::spawn(move || logger.start());
         }
 

@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::collector::utils::{self, clock};
+use crate::base::clock;
 
 /// Metrics information relating to the operation of the `Serializer`, all values are reset on metrics flush
 #[derive(Debug, Serialize, Clone)]
@@ -52,7 +52,7 @@ impl SerializerMetrics {
     pub fn add_batch(&mut self) {
         self.batches += 1;
         if self.batches == 1 {
-            self.timestamp = utils::clock();
+            self.timestamp = clock();
         }
     }
 

@@ -1,9 +1,9 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::{Payload, Point};
+
+use super::clock;
 
 /// On the Bytebeam platform, an Action is how beamd and through it,
 /// the end-user, can communicate the tasks they want to perform on
@@ -45,10 +45,7 @@ pub struct ActionResponse {
 
 impl ActionResponse {
     fn new(id: &str, state: &str, progress: u8, errors: Vec<String>) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::from_secs(0))
-            .as_millis() as u64;
+        let timestamp = clock() as u64;
 
         ActionResponse {
             action_id: id.to_owned(),

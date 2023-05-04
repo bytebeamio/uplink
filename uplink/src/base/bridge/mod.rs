@@ -12,13 +12,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
 
+mod delaymap;
 mod metrics;
 pub(crate) mod stream;
+mod streams;
 
 use crate::base::ActionRoute;
-use crate::{collector::utils::Streams, Action, ActionResponse, Config};
+use crate::{Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 use stream::Stream;
+use streams::Streams;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -511,7 +514,7 @@ mod tests {
         let (package_tx, package_rx) = bounded(10);
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
-        let action_status = Stream::dynamic_with_size("", "", "", 1, package_tx.clone());
+        let action_status = Stream::dynamic("", "", "", 1, package_tx.clone());
         let (shutdown_handle, _) = bounded(1);
 
         let mut bridge =

@@ -7,9 +7,10 @@ members = [
     "disk",
 ]
 exclude = [
+    "tools/deserialize-backup",
+    "tools/simulator",
     "tools/tunshell",
     "tools/utils",
-    "tools/simulator",
 ]
 
 [profile.dev]
