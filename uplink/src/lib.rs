@@ -388,10 +388,18 @@ impl Uplink {
             thread::spawn(move || ota_installer.start());
         }
 
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        {
-            let logger = collector::logging::LoggerInstance::new(config.clone(), bridge_tx.clone());
-            thread::spawn(move || logger.start());
+        #[cfg(target_os = "linux")]
+        if let Some(config) = &config.logging {
+            let logger = collector::journalctl::JournalCtl::new(bridge_tx.clone());
+            let config = config.clone();
+            thread::spawn(move || logger.start(config));
+        }
+
+        #[cfg(target_os = "android")]
+        if let Some(config) = &config.logging {
+            let logger = collector::logcat::Logcat::new(bridge_tx.clone());
+            let config = config.clone();
+            thread::spawn(move || logger.start(config));
         }
 
         if config.system_stats.enabled {
