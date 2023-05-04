@@ -123,7 +123,7 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct TracingConfig {
+pub struct ConsoleConfig {
     pub enabled: bool,
     pub port: u16,
 }
@@ -156,7 +156,7 @@ pub struct Config {
     pub broker: String,
     pub port: u16,
     #[serde(default)]
-    pub apis: TracingConfig,
+    pub console: ConsoleConfig,
     pub authentication: Option<Authentication>,
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,

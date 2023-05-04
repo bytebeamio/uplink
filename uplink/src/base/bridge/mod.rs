@@ -2,9 +2,14 @@ use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use signal_hook::consts::signal::{SIGINT, SIGQUIT, SIGTERM};
+use signal_hook_tokio::Signals;
 use tokio::select;
-use tokio::time::{self, interval, Sleep};
+use tokio::time::{self, interval, Instant, Sleep};
+use tokio_stream::StreamExt;
 
+use std::fs;
+use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
 
 mod delaymap;
@@ -22,6 +27,10 @@ use streams::Streams;
 pub enum Error {
     #[error("Receiver error {0}")]
     Recv(#[from] RecvError),
+    #[error("Io error {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Serde error {0}")]
+    Serde(#[from] serde_json::Error),
     #[error("Action receiver busy or down")]
     UnresponsiveReceiver,
     #[error("No route for action {0}")]
@@ -109,6 +118,9 @@ pub struct Bridge {
     action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
+    shutdown_rx: Receiver<()>,
+    shutdown_tx: Sender<()>,
+    shutdown_handle: Sender<()>,
 }
 
 impl Bridge {
@@ -118,9 +130,11 @@ impl Bridge {
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
+        shutdown_handle: Sender<()>,
     ) -> Bridge {
         let (bridge_tx, bridge_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
+        let (shutdown_tx, shutdown_rx) = bounded(1);
 
         Bridge {
             action_status,
@@ -133,11 +147,14 @@ impl Bridge {
             action_routes: HashMap::with_capacity(10),
             action_redirections,
             current_action: None,
+            shutdown_handle,
+            shutdown_rx,
+            shutdown_tx,
         }
     }
 
     pub fn tx(&mut self) -> BridgeTx {
-        BridgeTx { events_tx: self.bridge_tx.clone() }
+        BridgeTx { events_tx: self.bridge_tx.clone(), shutdown_handle: self.shutdown_tx.clone() }
     }
 
     fn clear_current_action(&mut self) {
@@ -150,6 +167,20 @@ impl Bridge {
             Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
                 .await;
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
+        self.load_saved_action()?;
+
+        let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT])?;
+        let shutdown_tx = self.shutdown_tx.clone();
+
+        tokio::spawn(async move {
+            // Handle a shutdown signal from POSIX
+            while let Some(signal) = signals.next().await {
+                match signal {
+                    SIGTERM | SIGINT | SIGQUIT => shutdown_tx.try_send(()).unwrap(),
+                    _ => unreachable!(),
+                }
+            }
+        });
 
         loop {
             select! {
@@ -221,8 +252,49 @@ impl Bridge {
                         debug!("Failed to flush stream metrics. Error = {}", e);
                     }
                 }
+                // Handle a shutdown signal
+                _ = self.shutdown_rx.recv_async() => {
+                    self.save_current_action()?;
+
+                    self.shutdown_handle.send(()).unwrap();
+                }
             }
         }
+    }
+
+    /// Save current action information in persistence
+    fn save_current_action(&mut self) -> Result<(), Error> {
+        let current_action = match self.current_action.take() {
+            Some(c) => c,
+            None => return Ok(()),
+        };
+        let mut path = match &self.config.persistence {
+            Some(p) => PathBuf::from(&p.path),
+            _ => return Ok(()),
+        };
+        fs::create_dir_all(&path)?;
+        path.push("current_action");
+        info!("Storing current action in persistence; path: {}", path.display());
+        current_action.write_to_disk(path)?;
+
+        Ok(())
+    }
+
+    /// Load a saved action from persistence, performed on startup
+    fn load_saved_action(&mut self) -> Result<(), Error> {
+        let mut path = match self.config.persistence.as_ref() {
+            Some(p) => PathBuf::from(&p.path),
+            None => return Ok(()),
+        };
+        path.push("current_action");
+
+        if path.is_file() {
+            let current_action = CurrentAction::read_from_disk(path)?;
+            info!("Loading saved action from persistence; action_id: {}", current_action.id);
+            self.current_action = Some(current_action)
+        }
+
+        Ok(())
     }
 
     /// Handle received actions
@@ -306,6 +378,13 @@ impl Bridge {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct SaveAction {
+    pub id: String,
+    pub action: Action,
+    pub timeout: Duration,
+}
+
 struct CurrentAction {
     pub id: String,
     pub action: Action,
@@ -319,6 +398,27 @@ impl CurrentAction {
             action,
             timeout: Box::pin(time::sleep(duration)),
         }
+    }
+
+    pub fn write_to_disk(self, path: PathBuf) -> Result<(), Error> {
+        let timeout = self.timeout.as_ref().deadline() - Instant::now();
+        let save_action = SaveAction { id: self.id, action: self.action, timeout };
+        let json = serde_json::to_string(&save_action)?;
+        fs::write(path, json)?;
+
+        Ok(())
+    }
+
+    pub fn read_from_disk(path: PathBuf) -> Result<Self, Error> {
+        let read = fs::read(&path)?;
+        let json: SaveAction = serde_json::from_slice(&read)?;
+        fs::remove_file(path)?;
+
+        Ok(CurrentAction {
+            id: json.id,
+            action: json.action,
+            timeout: Box::pin(time::sleep(json.timeout)),
+        })
     }
 }
 
@@ -341,6 +441,7 @@ impl ActionRouter {
 pub struct BridgeTx {
     // Handle for apps to send events to bridge
     pub(crate) events_tx: Sender<Event>,
+    pub shutdown_handle: Sender<()>,
 }
 
 impl BridgeTx {
@@ -423,8 +524,10 @@ mod tests {
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
         let action_status = Stream::dynamic("", "", "", 1, package_tx.clone());
+        let (shutdown_handle, _) = bounded(1);
 
-        let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status);
+        let mut bridge =
+            Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status, shutdown_handle);
         let bridge_tx = bridge.tx();
 
         std::thread::spawn(move || {
