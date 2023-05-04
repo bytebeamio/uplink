@@ -199,16 +199,20 @@ impl<C: MqttClient> Serializer<C> {
     /// Write all data received, from here-on, to disk only.
     async fn crash(&mut self, publish: Publish) -> Result<Status, Error> {
         // Write failed publish to disk first, metrics don't matter
-        if let Err(e) = write_to_disk(publish, &mut self.storage) {
-            error!("Crash loop: write error = {:?}", e);
+        match write_to_disk(publish, &mut self.storage) {
+            Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
+            Ok(_) => {}
+            Err(e) => error!("Crash loop: write error = {:?}", e),
         }
 
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
             let publish = construct_publish(data)?;
-            if let Err(e) = write_to_disk(publish, &mut self.storage) {
-                error!("Crash loop: write error = {:?}", e);
+            match write_to_disk(publish, &mut self.storage) {
+                Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
+                Ok(_) => {}
+                Err(e) => error!("Crash loop: write error = {:?}", e),
             }
         }
     }
@@ -233,9 +237,11 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
                     let publish = construct_publish(data)?;
                     match write_to_disk(publish, &mut self.storage) {
-                        Ok(deleted) => if deleted.is_some() {
+                        Ok(Some(deleted)) => {
+                            debug!("Lost segment = {deleted}");
                             self.metrics.increment_lost_segments();
                         }
+                        Ok(_) => {},
                         Err(e) => {
                             error!("Storage write error = {:?}", e);
                             self.metrics.increment_errors();
@@ -323,9 +329,11 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
                     let publish = construct_publish(data)?;
                     match write_to_disk(publish, &mut self.storage) {
-                        Ok(deleted) => if deleted.is_some() {
+                        Ok(Some(deleted)) => {
+                            debug!("Lost segment = {deleted}");
                             self.metrics.increment_lost_segments();
                         }
+                        Ok(_) => {},
                         Err(e) => {
                             error!("Storage write error = {:?}", e);
                             self.metrics.increment_errors();
