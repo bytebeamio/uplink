@@ -202,14 +202,17 @@ pub mod config {
             }
         }
 
-        let stream_config =
-            config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
-                topic: format!("/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"),
-                buf_size: 32,
-                flush_period: DEFAULT_TIMEOUT,
-                persistance: true,
-            });
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+            let stream_config =
+                config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
+                    topic: format!(
+                        "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+                    ),
+                    buf_size: 32,
+                    flush_period: DEFAULT_TIMEOUT,
+                    persistance: true,
+                });
             stream_config.buf_size = buf_size;
         }
 
@@ -388,10 +391,18 @@ impl Uplink {
             thread::spawn(move || ota_installer.start());
         }
 
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        {
-            let logger = collector::logging::LoggerInstance::new(config.clone(), bridge_tx.clone());
-            thread::spawn(move || logger.start());
+        #[cfg(target_os = "linux")]
+        if let Some(config) = &config.logging {
+            let logger = collector::journalctl::JournalCtl::new(bridge_tx.clone());
+            let config = config.clone();
+            thread::spawn(move || logger.start(config));
+        }
+
+        #[cfg(target_os = "android")]
+        if let Some(config) = &config.logging {
+            let logger = collector::logcat::Logcat::new(bridge_tx.clone());
+            let config = config.clone();
+            thread::spawn(move || logger.start(config));
         }
 
         if config.system_stats.enabled {
