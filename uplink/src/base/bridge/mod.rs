@@ -302,7 +302,11 @@ impl Bridge {
             error!("Failed to send status. Error = {:?}", e);
         }
 
-        self.clear_current_action();
+        // Clear current action only if the error being forwarded was triggered by it
+        match self.current_action.as_ref() {
+            Some(c) if c.id == action.action_id => self.clear_current_action(),
+            _ => {}
+        }
     }
 }
 
