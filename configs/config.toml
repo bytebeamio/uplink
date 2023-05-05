@@ -79,6 +79,9 @@ max_file_count = 3
 #   and WILL be flushed by collector. Defaults to 60s in case not configured.
 # - persistance(optional): a boolean value that is used to configure if a stream
 #   should be persisted to disk in case of network outage. Defaults to true.
+# - compression(optional): an enum values to determine what compression the serializer
+#   should perform on the data transiting through the stream. Currently supported
+#   compression schemes are Lz4 and Disabled. Defaults to Disabled.
 #
 # In the following config for the device_shadow stream we set buf_size to 1 and mark
 # it as non-persistent. streams are internally constructed as a map of Name -> Config
@@ -86,6 +89,11 @@ max_file_count = 3
 topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
 buf_size = 1
 persistance = false
+
+[streams.imu]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/imu/jsonarray"
+buf_size = 100
+compression = "Lz4"
 
 # Built-in streams: action status is a special case of stream and should be configured separately,
 # outside of the streams map. The action_status stream is used to push progress of Actions in

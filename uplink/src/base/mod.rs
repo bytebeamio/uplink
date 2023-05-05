@@ -37,6 +37,13 @@ pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default)]
+pub enum Compression {
+    #[default]
+    Disabled,
+    Lz4,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamConfig {
     pub topic: String,
@@ -47,6 +54,8 @@ pub struct StreamConfig {
     pub flush_period: u64,
     #[serde(default = "default_as_true")]
     pub persistance: bool,
+    #[serde(default)]
+    pub compression: Compression,
 }
 
 #[derive(Debug, Clone, Deserialize)]
