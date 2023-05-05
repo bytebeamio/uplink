@@ -244,7 +244,7 @@ impl Persistence {
     /// Opens file to flush current inmemory write buffer to disk.
     /// Also handles retention of previous files on disk
     fn open_next_write_file(&mut self) -> Result<NextFile, Error> {
-        let next_file_id = self.backlog_files.last().map_or(0, |id| id + 1);
+        let next_file_id = self.backlog_files.last().map_or(1, |id| id + 1);
         let file_name = format!("backup@{next_file_id}");
         let next_file_path = self.path.join(file_name);
         let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
@@ -371,7 +371,7 @@ mod test {
 
         // other messages on disk
         let files = get_file_ids(&backup.path()).unwrap();
-        assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(files, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 
     #[test]
@@ -384,14 +384,14 @@ mod test {
         write_n_publishes(&mut storage, 110);
 
         let files = get_file_ids(&backup.path()).unwrap();
-        assert_eq!(files, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        assert_eq!(files, vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 
         // 11 files created. 10 on disk
         write_n_publishes(&mut storage, 10);
 
         assert_eq!(storage.writer().len(), 0);
         let files = get_file_ids(&backup.path()).unwrap();
-        assert_eq!(files, vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+        assert_eq!(files, vec![3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     }
 
     #[test]
@@ -443,7 +443,7 @@ mod test {
         assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
         // Successfully read 10 files with files still in storage after 10 reads
-        for i in 0..10 {
+        for i in 1..=10 {
             read_n_publishes(&mut storage, 10);
             let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
             assert_eq!(file_id, i);
