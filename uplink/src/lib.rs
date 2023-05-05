@@ -48,6 +48,7 @@ use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
+use base::Compression;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
@@ -60,8 +61,8 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
+    use crate::base::{Compression, StreamConfig, DEFAULT_TIMEOUT};
     pub use crate::base::{Config, Persistence, Stats};
-    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     use config::{Environment, File, FileFormat};
     use std::fs;
     use structopt::StructOpt;
@@ -196,20 +197,23 @@ pub mod config {
                     ),
                     buf_size: config.system_stats.stream_size.unwrap_or(100),
                     flush_period: DEFAULT_TIMEOUT,
+                    compression: Compression::Disabled,
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
             }
         }
 
-        let stream_config =
-            config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
-                topic: format!("/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"),
-                buf_size: 32,
-                flush_period: DEFAULT_TIMEOUT,
-            });
-
         #[cfg(any(target_os = "linux", target_os = "android"))]
         if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+            let stream_config =
+                config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
+                    topic: format!(
+                        "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+                    ),
+                    buf_size: 32,
+                    flush_period: DEFAULT_TIMEOUT,
+                    compression: Compression::Disabled,
+                });
             stream_config.buf_size = buf_size;
         }
 
@@ -293,7 +297,13 @@ impl Uplink {
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
 
         let action_status_topic = &config.action_status.topic;
-        let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
+        let action_status = Stream::new(
+            "action_status",
+            action_status_topic,
+            1,
+            data_tx.clone(),
+            Compression::Disabled,
+        );
         Ok(Uplink {
             config,
             action_rx,
@@ -387,10 +397,18 @@ impl Uplink {
             thread::spawn(move || ota_installer.start());
         }
 
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        {
-            let logger = collector::logging::LoggerInstance::new(config.clone(), bridge_tx.clone());
-            thread::spawn(move || logger.start());
+        #[cfg(target_os = "linux")]
+        if let Some(config) = &config.logging {
+            let logger = collector::journalctl::JournalCtl::new(bridge_tx.clone());
+            let config = config.clone();
+            thread::spawn(move || logger.start(config));
+        }
+
+        #[cfg(target_os = "android")]
+        if let Some(config) = &config.logging {
+            let logger = collector::logcat::Logcat::new(bridge_tx.clone());
+            let config = config.clone();
+            thread::spawn(move || logger.start(config));
         }
 
         if config.system_stats.enabled {

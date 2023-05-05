@@ -3,8 +3,10 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
-use crate::collector::logging::LoggerConfig;
+#[cfg(any(target_os = "linux"))]
+use crate::collector::journalctl::JournalCtlConfig;
+#[cfg(any(target_os = "android"))]
+use crate::collector::logcat::LogcatConfig;
 
 pub mod actions;
 pub mod bridge;
@@ -31,6 +33,13 @@ pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default)]
+pub enum Compression {
+    #[default]
+    Disabled,
+    Lz4,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamConfig {
     pub topic: String,
@@ -39,6 +48,8 @@ pub struct StreamConfig {
     /// Duration(in seconds) that bridge collector waits from
     /// receiving first element, before the stream gets flushed.
     pub flush_period: u64,
+    #[serde(default)]
+    pub compression: Compression,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -189,6 +200,8 @@ pub struct Config {
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    pub logging: Option<LoggerConfig>,
+    #[cfg(any(target_os = "linux"))]
+    pub logging: Option<JournalCtlConfig>,
+    #[cfg(any(target_os = "android"))]
+    pub logging: Option<LogcatConfig>,
 }
