@@ -156,8 +156,8 @@ pub mod config {
 
         let mut config: Config = config.try_deserialize()?;
 
-        if let Some(persistence) = &config.persistence {
-            fs::create_dir_all(&persistence.path)?;
+        if let Some(disk) = &config.persistence.disk {
+            fs::create_dir_all(&disk.path)?;
         }
 
         // replace placeholders with device/tenant ID
@@ -270,7 +270,7 @@ use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
 pub use collector::{simulator, tcpjson::TcpJson};
-pub use disk::Storage;
+pub use storage::Storage;
 
 pub struct Uplink {
     config: Arc<Config>,
