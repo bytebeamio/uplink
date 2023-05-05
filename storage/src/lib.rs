@@ -191,8 +191,8 @@ struct Persistence {
     backlog_files: Vec<u64>,
     /// id of file being read, delete it on read completion
     current_read_file_id: Option<u64>,
-    /// Deleted file id
-    deleted: Option<u64>,
+    // /// Deleted file id
+    // deleted: Option<u64>,
 }
 
 impl Persistence {
@@ -206,7 +206,7 @@ impl Persistence {
             max_file_count,
             backlog_files,
             current_read_file_id: None,
-            deleted: None,
+            // deleted: None,
         })
     }
 
