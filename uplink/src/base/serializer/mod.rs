@@ -1,20 +1,22 @@
 mod metrics;
 
-pub use metrics::SerializerMetrics;
-
+use std::collections::VecDeque;
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::Duration;
-use std::{collections::VecDeque, io};
 
 use bytes::Bytes;
 use disk::Storage;
 use flume::{Receiver, RecvError, Sender};
 use log::{debug, error, info, trace};
+use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
 use thiserror::Error;
 use tokio::{select, time};
 
+use crate::base::Compression;
 use crate::{Config, Package};
+pub use metrics::SerializerMetrics;
 
 const METRICS_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -49,6 +51,8 @@ pub enum Error {
     Client(#[from] MqttError),
     #[error("Storage is disabled/missing")]
     MissingPersistence,
+    #[error("LZ4 compression error: {0}")]
+    Lz4(#[from] lz4_flex::frame::Error),
 }
 
 #[derive(Debug, PartialEq)]
@@ -428,7 +432,6 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-
                     let publish = construct_publish(data)?;
                     let payload_size = publish.payload.len();
                     debug!("publishing on {} with size = {}", publish.topic, payload_size);
@@ -488,6 +491,15 @@ async fn send_publish<C: MqttClient>(
     Ok(client)
 }
 
+fn lz4_compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
+    let mut compressor = FrameEncoder::new(vec![]);
+    compressor.write_all(payload)?;
+    *payload = compressor.finish()?;
+    topic.push_str("/lz4");
+
+    Ok(())
+}
+
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
 fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
     let stream = data.stream().as_ref().to_owned();
@@ -495,10 +507,14 @@ fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
     let batch_latency = data.latency();
     trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
 
-    let topic = data.topic();
-    let payload = data.serialize()?;
+    let mut topic = data.topic().to_string();
+    let mut payload = data.serialize()?;
 
-    Ok(Publish::new(topic.as_ref(), QoS::AtLeastOnce, payload))
+    if let Compression::Lz4 = data.compression() {
+        lz4_compress(&mut payload, &mut topic)?;
+    }
+
+    Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
 }
 
 // Writes the provided publish packet to disk with [Storage], after setting its pkid to 1.
@@ -716,7 +732,9 @@ mod test {
 
     impl MockCollector {
         fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
-            MockCollector { stream: Stream::new("hello", "hello/world", 1, data_tx) }
+            MockCollector {
+                stream: Stream::new("hello", "hello/world", 1, data_tx, Compression::Disabled),
+            }
         }
 
         fn send(&mut self, i: u32) -> Result<(), Error> {
