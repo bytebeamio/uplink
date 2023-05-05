@@ -29,6 +29,10 @@ fn default_file_count() -> usize {
     3
 }
 
+fn default_as_true() -> bool {
+    true
+}
+
 pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
@@ -48,6 +52,8 @@ pub struct StreamConfig {
     /// Duration(in seconds) that bridge collector waits from
     /// receiving first element, before the stream gets flushed.
     pub flush_period: u64,
+    #[serde(default = "default_as_true")]
+    pub persistance: bool,
     #[serde(default)]
     pub compression: Compression,
 }

@@ -197,6 +197,7 @@ pub mod config {
                     ),
                     buf_size: config.system_stats.stream_size.unwrap_or(100),
                     flush_period: DEFAULT_TIMEOUT,
+                    persistance: false,
                     compression: Compression::Disabled,
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
@@ -212,6 +213,7 @@ pub mod config {
                     ),
                     buf_size: 32,
                     flush_period: DEFAULT_TIMEOUT,
+                    persistance: true,
                     compression: Compression::Disabled,
                 });
             stream_config.buf_size = buf_size;
@@ -302,6 +304,7 @@ impl Uplink {
             action_status_topic,
             1,
             data_tx.clone(),
+            true,
             Compression::Disabled,
         );
         Ok(Uplink {

@@ -8,7 +8,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use disk::Storage;
 use flume::{Receiver, RecvError, Sender};
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
 use thiserror::Error;
@@ -222,6 +222,10 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
+            if !data.persistance() {
+                warn!("Not persisting stream: {}", data.stream());
+                continue;
+            }
             let publish = construct_publish(data)?;
             if let Err(e) = write_to_disk(publish, storage) {
                 error!("Crash loop: write error = {:?}", e);
@@ -255,6 +259,10 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     let data = data?;
+                    if !data.persistance() {
+                        warn!("Not persisting stream: {}", data.stream());
+                        continue;
+                    }
                     let publish = construct_publish(data)?;
                     match write_to_disk(publish, storage) {
                         Ok(deleted) => if deleted.is_some() {
@@ -350,6 +358,10 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
+                    if !data.persistance() {
+                        warn!("Not persisting stream: {}", data.stream());
+                        continue;
+                    }
                     let publish = construct_publish(data)?;
                     match write_to_disk(publish, storage) {
                         Ok(deleted) => if deleted.is_some() {
@@ -441,7 +453,10 @@ impl<C: MqttClient> Serializer<C> {
                             self.metrics.add_sent_size(payload_size);
                             continue;
                         }
-                        Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
+                        // NOTE: move to SlowEventloop mode only when data is persistable
+                        Err(MqttError::TrySend(Request::Publish(publish))) => {
+                            return Ok(Status::SlowEventloop(publish));
+                        }
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     }
 
@@ -733,7 +748,7 @@ mod test {
     impl MockCollector {
         fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
             MockCollector {
-                stream: Stream::new("hello", "hello/world", 1, data_tx, Compression::Disabled),
+                stream: Stream::new("hello", "hello/world", 1, data_tx, true, Compression::Disabled),
             }
         }
 

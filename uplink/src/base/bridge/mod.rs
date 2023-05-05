@@ -51,6 +51,7 @@ pub trait Package: Send + Debug {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    fn persistance(&self) -> bool;
     fn compression(&self) -> Compression;
 }
 
