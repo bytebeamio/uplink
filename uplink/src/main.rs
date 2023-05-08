@@ -29,9 +29,9 @@ fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
     };
 
     let levels =
-        match commandline.modules.clone().into_iter().reduce(|acc, e| format!("{acc},{e}={level}"))
+        match commandline.modules.clone().into_iter().reduce(|e, acc| format!("{e}={level},{acc}"))
         {
-            Some(f) => f,
+            Some(f) => format!("{f}={level}"),
             _ => format!("uplink={level},disk={level}"),
         };
 
