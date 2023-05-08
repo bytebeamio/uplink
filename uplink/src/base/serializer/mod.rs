@@ -608,15 +608,8 @@ mod test {
     use crate::base::{Disk, MqttConfig};
     use crate::{config::Persistence, Payload};
 
-    fn init_backup_folders(suffix: &str) -> TempDir {
-        let path = format!("/tmp/uplink_test/{suffix}");
-        let backup = TempDir::new(&path).unwrap();
-
-        if !backup.path().is_dir() {
-            panic!("Folder does not exist");
-        }
-
-        backup
+    fn init_backup_folders() -> TempDir {
+        TempDir::new("/tmp/uplink_test/").unwrap()
     }
 
     #[derive(Clone)]
@@ -775,7 +768,7 @@ mod test {
     #[test]
     // Force write publish to storage and verify by reading back
     fn read_write_storage() {
-        let backup_dir = init_backup_folders("disk");
+        let backup_dir = init_backup_folders();
         let path = format!("{}", backup_dir.path().display());
         let config = config_with_persistence(path);
         std::fs::create_dir_all(&config.persistence.disk.as_ref().unwrap().path).unwrap();
@@ -801,7 +794,7 @@ mod test {
     #[test]
     // Force runs serializer in disk mode, with network returning
     fn disk_to_catchup() {
-        let backup_dir = init_backup_folders("disk_catchup");
+        let backup_dir = init_backup_folders();
         let path = format!("{}", backup_dir.path().display());
         let config = config_with_persistence(path);
 
@@ -836,7 +829,7 @@ mod test {
     #[test]
     // Force runs serializer in disk mode, with crashed network
     fn disk_to_crash() {
-        let backup_dir = init_backup_folders("disk_crash");
+        let backup_dir = init_backup_folders();
         let path = format!("{}", backup_dir.path().display());
         let config = config_with_persistence(path);
         let (mut serializer, data_tx, _) = defaults(config);
@@ -869,7 +862,7 @@ mod test {
     #[test]
     // Force runs serializer in catchup mode, with empty persistence
     fn catchup_to_normal_empty_persistence() {
-        let backup_dir = init_backup_folders("catchup_empty");
+        let backup_dir = init_backup_folders();
         let path = format!("{}", backup_dir.path().display());
         let config = config_with_persistence(path);
 
@@ -883,7 +876,7 @@ mod test {
     #[test]
     // Force runs serializer in catchup mode, with data already in persistence
     fn catchup_to_normal_with_persistence() {
-        let backup_dir = init_backup_folders("catchup_normal");
+        let backup_dir = init_backup_folders();
         let path = format!("{}", backup_dir.path().display());
         let config = config_with_persistence(path);
 
@@ -934,7 +927,7 @@ mod test {
     #[test]
     // Force runs serializer in catchup mode, with persistence and crashed network
     fn catchup_to_crash_with_persistence() {
-        let backup_dir = init_backup_folders("catchup_crash");
+        let backup_dir = init_backup_folders();
         let path = format!("{}", backup_dir.path().display());
         let config = config_with_persistence(path);
 
