@@ -2,6 +2,7 @@ use bytes::{Buf, BufMut, BytesMut};
 use log::{self, error, info, warn};
 use seahash::hash;
 
+use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::mem;
@@ -155,7 +156,7 @@ fn id(path: &Path) -> Result<u64, Error> {
 
 /// Gets list of file ids in the disk. Id of file backup@10 is 10.
 /// Storing ids instead of full paths enables efficient indexing
-fn get_file_ids(path: &Path) -> Result<Vec<u64>, Error> {
+fn get_file_ids(path: &Path) -> Result<VecDeque<u64>, Error> {
     let mut file_ids = Vec::new();
     let files = fs::read_dir(path)?;
     for file in files {
@@ -173,6 +174,8 @@ fn get_file_ids(path: &Path) -> Result<Vec<u64>, Error> {
     }
 
     file_ids.sort_unstable();
+    let file_ids = VecDeque::from(file_ids);
+
     Ok(file_ids)
 }
 
@@ -188,7 +191,7 @@ struct Persistence {
     /// maximum number of files before deleting old file
     max_file_count: usize,
     /// list of backlog file ids. Mutated only be the serialization part of the sender
-    backlog_files: Vec<u64>,
+    backlog_files: VecDeque<u64>,
     /// id of file being read, delete it on read completion
     current_read_file_id: Option<u64>,
     // /// Deleted file id
@@ -244,12 +247,12 @@ impl Persistence {
     /// Opens file to flush current inmemory write buffer to disk.
     /// Also handles retention of previous files on disk
     fn open_next_write_file(&mut self) -> Result<NextFile, Error> {
-        let next_file_id = self.backlog_files.last().map_or(0, |id| id + 1);
+        let next_file_id = self.backlog_files.back().map_or(0, |id| id + 1);
         let file_name = format!("backup@{next_file_id}");
         let next_file_path = self.path.join(file_name);
         let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
 
-        self.backlog_files.push(next_file_id);
+        self.backlog_files.push_back(next_file_id);
 
         let mut next = NextFile { path: next_file_path, file: next_file, deleted: None };
         let mut backlog_files_count = self.backlog_files.len();
@@ -268,7 +271,7 @@ impl Persistence {
         // NOTE: keeps read buffer unchanged
         let id = match self.current_read_file_id.take() {
             Some(id) => id,
-            _ => self.backlog_files.remove(0),
+            _ => self.backlog_files.pop_front().unwrap(),
         };
 
         warn!("file limit reached. deleting backup@{}", id);
@@ -281,7 +284,7 @@ impl Persistence {
 
     fn load_next_read_file(&mut self, current_read_file: &mut BytesMut) -> Result<(), Error> {
         // Len always > 0 because of above if. Doesn't panic
-        let id = self.backlog_files.remove(0);
+        let id = self.backlog_files.pop_front().unwrap();
         let next_file_path = self.path(id)?;
 
         let mut file = OpenOptions::new().read(true).open(&next_file_path)?;
