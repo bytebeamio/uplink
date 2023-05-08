@@ -442,23 +442,51 @@ mod test {
         // Initially not on a read file
         assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
+        // Ensure read files are all present before read
+        let files = get_file_ids(&backup.path()).unwrap();
+        assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
         // Successfully read 10 files with files still in storage after 10 reads
         for i in 0..10 {
             read_n_publishes(&mut storage, 10);
             let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
             assert_eq!(file_id, i);
-            // Ensure file exists
-            let next_file_path = storage
-                .persistence
-                .as_ref()
-                .unwrap()
-                .path
-                .join("backup@".to_owned() + &file_id.to_string());
-            assert!(Path::new(&next_file_path).exists());
         }
 
         // All read files should be deleted just after 1 more read
         read_n_publishes(&mut storage, 1);
         assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
+
+        // Ensure read files are all present before read
+        let files = get_file_ids(&backup.path()).unwrap();
+        assert_eq!(files, vec![]);
+    }
+
+    #[test]
+    fn ensure_files_including_read_removed_post_flush_on_overflow() {
+        let backup = init_backup_folders();
+        let mut storage = Storage::new(10 * 1036);
+        storage.set_persistence(backup.path(), 10).unwrap();
+        // 10 files on disk and partially filled current write buffer, 10 publishes per file
+        write_n_publishes(&mut storage, 105);
+
+        // Initially not on a read file
+        assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
+
+        // Successfully read a single file
+        read_n_publishes(&mut storage, 10);
+        let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
+        assert_eq!(file_id, 0);
+
+        // Ensure all persistance files still exist
+        let files = get_file_ids(&backup.path()).unwrap();
+        assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+        // Write 10 more files onto disk, 10 publishes per file
+        write_n_publishes(&mut storage, 100);
+
+        // Ensure none of the earlier files exist on disk
+        let files = get_file_ids(&backup.path()).unwrap();
+        assert_eq!(files, vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
     }
 }
