@@ -442,7 +442,7 @@ mod test {
         // Initially not on a read file
         assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
-        // Ensure read files are all present before read
+        // Ensure unread files are all present before read
         let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
@@ -451,6 +451,9 @@ mod test {
             read_n_publishes(&mut storage, 10);
             let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
             assert_eq!(file_id, i);
+            // Ensure partially read file is still present in backup dir
+            let files = get_file_ids(&backup.path()).unwrap();
+            assert!(files.contains(&i));
         }
 
         // All read files should be deleted just after 1 more read
