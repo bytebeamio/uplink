@@ -511,7 +511,7 @@ fn lz4_compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> 
 
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
 fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
-    let stream = data.stream().as_ref().to_owned();
+    let stream = data.stream().to_owned();
     let point_count = data.len();
     let batch_latency = data.latency();
     trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
@@ -666,7 +666,7 @@ mod test {
 
     use super::*;
     use crate::base::bridge::stream::Stream;
-    use crate::base::MqttConfig;
+    use crate::base::{MqttConfig, StreamConfig};
     use crate::Payload;
 
     #[derive(Clone)]
@@ -762,9 +762,9 @@ mod test {
 
     impl MockCollector {
         fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
-            MockCollector {
-                stream: Stream::new("hello", "hello/world", 1, data_tx, Compression::Disabled),
-            }
+            let config =
+                StreamConfig { topic: "hello/world".to_owned(), buf_size: 1, ..Default::default() };
+            MockCollector { stream: Stream::new("hello", &config, data_tx) }
         }
 
         fn send(&mut self, i: u32) -> Result<(), Error> {

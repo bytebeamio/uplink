@@ -40,8 +40,8 @@ pub trait Point: Send + Debug {
 }
 
 pub trait Package: Send + Debug {
-    fn topic(&self) -> Arc<String>;
-    fn stream(&self) -> Arc<String>;
+    fn topic(&self) -> &str;
+    fn stream(&self) -> &str;
     // TODO: Implement a generic Return type that can wrap
     // around custom serialization error types.
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;

@@ -30,7 +30,7 @@ impl Streams {
     ) -> Self {
         let mut map = HashMap::new();
         for (name, stream) in &config.streams {
-            let stream = Stream::with_config(name, stream, data_tx.clone());
+            let stream = Stream::new(name, stream, data_tx.clone());
             map.insert(name.to_owned(), stream);
         }
 
@@ -73,7 +73,7 @@ impl Streams {
             }
         };
 
-        let max_stream_size = stream.max_buffer_size;
+        let max_stream_size = stream.meta.max_buf_size;
         let state = match stream.fill(data).await {
             Ok(s) => s,
             Err(e) => {

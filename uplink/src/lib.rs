@@ -48,7 +48,6 @@ use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
-use base::Compression;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
@@ -290,14 +289,9 @@ impl Uplink {
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
 
-        let action_status_topic = &config.action_status.topic;
-        let action_status = Stream::new(
-            "action_status",
-            action_status_topic,
-            1,
-            data_tx.clone(),
-            Compression::Disabled,
-        );
+        let mut action_status = config.action_status.clone();
+        action_status.buf_size = 1;
+        let action_status = Stream::new("action_status", &action_status, data_tx.clone());
         Ok(Uplink {
             config,
             action_rx,
