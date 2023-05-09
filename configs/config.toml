@@ -84,18 +84,27 @@ compression = "Lz4"
 # packets to disk in case of slow or crashed network, for recovery purposes.
 # 
 # Required Parameters
-# - max_file_size: Maximum size upto which single persistence file can grow(defaults to 100MB).
+# - max_file_size(defaults to 100MB): Maximum size upto which single persistence file can grow.
 #   This value alone can be changed to configure in-memory storage of packets during network recovery.
 # - path(optional): Path to directory for storing backlog in files, shouldn't contain anything else.
-#   Please ensure the location is unique for each stream to ensure there is no clash in files.
-# - max_file_count(optional): Maximum number of persistence files allowed on disk.
+#   Please ensure the location is unique for each stream to ensure there is no clash in files. 
+# - max_file_count(optional, defaults to 3): Maximum number of persistence files allowed on disk.
 #
 # NOTE: Persitence is an optional feature that is disabled by default, i.e. if not inlcuded in the 
 # configuration, we use transient(in-memory) storage to handle network downtime only.
 [streams.gps]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/gps/jsonarray"
-buf_size = 100
-persistence = { path = "/tmp/uplink/gps", max_file_size = 1024, max_file_count = 3 }
+buf_size = 10
+persistence = { path = "/tmp/uplink/gps", max_file_size = 1048576, max_file_count = 10 }
+
+# NOTE: While it is possible to configure persistence to be disabled, including only max_file_count
+# without path causes non-persistence. Configuring only the persistence path is allowed and the other
+# config values will be default. Configuring only max_file_size is also allowed, without persistance.
+[streams.motor]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/motor/jsonarray"
+buf_size = 50
+compression = "Lz4"
+persistence = { path = "/tmp/uplink/motor" }
 
 # Built-in streams: action status is a special case of stream and should be configured separately,
 # outside of the streams map. The action_status stream is used to push progress of Actions in
