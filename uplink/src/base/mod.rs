@@ -40,7 +40,16 @@ pub enum Compression {
     Lz4,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+impl Compression {
+    fn suffix(&self) -> &str {
+        match self {
+            Self::Disabled => "",
+            Self::Lz4 => "/lz4",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct StreamConfig {
     pub topic: String,
     pub buf_size: usize,
@@ -50,6 +59,20 @@ pub struct StreamConfig {
     pub flush_period: u64,
     #[serde(default)]
     pub compression: Compression,
+    #[serde(default)]
+    pub persistence: Persistence,
+}
+
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            topic: "".to_string(),
+            buf_size: 1,
+            flush_period: default_timeout(),
+            compression: Compression::Disabled,
+            persistence: Persistence::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -185,8 +208,6 @@ pub struct Config {
     pub processes: Vec<ActionRoute>,
     #[serde(skip)]
     pub actions_subscription: String,
-    #[serde(default)]
-    pub persistence: Persistence,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
     pub stream_metrics: StreamMetricsConfig,

@@ -86,11 +86,6 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    max_inflight_messages: {}", config.mqtt.max_inflight);
     println!("    keep_alive_timeout: {}", config.mqtt.keep_alive);
 
-    println!("    persistence_max_segment_size: {}", config.persistence.max_file_size);
-    if let Some(disk) = &config.persistence.disk {
-        println!("    persistence_dir: {}", disk.path);
-        println!("    persistence_max_segment_count: {}", disk.max_file_count);
-    }
     println!(
         "    downloader:\n\tpath: {}\n\tactions: {:?}",
         config.downloader.path, config.downloader.actions
