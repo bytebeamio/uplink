@@ -63,6 +63,12 @@ pub struct StreamConfig {
     pub persistence: Persistence,
 }
 
+impl StreamConfig {
+    pub fn topic(&self) -> String {
+        self.topic.to_owned() + self.compression.suffix()
+    }
+}
+
 impl Default for StreamConfig {
     fn default() -> Self {
         Self {

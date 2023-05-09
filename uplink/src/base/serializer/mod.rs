@@ -192,9 +192,7 @@ impl<C: MqttClient> Serializer<C> {
                 std::fs::create_dir_all(&persistence.path)?;
                 storage.set_persistence(&persistence.path, persistence.max_file_count)?;
             }
-
-            let topic = config.topic.to_owned() + config.compression.suffix();
-            storage_map.insert(topic.to_owned(), storage);
+            storage_map.insert(config.topic(), storage);
         }
 
         Ok(Serializer {
