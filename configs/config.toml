@@ -95,7 +95,7 @@ compression = "Lz4"
 [streams.gps]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/gps/jsonarray"
 buf_size = 10
-persistence = { path = "/tmp/uplink/gps", max_file_size = 1048576, max_file_count = 10 }
+persistence = { path = "/tmp/uplink/", max_file_size = 1048576, max_file_count = 10 }
 
 # NOTE: While it is possible to configure persistence to be disabled, including only max_file_count
 # without path causes non-persistence. Configuring only the persistence path is allowed and the other
@@ -104,7 +104,7 @@ persistence = { path = "/tmp/uplink/gps", max_file_size = 1048576, max_file_coun
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/motor/jsonarray"
 buf_size = 50
 compression = "Lz4"
-persistence = { path = "/tmp/uplink/motor" }
+persistence = { path = "/tmp/uplink/" }
 
 # Built-in streams: action status is a special case of stream and should be configured separately,
 # outside of the streams map. The action_status stream is used to push progress of Actions in

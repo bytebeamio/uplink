@@ -188,11 +188,19 @@ impl<C: MqttClient> Serializer<C> {
         metrics_tx: Sender<SerializerMetrics>,
     ) -> Result<Serializer<C>, Error> {
         let mut storage_map = HashMap::with_capacity(2 * config.streams.len());
-        for config in config.streams.values() {
+        for (stream_name, config) in config.streams.iter() {
             let mut storage = Storage::new(config.persistence.max_file_size);
             if let Some(persistence) = &config.persistence.disk {
-                std::fs::create_dir_all(&persistence.path)?;
-                storage.set_persistence(&persistence.path, persistence.max_file_count)?;
+                let mut path = persistence.path.clone();
+                path.push(stream_name);
+
+                debug!(
+                    "Disk persistance is enabled for stream: \"{stream_name}\"; path: {}",
+                    path.display()
+                );
+
+                std::fs::create_dir_all(&path)?;
+                storage.set_persistence(&path, persistence.max_file_count)?;
             }
             storage_map.insert(config.topic(), storage);
         }

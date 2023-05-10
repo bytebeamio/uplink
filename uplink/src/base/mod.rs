@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
 
@@ -99,7 +100,7 @@ impl Default for Persistence {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Disk {
-    pub path: String,
+    pub path: PathBuf,
     #[serde(default = "default_file_count")]
     pub max_file_count: usize,
 }
