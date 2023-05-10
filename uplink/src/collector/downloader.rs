@@ -305,7 +305,7 @@ mod test {
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
         let downloader_cfg = DownloaderConfig {
-            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
+            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: Duration::from_secs(10) }],
             path: format!("{DOWNLOAD_DIR}/uplink-test"),
         };
         let config = config(downloader_cfg.clone());
@@ -380,7 +380,7 @@ mod test {
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
         let downloader_cfg = DownloaderConfig {
-            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
+            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: Duration::from_secs(10) }],
             path: format!("{}/download", DOWNLOAD_DIR),
         };
         let config = config(downloader_cfg.clone());

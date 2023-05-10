@@ -1,7 +1,8 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DurationSeconds};
 
 #[cfg(any(target_os = "linux"))]
 use crate::collector::journalctl::JournalCtlConfig;
@@ -14,10 +15,10 @@ pub mod monitor;
 pub mod mqtt;
 pub mod serializer;
 
-pub const DEFAULT_TIMEOUT: u64 = 60;
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[inline]
-fn default_timeout() -> u64 {
+fn default_timeout() -> Duration {
     DEFAULT_TIMEOUT
 }
 
@@ -49,14 +50,16 @@ impl Compression {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamConfig {
     pub topic: String,
     pub buf_size: usize,
     #[serde(default = "default_timeout")]
+    #[serde_as(as = "DurationSeconds")]
     /// Duration(in seconds) that bridge collector waits from
     /// receiving first element, before the stream gets flushed.
-    pub flush_period: u64,
+    pub flush_period: Duration,
     #[serde(default)]
     pub compression: Compression,
     #[serde(default)]
@@ -74,7 +77,7 @@ impl Default for StreamConfig {
         Self {
             topic: "".to_string(),
             buf_size: 1,
-            flush_period: default_timeout(),
+            flush_period: DEFAULT_TIMEOUT,
             compression: Compression::Disabled,
             persistence: Persistence::default(),
         }
@@ -190,7 +193,7 @@ pub struct MqttConfig {
 pub struct ActionRoute {
     pub name: String,
     #[serde(default = "default_timeout")]
-    pub timeout: u64,
+    pub timeout: Duration,
 }
 
 impl From<&ActionRoute> for ActionRoute {

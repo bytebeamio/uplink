@@ -349,7 +349,7 @@ pub struct BridgeTx {
 impl BridgeTx {
     pub async fn register_action_route(&self, route: ActionRoute) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(1);
-        let duration = Duration::from_secs(route.timeout);
+        let duration = route.timeout;
         let action_router = ActionRouter { actions_tx, duration };
         let event = Event::RegisterActionRoute(route.name, action_router);
 
@@ -370,7 +370,7 @@ impl BridgeTx {
         let (actions_tx, actions_rx) = bounded(1);
 
         for route in routes {
-            let duration = Duration::from_secs(route.timeout);
+            let duration = route.timeout;
             let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
             let event = Event::RegisterActionRoute(route.name, action_router);
             // Bridge should always be up and hence unwrap is ok
@@ -448,10 +448,10 @@ mod tests {
     async fn timeout_on_diff_routes() {
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
-        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
+        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: Duration::from_secs(10) };
         let route_1_rx = bridge_tx.register_action_route(route_1).await;
 
-        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: 30 };
+        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: Duration::from_secs(30) };
         let route_2_rx = bridge_tx.register_action_route(route_2).await;
 
         std::thread::spawn(move || {
@@ -525,7 +525,7 @@ mod tests {
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
         let action_rx = bridge_tx.register_action_route(test_route).await;
 
         std::thread::spawn(move || loop {
@@ -569,7 +569,7 @@ mod tests {
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
         let action_rx = bridge_tx.register_action_route(test_route).await;
 
         std::thread::spawn(move || loop {
@@ -611,7 +611,7 @@ mod tests {
 
         std::thread::spawn(move || loop {
             let rt = Runtime::new().unwrap();
-            let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+            let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
             let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
             let action = action_rx.recv().unwrap();
             assert_eq!(action.action_id, "1".to_owned());
@@ -622,7 +622,7 @@ mod tests {
 
         std::thread::spawn(move || loop {
             let rt = Runtime::new().unwrap();
-            let test_route = ActionRoute { name: "redirect".to_string(), timeout: 30 };
+            let test_route = ActionRoute { name: "redirect".to_string(), timeout: Duration::from_secs(30) };
             let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
             let action = action_rx.recv().unwrap();
             assert_eq!(action.action_id, "1".to_owned());

@@ -125,7 +125,7 @@ impl JournalCtl {
             .bridge
             .register_action_route(ActionRoute {
                 name: "journalctl_config".to_string(),
-                timeout: 10,
+                timeout: Duration::from_secs(10),
             })
             .await;
 
