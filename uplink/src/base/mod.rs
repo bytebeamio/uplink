@@ -73,7 +73,7 @@ impl Default for StreamConfig {
     fn default() -> Self {
         Self {
             topic: "".to_string(),
-            buf_size: 1,
+            buf_size: MAX_BUFFER_SIZE,
             flush_period: default_timeout(),
             compression: Compression::Disabled,
             persistence: Persistence::default(),
