@@ -54,6 +54,8 @@ pub enum Error {
     MissingPersistence,
     #[error("LZ4 compression error: {0}")]
     Lz4(#[from] lz4_flex::frame::Error),
+    #[error("Empty storage")]
+    EmptyStorage,
 }
 
 #[derive(Debug, PartialEq)]
@@ -215,6 +217,29 @@ impl<C: MqttClient> Serializer<C> {
         Ok(storage)
     }
 
+    fn next_storage(&mut self) -> Result<&mut Storage, Error> {
+        let mut storages = self.storage_map.values_mut();
+
+        loop {
+            let storage = match storages.next() {
+                Some(s) => s,
+                _ => return Err(Error::EmptyStorage),
+            };
+            match storage.reload_on_eof() {
+                // Done reading all the pending files
+                Ok(true) => continue,
+                Ok(false) => return Ok(storage),
+                // Reload again on encountering a corrupted file
+                Err(e) => {
+                    self.metrics.increment_errors();
+                    self.metrics.increment_lost_segments();
+                    error!("Failed to reload from storage. Error = {e}");
+                    continue;
+                }
+            }
+        }
+    }
+
     /// Write all data received, from here-on, to disk only.
     async fn crash(&mut self, publish: Publish) -> Result<Status, Error> {
         let storage = self.select_storage(&publish.topic)?;
@@ -309,29 +334,12 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.mqtt.max_packet_size;
         let client = self.client.clone();
 
-        loop {
-            let storage = match self.storage_map.values_mut().next() {
-                Some(s) => s,
-                _ => return Ok(Status::Normal),
-            };
-            match storage.reload_on_eof() {
-                // Done reading all the pending files
-                Ok(true) => return Ok(Status::Normal),
-                Ok(false) => break,
-                // Reload again on encountering a corrupted file
-                Err(e) => {
-                    self.metrics.increment_errors();
-                    self.metrics.increment_lost_segments();
-                    error!("Failed to reload from storage. Error = {e}");
-                    continue;
-                }
-            }
-        }
-
-        let storage = match self.storage_map.values_mut().next() {
-            Some(s) => s,
-            _ => return Ok(Status::Normal),
+        let storage = match self.next_storage() {
+            Ok(s) => s,
+            Err(Error::EmptyStorage) => return Ok(Status::Normal),
+            Err(e) => unreachable!("Unexpected error: {e}"),
         };
+
         // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
         // This leads to force switching to normal mode. Increasing max_payload_size to bypass this
         let publish = match read(storage.reader(), max_packet_size) {
@@ -384,24 +392,11 @@ impl<C: MqttClient> Serializer<C> {
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
-                    let storage = match self.storage_map.values_mut().next() {
-                        Some(s) => s,
-                        _ => return Ok(Status::Normal),
+                    let storage = match self.next_storage() {
+                        Ok(s) => s,
+                        Err(Error::EmptyStorage) => return Ok(Status::Normal),
+                        Err(e) => unreachable!("Unexpected error: {e}"),
                     };
-                    loop {
-                        match storage.reload_on_eof() {
-                            // Done reading all the pending files
-                            Ok(true) => return Ok(Status::Normal),
-                            Ok(false) => break,
-                            // Reload again on encountering a corrupted file
-                            Err(e) => {
-                                self.metrics.increment_errors();
-                                self.metrics.increment_lost_segments();
-                                error!("Failed to reload from storage. Error = {e}");
-                                continue
-                            }
-                        }
-                    }
 
                     let publish = match read(storage.reader(), max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
