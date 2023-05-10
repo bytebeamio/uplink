@@ -8,6 +8,8 @@ use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(any(target_os = "android"))]
 use crate::collector::logcat::LogcatConfig;
 
+use self::bridge::stream::MAX_BUFFER_SIZE;
+
 pub mod actions;
 pub mod bridge;
 pub mod monitor;
