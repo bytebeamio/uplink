@@ -40,7 +40,7 @@ pub trait Point: Send + Debug {
 }
 
 pub trait Package: Send + Debug {
-    fn topic(&self) -> &str;
+    fn topic(&self) -> String;
     fn stream(&self) -> &str;
     // TODO: Implement a generic Return type that can wrap
     // around custom serialization error types.

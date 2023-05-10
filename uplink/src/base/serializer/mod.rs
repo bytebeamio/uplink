@@ -500,11 +500,10 @@ async fn send_publish<C: MqttClient>(
     Ok(client)
 }
 
-fn lz4_compress(payload: &mut Vec<u8>, topic: &mut String) -> Result<(), Error> {
+fn lz4_compress(payload: &mut Vec<u8>) -> Result<(), Error> {
     let mut compressor = FrameEncoder::new(vec![]);
     compressor.write_all(payload)?;
     *payload = compressor.finish()?;
-    topic.push_str("/lz4");
 
     Ok(())
 }
@@ -516,11 +515,11 @@ fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
     let batch_latency = data.latency();
     trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
 
-    let mut topic = data.topic().to_string();
+    let topic = data.topic();
     let mut payload = data.serialize()?;
 
     if let Compression::Lz4 = data.compression() {
-        lz4_compress(&mut payload, &mut topic)?;
+        lz4_compress(&mut payload)?;
     }
 
     Ok(Publish::new(topic, QoS::AtLeastOnce, payload))

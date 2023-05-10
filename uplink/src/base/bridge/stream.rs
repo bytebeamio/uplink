@@ -27,22 +27,13 @@ pub const MAX_BUFFER_SIZE: usize = 100;
 #[derive(Debug)]
 pub struct StreamMeta {
     pub name: String,
-    pub topic: String,
-    pub max_buf_size: usize,
-    pub timeout: Duration,
-    pub compression: Compression,
+    pub config: StreamConfig,
 }
 
 impl From<(String, StreamConfig)> for StreamMeta {
     fn from(value: (String, StreamConfig)) -> Self {
         let (name, config) = value;
-        Self {
-            name,
-            topic: config.topic,
-            max_buf_size: config.buf_size,
-            timeout: Duration::from_secs(config.flush_period),
-            compression: config.compression,
-        }
+        Self { name, config }
     }
 }
 
@@ -69,7 +60,7 @@ where
         let meta = StreamMeta::from((stream.into(), config.clone()));
         let meta = Arc::new(meta);
         let buffer = Buffer::new(meta.clone());
-        let metrics = StreamMetrics::new(&meta.name, meta.max_buf_size);
+        let metrics = StreamMetrics::new(&meta.name, meta.config.buf_size);
 
         Stream { meta, last_sequence: 0, last_timestamp: 0, buffer, tx, metrics }
     }
@@ -123,7 +114,7 @@ where
         self.last_timestamp = current_timestamp;
 
         // if max_buffer_size is breached, flush
-        let buf = if self.buffer.buffer.len() >= self.meta.max_buf_size {
+        let buf = if self.buffer.buffer.len() >= self.meta.config.buf_size {
             self.metrics.add_batch();
             Some(self.take_buffer())
         } else {
@@ -135,7 +126,7 @@ where
 
     // Returns buffer content, replacing with empty buffer in-place
     fn take_buffer(&mut self) -> Buffer<T> {
-        trace!("Flushing stream name: {}, topic: {}", self.meta.name, self.meta.topic);
+        trace!("Flushing stream name: {}, topic: {}", self.meta.name, self.meta.config.topic());
 
         mem::replace(&mut self.buffer, Buffer::new(self.meta.clone()))
     }
@@ -169,7 +160,7 @@ where
         }
 
         let status = match self.len() {
-            1 => StreamStatus::Init(self.meta.timeout),
+            1 => StreamStatus::Init(self.meta.config.flush_period),
             len => StreamStatus::Partial(len),
         };
 
@@ -185,7 +176,7 @@ where
         }
 
         let status = match self.len() {
-            1 => StreamStatus::Init(self.meta.timeout),
+            1 => StreamStatus::Init(self.meta.config.flush_period),
             len => StreamStatus::Partial(len),
         };
 
@@ -211,7 +202,7 @@ pub struct Buffer<T> {
 
 impl<T> Buffer<T> {
     pub fn new(stream_meta: Arc<StreamMeta>) -> Buffer<T> {
-        let buffer = Vec::with_capacity(stream_meta.max_buf_size);
+        let buffer = Vec::with_capacity(stream_meta.config.buf_size);
         Buffer { stream_meta, buffer, anomalies: String::with_capacity(100), anomaly_count: 0 }
     }
 
@@ -253,8 +244,8 @@ where
     T: Debug + Send + Point,
     Vec<T>: Serialize,
 {
-    fn topic(&self) -> &str {
-        &self.stream_meta.topic
+    fn topic(&self) -> String {
+        self.stream_meta.config.topic()
     }
 
     fn stream(&self) -> &str {
@@ -278,7 +269,7 @@ where
     }
 
     fn compression(&self) -> Compression {
-        self.stream_meta.compression
+        self.stream_meta.config.compression
     }
 }
 
@@ -289,7 +280,7 @@ impl<T> Clone for Stream<T> {
             last_sequence: 0,
             last_timestamp: 0,
             buffer: Buffer::new(self.meta.clone()),
-            metrics: StreamMetrics::new(&self.meta.name, self.meta.max_buf_size),
+            metrics: StreamMetrics::new(&self.meta.name, self.meta.config.buf_size),
             tx: self.tx.clone(),
         }
     }

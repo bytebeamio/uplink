@@ -73,7 +73,7 @@ impl Streams {
             }
         };
 
-        let max_stream_size = stream.meta.max_buf_size;
+        let max_stream_size = stream.meta.config.buf_size;
         let state = match stream.fill(data).await {
             Ok(s) => s,
             Err(e) => {
