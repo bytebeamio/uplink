@@ -148,7 +148,7 @@ impl StorageHandler {
                 std::fs::create_dir_all(&path)?;
                 storage.set_persistence(&path, persistence.max_file_count)?;
             }
-            map.insert(config.topic(), storage);
+            map.insert(config.topic.clone(), storage);
         }
 
         Ok(Self { map })

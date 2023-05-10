@@ -104,7 +104,7 @@ persistence = { path = "/tmp/uplink/", max_file_size = 1048576, max_file_count =
 # without path causes non-persistence. Configuring only the persistence path is allowed and the other
 # config values will be default. Configuring only max_file_size is also allowed, without persistance.
 [streams.motor]
-topic = "/tenants/{tenant_id}/devices/{device_id}/events/motor/jsonarray"
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/motor/jsonarray/lz4"
 buf_size = 50
 compression = "Lz4"
 persistence = { path = "/tmp/uplink/" }

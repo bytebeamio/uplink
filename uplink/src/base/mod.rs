@@ -43,15 +43,6 @@ pub enum Compression {
     Lz4,
 }
 
-impl Compression {
-    fn suffix(&self) -> &str {
-        match self {
-            Self::Disabled => "",
-            Self::Lz4 => "/lz4",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamConfig {
     pub topic: String,
@@ -64,12 +55,6 @@ pub struct StreamConfig {
     pub compression: Compression,
     #[serde(default)]
     pub persistence: Persistence,
-}
-
-impl StreamConfig {
-    pub fn topic(&self) -> String {
-        self.topic.to_owned() + self.compression.suffix()
-    }
 }
 
 impl Default for StreamConfig {
