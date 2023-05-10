@@ -127,6 +127,61 @@ impl MqttClient for AsyncClient {
     }
 }
 
+struct StorageHandler {
+    map: HashMap<String, Storage>,
+}
+
+impl StorageHandler {
+    fn new(config: Arc<Config>) -> Result<Self, Error> {
+        let mut map = HashMap::with_capacity(2 * config.streams.len());
+        for (stream_name, config) in config.streams.iter() {
+            let mut storage = Storage::new(config.persistence.max_file_size);
+            if let Some(persistence) = &config.persistence.disk {
+                let mut path = persistence.path.clone();
+                path.push(stream_name);
+
+                debug!(
+                    "Disk persistance is enabled for stream: \"{stream_name}\"; path: {}",
+                    path.display()
+                );
+
+                std::fs::create_dir_all(&path)?;
+                storage.set_persistence(&path, persistence.max_file_count)?;
+            }
+            map.insert(config.topic(), storage);
+        }
+
+        Ok(Self { map })
+    }
+
+    fn select(&mut self, topic: &str) -> &mut Storage {
+        self.map.entry(topic.to_owned()).or_insert_with(|| Storage::new(default_file_size()))
+    }
+
+    fn next(&mut self, metrics: &mut SerializerMetrics) -> Result<&mut Storage, Error> {
+        let mut storages = self.map.values_mut();
+
+        loop {
+            let storage = match storages.next() {
+                Some(s) => s,
+                _ => return Err(Error::EmptyStorage),
+            };
+            match storage.reload_on_eof() {
+                // Done reading all the pending files
+                Ok(true) => continue,
+                Ok(false) => return Ok(storage),
+                // Reload again on encountering a corrupted file
+                Err(e) => {
+                    metrics.increment_errors();
+                    metrics.increment_lost_segments();
+                    error!("Failed to reload from storage. Error = {e}");
+                    continue;
+                }
+            }
+        }
+    }
+}
+
 /// The uplink Serializer is the component that deals with serializing, compressing and writing data onto disk or Network.
 /// In case of network issues, the Serializer enters various states depending on the severeness, managed by [`start()`].                                                                                       
 ///
@@ -172,7 +227,7 @@ pub struct Serializer<C: MqttClient> {
     config: Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
     client: C,
-    storage_map: HashMap<String, Storage>,
+    storage_handler: StorageHandler,
     metrics: SerializerMetrics,
     metrics_tx: Sender<SerializerMetrics>,
     pending_metrics: VecDeque<SerializerMetrics>,
@@ -187,67 +242,22 @@ impl<C: MqttClient> Serializer<C> {
         client: C,
         metrics_tx: Sender<SerializerMetrics>,
     ) -> Result<Serializer<C>, Error> {
-        let mut storage_map = HashMap::with_capacity(2 * config.streams.len());
-        for (stream_name, config) in config.streams.iter() {
-            let mut storage = Storage::new(config.persistence.max_file_size);
-            if let Some(persistence) = &config.persistence.disk {
-                let mut path = persistence.path.clone();
-                path.push(stream_name);
-
-                debug!(
-                    "Disk persistance is enabled for stream: \"{stream_name}\"; path: {}",
-                    path.display()
-                );
-
-                std::fs::create_dir_all(&path)?;
-                storage.set_persistence(&path, persistence.max_file_count)?;
-            }
-            storage_map.insert(config.topic(), storage);
-        }
+        let storage_handler = StorageHandler::new(config.clone())?;
 
         Ok(Serializer {
             config,
             collector_rx,
             client,
-            storage_map,
+            storage_handler,
             metrics: SerializerMetrics::new("catchup"),
             metrics_tx,
             pending_metrics: VecDeque::with_capacity(3),
         })
     }
 
-    fn select_storage(&mut self, topic: &str) -> &mut Storage {
-        self.storage_map
-            .entry(topic.to_owned())
-            .or_insert_with(|| Storage::new(default_file_size()))
-    }
-
-    fn next_storage(&mut self) -> Result<&mut Storage, Error> {
-        let mut storages = self.storage_map.values_mut();
-
-        loop {
-            let storage = match storages.next() {
-                Some(s) => s,
-                _ => return Err(Error::EmptyStorage),
-            };
-            match storage.reload_on_eof() {
-                // Done reading all the pending files
-                Ok(true) => continue,
-                Ok(false) => return Ok(storage),
-                // Reload again on encountering a corrupted file
-                Err(e) => {
-                    self.metrics.increment_errors();
-                    self.metrics.increment_lost_segments();
-                    error!("Failed to reload from storage. Error = {e}");
-                    continue;
-                }
-            }
-        }
-    }
-
     /// Write all data received, from here-on, to disk only.
     async fn crash(&mut self, publish: Publish) -> Result<Status, Error> {
-        let storage = self.select_storage(&publish.topic);
+        let storage = self.storage_handler.select(&publish.topic);
         // Write failed publish to disk first, metrics don't matter
         match write_to_disk(publish, storage) {
             Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
@@ -259,7 +269,7 @@ impl<C: MqttClient> Serializer<C> {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
             let publish = construct_publish(data)?;
-            let storage = self.select_storage(&publish.topic);
+            let storage = self.storage_handler.select(&publish.topic);
             match write_to_disk(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
@@ -287,7 +297,7 @@ impl<C: MqttClient> Serializer<C> {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
                     let publish = construct_publish(data)?;
-                    let storage = self.select_storage(&publish.topic);
+                    let storage = self.storage_handler.select(&publish.topic);
                     match write_to_disk(publish, storage) {
                         Ok(Some(deleted)) => {
                             debug!("Lost segment = {deleted}");
@@ -315,7 +325,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
                 },
                 _ = interval.tick() => {
-                    check_metrics(&mut self.metrics, &self.storage_map);
+                    check_metrics(&mut self.metrics, &self.storage_handler);
                 }
             }
         };
@@ -339,7 +349,7 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.mqtt.max_packet_size;
         let client = self.client.clone();
 
-        let storage = match self.next_storage() {
+        let storage = match self.storage_handler.next(&mut self.metrics) {
             Ok(s) => s,
             Err(Error::EmptyStorage) => return Ok(Status::Normal),
             Err(e) => unreachable!("Unexpected error: {e}"),
@@ -356,7 +366,7 @@ impl<C: MqttClient> Serializer<C> {
                 save_and_prepare_next_metrics(
                     &mut self.pending_metrics,
                     &mut self.metrics,
-                    &self.storage_map,
+                    &self.storage_handler,
                 );
                 return Ok(Status::Normal);
             }
@@ -371,7 +381,7 @@ impl<C: MqttClient> Serializer<C> {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
                     let publish = construct_publish(data)?;
-                    let storage = self.select_storage(&publish.topic);
+                    let storage = self.storage_handler.select(&publish.topic);
                     match write_to_disk(publish, storage) {
                         Ok(Some(deleted)) => {
                             debug!("Lost segment = {deleted}");
@@ -397,7 +407,7 @@ impl<C: MqttClient> Serializer<C> {
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
-                    let storage = match self.next_storage() {
+                    let storage = match self.storage_handler.next(&mut self.metrics) {
                         Ok(s) => s,
                         Err(Error::EmptyStorage) => return Ok(Status::Normal),
                         Err(e) => unreachable!("Unexpected error: {e}"),
@@ -422,7 +432,7 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
-                    let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_map);
+                    let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler);
                 }
             }
         };
@@ -430,7 +440,7 @@ impl<C: MqttClient> Serializer<C> {
         save_and_prepare_next_metrics(
             &mut self.pending_metrics,
             &mut self.metrics,
-            &self.storage_map,
+            &self.storage_handler,
         );
         let v = v?;
         Ok(v)
@@ -465,7 +475,7 @@ impl<C: MqttClient> Serializer<C> {
                     // Check in storage stats every tick. TODO: Make storage object always
                     // available. It can be inmemory storage
 
-                    if let Err(e) = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_map) {
+                    if let Err(e) = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler) {
                         debug!("Failed to flush serializer metrics (normal). Error = {}", e);
                     }
                 }
@@ -543,13 +553,13 @@ fn write_to_disk(
     Ok(deleted)
 }
 
-fn check_metrics(metrics: &mut SerializerMetrics, storage_map: &HashMap<String, Storage>) {
+fn check_metrics(metrics: &mut SerializerMetrics, storage_handler: &StorageHandler) {
     use pretty_bytes::converter::convert;
     let mut inmemory_write_size = 0;
     let mut inmemory_read_size = 0;
     let mut file_count = 0;
 
-    for storage in storage_map.values() {
+    for storage in storage_handler.map.values() {
         inmemory_read_size += storage.inmemory_read_size();
         inmemory_write_size += storage.inmemory_write_size();
         file_count += storage.file_count();
@@ -574,13 +584,13 @@ fn check_metrics(metrics: &mut SerializerMetrics, storage_map: &HashMap<String, 
 fn save_and_prepare_next_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut SerializerMetrics,
-    storage_map: &HashMap<String, Storage>,
+    storage_handler: &StorageHandler,
 ) {
     let mut inmemory_write_size = 0;
     let mut inmemory_read_size = 0;
     let mut file_count = 0;
 
-    for storage in storage_map.values() {
+    for storage in storage_handler.map.values() {
         inmemory_write_size += storage.inmemory_write_size();
         inmemory_read_size += storage.inmemory_read_size();
         file_count += storage.file_count();
@@ -600,7 +610,7 @@ fn check_and_flush_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut SerializerMetrics,
     metrics_tx: &Sender<SerializerMetrics>,
-    storage_map: &HashMap<String, Storage>,
+    storage_handler: &StorageHandler,
 ) -> Result<(), flume::TrySendError<SerializerMetrics>> {
     use pretty_bytes::converter::convert;
 
@@ -608,7 +618,7 @@ fn check_and_flush_metrics(
     let mut inmemory_read_size = 0;
     let mut file_count = 0;
 
-    for storage in storage_map.values() {
+    for storage in storage_handler.map.values() {
         inmemory_write_size += storage.inmemory_write_size();
         inmemory_read_size += storage.inmemory_read_size();
         file_count += storage.file_count();
@@ -917,8 +927,11 @@ mod test {
 
         let (mut serializer, data_tx, net_rx) = defaults(config);
 
-        let mut storage =
-            serializer.storage_map.entry("hello/world".to_string()).or_insert(Storage::new(1024));
+        let mut storage = serializer
+            .storage_handler
+            .map
+            .entry("hello/world".to_string())
+            .or_insert(Storage::new(1024));
 
         let mut collector = MockCollector::new(data_tx);
         // Run a collector practically once
@@ -966,8 +979,11 @@ mod test {
 
         let (mut serializer, data_tx, _) = defaults(config);
 
-        let mut storage =
-            serializer.storage_map.entry("hello/world".to_string()).or_insert(Storage::new(1024));
+        let mut storage = serializer
+            .storage_handler
+            .map
+            .entry("hello/world".to_string())
+            .or_insert(Storage::new(1024));
 
         let mut collector = MockCollector::new(data_tx);
         // Run a collector
