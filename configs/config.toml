@@ -91,7 +91,7 @@ buf_size = 1
 persistance = false
 
 [streams.imu]
-topic = "/tenants/{tenant_id}/devices/{device_id}/events/imu/jsonarray"
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/imu/jsonarray/lz4"
 buf_size = 100
 compression = "Lz4"
 
