@@ -208,13 +208,10 @@ impl<C: MqttClient> Serializer<C> {
         })
     }
 
-    fn select_storage(&mut self, topic: &str) -> Result<&mut Storage, Error> {
-        let storage = self
-            .storage_map
+    fn select_storage(&mut self, topic: &str) -> &mut Storage {
+        self.storage_map
             .entry(topic.to_owned())
-            .or_insert_with(|| Storage::new(default_file_size()));
-
-        Ok(storage)
+            .or_insert_with(|| Storage::new(default_file_size()))
     }
 
     fn next_storage(&mut self) -> Result<&mut Storage, Error> {
@@ -242,7 +239,7 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Write all data received, from here-on, to disk only.
     async fn crash(&mut self, publish: Publish) -> Result<Status, Error> {
-        let storage = self.select_storage(&publish.topic)?;
+        let storage = self.select_storage(&publish.topic);
         // Write failed publish to disk first, metrics don't matter
         match write_to_disk(publish, storage) {
             Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
@@ -254,7 +251,7 @@ impl<C: MqttClient> Serializer<C> {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
             let publish = construct_publish(data)?;
-            let storage = self.select_storage(&publish.topic)?;
+            let storage = self.select_storage(&publish.topic);
             match write_to_disk(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
@@ -282,7 +279,7 @@ impl<C: MqttClient> Serializer<C> {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
                     let publish = construct_publish(data)?;
-                    let storage = self.select_storage(&publish.topic)?;
+                    let storage = self.select_storage(&publish.topic);
                     match write_to_disk(publish, storage) {
                         Ok(Some(deleted)) => {
                             debug!("Lost segment = {deleted}");
@@ -366,7 +363,7 @@ impl<C: MqttClient> Serializer<C> {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
                     let publish = construct_publish(data)?;
-                    let storage = self.select_storage(&publish.topic)?;
+                    let storage = self.select_storage(&publish.topic);
                     match write_to_disk(publish, storage) {
                         Ok(Some(deleted)) => {
                             debug!("Lost segment = {deleted}");
