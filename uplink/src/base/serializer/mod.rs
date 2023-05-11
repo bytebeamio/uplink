@@ -330,7 +330,11 @@ impl<C: MqttClient> Serializer<C> {
             }
         };
 
-        // save_and_prepare_next_metrics(&mut self.pending_metrics, &mut self.metrics, &self.storage);
+        save_and_prepare_next_metrics(
+            &mut self.pending_metrics,
+            &mut self.metrics,
+            &self.storage_handler,
+        );
         let v = v?;
         Ok(v)
     }
@@ -423,8 +427,6 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     self.metrics.add_batch();
-                    // self.metrics.set_write_memory(self.storage.inmemory_read_size());
-                    // self.metrics.set_disk_files(self.storage.file_count());
 
                     let payload = publish.payload;
                     last_publish_payload_size = payload.len();
