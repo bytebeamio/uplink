@@ -158,18 +158,14 @@ impl StorageHandler {
         self.map.entry(topic.to_owned()).or_insert_with(|| Storage::new(default_file_size()))
     }
 
-    fn next(&mut self, metrics: &mut SerializerMetrics) -> Result<&mut Storage, Error> {
+    fn next(&mut self, metrics: &mut SerializerMetrics) -> Option<&mut Storage> {
         let mut storages = self.map.values_mut();
 
-        loop {
-            let storage = match storages.next() {
-                Some(s) => s,
-                _ => return Err(Error::EmptyStorage),
-            };
+        while let Some(storage) = storages.next() {
             match storage.reload_on_eof() {
                 // Done reading all the pending files
                 Ok(true) => continue,
-                Ok(false) => return Ok(storage),
+                Ok(false) => return Some(storage),
                 // Reload again on encountering a corrupted file
                 Err(e) => {
                     metrics.increment_errors();
@@ -179,6 +175,8 @@ impl StorageHandler {
                 }
             }
         }
+
+        None
     }
 }
 
@@ -354,9 +352,8 @@ impl<C: MqttClient> Serializer<C> {
         let client = self.client.clone();
 
         let storage = match self.storage_handler.next(&mut self.metrics) {
-            Ok(s) => s,
-            Err(Error::EmptyStorage) => return Ok(Status::Normal),
-            Err(e) => unreachable!("Unexpected error: {e}"),
+            Some(s) => s,
+            _ => return Ok(Status::Normal),
         };
 
         // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
@@ -412,9 +409,8 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     let storage = match self.storage_handler.next(&mut self.metrics) {
-                        Ok(s) => s,
-                        Err(Error::EmptyStorage) => return Ok(Status::Normal),
-                        Err(e) => unreachable!("Unexpected error: {e}"),
+                        Some(s) => s,
+                        _ => return Ok(Status::Normal),
                     };
 
                     let publish = match read(storage.reader(), max_packet_size) {
