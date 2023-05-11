@@ -62,8 +62,6 @@ blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 #   unconfigured, stream will be created dynamically.
 # - flush-period(optional): Duration in seconds after a data point enters the stream
 #   and WILL be flushed by collector. Defaults to 60s in case not configured.
-# - persistance(optional): a boolean value that is used to configure if a stream
-#   should be persisted to disk in case of network outage. Defaults to true.
 # - compression(optional): an enum values to determine what compression the serializer
 #   should perform on the data transiting through the stream. Currently supported
 #   compression schemes are Lz4 and Disabled. Defaults to Disabled.
@@ -75,7 +73,6 @@ blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 [streams.device_shadow]
 topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
 buf_size = 1
-persistance = false
 
 # Example using compression
 [streams.imu]
