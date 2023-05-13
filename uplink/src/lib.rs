@@ -353,13 +353,7 @@ impl Uplink {
         // Serializer thread to handle network conditions state machine
         // and send data to mqtt thread
         thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("serializer")
-                .enable_time()
-                .build()
-                .unwrap();
-
-            rt.block_on(async {
+            tokio_uring::start(async {
                 if let Err(e) = serializer.start().await {
                     error!("Serializer stopped!! Error = {:?}", e);
                 }

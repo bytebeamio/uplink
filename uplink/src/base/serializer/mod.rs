@@ -158,11 +158,11 @@ impl StorageHandler {
         self.map.entry(topic.to_owned()).or_insert_with(|| Storage::new(default_file_size()))
     }
 
-    fn next(&mut self, metrics: &mut SerializerMetrics) -> Option<&mut Storage> {
+    async fn next(&mut self, metrics: &mut SerializerMetrics) -> Option<&mut Storage> {
         let mut storages = self.map.values_mut();
 
         while let Some(storage) = storages.next() {
-            match storage.reload_on_eof() {
+            match storage.reload_on_eof().await {
                 // Done reading all the pending files
                 Ok(true) => continue,
                 Ok(false) => return Some(storage),
@@ -257,7 +257,7 @@ impl<C: MqttClient> Serializer<C> {
     async fn crash(&mut self, publish: Publish) -> Result<Status, Error> {
         let storage = self.storage_handler.select(&publish.topic);
         // Write failed publish to disk first, metrics don't matter
-        match write_to_disk(publish, storage) {
+        match write_to_disk(publish, storage).await {
             Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
             Ok(_) => {}
             Err(e) => error!("Crash loop: write error = {:?}", e),
@@ -268,7 +268,7 @@ impl<C: MqttClient> Serializer<C> {
             let data = self.collector_rx.recv_async().await?;
             let publish = construct_publish(data)?;
             let storage = self.storage_handler.select(&publish.topic);
-            match write_to_disk(publish, storage) {
+            match write_to_disk(publish, storage).await {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
                 Err(e) => error!("Crash loop: write error = {:?}", e),
@@ -296,7 +296,7 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
                     let publish = construct_publish(data)?;
                     let storage = self.storage_handler.select(&publish.topic);
-                    match write_to_disk(publish, storage) {
+                    match write_to_disk(publish, storage).await {
                         Ok(Some(deleted)) => {
                             debug!("Lost segment = {deleted}");
                             self.metrics.increment_lost_segments();
@@ -351,7 +351,7 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.mqtt.max_packet_size;
         let client = self.client.clone();
 
-        let storage = match self.storage_handler.next(&mut self.metrics) {
+        let storage = match self.storage_handler.next(&mut self.metrics).await {
             Some(s) => s,
             _ => return Ok(Status::Normal),
         };
@@ -383,7 +383,7 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
                     let publish = construct_publish(data)?;
                     let storage = self.storage_handler.select(&publish.topic);
-                    match write_to_disk(publish, storage) {
+                    match write_to_disk(publish, storage).await {
                         Ok(Some(deleted)) => {
                             debug!("Lost segment = {deleted}");
                             self.metrics.increment_lost_segments();
@@ -408,7 +408,7 @@ impl<C: MqttClient> Serializer<C> {
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
-                    let storage = match self.storage_handler.next(&mut self.metrics) {
+                    let storage = match self.storage_handler.next(&mut self.metrics).await {
                         Some(s) => s,
                         _ => return Ok(Status::Normal),
                     };
@@ -536,7 +536,7 @@ fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
 // Writes the provided publish packet to disk with [Storage], after setting its pkid to 1.
 // Updates serializer metrics with appropriate values on success, if asked to do so.
 // Returns size in memory, size in disk, number of files in disk,
-fn write_to_disk(
+async fn write_to_disk(
     mut publish: Publish,
     storage: &mut Storage,
 ) -> Result<Option<u64>, storage::Error> {
@@ -546,7 +546,7 @@ fn write_to_disk(
         return Ok(None);
     }
 
-    let deleted = storage.flush_on_overflow()?;
+    let deleted = storage.flush_on_overflow().await?;
     Ok(deleted)
 }
 
@@ -720,8 +720,8 @@ mod test {
         }
     }
 
-    fn read_from_storage(storage: &mut Storage, max_packet_size: usize) -> Publish {
-        if storage.reload_on_eof().unwrap() {
+    async fn read_from_storage(storage: &mut Storage, max_packet_size: usize) -> Publish {
+        if storage.reload_on_eof().await.unwrap() {
             panic!("No publishes found in storage");
         }
 
@@ -821,24 +821,26 @@ mod test {
     #[test]
     // Force write publish to storage and verify by reading back
     fn read_write_storage() {
-        let config = Arc::new(default_config());
+        tokio_uring::start(async {
+            let config = Arc::new(default_config());
 
-        let (serializer, _, _) = defaults(config);
-        let mut storage = Storage::new(1024);
+            let (serializer, _, _) = defaults(config);
+            let mut storage = Storage::new(1024);
 
-        let mut publish = Publish::new(
-            "hello/world",
-            QoS::AtLeastOnce,
-            "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
-        );
-        write_to_disk(publish.clone(), &mut storage).unwrap();
+            let mut publish = Publish::new(
+                "hello/world",
+                QoS::AtLeastOnce,
+                "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+            );
+            write_to_disk(publish.clone(), &mut storage).await.unwrap();
 
-        let stored_publish =
-            read_from_storage(&mut storage, serializer.config.mqtt.max_packet_size);
+            let stored_publish =
+                read_from_storage(&mut storage, serializer.config.mqtt.max_packet_size).await;
 
-        // Ensure publish.pkid is 1, as written to disk
-        publish.pkid = 1;
-        assert_eq!(publish, stored_publish);
+            // Ensure publish.pkid is 1, as written to disk
+            publish.pkid = 1;
+            assert_eq!(publish, stored_publish);
+        });
     }
 
     #[test]
@@ -920,92 +922,98 @@ mod test {
     #[test]
     // Force runs serializer in catchup mode, with data already in persistence
     fn catchup_to_normal_with_persistence() {
-        let config = Arc::new(default_config());
+        tokio_uring::start(async {
+            let config = Arc::new(default_config());
 
-        let (mut serializer, data_tx, net_rx) = defaults(config);
+            let (mut serializer, data_tx, net_rx) = defaults(config);
 
-        let mut storage = serializer
-            .storage_handler
-            .map
-            .entry("hello/world".to_string())
-            .or_insert(Storage::new(1024));
+            let mut storage = serializer
+                .storage_handler
+                .map
+                .entry("hello/world".to_string())
+                .or_insert(Storage::new(1024));
 
-        let mut collector = MockCollector::new(data_tx);
-        // Run a collector practically once
-        std::thread::spawn(move || {
-            for i in 2..6 {
-                collector.send(i).unwrap();
-                std::thread::sleep(Duration::from_secs(100));
-            }
-        });
-
-        // Decent network that lets collector push data once into storage
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(5));
-            for i in 1..6 {
-                match net_rx.recv().unwrap() {
-                    Request::Publish(Publish { payload, .. }) => {
-                        let recvd = String::from_utf8(payload.to_vec()).unwrap();
-                        let expected = format!(
-                            "[{{\"sequence\":{i},\"timestamp\":0,\"msg\":\"Hello, World!\"}}]",
-                        );
-                        assert_eq!(recvd, expected)
-                    }
-                    r => unreachable!("Unexpected request: {:?}", r),
+            let mut collector = MockCollector::new(data_tx);
+            // Run a collector practically once
+            std::thread::spawn(move || {
+                for i in 2..6 {
+                    collector.send(i).unwrap();
+                    std::thread::sleep(Duration::from_secs(100));
                 }
-            }
+            });
+
+            // Decent network that lets collector push data once into storage
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(5));
+                for i in 1..6 {
+                    match net_rx.recv().unwrap() {
+                        Request::Publish(Publish { payload, .. }) => {
+                            let recvd = String::from_utf8(payload.to_vec()).unwrap();
+                            let expected = format!(
+                                "[{{\"sequence\":{i},\"timestamp\":0,\"msg\":\"Hello, World!\"}}]",
+                            );
+                            assert_eq!(recvd, expected)
+                        }
+                        r => unreachable!("Unexpected request: {:?}", r),
+                    }
+                }
+            });
+
+            // Force write a publish into storage
+            let publish = Publish::new(
+                "hello/world",
+                QoS::AtLeastOnce,
+                "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+            );
+            write_to_disk(publish.clone(), &mut storage).await.unwrap();
+
+            let status = serializer.catchup().await.unwrap();
+            assert_eq!(status, Status::Normal);
         });
-
-        // Force write a publish into storage
-        let publish = Publish::new(
-            "hello/world",
-            QoS::AtLeastOnce,
-            "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
-        );
-        write_to_disk(publish.clone(), &mut storage).unwrap();
-
-        let status =
-            tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap();
-        assert_eq!(status, Status::Normal);
     }
 
     #[test]
     // Force runs serializer in catchup mode, with persistence and crashed network
     fn catchup_to_crash_with_persistence() {
-        let config = Arc::new(default_config());
+        tokio_uring::start(async {
+            let config = Arc::new(default_config());
 
-        let (mut serializer, data_tx, _) = defaults(config);
+            let (mut serializer, data_tx, _) = defaults(config);
 
-        let mut storage = serializer
-            .storage_handler
-            .map
-            .entry("hello/world".to_string())
-            .or_insert(Storage::new(1024));
+            let mut storage = serializer
+                .storage_handler
+                .map
+                .entry("hello/world".to_string())
+                .or_insert(Storage::new(1024));
 
-        let mut collector = MockCollector::new(data_tx);
-        // Run a collector
-        std::thread::spawn(move || {
-            for i in 2..6 {
-                collector.send(i).unwrap();
-                std::thread::sleep(Duration::from_secs(10));
+            let mut collector = MockCollector::new(data_tx);
+            // Run a collector
+            std::thread::spawn(move || {
+                for i in 2..6 {
+                    collector.send(i).unwrap();
+                    std::thread::sleep(Duration::from_secs(10));
+                }
+            });
+
+            // Force write a publish into storage
+            let publish = Publish::new(
+                "hello/world",
+                QoS::AtLeastOnce,
+                "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+            );
+            write_to_disk(publish.clone(), &mut storage).await.unwrap();
+
+            match serializer.catchup().await.unwrap() {
+                Status::EventLoopCrash(Publish { topic, payload, .. }) => {
+                    assert_eq!(topic, "hello/world");
+                    let recvd = std::str::from_utf8(&payload).unwrap();
+                    assert_eq!(
+                        recvd,
+                        "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]"
+                    );
+                }
+                s => unreachable!("Unexpected status: {:?}", s),
             }
         });
-
-        // Force write a publish into storage
-        let publish = Publish::new(
-            "hello/world",
-            QoS::AtLeastOnce,
-            "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
-        );
-        write_to_disk(publish.clone(), &mut storage).unwrap();
-
-        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
-            Status::EventLoopCrash(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "hello/world");
-                let recvd = std::str::from_utf8(&payload).unwrap();
-                assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
-            }
-            s => unreachable!("Unexpected status: {:?}", s),
-        }
     }
 }

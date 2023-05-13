@@ -15,6 +15,7 @@ tracing-subscriber = { version="=0.3.14", features=["env-filter"] }
 time = "0.3"
 storage = { path = "../storage" }
 tokio = { version = "1", features = ["full"] }
+tokio-uring = "0.4"
 tokio-util = { version = "0.7", features = ["codec", "time"] }
 tokio-stream = "0.1"
 tokio-compat-02 = "0.2.0"
