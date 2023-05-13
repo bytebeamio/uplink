@@ -1,16 +1,15 @@
 use bytes::{Buf, BufMut, BytesMut};
 use log::{self, error, info, warn};
 use seahash::hash;
+use tokio_uring::fs::{File, OpenOptions};
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
-use std::mem;
 use std::path::{Path, PathBuf};
+use std::{fs, mem};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Io error: {0}")]
-    Io(#[from] io::Error),
+    Io(#[from] std::io::Error),
     #[error("Not a backup file")]
     NotBackup,
     #[error("Corrupted backup file")]
@@ -73,7 +72,7 @@ impl Storage {
 
     /// Checks current write buffer size and flushes it to disk when the size
     /// exceeds configured size
-    pub fn flush_on_overflow(&mut self) -> Result<Option<u64>, Error> {
+    pub async fn flush_on_overflow(&mut self) -> Result<Option<u64>, Error> {
         if self.current_write_file.len() < self.max_file_size {
             return Ok(None);
         }
@@ -81,13 +80,18 @@ impl Storage {
         match &mut self.persistence {
             Some(persistence) => {
                 let hash = hash(&self.current_write_file[..]);
-                let mut next_file = persistence.open_next_write_file()?;
+                let next_file = persistence.open_next_write_file().await?;
                 info!("Flushing data to disk!! {:?}", next_file.path);
 
-                next_file.file.write_all(&hash.to_be_bytes())?;
-                next_file.file.write_all(&self.current_write_file[..])?;
-                next_file.file.flush()?;
+                let (res, _) = next_file.file.write_at(hash.to_be_bytes().to_vec(), 0).await;
+                res?;
+                let buf = self.current_write_file.split_off(0).to_vec();
+                let (res, _) = next_file.file.write_at(buf, 8).await;
+                res?;
+                next_file.file.sync_all().await?;
                 self.current_write_file.clear();
+                next_file.file.close().await?;
+
                 Ok(next_file.deleted)
             }
             None => {
@@ -104,7 +108,7 @@ impl Storage {
     /// swaps current write buffer to current read buffer if there
     /// is pending data in memory write buffer.
     /// Returns true if all the messages are caught up
-    pub fn reload_on_eof(&mut self) -> Result<bool, Error> {
+    pub async fn reload_on_eof(&mut self) -> Result<bool, Error> {
         // Don't reload if there is data in current read file
         if self.current_read_file.has_remaining() {
             return Ok(false);
@@ -124,7 +128,7 @@ impl Storage {
                 return Ok(self.current_read_file.is_empty());
             }
 
-            if let Err(e) = persistence.load_next_read_file(&mut self.current_read_file) {
+            if let Err(e) = persistence.load_next_read_file(&mut self.current_read_file).await {
                 self.current_read_file.clear();
                 persistence.current_read_file_id.take();
                 return Err(e);
@@ -243,11 +247,11 @@ impl Persistence {
 
     /// Opens file to flush current inmemory write buffer to disk.
     /// Also handles retention of previous files on disk
-    fn open_next_write_file(&mut self) -> Result<NextFile, Error> {
+    async fn open_next_write_file(&mut self) -> Result<NextFile, Error> {
         let next_file_id = self.backlog_files.last().map_or(0, |id| id + 1);
         let file_name = format!("backup@{next_file_id}");
         let next_file_path = self.path.join(file_name);
-        let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path)?;
+        let next_file = OpenOptions::new().write(true).create(true).open(&next_file_path).await?;
 
         self.backlog_files.push(next_file_id);
 
@@ -279,22 +283,21 @@ impl Persistence {
         Ok(next)
     }
 
-    fn load_next_read_file(&mut self, current_read_file: &mut BytesMut) -> Result<(), Error> {
+    async fn load_next_read_file(&mut self, current_read_file: &mut BytesMut) -> Result<(), Error> {
         // Len always > 0 because of above if. Doesn't panic
         let id = self.backlog_files.remove(0);
         let next_file_path = self.path(id)?;
 
-        let mut file = OpenOptions::new().read(true).open(&next_file_path)?;
+        let file = OpenOptions::new().read(true).open(&next_file_path).await?;
 
         // Load file into memory and store its id for deleting in the future
         let metadata = fs::metadata(&next_file_path)?;
 
-        // Initialize next read file with 0s
         current_read_file.clear();
-        let init = vec![0u8; metadata.len() as usize];
-        current_read_file.put_slice(&init);
 
-        file.read_exact(&mut current_read_file[..])?;
+        let (res, buf) = file.read_at(vec![0u8; metadata.len() as usize], 0).await;
+        res?;
+        current_read_file.put_slice(&buf[..]);
         self.current_read_file_id = Some(id);
 
         // Verify with checksum
@@ -330,20 +333,20 @@ mod test {
         backup
     }
 
-    fn write_n_publishes(storage: &mut Storage, n: u8) {
+    async fn write_n_publishes(storage: &mut Storage, n: u8) {
         for i in 0..n {
             let mut publish = Publish::new("hello", QoS::AtLeastOnce, vec![i; 1024]);
             publish.pkid = 1;
             publish.write(storage.writer()).unwrap();
-            storage.flush_on_overflow().unwrap();
+            storage.flush_on_overflow().await.unwrap();
         }
     }
 
-    fn read_n_publishes(storage: &mut Storage, n: usize) -> Vec<Publish> {
+    async fn read_n_publishes(storage: &mut Storage, n: usize) -> Vec<Publish> {
         let mut publishes = vec![];
         for _ in 0..n {
             // Done reading all the pending files
-            if storage.reload_on_eof().unwrap() {
+            if storage.reload_on_eof().await.unwrap() {
                 break;
             }
 
@@ -358,138 +361,150 @@ mod test {
 
     #[test]
     fn flush_creates_new_file_after_size_limit() {
-        // 1036 is the size of a publish message with topic = "hello", qos = 1, payload = 1024 bytes
-        let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
-        storage.set_persistence(backup.path(), 10).unwrap();
+        tokio_uring::start(async {
+            // 1036 is the size of a publish message with topic = "hello", qos = 1, payload = 1024 bytes
+            let backup = init_backup_folders();
+            let mut storage = Storage::new(10 * 1036);
+            storage.set_persistence(backup.path(), 10).unwrap();
 
-        // 2 files on disk and a partially filled in memory buffer
-        write_n_publishes(&mut storage, 101);
+            // 2 files on disk and a partially filled in memory buffer
+            write_n_publishes(&mut storage, 101).await;
 
-        // 1 message in in memory writer
-        assert_eq!(storage.writer().len(), 1036);
+            // 1 message in in memory writer
+            assert_eq!(storage.writer().len(), 1036);
 
-        // other messages on disk
-        let files = get_file_ids(&backup.path()).unwrap();
-        assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+            // other messages on disk
+            let files = get_file_ids(&backup.path()).unwrap();
+            assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        })
     }
 
     #[test]
     fn old_file_is_deleted_after_limit() {
-        let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
-        storage.set_persistence(backup.path(), 10).unwrap();
+        tokio_uring::start(async {
+            let backup = init_backup_folders();
+            let mut storage = Storage::new(10 * 1036);
+            storage.set_persistence(backup.path(), 10).unwrap();
 
-        // 11 files created. 10 on disk
-        write_n_publishes(&mut storage, 110);
+            // 11 files created. 10 on disk
+            write_n_publishes(&mut storage, 110).await;
 
-        let files = get_file_ids(&backup.path()).unwrap();
-        assert_eq!(files, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+            let files = get_file_ids(&backup.path()).unwrap();
+            assert_eq!(files, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
-        // 11 files created. 10 on disk
-        write_n_publishes(&mut storage, 10);
+            // 11 files created. 10 on disk
+            write_n_publishes(&mut storage, 10).await;
 
-        assert_eq!(storage.writer().len(), 0);
-        let files = get_file_ids(&backup.path()).unwrap();
-        assert_eq!(files, vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+            assert_eq!(storage.writer().len(), 0);
+            let files = get_file_ids(&backup.path()).unwrap();
+            assert_eq!(files, vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+        })
     }
 
     #[test]
     fn reload_loads_correct_file_into_memory() {
-        let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
-        storage.set_persistence(backup.path(), 10).unwrap();
+        tokio_uring::start(async {
+            let backup = init_backup_folders();
+            let mut storage = Storage::new(10 * 1036);
+            storage.set_persistence(backup.path(), 10).unwrap();
 
-        // 10 files on disk
-        write_n_publishes(&mut storage, 100);
+            // 10 files on disk
+            write_n_publishes(&mut storage, 100).await;
 
-        // breaks after 100th iteration due to `reload_on_eof` break
-        let publishes = read_n_publishes(&mut storage, 1234);
+            // breaks after 100th iteration due to `reload_on_eof` break
+            let publishes = read_n_publishes(&mut storage, 1234).await;
 
-        assert_eq!(publishes.len(), 100);
-        for (i, publish) in publishes.iter().enumerate() {
-            assert_eq!(&publish.payload[..], vec![i as u8; 1024].as_slice());
-        }
+            assert_eq!(publishes.len(), 100);
+            for (i, publish) in publishes.iter().enumerate() {
+                assert_eq!(&publish.payload[..], vec![i as u8; 1024].as_slice());
+            }
+        })
     }
 
     #[test]
     fn reload_loads_partially_written_write_buffer_correctly() {
-        let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
-        storage.set_persistence(backup.path(), 10).unwrap();
+        tokio_uring::start(async {
+            let backup = init_backup_folders();
+            let mut storage = Storage::new(10 * 1036);
+            storage.set_persistence(backup.path(), 10).unwrap();
 
-        // 10 files on disk and partially filled current write buffer
-        write_n_publishes(&mut storage, 105);
+            // 10 files on disk and partially filled current write buffer
+            write_n_publishes(&mut storage, 105).await;
 
-        // breaks after 100th iteration due to `reload_on_eof` break
-        let publishes = read_n_publishes(&mut storage, 12345);
+            // breaks after 100th iteration due to `reload_on_eof` break
+            let publishes = read_n_publishes(&mut storage, 12345).await;
 
-        assert_eq!(storage.current_write_file.len(), 0);
-        assert_eq!(publishes.len(), 105);
-        for (i, publish) in publishes.iter().enumerate() {
-            assert_eq!(&publish.payload[..], vec![i as u8; 1024].as_slice());
-        }
+            assert_eq!(storage.current_write_file.len(), 0);
+            assert_eq!(publishes.len(), 105);
+            for (i, publish) in publishes.iter().enumerate() {
+                assert_eq!(&publish.payload[..], vec![i as u8; 1024].as_slice());
+            }
+        })
     }
 
     #[test]
     fn ensure_file_remove_on_read_completion_only() {
-        let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
-        storage.set_persistence(backup.path(), 10).unwrap();
-        // 10 files on disk and partially filled current write buffer, 10 publishes per file
-        write_n_publishes(&mut storage, 105);
+        tokio_uring::start(async {
+            let backup = init_backup_folders();
+            let mut storage = Storage::new(10 * 1036);
+            storage.set_persistence(backup.path(), 10).unwrap();
+            // 10 files on disk and partially filled current write buffer, 10 publishes per file
+            write_n_publishes(&mut storage, 105).await;
 
-        // Initially not on a read file
-        assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
+            // Initially not on a read file
+            assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
-        // Ensure unread files are all present before read
-        let files = get_file_ids(&backup.path()).unwrap();
-        assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-
-        // Successfully read 10 files with files still in storage after 10 reads
-        for i in 0..10 {
-            read_n_publishes(&mut storage, 10);
-            let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
-            assert_eq!(file_id, i);
-            // Ensure partially read file is still present in backup dir
+            // Ensure unread files are all present before read
             let files = get_file_ids(&backup.path()).unwrap();
-            assert!(files.contains(&i));
-        }
+            assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
-        // All read files should be deleted just after 1 more read
-        read_n_publishes(&mut storage, 1);
-        assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
+            // Successfully read 10 files with files still in storage after 10 reads
+            for i in 0..10 {
+                read_n_publishes(&mut storage, 10).await;
+                let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
+                assert_eq!(file_id, i);
+                // Ensure partially read file is still present in backup dir
+                let files = get_file_ids(&backup.path()).unwrap();
+                assert!(files.contains(&i));
+            }
 
-        // Ensure read files are all present before read
-        let files = get_file_ids(&backup.path()).unwrap();
-        assert_eq!(files, vec![]);
+            // All read files should be deleted just after 1 more read
+            read_n_publishes(&mut storage, 1).await;
+            assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
+
+            // Ensure read files are all present before read
+            let files = get_file_ids(&backup.path()).unwrap();
+            assert_eq!(files, vec![]);
+        })
     }
 
     #[test]
     fn ensure_files_including_read_removed_post_flush_on_overflow() {
-        let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
-        storage.set_persistence(backup.path(), 10).unwrap();
-        // 10 files on disk and partially filled current write buffer, 10 publishes per file
-        write_n_publishes(&mut storage, 105);
+        tokio_uring::start(async {
+            let backup = init_backup_folders();
+            let mut storage = Storage::new(10 * 1036);
+            storage.set_persistence(backup.path(), 10).unwrap();
+            // 10 files on disk and partially filled current write buffer, 10 publishes per file
+            write_n_publishes(&mut storage, 105).await;
 
-        // Initially not on a read file
-        assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
+            // Initially not on a read file
+            assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
-        // Successfully read a single file
-        read_n_publishes(&mut storage, 10);
-        let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
-        assert_eq!(file_id, 0);
+            // Successfully read a single file
+            read_n_publishes(&mut storage, 10).await;
+            let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
+            assert_eq!(file_id, 0);
 
-        // Ensure all persistance files still exist
-        let files = get_file_ids(&backup.path()).unwrap();
-        assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+            // Ensure all persistance files still exist
+            let files = get_file_ids(&backup.path()).unwrap();
+            assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
-        // Write 10 more files onto disk, 10 publishes per file
-        write_n_publishes(&mut storage, 100);
+            // Write 10 more files onto disk, 10 publishes per file
+            write_n_publishes(&mut storage, 100).await;
 
-        // Ensure none of the earlier files exist on disk
-        let files = get_file_ids(&backup.path()).unwrap();
-        assert_eq!(files, vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+            // Ensure none of the earlier files exist on disk
+            let files = get_file_ids(&backup.path()).unwrap();
+            assert_eq!(files, vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+        })
     }
 }
