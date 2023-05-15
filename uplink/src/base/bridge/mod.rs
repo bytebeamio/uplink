@@ -18,6 +18,8 @@ pub use metrics::StreamMetrics;
 use stream::Stream;
 use streams::Streams;
 
+use super::Compression;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Receiver error {0}")]
@@ -49,6 +51,7 @@ pub trait Package: Send + Debug {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    fn compression(&self) -> Compression;
 }
 
 // TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json

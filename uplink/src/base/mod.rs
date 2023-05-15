@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
 
@@ -7,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(any(target_os = "android"))]
 use crate::collector::logcat::LogcatConfig;
+
+use self::bridge::stream::MAX_BUFFER_SIZE;
 
 pub mod actions;
 pub mod bridge;
@@ -33,7 +36,14 @@ pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default)]
+pub enum Compression {
+    #[default]
+    Disabled,
+    Lz4,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct StreamConfig {
     pub topic: String,
     pub buf_size: usize,
@@ -41,13 +51,41 @@ pub struct StreamConfig {
     /// Duration(in seconds) that bridge collector waits from
     /// receiving first element, before the stream gets flushed.
     pub flush_period: u64,
+    #[serde(default)]
+    pub compression: Compression,
+    #[serde(default)]
+    pub persistence: Persistence,
+}
+
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            topic: "".to_string(),
+            buf_size: MAX_BUFFER_SIZE,
+            flush_period: default_timeout(),
+            compression: Compression::Disabled,
+            persistence: Persistence::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Persistence {
-    pub path: String,
     #[serde(default = "default_file_size")]
     pub max_file_size: usize,
+    #[serde(flatten)]
+    pub disk: Option<Disk>,
+}
+
+impl Default for Persistence {
+    fn default() -> Self {
+        Persistence { max_file_size: default_file_size(), disk: None }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Disk {
+    pub path: PathBuf,
     #[serde(default = "default_file_count")]
     pub max_file_count: usize,
 }
@@ -164,7 +202,6 @@ pub struct Config {
     pub processes: Vec<ActionRoute>,
     #[serde(skip)]
     pub actions_subscription: String,
-    pub persistence: Option<Persistence>,
     pub streams: HashMap<String, StreamConfig>,
     pub action_status: StreamConfig,
     pub stream_metrics: StreamMetricsConfig,

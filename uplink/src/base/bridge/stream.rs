@@ -4,7 +4,7 @@ use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::Serialize;
 
-use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
+use crate::base::{Compression, StreamConfig, DEFAULT_TIMEOUT};
 
 use super::{Package, Point, StreamMetrics};
 
@@ -35,6 +35,7 @@ pub struct Stream<T> {
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
     pub metrics: StreamMetrics,
+    compression: Compression,
 }
 
 impl<T> Stream<T>
@@ -47,10 +48,11 @@ where
         topic: impl Into<String>,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
+        compression: Compression,
     ) -> Stream<T> {
         let name = Arc::new(stream.into());
         let topic = Arc::new(topic.into());
-        let buffer = Buffer::new(name.clone(), topic.clone());
+        let buffer = Buffer::new(name.clone(), topic.clone(), compression);
         let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
         let metrics = StreamMetrics::new(&name, max_buffer_size);
 
@@ -64,6 +66,7 @@ where
             buffer,
             tx,
             metrics,
+            compression,
         }
     }
 
@@ -72,7 +75,7 @@ where
         config: &StreamConfig,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx);
+        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx, config.compression);
         stream.flush_period = Duration::from_secs(config.flush_period);
         stream
     }
@@ -96,7 +99,7 @@ where
             + &stream
             + "/jsonarray";
 
-        Stream::new(stream, topic, max_buffer_size, tx)
+        Stream::new(stream, topic, max_buffer_size, tx, Compression::Disabled)
     }
 
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
@@ -140,7 +143,7 @@ where
         let topic = self.topic.clone();
         trace!("Flushing stream name: {}, topic: {}", name, topic);
 
-        mem::replace(&mut self.buffer, Buffer::new(name, topic))
+        mem::replace(&mut self.buffer, Buffer::new(name, topic, self.compression))
     }
 
     /// Triggers flush and async channel send if not empty
@@ -211,16 +214,18 @@ pub struct Buffer<T> {
     pub buffer: Vec<T>,
     pub anomalies: String,
     pub anomaly_count: usize,
+    pub compression: Compression,
 }
 
 impl<T> Buffer<T> {
-    pub fn new(stream: Arc<String>, topic: Arc<String>) -> Buffer<T> {
+    pub fn new(stream: Arc<String>, topic: Arc<String>, compression: Compression) -> Buffer<T> {
         Buffer {
             stream,
             topic,
             buffer: vec![],
             anomalies: String::with_capacity(100),
             anomaly_count: 0,
+            compression,
         }
     }
 
@@ -285,6 +290,10 @@ where
     fn latency(&self) -> u64 {
         0
     }
+
+    fn compression(&self) -> Compression {
+        self.compression
+    }
 }
 
 impl<T> Clone for Stream<T> {
@@ -296,9 +305,14 @@ impl<T> Clone for Stream<T> {
             topic: self.topic.clone(),
             last_sequence: 0,
             last_timestamp: 0,
-            buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.topic.clone()),
+            buffer: Buffer::new(
+                self.buffer.stream.clone(),
+                self.buffer.topic.clone(),
+                self.compression,
+            ),
             metrics: StreamMetrics::new(&self.name, self.max_buffer_size),
             tx: self.tx.clone(),
+            compression: self.compression,
         }
     }
 }

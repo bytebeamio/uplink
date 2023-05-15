@@ -48,6 +48,7 @@ use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
+use base::Compression;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
@@ -60,8 +61,8 @@ pub mod base;
 pub mod collector;
 
 pub mod config {
+    use crate::base::{bridge::stream::MAX_BUFFER_SIZE, StreamConfig};
     pub use crate::base::{Config, Persistence, Stats};
-    use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
     use config::{Environment, File, FileFormat};
     use std::fs;
     use structopt::StructOpt;
@@ -156,10 +157,6 @@ pub mod config {
 
         let mut config: Config = config.try_deserialize()?;
 
-        if let Some(persistence) = &config.persistence {
-            fs::create_dir_all(&persistence.path)?;
-        }
-
         // replace placeholders with device/tenant ID
         let tenant_id = config.project_id.trim();
         let device_id = config.device_id.trim();
@@ -194,8 +191,8 @@ pub mod config {
                     topic: format!(
                         "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
                     ),
-                    buf_size: config.system_stats.stream_size.unwrap_or(100),
-                    flush_period: DEFAULT_TIMEOUT,
+                    buf_size: config.system_stats.stream_size.unwrap_or(MAX_BUFFER_SIZE),
+                    ..Default::default()
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
             }
@@ -209,7 +206,7 @@ pub mod config {
                         "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
                     ),
                     buf_size: 32,
-                    flush_period: DEFAULT_TIMEOUT,
+                    ..Default::default()
                 });
             stream_config.buf_size = buf_size;
         }
@@ -271,7 +268,7 @@ use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
 pub use collector::{simulator, tcpjson::TcpJson};
-pub use disk::Storage;
+pub use storage::Storage;
 
 pub struct Uplink {
     config: Arc<Config>,
@@ -294,7 +291,13 @@ impl Uplink {
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
 
         let action_status_topic = &config.action_status.topic;
-        let action_status = Stream::new("action_status", action_status_topic, 1, data_tx.clone());
+        let action_status = Stream::new(
+            "action_status",
+            action_status_topic,
+            1,
+            data_tx.clone(),
+            Compression::Disabled,
+        );
         Ok(Uplink {
             config,
             action_rx,
