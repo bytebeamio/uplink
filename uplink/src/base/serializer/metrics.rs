@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use serde::Serialize;
 
 use crate::base::clock;
@@ -23,6 +25,12 @@ pub struct SerializerMetrics {
     pub errors: usize,
     /// Size in bytes, of serialized data sent onto network
     pub sent_size: usize,
+    /// Average data rate in bytes/second
+    pub avg_data_rate: f64,
+    #[serde(skip_serializing)]
+    total_data_size: usize,
+    #[serde(skip_serializing)]
+    start_time: Instant,
 }
 
 impl SerializerMetrics {
@@ -38,6 +46,9 @@ impl SerializerMetrics {
             lost_segments: 0,
             errors: 0,
             sent_size: 0,
+            total_data_size: 0,
+            avg_data_rate: 0.0,
+            start_time: Instant::now(),
         }
     }
 
@@ -80,6 +91,12 @@ impl SerializerMetrics {
         self.sent_size += size;
     }
 
+    pub fn add_data_size(&mut self, size: usize) {
+        self.total_data_size += size;
+        self.avg_data_rate =
+            self.total_data_size as f64 / self.start_time.elapsed().as_secs() as f64;
+    }
+
     pub fn prepare_next(&mut self) {
         self.timestamp = clock();
         self.sequence += 1;
@@ -90,5 +107,8 @@ impl SerializerMetrics {
         self.lost_segments = 0;
         self.sent_size = 0;
         self.errors = 0;
+        self.avg_data_rate = 0.0;
+        self.total_data_size = 0;
+        self.start_time = Instant::now();
     }
 }

@@ -258,7 +258,7 @@ impl<C: MqttClient> Serializer<C> {
         let storage = self.storage_handler.select(&publish.topic);
         // Write failed publish to disk first, metrics don't matter
         match write_to_disk(publish, storage) {
-            Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
+            Ok((_, Some(deleted))) => debug!("Lost segment = {deleted}"),
             Ok(_) => {}
             Err(e) => error!("Crash loop: write error = {:?}", e),
         }
@@ -269,7 +269,7 @@ impl<C: MqttClient> Serializer<C> {
             let publish = construct_publish(data)?;
             let storage = self.storage_handler.select(&publish.topic);
             match write_to_disk(publish, storage) {
-                Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
+                Ok((_, Some(deleted))) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
                 Err(e) => error!("Crash loop: write error = {:?}", e),
             }
@@ -297,11 +297,14 @@ impl<C: MqttClient> Serializer<C> {
                     let publish = construct_publish(data)?;
                     let storage = self.storage_handler.select(&publish.topic);
                     match write_to_disk(publish, storage) {
-                        Ok(Some(deleted)) => {
+                        Ok((s, Some(deleted))) => {
                             debug!("Lost segment = {deleted}");
                             self.metrics.increment_lost_segments();
+                            self.metrics.add_data_size(s);
                         }
-                        Ok(_) => {},
+                        Ok((s, _)) => {
+                            self.metrics.add_data_size(s);
+                        },
                         Err(e) => {
                             error!("Storage write error = {:?}", e);
                             self.metrics.increment_errors();
@@ -384,11 +387,14 @@ impl<C: MqttClient> Serializer<C> {
                     let publish = construct_publish(data)?;
                     let storage = self.storage_handler.select(&publish.topic);
                     match write_to_disk(publish, storage) {
-                        Ok(Some(deleted)) => {
+                        Ok((s, Some(deleted))) => {
                             debug!("Lost segment = {deleted}");
                             self.metrics.increment_lost_segments();
+                            self.metrics.add_data_size(s);
                         }
-                        Ok(_) => {},
+                        Ok((s, _)) => {
+                            self.metrics.add_data_size(s);
+                        },
                         Err(e) => {
                             error!("Storage write error = {:?}", e);
                             self.metrics.increment_errors();
@@ -539,15 +545,18 @@ fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
 fn write_to_disk(
     mut publish: Publish,
     storage: &mut Storage,
-) -> Result<Option<u64>, storage::Error> {
+) -> Result<(usize, Option<u64>), storage::Error> {
     publish.pkid = 1;
-    if let Err(e) = publish.write(storage.writer()) {
+    let buf = storage.writer();
+    let size_before = buf.len();
+    if let Err(e) = publish.write(buf) {
         error!("Failed to fill disk buffer. Error = {:?}", e);
-        return Ok(None);
+        return Ok((0, None));
     }
+    let written = buf.len() - size_before;
 
     let deleted = storage.flush_on_overflow()?;
-    Ok(deleted)
+    Ok((written, deleted))
 }
 
 fn check_metrics(metrics: &mut SerializerMetrics, storage_handler: &StorageHandler) {
