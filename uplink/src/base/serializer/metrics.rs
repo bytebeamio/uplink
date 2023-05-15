@@ -31,6 +31,8 @@ pub struct SerializerMetrics {
     total_data_size: usize,
     #[serde(skip_serializing)]
     start_time: Instant,
+    /// Average data size saving by compression in percentage
+    pub avg_data_savings: f64,
 }
 
 impl SerializerMetrics {
@@ -49,6 +51,7 @@ impl SerializerMetrics {
             total_data_size: 0,
             avg_data_rate: 0.0,
             start_time: Instant::now(),
+            avg_data_savings: 0.0,
         }
     }
 
@@ -89,6 +92,8 @@ impl SerializerMetrics {
 
     pub fn add_sent_size(&mut self, size: usize) {
         self.sent_size += size;
+        self.avg_data_savings =
+            (self.total_data_size - self.sent_size) as f64 / self.total_data_size as f64;
     }
 
     pub fn add_data_size(&mut self, size: usize) {
@@ -110,5 +115,6 @@ impl SerializerMetrics {
         self.avg_data_rate = 0.0;
         self.total_data_size = 0;
         self.start_time = Instant::now();
+        self.avg_data_savings = 0.0;
     }
 }
