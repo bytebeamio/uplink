@@ -416,20 +416,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "disk"
-version = "0.1.0"
-dependencies = [
- "bytes 1.3.0",
- "log",
- "mqttbytes",
- "pretty_env_logger",
- "rand 0.7.3",
- "seahash",
- "tempdir",
- "thiserror",
-]
-
-[[package]]
 name = "either"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2195,6 +2181,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "storage"
+version = "0.1.0"
+dependencies = [
+ "bytes 1.3.0",
+ "log",
+ "mqttbytes",
+ "pretty_env_logger",
+ "rand 0.7.3",
+ "seahash",
+ "tempdir",
+ "thiserror",
+]
+
+[[package]]
 name = "strsim"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2818,7 +2818,6 @@ dependencies = [
  "axum",
  "bytes 1.3.0",
  "config",
- "disk",
  "flate2",
  "flume",
  "futures-util",
@@ -2833,9 +2832,11 @@ dependencies = [
  "rumqttc",
  "serde",
  "serde_json",
+ "storage",
  "structopt",
  "sysinfo",
  "tar",
+ "tempdir",
  "thiserror",
  "time",
  "tokio 1.22.0",

@@ -1,4 +1,3 @@
-topic_template = "/devices/{device_id}/events/{stream_name}/tenants/{tenant_id}/jsonarray"
 processes = [{ name = "echo" }]
 
 action_redirections = { "update_firmware" = "install_update", "send_file" = "load_file" }
