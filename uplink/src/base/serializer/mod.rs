@@ -159,9 +159,9 @@ impl StorageHandler {
     }
 
     fn next(&mut self, metrics: &mut SerializerMetrics) -> Option<&mut Storage> {
-        let mut storages = self.map.values_mut();
+        let storages = self.map.values_mut();
 
-        while let Some(storage) = storages.next() {
+        for storage in storages {
             match storage.reload_on_eof() {
                 // Done reading all the pending files
                 Ok(true) => continue,
