@@ -436,7 +436,7 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
-                    let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler);
+                    check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler);
                 }
             }
         };
@@ -478,10 +478,7 @@ impl<C: MqttClient> Serializer<C> {
                 _ = interval.tick() => {
                     // Check in storage stats every tick. TODO: Make storage object always
                     // available. It can be inmemory storage
-
-                    if let Err(e) = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler) {
-                        debug!("Failed to flush serializer metrics (normal). Error = {}", e);
-                    }
+                    check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler);
                 }
             }
         }
@@ -617,7 +614,7 @@ fn check_and_flush_metrics(
     metrics: &mut SerializerMetrics,
     metrics_tx: &Sender<SerializerMetrics>,
     storage_handler: &StorageHandler,
-) -> Result<(), flume::TrySendError<SerializerMetrics>> {
+) {
     use pretty_bytes::converter::convert;
 
     let mut inmemory_write_size = 0;
@@ -647,7 +644,9 @@ fn check_and_flush_metrics(
             convert(metrics.write_memory as f64),
             convert(metrics.read_memory as f64),
         );
-        metrics_tx.try_send(metrics.clone())?;
+        if let Err(e) = metrics_tx.try_send(metrics.clone()) {
+            debug!("Failed to flush serializer metrics (normal). Error = {}", e);
+        }
         pending.pop_front();
     }
 
@@ -663,11 +662,11 @@ fn check_and_flush_metrics(
             convert(metrics.read_memory as f64),
         );
 
-        metrics_tx.try_send(metrics.clone())?;
+        if let Err(e) = metrics_tx.try_send(metrics.clone()) {
+            debug!("Failed to flush serializer metrics (normal). Error = {}", e);
+        }
         metrics.prepare_next();
     }
-
-    Ok(())
 }
 
 // TODO(RT): Test cases
