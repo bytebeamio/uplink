@@ -92,14 +92,18 @@ impl SerializerMetrics {
 
     pub fn add_sent_size(&mut self, size: usize) {
         self.sent_size += size;
-        self.avg_data_savings =
-            (self.total_data_size - self.sent_size) as f64 / self.total_data_size as f64;
     }
 
-    pub fn add_data_size(&mut self, size: usize) {
+    pub fn add_payload_size(&mut self, size: usize) {
         self.total_data_size += size;
         self.avg_data_rate =
             self.total_data_size as f64 / self.start_time.elapsed().as_secs() as f64;
+        self.avg_data_savings = if self.total_data_size != 0 {
+            (self.total_data_size as f64 - self.sent_size as f64) * 100.0
+                / self.total_data_size as f64
+        } else {
+            0.0
+        };
     }
 
     pub fn prepare_next(&mut self) {
