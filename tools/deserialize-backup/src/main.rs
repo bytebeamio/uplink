@@ -1,6 +1,8 @@
-use std::{collections::HashMap, string::FromUtf8Error};
+use std::{collections::HashMap, io::Read, string::FromUtf8Error};
 
+use bytes::Bytes;
 use human_bytes::human_bytes;
+use lz4_flex::frame::FrameDecoder;
 use rumqttc::{read, Packet};
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
@@ -22,8 +24,10 @@ pub struct CommandLine {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Io error {0}")]
+    Io(#[from] std::io::Error),
     #[error("Disk error {0}")]
-    Disk(#[from] disk::Error),
+    Disk(#[from] storage::Error),
     #[error("From UTF8 error {0}")]
     FromUtf8(#[from] FromUtf8Error),
     #[error("Serde error {0}")]
@@ -35,16 +39,18 @@ pub struct Payload {
     timestamp: u64,
 }
 
+#[derive(Tabled)]
 struct Stream {
     count: usize,
     size: usize,
+    uncompressed_size: usize,
     start: u64,
     end: u64,
 }
 
 impl Default for Stream {
     fn default() -> Self {
-        Self { count: 0, size: 0, start: u64::MAX, end: 0 }
+        Self { count: 0, size: 0, uncompressed_size: 0, start: u64::MAX, end: 0 }
     }
 }
 
@@ -52,13 +58,16 @@ impl Default for Stream {
 struct Entry {
     stream_name: String,
     serialization_format: String,
+    compression_algo: String,
     count: usize,
     message_rate: String,
     data_size: String,
+    uncompressed_size: String,
     data_rate: String,
+    uncompressed_data_rate: String,
     start_timestamp: u64,
     end_timestamp: u64,
-    milliseconds: u64,
+    milliseconds: i64,
 }
 
 impl Entry {
@@ -66,17 +75,24 @@ impl Entry {
         let tokens: Vec<&str> = topic.split('/').collect();
         let stream_name = tokens[6].to_string();
         let serialization_format = tokens[7].to_string();
-        let milliseconds = stream.end - stream.start;
+        let compression_algo = tokens.get(8).map(|s| s.to_string()).unwrap_or_default();
+        let milliseconds = stream.end as i64 - stream.start as i64;
         let message_rate = format!("{} /s", (stream.count * 1000) as f32 / milliseconds as f32);
         let data_size = human_bytes(stream.size as f64);
+        let uncompressed_size = human_bytes(stream.uncompressed_size as f64);
         let data_rate = human_bytes((stream.size * 1000) as f32 / milliseconds as f32) + "/s";
+        let uncompressed_data_rate =
+            human_bytes((stream.uncompressed_size * 1000) as f32 / milliseconds as f32) + "/s";
 
         Self {
             stream_name,
             serialization_format,
             count: stream.count,
+            compression_algo,
             message_rate,
             data_size,
+            uncompressed_size,
+            uncompressed_data_rate,
             data_rate,
             start_timestamp: stream.start,
             end_timestamp: stream.end,
@@ -87,47 +103,64 @@ impl Entry {
 
 fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
-    // NOTE: max_file_size and max_file_count should not matter when reading non-destructively
-    let mut storage = disk::Storage::new(commandline.directory, 1048576, 3)?;
-    storage.non_destructive_read = true;
 
     let mut streams: HashMap<String, Stream> = HashMap::new();
+    let mut total = Stream::default();
+    let mut entries: Vec<Entry> = vec![];
 
-    'outer: loop {
-        loop {
-            match storage.reload_on_eof() {
-                // Done reading all the pending files
-                Ok(true) => break 'outer,
-                Ok(false) => break,
-                // Reload again on encountering a corrupted file
-                Err(e) => {
-                    eprintln!("Failed to reload from storage. Error = {e}");
-                    continue;
+    let dirs = std::fs::read_dir(commandline.directory)?;
+    for dir in dirs {
+        let dir = dir?;
+        // NOTE: max_file_size and max_file_count should not matter when reading non-destructively
+        let mut storage = storage::Storage::new(1048576);
+        storage.set_persistence(dir.path(), 3)?;
+        storage.set_non_destructive_read(true);
+
+        'outer: loop {
+            loop {
+                match storage.reload_on_eof() {
+                    // Done reading all the pending files
+                    Ok(true) => break 'outer,
+                    Ok(false) => break,
+                    // Reload again on encountering a corrupted file
+                    Err(e) => {
+                        eprintln!("Failed to reload from storage. Error = {e}");
+                        continue;
+                    }
                 }
             }
-        }
 
-        let publish = match read(storage.reader(), commandline.max_packet_size) {
-            Ok(Packet::Publish(publish)) => publish,
-            Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
-            Err(e) => {
-                eprintln!("Failed to read from storage. Error = {:?}", e);
-                break;
-            }
-        };
-        let stream = streams.entry(publish.topic.to_string()).or_default();
-        stream.size += publish.payload.len();
+            let mut publish = match read(storage.reader(), commandline.max_packet_size) {
+                Ok(Packet::Publish(publish)) => publish,
+                Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+                Err(e) => {
+                    eprintln!("Failed to read from storage. Error = {:?}", e);
+                    break;
+                }
+            };
+            let stream = streams.entry(publish.topic.to_string()).or_default();
+            stream.size += publish.payload.len();
 
-        let payloads: Vec<Payload> = serde_json::from_slice(&publish.payload)?;
-        for payload in payloads {
-            let timestamp = payload.timestamp;
-            stream.count += 1;
-            if stream.start > timestamp {
-                stream.start = timestamp
+            if publish.topic.contains("/lz4") {
+                let mut decompressor = FrameDecoder::new(&*publish.payload);
+                let mut bytes = vec![];
+                decompressor.read_to_end(&mut bytes)?;
+                publish.payload = Bytes::from(bytes);
             }
 
-            if stream.end < timestamp {
-                stream.end = timestamp
+            stream.uncompressed_size += publish.payload.len();
+
+            let payloads: Vec<Payload> = serde_json::from_slice(&publish.payload)?;
+            for payload in payloads {
+                let timestamp = payload.timestamp;
+                stream.count += 1;
+                if stream.start > timestamp {
+                    stream.start = timestamp
+                }
+
+                if stream.end < timestamp {
+                    stream.end = timestamp
+                }
             }
         }
     }
@@ -138,8 +171,6 @@ fn main() -> Result<(), Error> {
         return Ok(());
     }
 
-    let mut total = Stream::default();
-    let mut entries: Vec<Entry> = vec![];
     for (topic, stream) in streams.iter() {
         let entry = Entry::new(topic, stream);
         total.count += stream.count;
@@ -160,12 +191,15 @@ fn main() -> Result<(), Error> {
     println!("{}", table);
     println!("NOTE: timestamps are relative to UNIX epoch and in milliseconds and message_rate is in units of points/second");
 
-    println!("\nAggregated values");
+    println!("\nAggregated values (Network Impact)");
     let mut table = Table::new(vec![Entry::new("//////total/jsonarray", &total)]);
     table
         .with(Style::rounded())
         .with(Disable::column(ByColumnName::new("stream_name")))
-        .with(Disable::column(ByColumnName::new("serialization_format")));
+        .with(Disable::column(ByColumnName::new("serialization_format")))
+        .with(Disable::column(ByColumnName::new("compression_algo")))
+        .with(Disable::column(ByColumnName::new("uncompressed_size")))
+        .with(Disable::column(ByColumnName::new("uncompressed_data_rate")));
     println!("{}", table);
 
     Ok(())
