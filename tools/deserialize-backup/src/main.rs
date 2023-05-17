@@ -46,11 +46,19 @@ struct Stream {
     uncompressed_size: usize,
     start: u64,
     end: u64,
+    compression_algo: String,
 }
 
 impl Default for Stream {
     fn default() -> Self {
-        Self { count: 0, size: 0, uncompressed_size: 0, start: u64::MAX, end: 0 }
+        Self {
+            count: 0,
+            size: 0,
+            uncompressed_size: 0,
+            start: u64::MAX,
+            end: 0,
+            compression_algo: "".to_string(),
+        }
     }
 }
 
@@ -71,11 +79,7 @@ struct Entry {
 }
 
 impl Entry {
-    fn new(topic: &str, stream: &Stream) -> Self {
-        let tokens: Vec<&str> = topic.split('/').collect();
-        let stream_name = tokens[6].to_string();
-        let serialization_format = tokens[7].to_string();
-        let compression_algo = tokens.get(8).map(|s| s.to_string()).unwrap_or_default();
+    fn new(stream_name: String, stream: Stream) -> Self {
         let milliseconds = stream.end as i64 - stream.start as i64;
         let message_rate = format!("{} /s", (stream.count * 1000) as f32 / milliseconds as f32);
         let data_size = human_bytes(stream.size as f64);
@@ -86,9 +90,9 @@ impl Entry {
 
         Self {
             stream_name,
-            serialization_format,
+            serialization_format: "jsonarray".to_string(),
             count: stream.count,
-            compression_algo,
+            compression_algo: stream.compression_algo,
             message_rate,
             data_size,
             uncompressed_size,
@@ -116,6 +120,9 @@ fn main() -> Result<(), Error> {
         storage.set_persistence(dir.path(), 3)?;
         storage.set_non_destructive_read(true);
 
+        let stream = streams
+            .entry(dir.path().into_iter().last().unwrap().to_string_lossy().to_string())
+            .or_default();
         'outer: loop {
             loop {
                 match storage.reload_on_eof() {
@@ -138,10 +145,10 @@ fn main() -> Result<(), Error> {
                     break;
                 }
             };
-            let stream = streams.entry(publish.topic.to_string()).or_default();
             stream.size += publish.payload.len();
 
-            if publish.topic.contains("/lz4") {
+            if publish.topic.ends_with("lz4") {
+                stream.compression_algo = "lz4".to_owned();
                 let mut decompressor = FrameDecoder::new(&*publish.payload);
                 let mut bytes = vec![];
                 decompressor.read_to_end(&mut bytes)?;
@@ -171,8 +178,7 @@ fn main() -> Result<(), Error> {
         return Ok(());
     }
 
-    for (topic, stream) in streams.iter() {
-        let entry = Entry::new(topic, stream);
+    for (topic, stream) in streams {
         total.count += stream.count;
         total.size += stream.size;
 
@@ -183,6 +189,7 @@ fn main() -> Result<(), Error> {
         if total.end < stream.end {
             total.end = stream.end;
         }
+        let entry = Entry::new(topic, stream);
         entries.push(entry);
     }
 
@@ -192,7 +199,7 @@ fn main() -> Result<(), Error> {
     println!("NOTE: timestamps are relative to UNIX epoch and in milliseconds and message_rate is in units of points/second");
 
     println!("\nAggregated values (Network Impact)");
-    let mut table = Table::new(vec![Entry::new("//////total/jsonarray", &total)]);
+    let mut table = Table::new(vec![Entry::new("".to_string(), total)]);
     table
         .with(Style::rounded())
         .with(Disable::column(ByColumnName::new("stream_name")))
