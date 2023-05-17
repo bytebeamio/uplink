@@ -3,6 +3,8 @@
 # triggered from cloud.
 processes = [{ name = "echo", timeout = 10 }]
 
+# Map of action names for re-routing on partial completion. An action is considered
+# partially completed when progress is 100, but status is neither "Failed" nor "Completed".
 action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
 
 # MQTT client configuration
