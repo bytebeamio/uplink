@@ -71,7 +71,7 @@ blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 # In the following config for the device_shadow stream we set buf_size to 1 and mark
 # it as non-persistent. streams are internally constructed as a map of Name -> Config
 [streams.device_shadow]
-topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
 buf_size = 1
 
 # Example using compression
@@ -135,7 +135,7 @@ path = "/var/tmp/ota-file"
 # - enabled: A boolean to determine if the feature must be enabled
 # - process_names: List of process names that are to be tracked with system stats
 # - update_period: Time in seconds between each collection/publish of system stats
-[stats]
+[system_stats]
 enabled = false
 process_names = ["uplink"]
 update_period = 30
