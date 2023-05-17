@@ -56,6 +56,8 @@ pub enum Error {
     Lz4(#[from] lz4_flex::frame::Error),
     #[error("Empty storage")]
     EmptyStorage,
+    #[error("Permission denied while accessing persistence directory \"{0}\"")]
+    Persistence(String),
 }
 
 #[derive(Debug, PartialEq)]
@@ -134,21 +136,23 @@ struct StorageHandler {
 impl StorageHandler {
     fn new(config: Arc<Config>) -> Result<Self, Error> {
         let mut map = HashMap::with_capacity(2 * config.streams.len());
-        for (stream_name, config) in config.streams.iter() {
-            let mut storage = Storage::new(config.persistence.max_file_size);
-            if let Some(persistence) = &config.persistence.disk {
-                let mut path = persistence.path.clone();
+        for (stream_name, stream_config) in config.streams.iter() {
+            let mut storage = Storage::new(stream_config.persistence.max_file_size);
+            if stream_config.persistence.max_file_count > 0 {
+                let mut path = config.persistence_path.clone();
                 path.push(stream_name);
+
+                std::fs::create_dir_all(&path).map_err(|_| {
+                    Error::Persistence(config.persistence_path.to_string_lossy().to_string())
+                })?;
+                storage.set_persistence(&path, stream_config.persistence.max_file_count)?;
 
                 debug!(
                     "Disk persistance is enabled for stream: \"{stream_name}\"; path: {}",
                     path.display()
                 );
-
-                std::fs::create_dir_all(&path)?;
-                storage.set_persistence(&path, persistence.max_file_count)?;
             }
-            map.insert(config.topic.clone(), storage);
+            map.insert(stream_config.topic.clone(), storage);
         }
 
         Ok(Self { map })
