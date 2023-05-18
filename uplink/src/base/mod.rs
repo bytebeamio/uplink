@@ -25,7 +25,7 @@ fn default_timeout() -> u64 {
 }
 
 fn default_file_size() -> usize {
-    104857600 // 100MB
+    10485760 // 10MB
 }
 
 fn default_file_count() -> usize {
