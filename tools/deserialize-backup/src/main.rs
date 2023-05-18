@@ -47,6 +47,7 @@ struct Stream {
     start: u64,
     end: u64,
     compression_algo: String,
+    max_packet_size: usize,
 }
 
 impl Default for Stream {
@@ -58,6 +59,7 @@ impl Default for Stream {
             start: u64::MAX,
             end: 0,
             compression_algo: "".to_string(),
+            max_packet_size: 0,
         }
     }
 }
@@ -76,6 +78,7 @@ struct Entry {
     start_timestamp: u64,
     end_timestamp: u64,
     milliseconds: i64,
+    max_packet_size: String,
 }
 
 impl Entry {
@@ -87,6 +90,7 @@ impl Entry {
         let data_rate = human_bytes((stream.size * 1000) as f32 / milliseconds as f32) + "/s";
         let uncompressed_data_rate =
             human_bytes((stream.uncompressed_size * 1000) as f32 / milliseconds as f32) + "/s";
+        let max_packet_size = human_bytes(stream.max_packet_size as f32);
 
         Self {
             stream_name,
@@ -101,6 +105,7 @@ impl Entry {
             start_timestamp: stream.start,
             end_timestamp: stream.end,
             milliseconds,
+            max_packet_size,
         }
     }
 }
@@ -145,7 +150,12 @@ fn main() -> Result<(), Error> {
                     break;
                 }
             };
-            stream.size += publish.payload.len();
+            let compressed_size = publish.payload.len();
+            if compressed_size > stream.max_packet_size {
+                stream.max_packet_size = compressed_size;
+            }
+
+            stream.size += compressed_size;
 
             if publish.topic.ends_with("lz4") {
                 stream.compression_algo = "lz4".to_owned();
@@ -206,7 +216,8 @@ fn main() -> Result<(), Error> {
         .with(Disable::column(ByColumnName::new("serialization_format")))
         .with(Disable::column(ByColumnName::new("compression_algo")))
         .with(Disable::column(ByColumnName::new("uncompressed_size")))
-        .with(Disable::column(ByColumnName::new("uncompressed_data_rate")));
+        .with(Disable::column(ByColumnName::new("uncompressed_data_rate")))
+        .with(Disable::column(ByColumnName::new("max_packet_size")));
     println!("{}", table);
 
     Ok(())
