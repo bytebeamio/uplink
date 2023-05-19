@@ -271,10 +271,7 @@ impl Bridge {
             Some(c) => c,
             None => return Ok(()),
         };
-        let mut path = match &self.config.persistence {
-            Some(p) => PathBuf::from(&p.path),
-            _ => return Ok(()),
-        };
+        let mut path = self.config.persistence_path.clone();
         fs::create_dir_all(&path)?;
         path.push("current_action");
         info!("Storing current action in persistence; path: {}", path.display());
@@ -285,10 +282,7 @@ impl Bridge {
 
     /// Load a saved action from persistence, performed on startup
     fn load_saved_action(&mut self) -> Result<(), Error> {
-        let mut path = match self.config.persistence.as_ref() {
-            Some(p) => PathBuf::from(&p.path),
-            None => return Ok(()),
-        };
+        let mut path = self.config.persistence_path.clone();
         path.push("current_action");
 
         if path.is_file() {
