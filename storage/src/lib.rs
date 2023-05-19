@@ -49,6 +49,10 @@ impl Storage {
         Ok(())
     }
 
+    pub fn set_non_destructive_read(&mut self, switch: bool) {
+        self.persistence.as_mut().unwrap().non_destructive_read = switch;
+    }
+
     pub fn writer(&mut self) -> &mut BytesMut {
         &mut self.current_write_file
     }
@@ -196,6 +200,7 @@ struct Persistence {
     current_read_file_id: Option<u64>,
     // /// Deleted file id
     // deleted: Option<u64>,
+    non_destructive_read: bool,
 }
 
 impl Persistence {
@@ -210,6 +215,7 @@ impl Persistence {
             backlog_files,
             current_read_file_id: None,
             // deleted: None,
+            non_destructive_read: false,
         })
     }
 
@@ -222,6 +228,10 @@ impl Persistence {
 
     /// Removes a file with provided id
     fn remove(&self, id: u64) -> Result<(), Error> {
+        if self.non_destructive_read {
+            return Ok(());
+        }
+
         let path = self.path(id)?;
         fs::remove_file(path)?;
 

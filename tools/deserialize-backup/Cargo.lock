@@ -105,23 +105,15 @@ checksum = "e496a50fda8aacccc86d7529e2c1e0892dbd0f898a6b5645b5561b89c3210efa"
 name = "deserialize-backup"
 version = "0.1.0"
 dependencies = [
- "disk",
+ "bytes",
  "human_bytes",
+ "lz4_flex",
  "rumqttc",
  "serde",
  "serde_json",
+ "storage",
  "structopt",
  "tabled",
- "thiserror",
-]
-
-[[package]]
-name = "disk"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "log",
- "seahash",
  "thiserror",
 ]
 
@@ -320,6 +312,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "abb12e687cfb44aa40f41fc3978ef76448f9b6038cad6aef4259d3c095a2382e"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "lz4_flex"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b8c72594ac26bfd34f2d99dfced2edfaddfe8a476e3ff2ca0eb293d925c4f83"
+dependencies = [
+ "twox-hash",
 ]
 
 [[package]]
@@ -636,6 +637,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "static_assertions"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "storage"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "log",
+ "seahash",
+ "thiserror",
+]
+
+[[package]]
 name = "strsim"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -776,6 +793,16 @@ dependencies = [
  "rustls",
  "tokio",
  "webpki",
+]
+
+[[package]]
+name = "twox-hash"
+version = "1.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
+dependencies = [
+ "cfg-if",
+ "static_assertions",
 ]
 
 [[package]]
