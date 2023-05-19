@@ -3,6 +3,8 @@
 # triggered from cloud.
 processes = [{ name = "echo", timeout = 10 }]
 
+# Map of action names for re-routing on partial completion. An action is considered
+# partially completed when progress is 100, but status is neither "Failed" nor "Completed".
 action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
 
 # MQTT client configuration
@@ -53,21 +55,6 @@ enabled = true
 enabled = true
 blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 
-# Configuration details associated with uplink's persistent storage module
-# which writes publish packets to disk in case of slow or crashed network.
-# 
-# Required Parameters
-# - path: Path to directory where storage writes backups into files.
-# - max_file_size: Maximum size upto which single persistence file can grow
-# - max_file_count: Maximum number of persistence files allowed
-#
-# NOTE: Persitence as a whole is an optional feature that is disabled by
-# default, i.e. if not inlcuded in configuration.
-[persistence]
-path = "/tmp/uplink"
-max_file_size = 104857600 # 100MB
-max_file_count = 3
-
 # Table of pre-configured data streams, specifies streams of data elements that are to
 # be collected, batched and forwarded to serializer to then be published onto platform.
 #
@@ -77,12 +64,49 @@ max_file_count = 3
 #   unconfigured, stream will be created dynamically.
 # - flush-period(optional): Duration in seconds after a data point enters the stream
 #   and WILL be flushed by collector. Defaults to 60s in case not configured.
+# - compression(optional): an enum values to determine what compression the serializer
+#   should perform on the data transiting through the stream. Currently supported
+#   compression schemes are Lz4 and Disabled. Defaults to Disabled.
+# - persistence(optional): helps persist relevant information for data recovery purposes,
+#   used when there is a network/system failure. 
 #
-# In the following config for the device_shadow stream we set buf_size to 1. streams is
-# internally constructed as a map of Name -> Config
+# In the following config for the device_shadow stream we set buf_size to 1 and mark
+# it as non-persistent. streams are internally constructed as a map of Name -> Config
 [streams.device_shadow]
-topic = "/tenants/{tenant_id}/devices/{device_id}/device_shadow/jsonarray"
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
 buf_size = 1
+
+# Example using compression
+[streams.imu]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/imu/jsonarray/lz4"
+buf_size = 100
+compression = "Lz4"
+
+# Configuration details associated with uplink's persistent storage module which writes publish
+# packets to disk in case of slow or crashed network, for recovery purposes.
+# 
+# Required Parameters
+# - max_file_size(defaults to 100MB): Maximum size upto which single persistence file can grow.
+#   This value alone can be changed to configure in-memory storage of packets during network recovery.
+# - path(optional): Path to directory for storing backlog in files, shouldn't contain anything else.
+#   Please ensure the location is unique for each stream to ensure there is no clash in files. 
+# - max_file_count(optional, defaults to 3): Maximum number of persistence files allowed on disk.
+#
+# NOTE: Persitence is an optional feature that is disabled by default, i.e. if not inlcuded in the 
+# configuration, we use transient(in-memory) storage to handle network downtime only.
+[streams.gps]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/gps/jsonarray"
+buf_size = 10
+persistence = { path = "/tmp/uplink/", max_file_size = 1048576, max_file_count = 10 }
+
+# NOTE: While it is possible to configure persistence to be disabled, including only max_file_count
+# without path causes non-persistence. Configuring only the persistence path is allowed and the other
+# config values will be default. Configuring only max_file_size is also allowed, without persistance.
+[streams.motor]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/motor/jsonarray/lz4"
+buf_size = 50
+compression = "Lz4"
+persistence = { path = "/tmp/uplink/" }
 
 # Built-in streams: action status is a special case of stream and should be configured separately,
 # outside of the streams map. The action_status stream is used to push progress of Actions in
@@ -113,7 +137,7 @@ path = "/var/tmp/ota-file"
 # - enabled: A boolean to determine if the feature must be enabled
 # - process_names: List of process names that are to be tracked with system stats
 # - update_period: Time in seconds between each collection/publish of system stats
-[stats]
+[system_stats]
 enabled = false
 process_names = ["uplink"]
 update_period = 30
