@@ -2,11 +2,8 @@ use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use signal_hook::consts::signal::{SIGINT, SIGQUIT, SIGTERM};
-use signal_hook_tokio::Signals;
 use tokio::select;
 use tokio::time::{self, interval, Instant, Sleep};
-use tokio_stream::StreamExt;
 
 use std::fs;
 use std::path::PathBuf;
@@ -171,19 +168,6 @@ impl Bridge {
                 .await;
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
         self.load_saved_action()?;
-
-        let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT])?;
-        let shutdown_tx = self.shutdown_tx.clone();
-
-        tokio::spawn(async move {
-            // Handle a shutdown signal from POSIX
-            while let Some(signal) = signals.next().await {
-                match signal {
-                    SIGTERM | SIGINT | SIGQUIT => shutdown_tx.try_send(()).unwrap(),
-                    _ => unreachable!(),
-                }
-            }
-        });
 
         loop {
             select! {

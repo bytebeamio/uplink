@@ -6,7 +6,10 @@ use std::thread;
 use anyhow::Error;
 
 use log::info;
+use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
+use signal_hook_tokio::Signals;
 use structopt::StructOpt;
+use tokio_stream::StreamExt;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
 use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
@@ -146,6 +149,19 @@ fn main() -> Result<(), Error> {
                 }
             });
         }
+
+        let shutdown_tx = bridge.shutdown_handle.clone();
+        let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT]).unwrap();
+
+        tokio::spawn(async move {
+            // Handle a shutdown signal from POSIX
+            while let Some(signal) = signals.next().await {
+                match signal {
+                    SIGTERM | SIGINT | SIGQUIT => shutdown_tx.try_send(()).unwrap(),
+                    _ => unreachable!(),
+                }
+            }
+        });
 
         uplink.resolve_on_shutdown().await.unwrap();
         info!("Uplink shutting down");
