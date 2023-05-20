@@ -18,6 +18,7 @@ use tracing_subscriber::{EnvFilter, Registry};
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
+use uplink::base::bridge::BridgeCtrl;
 use uplink::base::AppConfig;
 use uplink::config::{get_configs, initialize, CommandLine};
 use uplink::{simulator, Config, TcpJson, Uplink};
@@ -157,7 +158,9 @@ fn main() -> Result<(), Error> {
             // Handle a shutdown signal from POSIX
             while let Some(signal) = signals.next().await {
                 match signal {
-                    SIGTERM | SIGINT | SIGQUIT => shutdown_tx.try_send(()).unwrap(),
+                    SIGTERM | SIGINT | SIGQUIT => {
+                        shutdown_tx.try_send(BridgeCtrl::Shutdown).unwrap()
+                    }
                     _ => unreachable!(),
                 }
             }

@@ -95,6 +95,11 @@ pub enum Event {
     ActionResponse(ActionResponse),
 }
 
+/// Commands that can be used to remotely control bridge
+pub enum BridgeCtrl {
+    Shutdown,
+}
+
 pub struct Bridge {
     /// All configuration
     config: Arc<Config>,
@@ -118,8 +123,8 @@ pub struct Bridge {
     action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
-    shutdown_rx: Receiver<()>,
-    shutdown_tx: Sender<()>,
+    ctrl_rx: Receiver<BridgeCtrl>,
+    ctrl_tx: Sender<BridgeCtrl>,
     shutdown_handle: Sender<()>,
 }
 
@@ -134,7 +139,7 @@ impl Bridge {
     ) -> Bridge {
         let (bridge_tx, bridge_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
-        let (shutdown_tx, shutdown_rx) = bounded(1);
+        let (ctrl_tx, ctrl_rx) = bounded(1);
 
         Bridge {
             action_status,
@@ -148,13 +153,13 @@ impl Bridge {
             action_redirections,
             current_action: None,
             shutdown_handle,
-            shutdown_rx,
-            shutdown_tx,
+            ctrl_rx,
+            ctrl_tx,
         }
     }
 
     pub fn tx(&mut self) -> BridgeTx {
-        BridgeTx { events_tx: self.bridge_tx.clone(), shutdown_handle: self.shutdown_tx.clone() }
+        BridgeTx { events_tx: self.bridge_tx.clone(), shutdown_handle: self.ctrl_tx.clone() }
     }
 
     fn clear_current_action(&mut self) {
@@ -240,7 +245,7 @@ impl Bridge {
                     }
                 }
                 // Handle a shutdown signal
-                _ = self.shutdown_rx.recv_async() => {
+                _ = self.ctrl_rx.recv_async() => {
                     self.save_current_action()?;
 
                     self.shutdown_handle.send(()).unwrap();
@@ -426,7 +431,7 @@ impl ActionRouter {
 pub struct BridgeTx {
     // Handle for apps to send events to bridge
     pub(crate) events_tx: Sender<Event>,
-    pub shutdown_handle: Sender<()>,
+    pub shutdown_handle: Sender<BridgeCtrl>,
 }
 
 impl BridgeTx {
