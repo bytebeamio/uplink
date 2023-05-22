@@ -161,3 +161,18 @@ port = 3333
 # [simulator]
 # num_devices = 10
 # gps_paths = "./paths/"
+
+# Configuration of logger, journalctl in the case of linux. As configured, uplink will 
+# push log lines in batches of size
+# 
+# Required Parameters
+# - tags: syslog identifiers for the processes to be logged, e.g. systemd, sshd, kernel
+# - units: names of the systemd units that are to be logged, e.g. collector.service, app.service
+# - min_level: priority level by number(7 is Debug, 0 is Emergency)
+# - stream_size: maximum number of log line before the log stream is flushed
+# 
+# [logging]
+# tags = ["systemd"]
+# units = ["collector"]
+# min_level = 7
+# stream_size = 100

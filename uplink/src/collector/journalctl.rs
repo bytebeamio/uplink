@@ -17,7 +17,10 @@ pub enum Error {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct JournalCtlConfig {
+    #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub units: Vec<String>,
     pub min_level: u8,
     pub stream_size: Option<usize>,
 }
@@ -133,6 +136,12 @@ impl JournalCtl {
             let action = log_rx.recv()?;
             let mut config = serde_json::from_str::<JournalCtlConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
+            config.units.retain(|unit| !unit.is_empty());
+            if config.tags.is_empty() && config.units.is_empty() {
+                let response = ActionResponse::failure(&action.action_id, "No targets to log for");
+                self.bridge.send_action_response(response).await;
+                continue;
+            }
 
             self.spawn_logger(config).await;
 
@@ -155,6 +164,11 @@ impl JournalCtl {
         for tag in &config.tags {
             let tag_args = ["-t", tag].map(String::from).to_vec();
             journalctl_args.extend(tag_args);
+        }
+        // enable logging for requested units
+        for unit in &config.units {
+            let unit_args = ["-u", unit].map(String::from).to_vec();
+            journalctl_args.extend(unit_args);
         }
 
         log::info!("journalctl args: {:?}", journalctl_args);
