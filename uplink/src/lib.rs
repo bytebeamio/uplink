@@ -54,7 +54,7 @@ use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellSession;
-use flume::{bounded, Receiver, Sender};
+use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
 pub mod base;
@@ -281,6 +281,8 @@ pub struct Uplink {
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
     serializer_metrics_rx: Receiver<SerializerMetrics>,
+    shutdown_tx: Sender<()>,
+    shutdown_rx: Receiver<()>,
 }
 
 impl Uplink {
@@ -289,6 +291,7 @@ impl Uplink {
         let (data_tx, data_rx) = bounded(10);
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
+        let (shutdown_tx, shutdown_rx) = bounded(1);
 
         let action_status_topic = &config.action_status.topic;
         let action_status = Stream::new(
@@ -309,6 +312,8 @@ impl Uplink {
             stream_metrics_rx,
             serializer_metrics_tx,
             serializer_metrics_rx,
+            shutdown_tx,
+            shutdown_rx,
         })
     }
 
@@ -320,6 +325,7 @@ impl Uplink {
             self.stream_metrics_tx(),
             self.action_rx.clone(),
             self.action_status(),
+            self.shutdown_tx.clone(),
         );
 
         let bridge_tx = bridge.tx();
@@ -458,5 +464,9 @@ impl Uplink {
 
     pub fn action_status(&self) -> Stream<ActionResponse> {
         self.action_status.clone()
+    }
+
+    pub async fn resolve_on_shutdown(&self) -> Result<(), RecvError> {
+        self.shutdown_rx.recv_async().await
     }
 }

@@ -7,6 +7,9 @@ processes = [{ name = "echo", timeout = 10 }]
 # partially completed when progress is 100, but status is neither "Failed" nor "Completed".
 action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
 
+# Location on disk for persisted streams to write backlogs into, also used to write
+persistence_path = "/tmp/uplink/"
+
 # MQTT client configuration
 # 
 # Required Parameters
@@ -97,7 +100,7 @@ compression = "Lz4"
 [streams.gps]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/gps/jsonarray"
 buf_size = 10
-persistence = { path = "/tmp/uplink/", max_file_size = 1048576, max_file_count = 10 }
+persistence = { max_file_size = 1048576, max_file_count = 10 }
 
 # NOTE: While it is possible to configure persistence to be disabled, including only max_file_count
 # without path causes non-persistence. Configuring only the persistence path is allowed and the other
@@ -106,7 +109,7 @@ persistence = { path = "/tmp/uplink/", max_file_size = 1048576, max_file_count =
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/motor/jsonarray/lz4"
 buf_size = 50
 compression = "Lz4"
-persistence = { path = "/tmp/uplink/" }
+persistence = { max_file_count = 3 }
 
 # Built-in streams: action status is a special case of stream and should be configured separately,
 # outside of the streams map. The action_status stream is used to push progress of Actions in
@@ -142,8 +145,8 @@ enabled = false
 process_names = ["uplink"]
 update_period = 30
 
-# Define port that accepts tracing control messges, if enabled
-[apis]
+# Define port to accept uplink control messages over HTTP.
+[console]
 enabled = true
 port = 3333
 

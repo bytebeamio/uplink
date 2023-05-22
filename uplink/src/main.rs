@@ -1,13 +1,15 @@
-mod apis;
+mod console;
 
 use std::sync::Arc;
 use std::thread;
 
 use anyhow::Error;
 
+use log::info;
+use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
+use signal_hook_tokio::Signals;
 use structopt::StructOpt;
-use tokio::task::JoinSet;
-
+use tokio_stream::StreamExt;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
 use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
@@ -96,8 +98,8 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     if config.system_stats.enabled {
         println!("    processes: {:?}", config.system_stats.process_names);
     }
-    if config.apis.enabled {
-        println!("    tracing: http://localhost:{}", config.apis.port);
+    if config.console.enabled {
+        println!("    console: http://localhost:{}", config.console.port);
     }
     println!("\n");
 }
@@ -126,9 +128,10 @@ fn main() -> Result<(), Error> {
         });
     }
 
-    if config.apis.enabled {
-        let port = config.apis.port;
-        thread::spawn(move || apis::start(port, reload_handle));
+    if config.console.enabled {
+        let port = config.console.port;
+        let bridge_handle = bridge.clone();
+        thread::spawn(move || console::start(port, reload_handle, bridge_handle));
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -138,19 +141,30 @@ fn main() -> Result<(), Error> {
         .unwrap();
 
     rt.block_on(async {
-        let mut handles = JoinSet::new();
         for (app, cfg) in config.tcpapps.iter() {
             let tcpjson = TcpJson::new(app.to_owned(), cfg.clone(), bridge.clone()).await;
-            handles.spawn(async move {
+            tokio::task::spawn(async move {
                 if let Err(e) = tcpjson.start().await {
                     error!("App failed. Error = {:?}", e);
                 }
             });
         }
 
-        while let Some(Err(e)) = handles.join_next().await {
-            error!("App failed. Error = {:?}", e);
-        }
+        let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT]).unwrap();
+
+        tokio::spawn(async move {
+            // Handle a shutdown signal from POSIX
+            while let Some(signal) = signals.next().await {
+                match signal {
+                    SIGTERM | SIGINT | SIGQUIT => bridge.trigger_shutdown().await,
+                    s => error!("Couldn't handle signal: {s}"),
+                }
+            }
+        });
+
+        uplink.resolve_on_shutdown().await.unwrap();
+        info!("Uplink shutting down");
     });
+
     Ok(())
 }

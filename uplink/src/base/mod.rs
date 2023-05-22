@@ -28,8 +28,8 @@ fn default_file_size() -> usize {
     10485760 // 10MB
 }
 
-fn default_file_count() -> usize {
-    3
+fn default_persistence_path() -> PathBuf {
+    PathBuf::from("/var/lib/uplink")
 }
 
 pub fn clock() -> u128 {
@@ -73,21 +73,14 @@ impl Default for StreamConfig {
 pub struct Persistence {
     #[serde(default = "default_file_size")]
     pub max_file_size: usize,
-    #[serde(flatten)]
-    pub disk: Option<Disk>,
+    #[serde(default)]
+    pub max_file_count: usize,
 }
 
 impl Default for Persistence {
     fn default() -> Self {
-        Persistence { max_file_size: default_file_size(), disk: None }
+        Persistence { max_file_size: default_file_size(), max_file_count: 0 }
     }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Disk {
-    pub path: PathBuf,
-    #[serde(default = "default_file_count")]
-    pub max_file_count: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -161,7 +154,7 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct TracingConfig {
+pub struct ConsoleConfig {
     pub enabled: bool,
     pub port: u16,
 }
@@ -194,8 +187,9 @@ pub struct Config {
     pub broker: String,
     pub port: u16,
     #[serde(default)]
-    pub apis: TracingConfig,
+    pub console: ConsoleConfig,
     pub authentication: Option<Authentication>,
+    #[serde(default)]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
     #[serde(default)]
@@ -203,6 +197,8 @@ pub struct Config {
     #[serde(skip)]
     pub actions_subscription: String,
     pub streams: HashMap<String, StreamConfig>,
+    #[serde(default = "default_persistence_path")]
+    pub persistence_path: PathBuf,
     pub action_status: StreamConfig,
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
