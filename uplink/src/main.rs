@@ -161,7 +161,7 @@ fn main() -> Result<(), Error> {
                     SIGTERM | SIGINT | SIGQUIT => {
                         shutdown_tx.try_send(BridgeCtrl::Shutdown).unwrap()
                     }
-                    _ => unreachable!(),
+                    s => error!("Couldn't handle signal: {s}"),
                 }
             }
         });
