@@ -17,7 +17,7 @@ pub async fn start(port: u16, reload_handle: ReloadHandle, bridge_handle: Bridge
     let state = StateHandle { reload_handle, bridge_handle };
     let app = Router::new()
         .route("/logs", post(reload_loglevel))
-        .route("/shutdown", post(abrupt_shutdown))
+        .route("/shutdown", post(shutdown))
         .with_state(state);
 
     axum::Server::bind(&address.parse().unwrap()).serve(app.into_make_service()).await.unwrap();
@@ -32,7 +32,7 @@ async fn reload_loglevel(State(state): State<StateHandle>, filter: String) -> im
     StatusCode::OK
 }
 
-async fn abrupt_shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
+async fn shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Shutting down uplink");
     state.bridge_handle.trigger_shutdown().await;
 
