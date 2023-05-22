@@ -18,7 +18,6 @@ use tracing_subscriber::{EnvFilter, Registry};
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
-use uplink::base::bridge::BridgeCtrl;
 use uplink::base::AppConfig;
 use uplink::config::{get_configs, initialize, CommandLine};
 use uplink::{simulator, Config, TcpJson, Uplink};
@@ -151,16 +150,13 @@ fn main() -> Result<(), Error> {
             });
         }
 
-        let shutdown_tx = bridge.shutdown_handle.clone();
         let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT]).unwrap();
 
         tokio::spawn(async move {
             // Handle a shutdown signal from POSIX
             while let Some(signal) = signals.next().await {
                 match signal {
-                    SIGTERM | SIGINT | SIGQUIT => {
-                        shutdown_tx.try_send(BridgeCtrl::Shutdown).unwrap()
-                    }
+                    SIGTERM | SIGINT | SIGQUIT => bridge.trigger_shutdown().await,
                     s => error!("Couldn't handle signal: {s}"),
                 }
             }

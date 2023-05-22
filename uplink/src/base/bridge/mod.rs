@@ -96,7 +96,7 @@ pub enum Event {
 }
 
 /// Commands that can be used to remotely control bridge
-pub enum BridgeCtrl {
+pub(crate) enum BridgeCtrl {
     Shutdown,
 }
 
@@ -431,7 +431,7 @@ impl ActionRouter {
 pub struct BridgeTx {
     // Handle for apps to send events to bridge
     pub(crate) events_tx: Sender<Event>,
-    pub shutdown_handle: Sender<BridgeCtrl>,
+    pub(crate) shutdown_handle: Sender<BridgeCtrl>,
 }
 
 impl BridgeTx {
@@ -481,6 +481,10 @@ impl BridgeTx {
     pub async fn send_action_response(&self, response: ActionResponse) {
         let event = Event::ActionResponse(response);
         self.events_tx.send_async(event).await.unwrap()
+    }
+
+    pub async fn trigger_shutdown(&self) {
+        self.shutdown_handle.send_async(BridgeCtrl::Shutdown).await.unwrap()
     }
 }
 

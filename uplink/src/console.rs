@@ -1,6 +1,6 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Router};
 use log::info;
-use uplink::base::bridge::{BridgeCtrl, BridgeTx};
+use uplink::base::bridge::BridgeTx;
 
 use crate::ReloadHandle;
 
@@ -34,9 +34,7 @@ async fn reload_loglevel(State(state): State<StateHandle>, filter: String) -> im
 
 async fn abrupt_shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Shutting down uplink");
-    if state.bridge_handle.shutdown_handle.try_send(BridgeCtrl::Shutdown).is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR;
-    }
+    state.bridge_handle.trigger_shutdown().await;
 
     StatusCode::OK
 }
