@@ -163,8 +163,8 @@ port = 3333
 # push log lines in batches of size
 # 
 # Required Parameters
-# - tags: syslog identifiers for the processes to be logged
-# - units: names of the systemd units that are to be logged
+# - tags: syslog identifiers for the processes to be logged, e.g. systemd, sshd, kernel
+# - units: names of the systemd units that are to be logged, e.g. collector.service, app.service
 # - min_level: priority level by number(7 is Debug, 0 is Emergency)
 # - stream_size: maximum number of log line before the log stream is flushed
 # 
