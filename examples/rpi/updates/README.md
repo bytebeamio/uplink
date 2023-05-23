@@ -10,7 +10,7 @@ These are the types of updates that are currently supported.
 		     					      and if the installation fails, script switches back to the
 						              previous working version of the app
 * [**deb_update**](deb_update/) - Installs the provided deb package to the current partition
-* [**rootfs_update**](kernel_update/) - Installs the rootfs in the other partition and switches to the new rootfs on reboot.
+* [**rootfs_update**](rootfs_update/) - Installs the rootfs in the other partition and switches to the new rootfs on reboot.
 
 Each of these folders has details about creating appropriate update tar archive, that needs to be uploaded on Bytebeam cloud. 
 Refer the ["Create New Firmware version"](https://bytebeam.io/docs/creating-new-firmware-version) section to understand how to upload new fimware to Bytebeam cloud.
