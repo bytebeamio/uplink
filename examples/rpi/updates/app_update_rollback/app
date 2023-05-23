@@ -1,0 +1,7 @@
+#!/bin/bash
+# Print the string "Hello from Bytebeam" every 3 seconds
+while [ 1 ]
+	do
+		sleep 3
+		echo "Hello from Bytebeam"
+	done
