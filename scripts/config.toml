@@ -1,0 +1,25 @@
+action_redirections={update_firmware="install_firmware"}
+[tcpapps.1]
+port=5555
+actions=[{name="reboot"}]
+
+[downloader]
+path="/tmp/uplink/download"
+actions=[{name="update_firmware"}, {name="send_file"}]
+
+[apis]
+enabled=true
+port=3333
+
+[persistence]
+path="/tmp/uplink/"
+
+[ota_installer]
+path="/tmp/uplink/installer"
+actions=[{name="install_firmware", timeout=310}]
+uplink_port=5555
+
+[logging]
+tags=["sshd", "systemd"]
+stream_size=1
+min_level=7
