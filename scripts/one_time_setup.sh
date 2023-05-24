@@ -12,7 +12,7 @@ cp update_fstab.sh /mnt/download/
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/update_fstab_next_root.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/main/scripts/update_fstab_next_root.sh
 
 # get uplink binary
-curl --proto '=https' --tlsv1.2 -sSfL -o /mnt/download/uplink https://github.com/bytebeamio/uplink/releases/download/v2.3.0-rc/uplink-aarch64-unknown-linux-gnu
+curl --proto '=https' --tlsv1.2 -sSfL -o /etc/bytebeam/uplink https://github.com/bytebeamio/uplink/releases/download/v2.3.0-rc/uplink-aarch64-unknown-linux-gnu
 
 # get systemd script
 mkdir -pv /mnt/download/systemd
@@ -25,7 +25,7 @@ curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/uplink.service htt
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/startup.service https://raw.githubusercontent.com/sai-kiran-y/uplink/main/scripts/systemd/startup.service
 
 # get config.toml 
-curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/config.toml https://raw.githubusercontent.com/sai-kiran-y/uplink/main/scripts/config.toml
+curl --proto '=https' --tlsv1.2 -sSf -o /etc/bytebeam/config.toml https://raw.githubusercontent.com/sai-kiran-y/uplink/main/scripts/config.toml
 
 # get reboot.sh
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/reboot.sh https://raw.githubusercontent.com/sai-kiran-y/uplink/main/scripts/reboot.sh
@@ -41,7 +41,7 @@ sudo apt install vim -y
 sudo apt install netcat -y
 
 # Make uplink executable
-chmod +x /mnt/download/uplink
+chmod +x /etc/bytebeam/uplink
 chmod +x /mnt/download/startup.sh
 
 cp /mnt/download/systemd/uplink.service /etc/systemd/system/
