@@ -89,11 +89,11 @@ echo "{ \"stream\": \"action_status\", \"sequence\": 0, \"timestamp\": $(date +%
 ## Step 4: Reboot the system
 # Before rebooting, some flags are created in data partition
 # to know if reboot is due to rootfs issue or if it's a normal reboot.
-TWO_OK=/uboot/two_ok
-TWO_BOOT=/uboot/two
+TWO_OK=/boot/two_ok
+TWO_BOOT=/boot/two
 TWO_DOWNLOAD=/mnt/download/two
-THREE_OK=/uboot/three_ok
-THREE_BOOT=/uboot/three
+THREE_OK=/boot/three_ok
+THREE_BOOT=/boot/three
 THREE_DOWNLOAD=/mnt/download/three
 
 root_part=`awk -F"root=" '{ print $NF; }' /proc/cmdline | cut -d" " -f1`
@@ -134,25 +134,26 @@ fi
 
 echo "{ \"stream\": \"action_status\", \"sequence\": 0, \"timestamp\": $(date +%s%3N), \"action_id\": \"$1\", \"state\": \"Completed\", \"progress\": 90, \"errors\": [] }" >&"${COPROC[1]}"
 
-mkdir /mnt/next_root/uboot
-cp /uboot/u-boot.bin /mnt/download
-cp /uboot/boot.scr /mnt/download
+#mkdir /mnt/next_root/uboot
+cp /boot/u-boot.bin /mnt/download
+cp /boot/boot.scr /mnt/download
 
 # Copy the kernel and firmware files to boot partition
-cp -r /mnt/next_root/boot/* /uboot/
+cp -r /mnt/next_root/boot/* /boot/
 
-# Extract the kernel
-cp /mnt/next_root/boot/kernel8.img /mnt/next_root/boot/_kernel8.img.gz
-gunzip /mnt/next_root/boot/_kernel8.img.gz
+# Extract the kernel - Needed for u-boot v2022. Currently v2023 is being used.
+# cp /mnt/next_root/boot/kernel8.img /mnt/next_root/boot/_kernel8.img.gz
+# gunzip /mnt/next_root/boot/_kernel8.img.gz
 
 # Update config file to load uboot 
-echo "kernel=u-boot.bin">>/uboot/config.txt
+# echo "kernel=u-boot.bin">>/boot/config.txt
 
 # Place uboot script in boot partition
-cp /mnt/download/boot.scr /uboot/
-cp /mnt/download/u-boot.bin /uboot/
+cp /mnt/download/boot.scr /boot/
+cp /mnt/download/u-boot.bin /boot/
 
 # Create symlink between the contents of boot folder and uboot folder
+"""
 BOOT_PATH="/mnt/next_root/boot/*"
 UBOOT_PATH="/uboot"
 for FILE in  $BOOT_PATH;
@@ -172,6 +173,6 @@ do
 		ln -sf $UBOOT_PATH/$(basename $FILE) $FILE 
 	fi
 done
-
+"""
 # If the boot is successful, startup script sends progress as 100.
 sudo reboot
