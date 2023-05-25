@@ -48,12 +48,12 @@ use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
+use base::tunshell::TunshellSession;
 use base::Compression;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
 use collector::systemstats::StatCollector;
-use collector::tunshell::TunshellSession;
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
@@ -346,7 +346,8 @@ impl Uplink {
             })
         });
 
-        let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
+        let (tunshell_tx, tunshell_rx) = bounded(1);
+        let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), tunshell_tx, mqtt_metrics_tx);
         let mqtt_client = mqtt.client();
 
         let serializer = Serializer::new(
@@ -386,7 +387,8 @@ impl Uplink {
             })
         });
 
-        let tunshell_session = TunshellSession::new(config.clone(), false, bridge_tx.clone());
+        let tunshell_session =
+            TunshellSession::new(config.clone(), false, tunshell_rx, self.action_status());
         thread::spawn(move || tunshell_session.start());
 
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;

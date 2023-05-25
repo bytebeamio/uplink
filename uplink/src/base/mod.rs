@@ -16,6 +16,7 @@ pub mod bridge;
 pub mod monitor;
 pub mod mqtt;
 pub mod serializer;
+pub mod tunshell;
 
 pub const DEFAULT_TIMEOUT: u64 = 60;
 

@@ -306,6 +306,8 @@ impl Bridge {
             }
         };
 
+        dbg!(&response);
+
         if *inflight_action.id != response.action_id {
             error!("response id({}) != active action({})", response.action_id, inflight_action.id);
             return;

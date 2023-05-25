@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
+use flume::Receiver;
 use log::error;
 use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
-use crate::{
-    base::{self, bridge::BridgeTx, ActionRoute},
-    ActionResponse,
-};
+use crate::{base, Action, ActionResponse};
+
+use super::bridge::stream::Stream;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Keys {
@@ -20,12 +20,18 @@ pub struct Keys {
 pub struct TunshellSession {
     _config: Arc<base::Config>,
     echo_stdout: bool,
-    bridge: BridgeTx,
+    actions_rx: Receiver<Action>,
+    action_status: Stream<ActionResponse>,
 }
 
 impl TunshellSession {
-    pub fn new(config: Arc<base::Config>, echo_stdout: bool, bridge: BridgeTx) -> Self {
-        Self { _config: config, echo_stdout, bridge }
+    pub fn new(
+        config: Arc<base::Config>,
+        echo_stdout: bool,
+        actions_rx: Receiver<Action>,
+        action_status: Stream<ActionResponse>,
+    ) -> Self {
+        Self { _config: config, echo_stdout, actions_rx, action_status }
     }
 
     fn config(&self, keys: Keys) -> Config {
@@ -42,11 +48,8 @@ impl TunshellSession {
     }
 
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(self) {
-        let route = ActionRoute { name: "launch_shell".to_owned(), timeout: 10 };
-        let actions_rx = self.bridge.register_action_route(route).await;
-
-        while let Ok(action) = actions_rx.recv_async().await {
+    pub async fn start(mut self) {
+        while let Ok(action) = self.actions_rx.recv_async().await {
             let action_id = action.action_id.clone();
 
             // println!("{:?}", keys);
@@ -54,35 +57,45 @@ impl TunshellSession {
                 Ok(k) => k,
                 Err(e) => {
                     error!("Failed to deserialize keys. Error = {:?}", e);
-                    let status = ActionResponse::failure(&action_id, "corruptkeys".to_owned());
-                    self.bridge.send_action_response(status).await;
+                    let response = ActionResponse::failure(&action_id, "corruptkeys".to_owned());
+                    if let Err(e) = self.action_status.fill(response).await {
+                        error!("Couldn't send tunshell action status: {e}")
+                    }
                     continue;
                 }
             };
 
             let mut client = Client::new(self.config(keys), HostShell::new().unwrap());
-            let status_tx = self.bridge.clone();
+            let mut action_status = self.action_status.clone();
 
             //TODO(RT): Findout why this is spawned. We want to send other action's with shell?
             tokio::spawn(async move {
                 let response = ActionResponse::progress(&action_id, "ShellSpawned", 90);
-                status_tx.send_action_response(response).await;
+                if let Err(e) = action_status.fill(response).await {
+                    error!("Couldn't send tunshell action status: {e}")
+                }
 
                 match client.start_session().compat().await {
                     Ok(status) => {
                         if status != 0 {
                             let response = ActionResponse::failure(&action_id, status.to_string());
-                            status_tx.send_action_response(response).await;
+                            if let Err(e) = action_status.fill(response).await {
+                                error!("Couldn't send tunshell action status: {e}")
+                            }
                         } else {
                             log::info!("tunshell exited with status: {}", status);
                             let response = ActionResponse::success(&action_id);
-                            status_tx.send_action_response(response).await;
+                            if let Err(e) = action_status.fill(response).await {
+                                error!("Couldn't send tunshell action status: {e}")
+                            }
                         }
                     }
                     Err(e) => {
                         log::warn!("tunshell client error: {}", e);
                         let response = ActionResponse::failure(&action_id, e.to_string());
-                        status_tx.send_action_response(response).await;
+                        if let Err(e) = action_status.fill(response).await {
+                            error!("Couldn't send tunshell action status: {e}")
+                        }
                     }
                 };
             });

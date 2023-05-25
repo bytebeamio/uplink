@@ -49,12 +49,15 @@ pub struct Mqtt {
     metrics: MqttMetrics,
     /// Metrics tx
     metrics_tx: Sender<MqttMetrics>,
+    /// Special channel for in-built tunshell action handler
+    tunshell_tx: Sender<Action>,
 }
 
 impl Mqtt {
     pub fn new(
         config: Arc<Config>,
         actions_tx: Sender<Action>,
+        tunshell_tx: Sender<Action>,
         metrics_tx: Sender<MqttMetrics>,
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
@@ -71,6 +74,7 @@ impl Mqtt {
             client,
             eventloop,
             native_actions_tx: actions_tx,
+            tunshell_tx,
             actions_subscriptions,
             metrics: MqttMetrics::new(),
             metrics_tx,
@@ -166,8 +170,10 @@ impl Mqtt {
         }
 
         info!("Action = {:?}", action);
-        self.native_actions_tx.try_send(action)?;
-
+        match action.name.as_str() {
+            "launch_shell" => self.tunshell_tx.try_send(action)?,
+            _ => self.native_actions_tx.try_send(action)?,
+        }
         Ok(())
     }
 
