@@ -180,6 +180,11 @@ impl From<&ActionRoute> for ActionRoute {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct DeviceShadowConfig {
+    timeout: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
@@ -207,6 +212,7 @@ pub struct Config {
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
     pub ota_installer: Option<InstallerConfig>,
+    pub device_shadow: DeviceShadowConfig,
     #[serde(default)]
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]

@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
 
 mod delaymap;
+mod device_shadow;
 mod metrics;
 pub(crate) mod stream;
 mod streams;
@@ -19,6 +20,8 @@ use crate::{Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 use stream::Stream;
 use streams::Streams;
+
+use self::device_shadow::DeviceShadowHandler;
 
 use super::Compression;
 
@@ -174,6 +177,10 @@ impl Bridge {
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
         self.load_saved_action()?;
 
+        let mut device_shadow = DeviceShadowHandler::new();
+        let mut device_shadow_timeout =
+            interval(Duration::from_secs(self.config.device_shadow.timeout));
+
         loop {
             select! {
                 action = self.actions_rx.recv_async() => {
@@ -243,6 +250,11 @@ impl Bridge {
                     if let Err(e) = streams.check_and_flush_metrics() {
                         debug!("Failed to flush stream metrics. Error = {}", e);
                     }
+                }
+                // Forward device shadow to platform
+                _ = device_shadow_timeout.tick() => {
+                    let payload = device_shadow.next_payload()?;
+                     streams.forward(payload).await;
                 }
                 // Handle a shutdown signal
                 _ = self.ctrl_rx.recv_async() => {
