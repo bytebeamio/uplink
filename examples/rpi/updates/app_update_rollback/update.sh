@@ -9,6 +9,6 @@ SLEEP_TIME=2
 INSTALL_AB="no"
 
 ## App update with rollback
-APP_NAME=app
+APP_NAME=hello_app
 APP_BIN_PATH=/usr/local/bin
 $FILE_PATH/app_update_rollback.sh $1 $2 $APP_NAME $APP_BIN_PATH $FILE_PATH $INSTALL_AB $SLEEP_TIME
