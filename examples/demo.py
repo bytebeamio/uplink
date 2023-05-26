@@ -64,8 +64,6 @@ def reboot(action):
 	if (root == 3):
 		open("/mnt/download/three","r")
 	os.system('sudo reboot')
-	# Stop uplink
-	#os.system('sudo curl -X POST http://localhost:3333/shutdown')
 
 def update_firmware(action):
     payload = json.loads(action['payload'])
@@ -89,10 +87,6 @@ def recv_actions():
 			print("update_config action received")
 			print(json.loads(action['payload']))
 			update_config(action)
-            
-		#resp = action_complete(action["action_id"])
-		#print(resp)
-		#send_data(s, resp)
 
 print("Starting Uplink Bridge App")
 threading.Thread(target=recv_actions).start()
