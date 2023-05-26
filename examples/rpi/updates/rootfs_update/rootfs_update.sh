@@ -143,7 +143,7 @@ files=( two two_ok three three_ok )
 for i in "${files[@]}"
 do
 	echo "$i"
-	rm -rf /tmp/$i
+	rm -rf /mnt/next_root/boot/$i
 done
 
 # Copy the kernel and firmware files to boot partition
