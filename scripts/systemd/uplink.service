@@ -1,0 +1,12 @@
+[Unit]
+Description=Bytebeam Uplink service
+After=network.target auditd.service
+
+[Service]
+ExecStart=/usr/local/share/bytebeam/uplink -c /usr/local/share/bytebeam/config.toml -a /mnt/download/device.json -vvv
+KillMode=process
+Restart=on-failure
+Type=simple
+
+[Install]
+WantedBy=multi-user.target

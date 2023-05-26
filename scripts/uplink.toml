@@ -1,0 +1,13 @@
+
+action_redirections={update_firmware="install_firmware"}
+[tcpapps.1]
+port=5555
+
+[downloader]
+path="/tmp/uplink/download"
+actions=[{name="update_firmware", timeout=310}, {name="send_file"}]
+
+[ota_installer]
+path="/tmp/uplink/installer"
+actions=[{name="install_firmware", timeout=310}]
+uplink_port=5555

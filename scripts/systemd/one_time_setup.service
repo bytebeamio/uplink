@@ -1,0 +1,12 @@
+[Unit]
+Description=Bytebeam One Time Setup Service
+After=network.target auditd.service
+
+[Service]
+ExecStart=/home/pi/get_scripts.sh 
+KillMode=process
+Restart=on-failure
+Type=simple
+
+[Install]
+WantedBy=multi-user.target
