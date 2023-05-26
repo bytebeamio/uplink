@@ -176,3 +176,6 @@ port = 3333
 # units = ["collector"]
 # min_level = 7
 # stream_size = 100
+
+[device_shadow]
+interval = 30
