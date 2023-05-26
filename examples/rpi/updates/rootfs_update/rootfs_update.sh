@@ -86,6 +86,17 @@ fi
 ln -s /mnt/next_root/etc/systemd/system/startup.service /mnt/next_root/etc/systemd/system/multi-user.target.wants/startup.service
 echo "{ \"stream\": \"action_status\", \"sequence\": 0, \"timestamp\": $(date +%s%3N), \"action_id\": \"$1\", \"state\": \"Completed\", \"progress\": 75, \"errors\": [] }" >&"${COPROC[1]}"
 
+# Copy uplink binary and config.toml to /usr/local/share/bytebeam folder of next rootfs
+if [ ! -f /mnt/next_root/usr/local/share/bytebeam/uplink ]
+then
+	cp /usr/local/share/bytebeam/uplink /mnt/next_root/usr/local/share/bytebeam/uplink
+fi
+
+if [ ! -f /mnt/next_root/usr/local/share/bytebeam/config.toml ]
+then
+	cp /usr/local/share/bytebeam/config.toml /mnt/next_root/usr/local/share/bytebeam/config.toml
+fi
+
 ## Step 4: Reboot the system
 # Before rebooting, some flags are created in data partition
 # to know if reboot is due to rootfs issue or if it's a normal reboot.
