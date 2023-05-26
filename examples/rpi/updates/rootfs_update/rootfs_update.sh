@@ -145,7 +145,6 @@ fi
 
 echo "{ \"stream\": \"action_status\", \"sequence\": 0, \"timestamp\": $(date +%s%3N), \"action_id\": \"$1\", \"state\": \"Completed\", \"progress\": 90, \"errors\": [] }" >&"${COPROC[1]}"
 
-#mkdir /mnt/next_root/uboot
 cp /boot/u-boot.bin /mnt/download
 cp /boot/boot.scr /mnt/download
 
@@ -160,38 +159,9 @@ done
 # Copy the kernel and firmware files to boot partition
 cp -r /mnt/next_root/boot/* /boot/
 
-# Extract the kernel - Needed for u-boot v2022. Currently v2023 is being used.
-# cp /mnt/next_root/boot/kernel8.img /mnt/next_root/boot/_kernel8.img.gz
-# gunzip /mnt/next_root/boot/_kernel8.img.gz
-
-# Update config file to load uboot 
-# echo "kernel=u-boot.bin">>/boot/config.txt
-
 # Place uboot script in boot partition
 cp /mnt/download/boot.scr /boot/
 cp /mnt/download/u-boot.bin /boot/
 
-# Create symlink between the contents of boot folder and uboot folder
-"""
-BOOT_PATH="/mnt/next_root/boot/*"
-UBOOT_PATH="/uboot"
-for FILE in  $BOOT_PATH;
-do
-	if [ -d "$FILE" ]
-	then
-		for SUBFILE in `ls $FILE`
-		do
-			if [ -f $UBOOT_PATH/$(basename $FILE)/$SUBFILE ]
-			then
-				ln -sf $UBOOT_PATH/$(basename $FILE)/$SUBFILE $FILE/$SUBFILE
-			fi
-		done
-	fi
-	if [ -f $UBOOT_PATH/$(basename $FILE) ]
-	then
-		ln -sf $UBOOT_PATH/$(basename $FILE) $FILE 
-	fi
-done
-"""
 # If the boot is successful, startup script sends progress as 100.
 sudo reboot
