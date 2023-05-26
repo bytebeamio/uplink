@@ -63,7 +63,7 @@ def reboot(action):
 		open("/mnt/download/two","r")
 	if (root == 3):
 		open("/mnt/download/three","r")
-	#os.system('sudo reboot')
+	os.system('sudo reboot')
 	# Stop uplink
 	#os.system('sudo curl -X POST http://localhost:3333/shutdown')
 
