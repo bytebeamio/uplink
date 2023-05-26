@@ -138,6 +138,14 @@ echo "{ \"stream\": \"action_status\", \"sequence\": 0, \"timestamp\": $(date +%
 cp /boot/u-boot.bin /mnt/download
 cp /boot/boot.scr /mnt/download
 
+# Delete flags in boot folder of next rootfs
+files=( two two_ok three three_ok )
+for i in "${files[@]}"
+do
+	echo "$i"
+	rm -rf /tmp/$i
+done
+
 # Copy the kernel and firmware files to boot partition
 cp -r /mnt/next_root/boot/* /boot/
 
