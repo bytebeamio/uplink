@@ -48,7 +48,6 @@ cp /mnt/download/systemd/uplink.service /etc/systemd/system/
 cp /mnt/download/systemd/startup.service /etc/systemd/system/
 systemctl daemon-reload
 
-chmod +x /mnt/download/run_uplink.sh
 touch /boot/two
 touch /mnt/download/two
-echo "Done!!! Place device.json in /mnt/download folder and run the script run_uplink.sh"
+echo "Done!!! Place device.json in /mnt/download folder"
