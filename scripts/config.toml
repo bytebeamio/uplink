@@ -6,7 +6,7 @@ actions=[{name="reboot"}]
 
 [downloader]
 path="/tmp/uplink/download"
-actions=[{name="update_firmware"}, {name="send_file"}]
+actions=[{name="update_firmware", timeout=610}, {name="send_file"}]
 
 [apis]
 enabled=true
@@ -14,7 +14,7 @@ port=3333
 
 [ota_installer]
 path="/tmp/uplink/installer"
-actions=[{name="install_firmware", timeout=310}]
+actions=[{name="install_firmware", timeout=610}]
 uplink_port=5555
 
 [logging]
