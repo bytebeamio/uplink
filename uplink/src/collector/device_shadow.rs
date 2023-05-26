@@ -3,6 +3,7 @@ use std::time::Duration;
 use log::{error, trace};
 use serde::Serialize;
 
+use crate::base::DeviceShadowConfig;
 use crate::base::{bridge::BridgeTx, clock};
 use crate::Payload;
 
@@ -15,14 +16,16 @@ pub struct DeviceShadow {
 }
 
 pub struct DeviceShadowHandler {
+    config: DeviceShadowConfig,
     bridge: BridgeTx,
     sequence: u32,
     state: DeviceShadow,
 }
 
 impl DeviceShadowHandler {
-    pub fn new(bridge: BridgeTx) -> Self {
+    pub fn new(config: DeviceShadowConfig, bridge: BridgeTx) -> Self {
         Self {
+            config,
             bridge,
             sequence: 0,
             state: DeviceShadow { uplink_version: UPLINK_VERSION.to_owned(), latency: 1000000 },
@@ -47,7 +50,8 @@ impl DeviceShadowHandler {
         let ping_addr = "8.8.8.8".parse().unwrap();
         let ping_payload = [0; 64];
 
-        let mut device_shadow_interval = tokio::time::interval(Duration::from_secs(10));
+        let mut device_shadow_interval =
+            tokio::time::interval(Duration::from_secs(self.config.interval));
 
         loop {
             _ = device_shadow_interval.tick().await;

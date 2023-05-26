@@ -393,7 +393,8 @@ impl Uplink {
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
 
-        let device_shadow = DeviceShadowHandler::new(bridge_tx.clone());
+        let device_shadow =
+            DeviceShadowHandler::new(config.device_shadow.clone(), bridge_tx.clone());
         thread::spawn(move || device_shadow.start());
 
         if let Some(config) = &config.ota_installer {
