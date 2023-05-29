@@ -10,7 +10,7 @@ start_devices() {
     devices=($(seq $start $stop))
     first=${devices[0]}
     rest=${devices[@]:1}
-    printf -v port "50%03d" $first
+    printf -v port "5%04d" $first
     download_auth_config $first
     create_uplink_config $first $port
     start_uplink 1 $first "-vv" "devices/uplink_$first.log"
@@ -20,7 +20,7 @@ start_devices() {
 
     for id in $rest
     do 
-        printf -v port "50%03d" $id
+        printf -v port "5%04d" $id
         download_auth_config $id
         create_uplink_config $id $port
         start_uplink 0 $id
