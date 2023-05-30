@@ -129,6 +129,7 @@ impl JournalCtl {
             .register_action_route(ActionRoute {
                 name: "journalctl_config".to_string(),
                 timeout: 10,
+                parallelizable: false,
             })
             .await;
 

@@ -276,7 +276,7 @@ pub struct DownloadFile {
 
 #[cfg(test)]
 mod test {
-    use flume::{TrySendError, bounded};
+    use flume::{bounded, TrySendError};
     use serde_json::json;
 
     use std::{collections::HashMap, time::Duration};
@@ -305,7 +305,11 @@ mod test {
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
         let downloader_cfg = DownloaderConfig {
-            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
+            actions: vec![ActionRoute {
+                name: "firmware_update".to_owned(),
+                timeout: 10,
+                parallelizable: false,
+            }],
             path: format!("{DOWNLOAD_DIR}/uplink-test"),
         };
         let config = config(downloader_cfg.clone());
@@ -381,7 +385,11 @@ mod test {
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
         let downloader_cfg = DownloaderConfig {
-            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
+            actions: vec![ActionRoute {
+                name: "firmware_update".to_owned(),
+                timeout: 10,
+                parallelizable: false,
+            }],
             path: format!("{}/download", DOWNLOAD_DIR),
         };
         let config = config(downloader_cfg.clone());

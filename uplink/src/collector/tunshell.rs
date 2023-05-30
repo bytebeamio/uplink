@@ -43,7 +43,8 @@ impl TunshellSession {
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) {
-        let route = ActionRoute { name: "launch_shell".to_owned(), timeout: 10 };
+        let route =
+            ActionRoute { name: "launch_shell".to_owned(), timeout: 10, parallelizable: true };
         let actions_rx = self.bridge.register_action_route(route).await;
 
         while let Ok(action) = actions_rx.recv_async().await {

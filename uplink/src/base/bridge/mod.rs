@@ -5,6 +5,7 @@ use serde_json::Value;
 use tokio::select;
 use tokio::time::{self, interval, Instant, Sleep};
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
@@ -123,6 +124,7 @@ pub struct Bridge {
     action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
+    parallel_actions: HashSet<String>,
     ctrl_rx: Receiver<BridgeCtrl>,
     ctrl_tx: Sender<BridgeCtrl>,
     shutdown_handle: Sender<()>,
@@ -152,6 +154,7 @@ impl Bridge {
             action_routes: HashMap::with_capacity(10),
             action_redirections,
             current_action: None,
+            parallel_actions: HashSet::new(),
             shutdown_handle,
             ctrl_rx,
             ctrl_tx,
@@ -183,9 +186,11 @@ impl Bridge {
                     info!("Received action: {:?}", action);
 
                     if let Some(current_action) = &self.current_action {
-                        warn!("Another action is currently occupying uplink; action_id = {}", current_action.id);
-                        self.forward_action_error(action, Error::Busy).await;
-                        continue
+                        if !self.route_is_parallelizable(&action.name) {
+                            warn!("Another action is currently occupying uplink; action_id = {}", current_action.id);
+                            self.forward_action_error(action, Error::Busy).await;
+                            continue
+                        }
                     }
 
                     // NOTE: Don't do any blocking operations here
@@ -283,12 +288,23 @@ impl Bridge {
         Ok(())
     }
 
+    /// Actions should be configured to be parallelizable, while by default considered as not
+    fn route_is_parallelizable(&self, action_name: &str) -> bool {
+        self.action_routes.get(action_name).map(|r| r.parallelizable).unwrap_or_default()
+    }
+
     /// Handle received actions
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
         match self.action_routes.get(&action.name) {
-            Some(app_tx) => {
+            Some(route) => {
                 let duration =
-                    app_tx.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
+                    route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
+                // current action left unchanged in case of forwarded action being parallelizable
+                if route.parallelizable {
+                    self.parallel_actions.insert(action.action_id);
+                    return Ok(());
+                }
+
                 self.current_action = Some(CurrentAction::new(action, duration));
 
                 Ok(())
@@ -298,6 +314,12 @@ impl Bridge {
     }
 
     async fn forward_action_response(&mut self, response: ActionResponse) {
+        if self.parallel_actions.contains(&response.action_id) {
+            self.forward_parallel_action_response(response).await;
+
+            return;
+        }
+
         let inflight_action = match &mut self.current_action {
             Some(v) => v,
             None => {
@@ -350,6 +372,17 @@ impl Bridge {
                 error!("Failed to route action to app. Error = {:?}", e);
                 self.forward_action_error(fwd_action, e).await;
             }
+        }
+    }
+
+    async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
+        info!("Action response = {:?}", response);
+        if let Err(e) = self.action_status.fill(response.clone()).await {
+            error!("Failed to fill. Error = {:?}", e);
+        }
+
+        if response.is_completed() || response.is_failed() {
+            self.parallel_actions.remove(&response.action_id);
         }
     }
 
@@ -416,6 +449,7 @@ impl CurrentAction {
 pub struct ActionRouter {
     actions_tx: Sender<Action>,
     duration: Duration,
+    parallelizable: bool,
 }
 
 impl ActionRouter {
@@ -437,9 +471,10 @@ pub struct BridgeTx {
 impl BridgeTx {
     pub async fn register_action_route(&self, route: ActionRoute) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(1);
-        let duration = Duration::from_secs(route.timeout);
-        let action_router = ActionRouter { actions_tx, duration };
-        let event = Event::RegisterActionRoute(route.name, action_router);
+        let ActionRoute { name, timeout, parallelizable } = route;
+        let duration = Duration::from_secs(timeout);
+        let action_router = ActionRouter { actions_tx, duration, parallelizable };
+        let event = Event::RegisterActionRoute(name, action_router);
 
         // Bridge should always be up and hence unwrap is ok
         self.events_tx.send_async(event).await.unwrap();
@@ -458,9 +493,11 @@ impl BridgeTx {
         let (actions_tx, actions_rx) = bounded(1);
 
         for route in routes {
-            let duration = Duration::from_secs(route.timeout);
-            let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
-            let event = Event::RegisterActionRoute(route.name, action_router);
+            let ActionRoute { name, timeout, parallelizable } = route;
+            let duration = Duration::from_secs(timeout);
+            let action_router =
+                ActionRouter { actions_tx: actions_tx.clone(), duration, parallelizable };
+            let event = Event::RegisterActionRoute(name, action_router);
             // Bridge should always be up and hence unwrap is ok
             self.events_tx.send_async(event).await.unwrap();
         }
@@ -542,10 +579,12 @@ mod tests {
     async fn timeout_on_diff_routes() {
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
-        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
+        let route_1 =
+            ActionRoute { name: "route_1".to_string(), timeout: 10, parallelizable: false };
         let route_1_rx = bridge_tx.register_action_route(route_1).await;
 
-        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: 30 };
+        let route_2 =
+            ActionRoute { name: "route_2".to_string(), timeout: 30, parallelizable: false };
         let route_2_rx = bridge_tx.register_action_route(route_2).await;
 
         std::thread::spawn(move || {
@@ -619,7 +658,8 @@ mod tests {
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route =
+            ActionRoute { name: "test".to_string(), timeout: 30, parallelizable: false };
         let action_rx = bridge_tx.register_action_route(test_route).await;
 
         std::thread::spawn(move || loop {
@@ -663,7 +703,8 @@ mod tests {
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route =
+            ActionRoute { name: "test".to_string(), timeout: 30, parallelizable: false };
         let action_rx = bridge_tx.register_action_route(test_route).await;
 
         std::thread::spawn(move || loop {
@@ -705,7 +746,8 @@ mod tests {
 
         std::thread::spawn(move || loop {
             let rt = Runtime::new().unwrap();
-            let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+            let test_route =
+                ActionRoute { name: "test".to_string(), timeout: 30, parallelizable: false };
             let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
             let action = action_rx.recv().unwrap();
             assert_eq!(action.action_id, "1".to_owned());
@@ -716,7 +758,8 @@ mod tests {
 
         std::thread::spawn(move || loop {
             let rt = Runtime::new().unwrap();
-            let test_route = ActionRoute { name: "redirect".to_string(), timeout: 30 };
+            let test_route =
+                ActionRoute { name: "redirect".to_string(), timeout: 30, parallelizable: false };
             let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
             let action = action_rx.recv().unwrap();
             assert_eq!(action.action_id, "1".to_owned());
