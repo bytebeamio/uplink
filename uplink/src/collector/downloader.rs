@@ -212,6 +212,9 @@ impl FileDownloader {
             }
         }
         let file = File::create(file_path)?;
+        #[cfg(unix)]
+        file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666))?;
+
         let file_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
 
         Ok((file, file_path))
