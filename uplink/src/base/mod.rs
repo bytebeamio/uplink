@@ -18,7 +18,6 @@ pub mod mqtt;
 pub mod serializer;
 
 pub const DEFAULT_TIMEOUT: u64 = 60;
-const SHADOW_UPDATE_INTERVAL: u64 = 10;
 
 #[inline]
 fn default_timeout() -> u64 {
@@ -188,7 +187,7 @@ pub struct DeviceShadowConfig {
 
 impl Default for DeviceShadowConfig {
     fn default() -> Self {
-        Self { interval: SHADOW_UPDATE_INTERVAL }
+        Self { interval: DEFAULT_TIMEOUT }
     }
 }
 

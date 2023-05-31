@@ -177,5 +177,9 @@ port = 3333
 # min_level = 7
 # stream_size = 100
 
+# Configurations associated with in-built device-shadow collector
+#
+# Required Parameters
+# - interval: time in seconds after which device-shadow is pushed onto platform, default value is 60
 [device_shadow]
 interval = 30
