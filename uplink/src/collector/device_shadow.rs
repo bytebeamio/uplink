@@ -10,25 +10,25 @@ use crate::Payload;
 pub const UPLINK_VERSION: &str = env!("VERGEN_BUILD_SEMVER");
 
 #[derive(Debug, Serialize)]
-pub struct DeviceShadow {
+struct State {
     uplink_version: String,
     latency: u64,
 }
 
-pub struct DeviceShadowHandler {
+pub struct DeviceShadow {
     config: DeviceShadowConfig,
     bridge: BridgeTx,
     sequence: u32,
-    state: DeviceShadow,
+    state: State,
 }
 
-impl DeviceShadowHandler {
+impl DeviceShadow {
     pub fn new(config: DeviceShadowConfig, bridge: BridgeTx) -> Self {
         Self {
             config,
             bridge,
             sequence: 0,
-            state: DeviceShadow { uplink_version: UPLINK_VERSION.to_owned(), latency: 1000000 },
+            state: State { uplink_version: UPLINK_VERSION.to_owned(), latency: 1000000 },
         }
     }
 
