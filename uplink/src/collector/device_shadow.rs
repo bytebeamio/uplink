@@ -55,16 +55,18 @@ impl DeviceShadow {
 
         loop {
             _ = device_shadow_interval.tick().await;
-            match surge_ping::ping(ping_addr, &ping_payload).await {
+            self.state.latency = match surge_ping::ping(ping_addr, &ping_payload).await {
                 Ok((_, duration)) => {
                     trace!("Ping took {:.3?}", duration);
-                    self.state.latency = duration.as_millis() as u64;
+                    duration.as_millis() as u64
                 }
                 Err(e) => {
                     error!("pinger: {e}");
-                    continue;
+                    // NOTE: 10s time is very large for ping time, denotes network failure,
+                    // will go into persistence and be used by platform for incident reporting
+                    10000
                 }
-            }
+            };
 
             let payload = match self.snapshot() {
                 Ok(v) => v,
