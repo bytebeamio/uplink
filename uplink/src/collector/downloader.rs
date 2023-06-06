@@ -279,7 +279,7 @@ pub struct DownloadFile {
 
 #[cfg(test)]
 mod test {
-    use flume::{TrySendError, bounded};
+    use flume::{bounded, TrySendError};
     use serde_json::json;
 
     use std::{collections::HashMap, time::Duration};

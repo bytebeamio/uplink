@@ -5,6 +5,7 @@ use serde_json::Value;
 use tokio::select;
 use tokio::time::{self, interval, Instant, Sleep};
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
@@ -14,13 +15,14 @@ mod metrics;
 pub(crate) mod stream;
 mod streams;
 
+use super::Compression;
 use crate::base::ActionRoute;
 use crate::{Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 use stream::Stream;
 use streams::Streams;
 
-use super::Compression;
+const TUNSHELL_ACTION: &str = "launch_shell";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -123,6 +125,7 @@ pub struct Bridge {
     action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
+    parallel_actions: HashSet<String>,
     ctrl_rx: Receiver<BridgeCtrl>,
     ctrl_tx: Sender<BridgeCtrl>,
     shutdown_handle: Sender<()>,
@@ -152,6 +155,7 @@ impl Bridge {
             action_routes: HashMap::with_capacity(10),
             action_redirections,
             current_action: None,
+            parallel_actions: HashSet::new(),
             shutdown_handle,
             ctrl_rx,
             ctrl_tx,
@@ -183,9 +187,11 @@ impl Bridge {
                     info!("Received action: {:?}", action);
 
                     if let Some(current_action) = &self.current_action {
-                        warn!("Another action is currently occupying uplink; action_id = {}", current_action.id);
-                        self.forward_action_error(action, Error::Busy).await;
-                        continue
+                        if action.name != TUNSHELL_ACTION {
+                            warn!("Another action is currently occupying uplink; action_id = {}", current_action.id);
+                            self.forward_action_error(action, Error::Busy).await;
+                            continue
+                        }
                     }
 
                     // NOTE: Don't do any blocking operations here
@@ -286,9 +292,15 @@ impl Bridge {
     /// Handle received actions
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
         match self.action_routes.get(&action.name) {
-            Some(app_tx) => {
+            Some(route) => {
                 let duration =
-                    app_tx.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
+                    route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
+                // current action left unchanged in case of forwarded action bein
+                if action.name == TUNSHELL_ACTION {
+                    self.parallel_actions.insert(action.action_id);
+                    return Ok(());
+                }
+
                 self.current_action = Some(CurrentAction::new(action, duration));
 
                 Ok(())
@@ -298,6 +310,12 @@ impl Bridge {
     }
 
     async fn forward_action_response(&mut self, response: ActionResponse) {
+        if self.parallel_actions.contains(&response.action_id) {
+            self.forward_parallel_action_response(response).await;
+
+            return;
+        }
+
         let inflight_action = match &mut self.current_action {
             Some(v) => v,
             None => {
@@ -350,6 +368,17 @@ impl Bridge {
                 error!("Failed to route action to app. Error = {:?}", e);
                 self.forward_action_error(fwd_action, e).await;
             }
+        }
+    }
+
+    async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
+        info!("Action response = {:?}", response);
+        if let Err(e) = self.action_status.fill(response.clone()).await {
+            error!("Failed to fill. Error = {:?}", e);
+        }
+
+        if response.is_completed() || response.is_failed() {
+            self.parallel_actions.remove(&response.action_id);
         }
     }
 
@@ -437,9 +466,10 @@ pub struct BridgeTx {
 impl BridgeTx {
     pub async fn register_action_route(&self, route: ActionRoute) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(1);
-        let duration = Duration::from_secs(route.timeout);
+        let ActionRoute { name, timeout } = route;
+        let duration = Duration::from_secs(timeout);
         let action_router = ActionRouter { actions_tx, duration };
-        let event = Event::RegisterActionRoute(route.name, action_router);
+        let event = Event::RegisterActionRoute(name, action_router);
 
         // Bridge should always be up and hence unwrap is ok
         self.events_tx.send_async(event).await.unwrap();
@@ -458,9 +488,10 @@ impl BridgeTx {
         let (actions_tx, actions_rx) = bounded(1);
 
         for route in routes {
-            let duration = Duration::from_secs(route.timeout);
+            let ActionRoute { name, timeout } = route;
+            let duration = Duration::from_secs(timeout);
             let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
-            let event = Event::RegisterActionRoute(route.name, action_router);
+            let event = Event::RegisterActionRoute(name, action_router);
             // Bridge should always be up and hence unwrap is ok
             self.events_tx.send_async(event).await.unwrap();
         }
