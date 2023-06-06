@@ -12,6 +12,10 @@ name = "push_data"
 path = "src/push_data.rs"
 
 [[bin]]
+name = "benchmark"
+path = "src/benchmark.rs"
+
+[[bin]]
 name = "push_to_uplink"
 path = "src/push_to_uplink.rs"
 
