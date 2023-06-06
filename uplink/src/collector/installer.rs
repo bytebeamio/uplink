@@ -78,6 +78,13 @@ impl OTAInstaller {
         let updater_path = PathBuf::from(self.config.path.clone()).join("updater");
         debug!("Running updater: {}/updater", self.config.path);
 
+        // Ensure updater has execution rights
+        #[cfg(unix)]
+        {
+            let file = File::open(&updater_path)?;
+            file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o777))?;
+        }
+
         let mut cmd = Command::new(updater_path.as_path());
         cmd.arg(&action.action_id).arg(self.config.uplink_port.to_string());
         cmd.spawn()?;
