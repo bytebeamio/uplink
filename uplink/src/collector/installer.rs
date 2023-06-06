@@ -73,13 +73,13 @@ impl OTAInstaller {
         Ok(())
     }
 
-    // Run `update.sh` from extracted tarball
+    // Run `updater` from extracted tarball
     async fn installer(&self, action: &Action) -> Result<(), Error> {
-        let script_path = PathBuf::from(self.config.path.clone()).join("update.sh");
-        debug!("Running script: {}/update.sh", self.config.path);
+        let updater_path = PathBuf::from(self.config.path.clone()).join("updater");
+        debug!("Running updater: {}/updater", self.config.path);
 
-        let mut cmd = Command::new("bash");
-        cmd.arg(script_path).arg(&action.action_id).arg(self.config.uplink_port.to_string());
+        let mut cmd = Command::new(updater_path.as_path());
+        cmd.arg(&action.action_id).arg(self.config.uplink_port.to_string());
         cmd.spawn()?;
 
         Ok(())
