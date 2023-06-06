@@ -172,11 +172,7 @@ impl Logcat {
 
         let log_rx = self
             .bridge
-            .register_action_route(ActionRoute {
-                name: "logcat_config".to_string(),
-                timeout: 10,
-                parallelizable: false,
-            })
+            .register_action_route(ActionRoute { name: "logcat_config".to_string(), timeout: 10 })
             .await;
 
         loop {
