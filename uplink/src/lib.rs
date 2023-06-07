@@ -158,6 +158,14 @@ pub mod config {
 
         let mut config: Config = config.try_deserialize()?;
 
+        // Create directory at persistence_path if it doesn't already exist
+        fs::create_dir_all(&config.persistence_path).map_err(|_| {
+            anyhow::Error::msg(format!(
+                "Permission denied for creating persistence directory at \"{}\"",
+                config.persistence_path.display()
+            ))
+        })?;
+
         // replace placeholders with device/tenant ID
         let tenant_id = config.project_id.trim();
         let device_id = config.device_id.trim();

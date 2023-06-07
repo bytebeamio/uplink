@@ -267,7 +267,6 @@ impl Bridge {
             None => return Ok(()),
         };
         let mut path = self.config.persistence_path.clone();
-        fs::create_dir_all(&path)?;
         path.push("current_action");
         info!("Storing current action in persistence; path: {}", path.display());
         current_action.write_to_disk(path)?;
