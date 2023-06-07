@@ -68,6 +68,7 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    project_id: {}", config.project_id);
     println!("    device_id: {}", config.device_id);
     println!("    remote: {}:{}", config.broker, config.port);
+    println!("    persistence_path: {}", config.persistence_path.display());
     if !config.action_redirections.is_empty() {
         println!("    action redirections:");
         for (action, redirection) in config.action_redirections.iter() {
