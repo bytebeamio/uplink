@@ -2,7 +2,7 @@
 
 ## Uploading the update to Bytebeam Cloud
 From the Bytebeam cloud, updates can be easily installed in few simple steps.
-The update file is typically a tar archive(update.tar.gz) with a script(called update.sh) and
+The update file is typically a tar archive(update.tar.gz) with a script(called updater) and
 other files. 
 These are the types of updates that are currently supported.
 * [**app_update**](app_update/) -  Installs the application binary to the specified location
