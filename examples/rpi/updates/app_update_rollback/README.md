@@ -1,15 +1,15 @@
 # App update with rollback feature
 
 This update basically replaces the existing binary on the system with the
-binary uploaded on the Bytebeam cloud. In this example, it is assumed that
-the app is part of systemd. The app basically prints the string "Hello from Bytebeam" 
+binary uploaded on the Bytebeam cloud. In this example,the app is expected 
+to be part of systemd. The app basically prints the string "Hello from Bytebeam" 
 every 3 seconds. [app_update_rollback.sh](app_update_rollback.sh) has the logic of 
 replacing the old app, with the new one. By default the app is assumed to be in the 
-folder /usr/local/bin. This is configurable in update.sh script. If the new app doesn't
+folder /usr/local/bin. This is configurable in updater script. If the new app doesn't
 work as expected, it is replaced with the older working version of the app.
 
-## update.sh 
-[update.sh](update.sh) is the wrapper script for app_update_rollback script. Using update.sh 
+## updater 
+[updater](updater) is the wrapper script for app_update_rollback script. Using updater 
 script we can configure several parameters such as
 * Port number
 * App name
@@ -18,9 +18,9 @@ script we can configure several parameters such as
 
 ## Create app update
 make_firmware_update.sh script creates the [app_update_rollback](app_update_rollback.tar.gz) tar file
-which has the new application, update.sh and app_update_rollback.sh scripts. The app_update_rollback.tar.gz 
+which has the new application, updater and app_update_rollback.sh scripts. The app_update_rollback.tar.gz 
 file is to be uploaded to the "Firmware Update" section of Bytebeam cloud. Once the OTA
-update is triggered, the tar is downloaded to the device and update.sh is run, which
+update is triggered, the tar is downloaded to the device and updater is run, which
 inturn calls app_update_rollback.sh with appropriate parameters. 
 
 ## Status of the update
