@@ -6,7 +6,7 @@ the app is part of systemd. The app basically prints the string "Hello from Byte
 [app_update.sh](app_update.sh) has the logic of replacing the old app, with the new one.
 By default the app is assumed to be in the folder /usr/local/bin. This is configurable in update.sh script.
 
-## update.sh 
+## updater
 [updater](updater) is the wrapper script for app_update script. Using update.sh 
 script we can configure several parameters such as
 * Port number
