@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::sink::SinkExt;
 use log::error;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 use structopt::StructOpt;
 use tokio::io::{stdin, AsyncBufReadExt, BufReader};
@@ -30,7 +30,27 @@ pub struct CommandLine {
     pub stream: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
+struct LogEntry {
+ pub line: String,
+ pub level: String,
+ #[serde(skip)]
+ pub timestamp: u64,
+ pub message: String,
+}
+
+impl LogEntry {
+    fn parse(line: String) -> Self {
+        Self {
+            line,
+            level: "".to_string(),
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
+            message: "".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
 pub struct Payload {
     pub stream: String,
     #[serde(skip)]
@@ -50,13 +70,13 @@ async fn reader(stream_name: &str, mut tx: Framed<TcpStream, LinesCodec>) -> Res
         match lines.next_line().await? {
             Some(l) => {
                 sequence += 1;
+                let log_entry = LogEntry::parse(l);
                 let data = Payload {
                     stream: stream_name.to_owned(),
                     device_id: None,
                     sequence,
-                    timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
-                        as u64,
-                    payload: json!({ "line": l }),
+                    timestamp: log_entry.timestamp,
+                    payload: json!(log_entry),
                 };
                 let payload = serde_json::to_string(&data)?;
                 tx.send(payload).await?;
