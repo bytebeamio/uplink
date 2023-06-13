@@ -86,6 +86,7 @@ We have provided examples written in python and golang to demonstrate how you ca
 1. Ensure uplink is running on the device, connected to relevant broker and using the following config:
 ```toml
 [tcpapps.main_app]
+port = 5555
 actions = [{ name = "update_firmware" }, { name = "reboot" }, { name = "update_config" }]
 ```
 2. Run the python/golang examples
