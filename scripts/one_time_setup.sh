@@ -21,7 +21,7 @@ curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/systemd.sh https:/
 # get uplink.service
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/uplink.service https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/systemd/uplink.service
 
-# get startup.service
+# get check-root-partition.service
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/check-root-partition.service https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/systemd/check-root-partition.service
 
 # get config.toml 
