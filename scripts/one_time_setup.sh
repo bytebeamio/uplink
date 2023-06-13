@@ -33,7 +33,7 @@ curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/reboot.sh https://raw.gith
 # get run_uplink.sh script
 # curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/run_uplink.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/run_uplink.sh
 
-# get startup.sh
+# get check_root_part.sh
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/check_root_part.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/check_root_part.sh
 
 # Install netcat and vim
