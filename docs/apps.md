@@ -11,7 +11,7 @@ port = 5555
 port = 5555
 actions = [{ name = "install_firmware" }]
 ```
-NOTE: not more than one application can connect to a TCP port at a time.
+NOTE: Only one client can connect to a TCP port at a time. If a second client attempts to connect to a port which is already occupied, the first client will be disconnected from uplink.
 
 ## Action
 An `Action` is the term used to refer to messages that carry commands and other information that can be executed by uplink or applications connected to it. Some common actions include the `update_firmware` and `config_update`. An `Action` messages in JSON would be structured as follows:
@@ -31,7 +31,7 @@ Connected application can send data to the broker as Streamed Payload. Streams e
     "stream": "...",  // Name of stream to which data is being sent
     "sequence": ...,  // Sequence number of data packet
     "timestamp": ..., // Timestamp at message generation
-    //...payload: more JSON data
+    //...payload: stream columns as JSON key+value pairs
 }
 ```
 
