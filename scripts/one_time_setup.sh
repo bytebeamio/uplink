@@ -47,7 +47,7 @@ chmod +x /mnt/download/check_root_part.sh
 cp /mnt/download/systemd/uplink.service /etc/systemd/system/
 cp /mnt/download/systemd/check-root-partition.service /etc/systemd/system/
 systemctl daemon-reload
-systemctl start check-root-part.service
+systemctl start check-root-partition.service
 
 touch /boot/two
 touch /mnt/download/two
