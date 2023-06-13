@@ -12,7 +12,7 @@ cp update_fstab.sh /mnt/download/
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/update_fstab_next_root.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/update_fstab_next_root.sh
 
 # get uplink binary
-curl --proto '=https' --tlsv1.2 -sSfL -o /usr/local/share/bytebeam/uplink https://github.com/bytebeamio/uplink/releases/download/v2.4.0/uplink-aarch64-unknown-linux-gnu
+curl --proto '=https' --tlsv1.2 -sSfL -o /usr/local/share/bytebeam/uplink https://github.com/bytebeamio/uplink/releases/download/v2.5.0/uplink-aarch64-unknown-linux-gnu
 
 # get systemd script
 mkdir -pv /mnt/download/systemd
@@ -22,7 +22,7 @@ curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/systemd.sh https:/
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/uplink.service https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/systemd/uplink.service
 
 # get startup.service
-curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/check-root-partition.service https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/systemd/startup.service
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/check-root-partition.service https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/systemd/check-root-partition.service
 
 # get config.toml 
 curl --proto '=https' --tlsv1.2 -sSf -o /usr/local/share/bytebeam/config.toml https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/config.toml
@@ -34,7 +34,7 @@ curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/reboot.sh https://raw.gith
 # curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/run_uplink.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/run_uplink.sh
 
 # get startup.sh
-curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/check_root_part.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/startup.sh
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/check_root_part.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/check_root_part.sh
 
 # Install netcat and vim
 sudo apt install vim -y
