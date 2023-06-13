@@ -22,7 +22,7 @@ curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/systemd.sh https:/
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/uplink.service https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/systemd/uplink.service
 
 # get startup.service
-curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/startup.service https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/systemd/startup.service
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/systemd/check-root-partition.service https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/systemd/startup.service
 
 # get config.toml 
 curl --proto '=https' --tlsv1.2 -sSf -o /usr/local/share/bytebeam/config.toml https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/config.toml
@@ -34,7 +34,7 @@ curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/reboot.sh https://raw.gith
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/run_uplink.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/run_uplink.sh
 
 # get startup.sh
-curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/startup.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/startup.sh
+curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/check_root_part.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/startup.sh
 
 # Install netcat and vim
 sudo apt install vim -y
@@ -42,10 +42,10 @@ sudo apt install netcat -y
 
 # Make uplink executable
 chmod +x /usr/local/share/bytebeam/uplink
-chmod +x /mnt/download/startup.sh
+chmod +x /mnt/download/check_root_part.sh
 
 cp /mnt/download/systemd/uplink.service /etc/systemd/system/
-cp /mnt/download/systemd/startup.service /etc/systemd/system/
+cp /mnt/download/systemd/check-root-partition.service /etc/systemd/system/
 systemctl daemon-reload
 
 touch /boot/two
