@@ -83,7 +83,11 @@ An example success response to an action with the id `"123"`, would look like:
 
 ## Demonstration
 We have provided examples written in python and golang to demonstrate how you can receive Actions and reply back with either data or responses. You can checkout the examples provided in the `demo/` directory and execute them as such:
-1. Ensure uplink is running on device and connected to relevant broker.
+1. Ensure uplink is running on the device, connected to relevant broker and using the following config:
+```toml
+[tcpapps.main_app]
+actions = [{ name = "update_firmware" }, { name = "reboot" }, { name = "update_config" }]
+```
 2. Run the python/golang examples
 ```sh
 # For python
