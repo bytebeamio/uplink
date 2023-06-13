@@ -31,7 +31,7 @@ curl --proto '=https' --tlsv1.2 -sSf -o /usr/local/share/bytebeam/config.toml ht
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/reboot.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/reboot.sh
 
 # get run_uplink.sh script
-curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/run_uplink.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/run_uplink.sh
+# curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/run_uplink.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/run_uplink.sh
 
 # get startup.sh
 curl --proto '=https' --tlsv1.2 -sSf -o /mnt/download/check_root_part.sh https://raw.githubusercontent.com/bytebeamio/uplink/main/scripts/startup.sh
@@ -47,6 +47,7 @@ chmod +x /mnt/download/check_root_part.sh
 cp /mnt/download/systemd/uplink.service /etc/systemd/system/
 cp /mnt/download/systemd/check-root-partition.service /etc/systemd/system/
 systemctl daemon-reload
+systemctl start check-root-part.service
 
 touch /boot/two
 touch /mnt/download/two
