@@ -74,16 +74,16 @@ then
 fi
 ln -s /mnt/next_root/etc/systemd/system/uplink.service /mnt/next_root/etc/systemd/system/multi-user.target.wants/uplink.service
 
-# Add startup script to systemd
-# startup script checks if:
+# Add check_root_part script to systemd
+# This script checks if:
 #			system booted to correct partition 
 #			uplink is running as expected
-cp /mnt/download/systemd/startup.service /mnt/next_root/etc/systemd/system/
-if [ -f /mnt/next_root/etc/systemd/system/multi-user.target.wants/startup.service ]
+cp /mnt/download/systemd/check-root-partition.service /mnt/next_root/etc/systemd/system/
+if [ -f /mnt/next_root/etc/systemd/system/multi-user.target.wants/check-root-partition.service ]
 then
-	unlink  /mnt/next_root/etc/systemd/system/multi-user.target.wants/startup.service 
+	unlink  /mnt/next_root/etc/systemd/system/multi-user.target.wants/check-root-partition.service 
 fi
-ln -s /mnt/next_root/etc/systemd/system/startup.service /mnt/next_root/etc/systemd/system/multi-user.target.wants/startup.service
+ln -s /mnt/next_root/etc/systemd/system/check-root-partition.service /mnt/next_root/etc/systemd/system/multi-user.target.wants/check-root-partition.service
 echo "{ \"stream\": \"action_status\", \"sequence\": 0, \"timestamp\": $(date +%s%3N), \"action_id\": \"$1\", \"state\": \"Completed\", \"progress\": 75, \"errors\": [] }" >&"${COPROC[1]}"
 
 # Copy uplink binary and config.toml to /usr/local/share/bytebeam folder of next rootfs
