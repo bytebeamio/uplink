@@ -193,6 +193,7 @@ impl Default for DeviceShadowConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct PrometheusConfig {
+    pub stream_name: String,
     pub endpoint: String,
     pub interval: u64,
 }

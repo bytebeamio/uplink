@@ -443,7 +443,7 @@ impl Uplink {
         );
 
         if let Some(config) = self.config.prometheus.clone() {
-            let prometheus = Prometheus::new(config);
+            let prometheus = Prometheus::new(config, bridge_tx.clone());
             thread::spawn(|| prometheus.start());
         }
 
