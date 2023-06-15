@@ -53,6 +53,7 @@ use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
+use collector::stdout::Stdout;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellSession;
 use flume::{bounded, Receiver, RecvError, Sender};
@@ -433,6 +434,11 @@ impl Uplink {
         let process_handler = ProcessHandler::new(bridge_tx.clone());
         let processes = config.processes.clone();
         thread::spawn(move || process_handler.start(processes));
+
+        if let Some(config) = &config.stdout {
+            let stdout_collector = Stdout::new(config.clone(), bridge_tx.clone());
+            thread::spawn(move || stdout_collector.start());
+        }
 
         let monitor = Monitor::new(
             self.config.clone(),

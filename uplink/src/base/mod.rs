@@ -192,6 +192,11 @@ impl Default for DeviceShadowConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct StdoutConfig {
+    pub stream_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct PrometheusConfig {
     pub stream_name: String,
     pub endpoint: String,
@@ -225,6 +230,7 @@ pub struct Config {
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
     pub ota_installer: Option<InstallerConfig>,
+    pub stdout: Option<StdoutConfig>,
     pub prometheus: Option<PrometheusConfig>,
     #[serde(default)]
     pub device_shadow: DeviceShadowConfig,

@@ -10,3 +10,4 @@ pub mod systemstats;
 pub mod tcpjson;
 pub mod tunshell;
 pub mod device_shadow;
+pub mod stdout;
