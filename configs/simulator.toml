@@ -2,21 +2,7 @@ processes = [{ name = "echo" }]
 
 action_redirections = { "update_firmware" = "install_update", "send_file" = "load_file" }
 
+persistence_path = "/tmp/uplink"
+
 [tcpapps.1]
 port = 5555
-actions = [{ name = "install_update" }, { name = "load_file" }]
-
-[persistence]
-path = "/tmp/uplink"
-max_file_size = 104857600 # 100MB
-max_file_count = 3
-
-[simulator]
-num_devices = 1
-gps_paths = "./paths/"
-actions = [
-    { name = "update_firmware" },
-    { name = "send_file" },
-    { name = "lock" },
-    { name = "unlock" }
-]
