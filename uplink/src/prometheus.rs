@@ -1,9 +1,8 @@
 use std::time::Duration;
 
-use log::{error, warn};
-use prometheus_parse::Scrape;
+use log::error;
 use reqwest::{Client, Method};
-use serde_json::{Map, Number, Value};
+use serde_json::{json, Map, Value};
 
 use crate::base::{
     bridge::{BridgeTx, Payload},
@@ -31,60 +30,102 @@ impl Prometheus {
 
     #[tokio::main]
     pub async fn start(self) {
-        let mut sequence = 0;
         loop {
-            match self.query().await {
-                Ok(payload) => {
-                    sequence += 1;
-                    let payload = Payload {
-                        stream: self.config.stream_name.clone(),
-                        device_id: None,
-                        sequence,
-                        timestamp: clock() as u64,
-                        payload,
-                    };
-                    self.tx.send_payload(payload).await
-                }
-                Err(e) => error!("{e}"),
+            if let Err(e) = self.query().await {
+                error!("{e}")
             }
 
             tokio::time::sleep(Duration::from_secs(self.config.interval)).await;
         }
     }
 
-    async fn query(&self) -> Result<Value, Error> {
+    async fn query(&self) -> Result<(), Error> {
         let resp = self.client.request(Method::GET, &self.config.endpoint).send().await?;
-        let lines: Vec<_> = resp.text().await?.lines().map(|s| Ok(s.to_owned())).collect();
-        let metrics = Scrape::parse(lines.into_iter())?;
+        let lines: Vec<_> = resp.text().await?.lines().map(|s| s.to_owned()).collect();
+        let mut sequence = 0;
 
-        let mut json = Map::new();
-        for sample in metrics.samples {
-            let num = match sample.value {
-                prometheus_parse::Value::Counter(c) => c,
-                prometheus_parse::Value::Gauge(g) => g,
-                v => {
-                    warn!("Unexpected value: {v:?}");
-                    continue;
-                }
-            };
-            let num = match Number::from_f64(num) {
-                Some(c) => c,
-                _ => {
-                    warn!("Couldn't parse number: {num}");
-                    continue;
-                }
-            };
-            json.insert(sample.metric, Value::Number(num));
+        for mut payload in read_prom(lines) {
+            sequence += 1;
+            payload.sequence = sequence;
+            self.tx.send_payload(payload).await;
         }
 
-        Ok(Value::Object(json))
+        Ok(())
     }
+}
+
+fn read_prom(lines: Vec<String>) -> Vec<Payload> {
+    let mut payloads = vec![];
+    for line in lines {
+        let line = line.trim();
+        // skip the line that starts with #
+        if line.is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+
+        // split the line by space
+        let tokens = &mut line.split_whitespace();
+        if let Some(p) = frame_payload(tokens) {
+            payloads.push(p);
+        }
+    }
+
+    payloads
+}
+
+// Create a function with impl Iterator over &str
+fn frame_payload<'a>(mut line: impl Iterator<Item = &'a str>) -> Option<Payload> {
+    // split at the first { to get stream and payload
+    let stream_and_payload = line.next()?;
+
+    // split without removing the delimiter
+    let mut tokens = stream_and_payload.split('{');
+    let stream = tokens.next()?.to_owned();
+
+    let mut payload = if tokens.next().is_some() {
+        let payload = &stream_and_payload[stream.len()..];
+        create_map(payload)
+    } else {
+        serde_json::Map::new()
+    };
+
+    let value = line.next()?;
+    let value = value.parse::<f64>().ok()?;
+    payload.insert("value".to_owned(), json!(value));
+
+    let mut payload = Payload {
+        stream,
+        device_id: None,
+        sequence: 0,
+        timestamp: clock() as u64,
+        payload: payload.into(),
+    };
+
+    if let Some(timestamp) = line.next() {
+        let timestamp = timestamp.parse::<u64>().ok()?;
+        payload.timestamp = timestamp;
+    }
+
+    Some(payload)
+}
+
+fn create_map(line: &str) -> Map<String, Value> {
+    let v: Vec<&str> = line.trim_matches(|c| c == '{' || c == '}').split(',').collect();
+
+    let mut map = serde_json::Map::new();
+    for item in v {
+        let parts: Vec<&str> = item.split('=').collect();
+        if parts.len() == 2 {
+            map.insert(parts[0].to_string(), json!(parts[1]));
+        }
+    }
+
+    map
 }
 
 #[cfg(test)]
 mod test {
-    use crate::Payload;
-    use serde_json::{json, Map, Value};
+    use super::frame_payload;
 
     #[test]
     fn parse_prom_to_payload() {
@@ -167,50 +208,5 @@ mod test {
 
             dbg!(&payload);
         }
-    }
-
-    // Create a function with impl Iterator over &str
-    fn frame_payload<'a>(mut line: impl Iterator<Item = &'a str>) -> Option<Payload> {
-        // split at the first { to get stream and payload
-        let stream_and_payload = line.next()?;
-
-        // split without removing the delimiter
-        let mut tokens = stream_and_payload.split("{");
-        let stream = tokens.next()?.to_owned();
-
-        let mut payload = if tokens.next().is_some() {
-            let payload = &stream_and_payload[stream.len()..];
-            create_map(payload)
-        } else {
-            serde_json::Map::new()
-        };
-
-        let value = line.next()?;
-        let value = value.parse::<f64>().ok()?;
-        payload.insert("value".to_owned(), json!(value));
-
-        let mut payload =
-            Payload { stream, device_id: None, sequence: 0, timestamp: 0, payload: payload.into() };
-
-        if let Some(timestamp) = line.next() {
-            let timestamp = timestamp.parse::<u64>().ok()?;
-            payload.timestamp = timestamp;
-        }
-
-        Some(payload)
-    }
-
-    fn create_map(line: &str) -> Map<String, Value> {
-        let v: Vec<&str> = line.trim_matches(|c| c == '{' || c == '}').split(',').collect();
-
-        let mut map = serde_json::Map::new();
-        for item in v {
-            let parts: Vec<&str> = item.split('=').collect();
-            if parts.len() == 2 {
-                map.insert(parts[0].to_string(), json!(parts[1]));
-            }
-        }
-
-        map
     }
 }
