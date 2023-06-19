@@ -61,7 +61,6 @@ use log::error;
 
 pub mod base;
 pub mod collector;
-mod prometheus;
 
 pub mod config {
     use crate::base::{bridge::stream::MAX_BUFFER_SIZE, StreamConfig};
@@ -278,8 +277,8 @@ use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
+use collector::prometheus::Prometheus;
 pub use collector::{simulator, tcpjson::TcpJson};
-use prometheus::Prometheus;
 pub use storage::Storage;
 
 pub struct Uplink {

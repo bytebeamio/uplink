@@ -4,10 +4,8 @@ use log::error;
 use reqwest::{Client, Method};
 use serde_json::{json, Map, Value};
 
-use crate::base::{
-    bridge::{BridgeTx, Payload},
-    clock, PrometheusConfig,
-};
+use crate::base::bridge::{BridgeTx, Payload};
+use crate::base::{clock, PrometheusConfig};
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
