@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::select;
 use tokio::time::{self, interval, Instant, Sleep};
+use tokio_stream::StreamExt;
+use tokio_util::time::DelayQueue;
 
 use std::collections::HashSet;
 use std::fs;
@@ -178,11 +180,9 @@ impl Bridge {
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
 
         // Resend saved action if required by route
+        let mut waiter = DelayQueue::with_capacity(1);
         if let Some(saved_action) = self.load_saved_action()? {
-            if let Err(e) = self.try_route_action(saved_action.clone()) {
-                error!("Failed to route saved action to app. Error = {:?}", e);
-                self.forward_action_error(saved_action, e).await;
-            }
+            waiter.insert(saved_action, Duration::from_secs(3));
         }
 
         loop {
@@ -263,6 +263,22 @@ impl Bridge {
 
                     self.shutdown_handle.send(()).unwrap();
                 }
+
+                // NOTE: This should only runs once after 3s of bridge, allowing handlers to register route
+                Some(saved_action) = waiter.next() => {
+                    let saved_action = saved_action.into_inner();
+                    // NOTE: only if action must be resent, route it to handler, else store as current_action
+                    match self.action_routes.get(&saved_action.action.name) {
+                        Some(route) if route.resend => {
+                            if let Err(e) = self.try_route_action(saved_action.action.clone()) {
+                                error!("Failed to route saved action to app. Error = {:?}", e);
+                                self.forward_action_error(saved_action.action, e).await;
+                            }
+                        }
+                        // NOTE: even if action doesn't have a route, it must be reported on timeout
+                        _ => self.current_action = Some(saved_action),
+                }
+            }
             }
         }
     }
@@ -282,19 +298,14 @@ impl Bridge {
     }
 
     /// Load a saved action from persistence, performed on startup
-    fn load_saved_action(&mut self) -> Result<Option<Action>, Error> {
+    fn load_saved_action(&mut self) -> Result<Option<CurrentAction>, Error> {
         let mut path = self.config.persistence_path.clone();
         path.push("current_action");
 
         if path.is_file() {
             let current_action = CurrentAction::read_from_disk(path)?;
             info!("Loading saved action from persistence; action_id: {}", current_action.id);
-            // NOTE: only if action must be resent, route it to handler, else store as current_action
-            match self.action_routes.get(&current_action.action.name) {
-                Some(route) if route.resend => return Ok(Some(current_action.action)),
-                // NOTE: even if action doesn't have a route, it must be reported on timeout
-                _ => self.current_action = Some(current_action),
-            }
+            return Ok(Some(current_action));
         }
 
         Ok(None)
