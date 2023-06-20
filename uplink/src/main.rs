@@ -19,6 +19,8 @@ pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
 use uplink::base::AppConfig;
+use uplink::collector::serial::Serial;
+use uplink::collector::serial2;
 use uplink::config::{get_configs, initialize, CommandLine};
 use uplink::{simulator, Config, TcpJson, Uplink};
 
@@ -135,8 +137,17 @@ fn main() -> Result<(), Error> {
         thread::spawn(move || console::start(port, reload_handle, bridge_handle));
     }
 
+    let bridge2 = bridge.clone();
+    thread::spawn(move || {
+        let serial = serial2::Serial::new("serial".to_owned(), bridge2);
+        dbg!();
+        serial.start().unwrap();
+        dbg!();
+    });
+
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
+        .enable_time()
         .thread_name("tcpjson")
         .build()
         .unwrap();

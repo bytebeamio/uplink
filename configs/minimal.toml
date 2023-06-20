@@ -1,0 +1,4 @@
+# Location on disk for persisted streams to write backlogs into, also used to write
+persistence_path = "/data/local/uplink/persistence"
+
+
