@@ -89,7 +89,7 @@ fn frame_payload<'a>(mut line: impl Iterator<Item = &'a str>) -> Option<Payload>
 
     let value = line.next()?;
     let value = value.parse::<f64>().ok()?;
-    payload.insert("value".to_owned(), json!(value));
+    payload.insert(stream.to_owned(), json!(value));
 
     let mut payload = Payload {
         stream,
