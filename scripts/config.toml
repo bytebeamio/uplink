@@ -1,4 +1,4 @@
-persistence_path = "/tmp/uplink"
+persistence_path = "/mnt/download/tmp/uplink"
 action_redirections={update_firmware="install_firmware"}
 [tcpapps.1]
 port=5555
@@ -13,7 +13,7 @@ enabled=true
 port=3333
 
 [ota_installer]
-path="/tmp/uplink/installer"
+path="/mnt/download/tmp/uplink/installer"
 actions=[{name="install_firmware", timeout=610}]
 uplink_port=5555
 
