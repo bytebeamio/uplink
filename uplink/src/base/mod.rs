@@ -172,8 +172,6 @@ pub struct ActionRoute {
     pub name: String,
     #[serde(default = "default_timeout")]
     pub timeout: u64,
-    #[serde(skip)]
-    pub resend: bool,
 }
 
 impl From<&ActionRoute> for ActionRoute {

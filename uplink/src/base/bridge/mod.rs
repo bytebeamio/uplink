@@ -179,11 +179,14 @@ impl Bridge {
                 .await;
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
 
-        // Resend saved action if required by route
+        // saved action if required by route
         let mut waiter = DelayQueue::with_capacity(1);
         if let Some(saved_action) = self.load_saved_action()? {
             waiter.insert(saved_action, Duration::from_secs(3));
         }
+
+        let downloader_actions: Vec<String> =
+            self.config.downloader.actions.iter().map(|c| c.name.clone()).collect();
 
         loop {
             select! {
@@ -268,17 +271,16 @@ impl Bridge {
                 Some(saved_action) = waiter.next() => {
                     let saved_action = saved_action.into_inner();
                     // NOTE: only if action must be resent, route it to handler, else store as current_action
-                    match self.action_routes.get(&saved_action.action.name) {
-                        Some(route) if route.resend => {
-                            if let Err(e) = self.try_route_action(saved_action.action.clone()) {
-                                error!("Failed to route saved action to app. Error = {:?}", e);
-                                self.forward_action_error(saved_action.action, e).await;
-                            }
+                    if downloader_actions.contains(&saved_action.action.name) {
+                        if let Err(e) = self.try_route_action(saved_action.action.clone()) {
+                            error!("Failed to route saved action to app. Error = {:?}", e);
+                            self.forward_action_error(saved_action.action, e).await;
                         }
+                    } else {
                         // NOTE: even if action doesn't have a route, it must be reported on timeout
-                        _ => self.current_action = Some(saved_action),
+                        self.current_action = Some(saved_action);
+                    }
                 }
-            }
             }
         }
     }
@@ -467,7 +469,6 @@ impl CurrentAction {
 pub struct ActionRouter {
     actions_tx: Sender<Action>,
     duration: Duration,
-    resend: bool,
 }
 
 impl ActionRouter {
@@ -489,9 +490,9 @@ pub struct BridgeTx {
 impl BridgeTx {
     pub async fn register_action_route(&self, route: ActionRoute) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(1);
-        let ActionRoute { name, timeout, resend } = route;
+        let ActionRoute { name, timeout } = route;
         let duration = Duration::from_secs(timeout);
-        let action_router = ActionRouter { actions_tx, duration, resend };
+        let action_router = ActionRouter { actions_tx, duration };
         let event = Event::RegisterActionRoute(name, action_router);
 
         // Bridge should always be up and hence unwrap is ok
@@ -511,9 +512,9 @@ impl BridgeTx {
         let (actions_tx, actions_rx) = bounded(1);
 
         for route in routes {
-            let ActionRoute { name, timeout, resend } = route;
+            let ActionRoute { name, timeout } = route;
             let duration = Duration::from_secs(timeout);
-            let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration, resend };
+            let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
             let event = Event::RegisterActionRoute(name, action_router);
             // Bridge should always be up and hence unwrap is ok
             self.events_tx.send_async(event).await.unwrap();
@@ -559,7 +560,7 @@ mod tests {
     fn default_config() -> Config {
         Config {
             stream_metrics: StreamMetricsConfig {
-                enabled: false,
+                enabled: true,
                 timeout: 10,
                 ..Default::default()
             },
@@ -596,10 +597,10 @@ mod tests {
     async fn timeout_on_diff_routes() {
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
-        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10, resend: false };
+        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
         let route_1_rx = bridge_tx.register_action_route(route_1).await;
 
-        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: 30, resend: false };
+        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: 30 };
         let route_2_rx = bridge_tx.register_action_route(route_2).await;
 
         std::thread::spawn(move || {
@@ -673,7 +674,7 @@ mod tests {
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30, resend: false };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
         let action_rx = bridge_tx.register_action_route(test_route).await;
 
         std::thread::spawn(move || loop {
@@ -717,7 +718,7 @@ mod tests {
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30, resend: false };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
         let action_rx = bridge_tx.register_action_route(test_route).await;
 
         std::thread::spawn(move || loop {
@@ -759,7 +760,7 @@ mod tests {
 
         std::thread::spawn(move || loop {
             let rt = Runtime::new().unwrap();
-            let test_route = ActionRoute { name: "test".to_string(), timeout: 30, resend: false };
+            let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
             let action = action_rx.recv().unwrap();
             assert_eq!(action.action_id, "1".to_owned());
@@ -770,8 +771,7 @@ mod tests {
 
         std::thread::spawn(move || loop {
             let rt = Runtime::new().unwrap();
-            let test_route =
-                ActionRoute { name: "redirect".to_string(), timeout: 30, resend: false };
+            let test_route = ActionRoute { name: "redirect".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
             let action = action_rx.recv().unwrap();
             assert_eq!(action.action_id, "1".to_owned());

@@ -207,11 +207,6 @@ pub mod config {
             }
         }
 
-        // NOTE: download actions must be resend on load from save file
-        for route in config.downloader.actions.iter_mut() {
-            route.resend = true
-        }
-
         #[cfg(any(target_os = "linux", target_os = "android"))]
         if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
             let stream_config =
