@@ -179,14 +179,9 @@ impl Bridge {
                 .await;
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
 
-        // saved action if required by route
+        // load saved action and re-route if necessary
         let mut waiter = DelayQueue::with_capacity(1);
-        if let Some(saved_action) = self.load_saved_action()? {
-            waiter.insert(saved_action, Duration::from_secs(3));
-        }
-
-        let downloader_actions: Vec<String> =
-            self.config.downloader.actions.iter().map(|c| c.name.clone()).collect();
+        self.starting_procedures(&mut waiter).await?;
 
         loop {
             select! {
@@ -270,15 +265,9 @@ impl Bridge {
                 // NOTE: This should only runs once after 3s of bridge, allowing handlers to register route
                 Some(saved_action) = waiter.next() => {
                     let saved_action = saved_action.into_inner();
-                    // NOTE: only if action must be resent, route it to handler, else store as current_action
-                    if downloader_actions.contains(&saved_action.action.name) {
-                        if let Err(e) = self.try_route_action(saved_action.action.clone()) {
-                            error!("Failed to route saved action to app. Error = {:?}", e);
-                            self.forward_action_error(saved_action.action, e).await;
-                        }
-                    } else {
-                        // NOTE: even if action doesn't have a route, it must be reported on timeout
-                        self.current_action = Some(saved_action);
+                    if let Err(e) = self.try_route_action(saved_action.action.clone()) {
+                        error!("Failed to route saved action to app. Error = {:?}", e);
+                        self.forward_action_error(saved_action.action, e).await;
                     }
                 }
             }
@@ -295,6 +284,26 @@ impl Bridge {
         path.push("current_action");
         info!("Storing current action in persistence; path: {}", path.display());
         current_action.write_to_disk(path)?;
+
+        Ok(())
+    }
+
+    /// Loads previously saved actions and setup task to trigger restart of unfinished download
+    async fn starting_procedures(
+        &mut self,
+        waiter: &mut DelayQueue<CurrentAction>,
+    ) -> Result<(), Error> {
+        let saved_action = match self.load_saved_action()? {
+            Some(s) => s,
+            _ => return Ok(()),
+        };
+
+        // NOTE: only if action must be resent, route it to handler, else store as current_action
+        if self.config.downloader.actions.iter().any(|c| c.name == saved_action.action.name) {
+            waiter.insert(saved_action, Duration::from_secs(3));
+        } else {
+            self.current_action = Some(saved_action);
+        }
 
         Ok(())
     }
