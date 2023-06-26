@@ -295,7 +295,7 @@ impl Bridge {
         // NOTE: only if action must be resent, route it to handler, else store as current_action
         if self.config.downloader.actions.iter().any(|c| c.name == saved_action.action.name) {
             let action_tx = self.actions_tx.clone();
-            // NOTE: The following action
+            // NOTE: wait 3s when rerouting downloader actions
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 if let Err(e) = action_tx.send_async(saved_action.action).await {
