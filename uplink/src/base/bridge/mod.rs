@@ -569,7 +569,7 @@ mod tests {
     fn default_config() -> Config {
         Config {
             stream_metrics: StreamMetricsConfig {
-                enabled: true,
+                enabled: false,
                 timeout: 10,
                 ..Default::default()
             },

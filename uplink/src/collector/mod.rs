@@ -1,4 +1,3 @@
-pub mod device_shadow;
 pub mod downloader;
 pub mod installer;
 #[cfg(target_os = "linux")]
@@ -10,3 +9,4 @@ pub mod simulator;
 pub mod systemstats;
 pub mod tcpjson;
 pub mod tunshell;
+pub mod device_shadow;
