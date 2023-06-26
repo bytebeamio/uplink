@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::select;
 use tokio::time::{self, interval, Instant, Sleep};
-use tokio_stream::StreamExt;
-use tokio_util::time::DelayQueue;
 
 use std::collections::HashSet;
 use std::fs;
@@ -115,7 +113,9 @@ pub struct Bridge {
     package_tx: Sender<Box<dyn Package>>,
     /// Handle to send stream metrics to monitor
     metrics_tx: Sender<StreamMetrics>,
-    /// Actions incoming from backend
+    /// Sender handle to channel for Actions incoming from backend
+    actions_tx: Sender<Action>,
+    /// Receiver handle to channel for Actions incoming from backend
     actions_rx: Receiver<Action>,
     /// Action responses going to backend
     action_status: Stream<ActionResponse>,
@@ -138,6 +138,7 @@ impl Bridge {
         config: Arc<Config>,
         package_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
+        actions_tx: Sender<Action>,
         actions_rx: Receiver<Action>,
         action_status: Stream<ActionResponse>,
         shutdown_handle: Sender<()>,
@@ -153,6 +154,7 @@ impl Bridge {
             package_tx,
             metrics_tx,
             config,
+            actions_tx,
             actions_rx,
             action_routes: HashMap::with_capacity(10),
             action_redirections,
@@ -180,8 +182,7 @@ impl Bridge {
         let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
 
         // load saved action and re-route if necessary
-        let mut waiter = DelayQueue::with_capacity(1);
-        self.starting_procedures(&mut waiter).await?;
+        self.load_saved_action().await?;
 
         loop {
             select! {
@@ -261,15 +262,6 @@ impl Bridge {
 
                     self.shutdown_handle.send(()).unwrap();
                 }
-
-                // NOTE: This should only runs once after 3s of bridge, allowing handlers to register route
-                Some(saved_action) = waiter.next() => {
-                    let saved_action = saved_action.into_inner();
-                    if let Err(e) = self.try_route_action(saved_action.action.clone()) {
-                        error!("Failed to route saved action to app. Error = {:?}", e);
-                        self.forward_action_error(saved_action.action, e).await;
-                    }
-                }
             }
         }
     }
@@ -289,37 +281,32 @@ impl Bridge {
     }
 
     /// Loads previously saved actions and setup task to trigger restart of unfinished download
-    async fn starting_procedures(
-        &mut self,
-        waiter: &mut DelayQueue<CurrentAction>,
-    ) -> Result<(), Error> {
-        let saved_action = match self.load_saved_action()? {
-            Some(s) => s,
-            _ => return Ok(()),
-        };
+    async fn load_saved_action(&mut self) -> Result<(), Error> {
+        let mut path = self.config.persistence_path.clone();
+        path.push("current_action");
+
+        if !path.is_file() {
+            return Ok(());
+        }
+
+        let saved_action = CurrentAction::read_from_disk(path)?;
+        info!("Loading saved action from persistence; action_id: {}", saved_action.id);
 
         // NOTE: only if action must be resent, route it to handler, else store as current_action
         if self.config.downloader.actions.iter().any(|c| c.name == saved_action.action.name) {
-            waiter.insert(saved_action, Duration::from_secs(3));
+            let action_tx = self.actions_tx.clone();
+            // NOTE: The following action
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                if let Err(e) = action_tx.send_async(saved_action.action).await {
+                    error!("Failed to route saved action onto bridge. Error = {:?}", e);
+                }
+            });
         } else {
             self.current_action = Some(saved_action);
         }
 
         Ok(())
-    }
-
-    /// Load a saved action from persistence, performed on startup
-    fn load_saved_action(&mut self) -> Result<Option<CurrentAction>, Error> {
-        let mut path = self.config.persistence_path.clone();
-        path.push("current_action");
-
-        if path.is_file() {
-            let current_action = CurrentAction::read_from_disk(path)?;
-            info!("Loading saved action from persistence; action_id: {}", current_action.id);
-            return Ok(Some(current_action));
-        }
-
-        Ok(None)
     }
 
     /// Handle received actions
@@ -584,8 +571,15 @@ mod tests {
         let action_status = Stream::dynamic("", "", "", 1, package_tx.clone());
         let (shutdown_handle, _) = bounded(1);
 
-        let mut bridge =
-            Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status, shutdown_handle);
+        let mut bridge = Bridge::new(
+            config,
+            package_tx,
+            metrics_tx,
+            actions_tx.clone(),
+            actions_rx,
+            action_status,
+            shutdown_handle,
+        );
         let bridge_tx = bridge.tx();
 
         std::thread::spawn(move || {

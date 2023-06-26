@@ -332,6 +332,7 @@ impl Uplink {
             self.config.clone(),
             self.data_tx.clone(),
             self.stream_metrics_tx(),
+            self.action_tx.clone(),
             self.action_rx.clone(),
             self.action_status(),
             self.shutdown_tx.clone(),
