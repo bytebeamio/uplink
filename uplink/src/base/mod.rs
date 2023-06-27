@@ -198,7 +198,6 @@ pub struct StdoutConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct PrometheusConfig {
-    pub stream_name: String,
     pub endpoint: String,
     pub interval: u64,
 }

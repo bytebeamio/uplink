@@ -25,7 +25,7 @@ impl LogEntry {
     fn parse(line: String) -> Option<Self> {
         // NOTE: remove any tty color escape characters
         let line = COLORS_RE.replace_all(&line, "").trim().to_string();
-        let mut tokens = line.split(" ");
+        let mut tokens = line.split(' ');
         let log_timestamp = tokens.next()?.to_string();
         let level = tokens.next()?.to_string();
         let tag = tokens.next()?.trim_end_matches(':').to_string();
