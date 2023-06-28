@@ -205,6 +205,8 @@ pub struct Config {
     pub mqtt: MqttConfig,
     #[serde(default)]
     pub processes: Vec<ActionRoute>,
+    #[serde(default)]
+    pub script_runner: Vec<ActionRoute>,
     #[serde(skip)]
     pub actions_subscription: String,
     pub streams: HashMap<String, StreamConfig>,
