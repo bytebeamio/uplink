@@ -46,3 +46,4 @@ COPY --from=staging /usr/share/bytebeam/uplink/bin /usr/bin
 COPY --from=staging /usr/share/bytebeam/uplink/paths /usr/share/bytebeam/uplink/paths
 COPY --from=staging /usr/share/bytebeam/uplink/simulator.sh /usr/share/bytebeam/uplink
 COPY --from=staging /usr/share/bytebeam/uplink/bin /usr/share/bytebeam/uplink
+CMD  cp /usr/share/bytebeam/uplink/uplink /usr/share/bytebeam/uplink/shared/uplink
