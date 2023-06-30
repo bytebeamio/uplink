@@ -1,5 +1,5 @@
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
-use log::{debug, error, info, log, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::select;
