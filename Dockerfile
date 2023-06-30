@@ -45,4 +45,4 @@ RUN mkdir -p /usr/share/bytebeam/uplink
 COPY --from=staging /usr/share/bytebeam/uplink/bin /usr/bin
 COPY --from=staging /usr/share/bytebeam/uplink/paths /usr/share/bytebeam/uplink/paths
 COPY --from=staging /usr/share/bytebeam/uplink/simulator.sh /usr/share/bytebeam/uplink
-COPY /usr/bin/uplink /usr/share/bytebeam/uplink/uplink
+COPY --from=staging /usr/share/bytebeam/uplink/bin/uplink /usr/share/bytebeam/uplink/uplink
