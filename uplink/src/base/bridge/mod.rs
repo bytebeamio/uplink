@@ -1,5 +1,5 @@
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
-use log::{debug, error, info, warn};
+use log::{debug, error, info, log, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::select;
@@ -252,7 +252,9 @@ impl Bridge {
                 }
                 // Handle a shutdown signal
                 _ = self.ctrl_rx.recv_async() => {
-                    self.save_current_action()?;
+                    if let Err(e) = self.save_current_action() {
+                        error!("Failed to save current action: {e}");
+                    }
                     streams.flush_all().await;
                     // NOTE: there might be events still waiting for recv on bridge_rx
                     self.shutdown_handle.send(()).unwrap();
