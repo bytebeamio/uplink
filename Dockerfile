@@ -36,7 +36,6 @@ RUN cp target/release/simulator /usr/share/bytebeam/uplink/bin/
 WORKDIR /usr/share/bytebeam/uplink
 RUN $HOME/.cargo/bin/cargo build --release
 RUN cp target/release/uplink /usr/share/bytebeam/uplink/bin/
-RUN cp target/release/uplink /usr/share/bytebeam/uplink/
 
 ###################################################################################################
 
@@ -46,4 +45,4 @@ RUN mkdir -p /usr/share/bytebeam/uplink
 COPY --from=staging /usr/share/bytebeam/uplink/bin /usr/bin
 COPY --from=staging /usr/share/bytebeam/uplink/paths /usr/share/bytebeam/uplink/paths
 COPY --from=staging /usr/share/bytebeam/uplink/simulator.sh /usr/share/bytebeam/uplink
-COPY --from=staging /usr/share/bytebeam/uplink/uplink /usr/share/bytebeam/uplink/uplink
+COPY --from=staging /usr/share/bytebeam/uplink/bin /usr/share/bytebeam/uplink
