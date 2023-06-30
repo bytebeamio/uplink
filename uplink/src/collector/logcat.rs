@@ -138,7 +138,7 @@ impl LogEntry {
             stream: "logs".to_string(),
             device_id: None,
             sequence,
-            timestamp: self.timestamp,
+            timestamp: self.log_timestamp,
             payload: serde_json::json!({
                 "level": self.level,
                 "log_timestamp": self.log_timestamp,
@@ -243,12 +243,13 @@ impl Logcat {
                     logger.kill().unwrap();
                     break;
                 }
-                let read_result = read_line_lossy(&mut buf_stdout);
-                if read_result.is_none() {
-                    log::info!("logger output has ended");
-                    break;
-                }
-                let next_line = read_result.unwrap();
+                let next_line = match read_line_lossy(&mut buf_stdout) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        log::error!("Logcat error: {e}");
+                        break;
+                    }
+                };
                 let next_line = next_line.trim();
                 let entry = match LogEntry::from_string(next_line) {
                     Ok(entry) => entry,
@@ -272,11 +273,11 @@ impl Logcat {
     }
 }
 
-fn read_line_lossy(reader: &mut BufReader<ChildStdout>) -> Option<String> {
+fn read_line_lossy(reader: &mut BufReader<ChildStdout>) -> Result<String, String> {
     let mut buf = Vec::with_capacity(256);
-    if let Err(_) = reader.read_until(u8::try_from('\n').unwrap(), &mut buf) {
-        None
-    } else {
-        Some(String::from_utf8_lossy(buf.as_slice()).to_string())
+    match reader.read_until(b'\n', &mut buf) {
+        Err(e) => Err(format!("Error when reading from logcat: {e}")),
+        Ok(0) => Err("logcat output has ended".to_string()),
+        Ok(_) => Ok(String::from_utf8_lossy(buf.as_slice()).to_string()),
     }
 }
