@@ -194,6 +194,7 @@ impl Default for DeviceShadowConfig {
 #[derive(Clone, Debug, Deserialize)]
 pub struct StdoutConfig {
     pub stream_name: String,
+    pub log_template: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]

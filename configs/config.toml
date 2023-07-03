@@ -183,3 +183,14 @@ port = 3333
 # - interval: time in seconds after which device-shadow is pushed onto platform, default value is 60
 [device_shadow]
 interval = 30
+
+# Collect log lines from stdout, extract information with help of configured regex template
+# and push to appropriate stream.
+# Required Parameters
+# - stream_name: stream onto which data is being pushed to, usually "logs"
+# - template: regex based template that must contain order of log_timestamp, level, tag and message info.
+#             e.g. '2023-07-01T16:00:00.000000Z  INFO app: This is an example log' according to example template
+#                  log_timestamp: 2023-07-01T16:00:00.000000, level: INFO, tag: app, message: This is an example log
+[stdout]
+stream_name = "logs"
+log_template = '''^(?P<log_timestamp>.*)Z\s(?P<level>\S+)\s(?P<tag>\S+):\s(?P<message>.*)'''
