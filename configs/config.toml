@@ -188,9 +188,12 @@ interval = 30
 # and push to appropriate stream.
 # Required Parameters
 # - stream_name: stream onto which data is being pushed to, usually "logs"
-# - template: regex based template that must contain order of log_timestamp, level, tag and message info.
+# - log_template: regex based template that must contain order of timestamp, level, tag and message info.
 #             e.g. '2023-07-01T16:00:00.000000Z  INFO app: This is an example log' according to example template
-#                  log_timestamp: 2023-07-01T16:00:00.000000, level: INFO, tag: app, message: This is an example log
+#                  timestamp: 1688227200000, level: INFO, tag: app, message: This is an example log
+# - timestamp_template: regex template for calculating timestamp from, must contain order of day, month, hour, etc.
+#                       e.g. 2023-07-01T16:00:00.000000 will be transformed into 1688227200000 in milliseconds
 [stdout]
 stream_name = "logs"
-log_template = '''^(?P<log_timestamp>.*)Z\s(?P<level>\S+)\s(?P<tag>\S+):\s(?P<message>.*)'''
+log_template = '''^(?P<timestamp>.*)Z\s(?P<level>\S+)\s(?P<tag>\S+):\s(?P<message>.*)'''
+timestamp_template = '''^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+).(?P<microsecond>\S+)'''
