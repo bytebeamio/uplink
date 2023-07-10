@@ -202,7 +202,6 @@ impl FileDownloader {
 
         for component in path.components() {
             current_path.push(component);
-            dbg!(&current_path);
 
             if !current_path.exists() {
                 create_dir(&current_path)?;
