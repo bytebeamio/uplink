@@ -54,10 +54,11 @@ use log::{error, info};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 
-use std::fs::{create_dir_all, metadata, remove_dir_all, File};
+use std::fs::{metadata, remove_dir_all, File, create_dir, set_permissions, Permissions};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
+use std::path::Path;
 
 use crate::base::bridge::BridgeTx;
 use crate::base::DownloaderConfig;
@@ -195,12 +196,32 @@ impl FileDownloader {
         Ok(())
     }
 
+    #[cfg(unix)]
+    fn create_dirs_with_perms(&self, path: &Path, perms: Permissions) -> std::io::Result<()> {
+        let mut current_path = PathBuf::new();
+
+        for component in path.components() {
+            current_path.push(component);
+            dbg!(&current_path);
+
+            if !current_path.exists() {
+                create_dir(&current_path)?;
+                set_permissions(&current_path, perms.clone())?;
+            }
+
+        }
+
+        Ok(())
+    }
+
     /// Creates file to download into
     fn create_file(&self, name: &str, file_name: &str) -> Result<(File, String), Error> {
         // Ensure that directory for downloading file into, exists
         let mut download_path = PathBuf::from(self.config.path.clone());
         download_path.push(name);
-        create_dir_all(&download_path)?;
+        // do manual create_dir_all while setting permissions on each created directory
+        #[cfg(unix)]
+        self.create_dirs_with_perms(download_path.as_path(), std::os::unix::fs::PermissionsExt::from_mode(0o777))?;
 
         let mut file_path = download_path.to_owned();
         file_path.push(file_name);
