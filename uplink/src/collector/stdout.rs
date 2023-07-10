@@ -25,6 +25,10 @@ struct LogEntry {
 pub fn parse_timestamp(s: &str, template: &Regex) -> Option<u64> {
     let matches = template.captures(s)?;
     let mut date = time::OffsetDateTime::now_utc();
+    if let Some(year) = matches.name("year") {
+        let year = year.as_str().parse().ok()?;
+        date = date.replace_year(year).ok()?;
+    }
     if let Some(month) = matches.name("month") {
         let month = month.as_str().parse().ok()?;
         date = date.replace_month(month).ok()?;
