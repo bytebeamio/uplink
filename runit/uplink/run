@@ -1,7 +1,0 @@
-#!/bin/sh
-
-# cd /usr/share/bytebeam/uplink
-# exec ./simulator.sh start_devices $START_ID $END_ID
-# echo "Check devices directory for uplink and simulator logs"
-# echo "Run ./simulator.sh kill_devices to stop simulator"
-#exec tail -f /var/log/bytebeam/current > uplink -a /usr/share/bytebeam/uplink/config/device.json -c /usr/share/bytebeam/uplink/config/config.toml
