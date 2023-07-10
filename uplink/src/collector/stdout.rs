@@ -1,5 +1,5 @@
 use regex::{Match, Regex};
-use tokio::io::{stdin, AsyncBufReadExt, BufReader};
+use tokio::io::{stdin, AsyncBufReadExt, BufReader, Lines, Stdin};
 
 use serde::Serialize;
 use serde_json::json;
@@ -59,7 +59,7 @@ pub fn parse_timestamp(s: &str, template: &Regex) -> Option<u64> {
 
 impl LogEntry {
     // NOTE: expects log lines to contain information in the format "{log_timestamp} {level} {tag}: {message}"
-    fn parse(line: String, log_template: &Regex, timestamp_template: &Regex) -> Option<Self> {
+    fn parse(line: &str, log_template: &Regex, timestamp_template: &Regex) -> Option<Self> {
         let to_string = |x: Match| x.as_str().to_string();
         let to_timestamp = |t: Match| parse_timestamp(t.as_str(), timestamp_template);
         // NOTE: remove any tty color escape characters
@@ -89,42 +89,61 @@ pub enum Error {
 pub struct Stdout {
     config: StdoutConfig,
     tx: BridgeTx,
+    sequence: u32,
     log_template: Regex,
     timestamp_template: Regex,
+    log_entry: Option<LogEntry>,
 }
 
 impl Stdout {
     pub fn new(config: StdoutConfig, tx: BridgeTx) -> Self {
         let log_template = Regex::new(&config.log_template).unwrap();
         let timestamp_template = Regex::new(&config.timestamp_template).unwrap();
-        Self { config, tx, log_template, timestamp_template }
+        Self { config, tx, log_template, timestamp_template, sequence: 0, log_entry: None }
     }
 
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(&self) -> Result<(), Error> {
+    pub async fn start(mut self) -> Result<(), Error> {
         let stdin = stdin();
         let mut lines = BufReader::new(stdin).lines();
-        let mut sequence = 0;
 
         loop {
-            match lines.next_line().await? {
-                Some(l) => {
-                    sequence += 1;
-                    if let Some(log_entry) =
-                        LogEntry::parse(l, &self.log_template, &self.timestamp_template)
-                    {
-                        let payload = Payload {
-                            stream: self.config.stream_name.to_owned(),
-                            device_id: None,
-                            sequence,
-                            timestamp: log_entry.timestamp,
-                            payload: json!(log_entry),
-                        };
-                        self.tx.send_payload(payload).await;
-                    }
-                }
+            match self.parse_lines(&mut lines).await {
+                Some(payload) => self.tx.send_payload(payload).await,
                 None => return Ok(()),
             }
         }
+    }
+
+    async fn parse_lines(&mut self, lines: &mut Lines<BufReader<Stdin>>) -> Option<Payload> {
+        match lines.next_line().await.ok()? {
+            Some(line) => match self.log_entry.take() {
+                Some(log_entry) => {
+                    self.sequence += 1;
+                    return Some(Payload {
+                        stream: self.config.stream_name.to_owned(),
+                        device_id: None,
+                        sequence: self.sequence,
+                        timestamp: log_entry.timestamp,
+                        payload: json!(log_entry),
+                    });
+                }
+                _ => match LogEntry::parse(&line, &self.log_template, &self.timestamp_template) {
+                    Some(new_log) => self.log_entry = Some(new_log),
+                    _ => {
+                        if let Some(log_entry) = &mut self.log_entry {
+                            log_entry.line += &line;
+                            match &mut log_entry.message {
+                                Some(msg) => *msg += &line,
+                                _ => log_entry.message = Some(line),
+                            };
+                        }
+                    }
+                },
+            },
+            _ => {}
+        }
+
+        None
     }
 }
