@@ -76,6 +76,16 @@ impl LogEntry {
 
         Some(Self { line, level, tag, timestamp, message })
     }
+
+    fn payload(self, stream: String, sequence: u32) -> Payload {
+        Payload {
+            stream,
+            device_id: None,
+            sequence,
+            timestamp: self.timestamp,
+            payload: json!(self),
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -92,13 +102,14 @@ pub struct Stdout {
     sequence: u32,
     log_template: Regex,
     timestamp_template: Regex,
+    log_entry: Option<LogEntry>,
 }
 
 impl Stdout {
     pub fn new(config: StdoutConfig, tx: BridgeTx) -> Self {
         let log_template = Regex::new(&config.log_template).unwrap();
         let timestamp_template = Regex::new(&config.timestamp_template).unwrap();
-        Self { config, tx, log_template, timestamp_template, sequence: 0 }
+        Self { config, tx, log_template, timestamp_template, sequence: 0, log_entry: None }
     }
 
     #[tokio::main(flavor = "current_thread")]
@@ -118,23 +129,33 @@ impl Stdout {
         &mut self,
         lines: &mut Lines<T>,
     ) -> Option<Payload> {
-        let mut log_entry: Option<LogEntry> = None;
         while let Some(line) = lines.next_line().await.ok()? {
-            match log_entry.take() {
-                Some(log_entry) => {
-                    self.sequence += 1;
-                    return Some(Payload {
-                        stream: self.config.stream_name.to_owned(),
-                        device_id: None,
-                        sequence: self.sequence,
-                        timestamp: log_entry.timestamp,
-                        payload: json!(log_entry),
-                    });
+            match self.log_entry.take() {
+                Some(mut old_entry) => {
+                    match LogEntry::parse(&line, &self.log_template, &self.timestamp_template) {
+                        Some(new_entry) => {
+                            self.sequence += 1;
+                            self.log_entry = Some(new_entry);
+                            return Some(
+                                old_entry
+                                    .payload(self.config.stream_name.to_owned(), self.sequence),
+                            );
+                        }
+                        _ => {
+                            old_entry.line += &line;
+                            match &mut old_entry.message {
+                                Some(msg) => *msg += &line,
+                                _ => old_entry.message = Some(line),
+                            };
+
+                            self.log_entry = Some(old_entry)
+                        }
+                    }
                 }
                 _ => match LogEntry::parse(&line, &self.log_template, &self.timestamp_template) {
-                    Some(new_log) => log_entry = Some(new_log),
+                    Some(new_log) => self.log_entry = Some(new_log),
                     _ => {
-                        if let Some(log_entry) = &mut log_entry {
+                        if let Some(log_entry) = &mut self.log_entry {
                             log_entry.line += &line;
                             match &mut log_entry.message {
                                 Some(msg) => *msg += &line,
@@ -146,6 +167,7 @@ impl Stdout {
             }
         }
 
-        None
+        self.sequence += 1;
+        self.log_entry.take().map(|e| e.payload(self.config.stream_name.to_owned(), self.sequence))
     }
 }
