@@ -1,5 +1,5 @@
 use regex::{Match, Regex};
-use tokio::io::{stdin, AsyncBufReadExt, BufReader, Lines, Stdin};
+use tokio::io::{stdin, AsyncBufReadExt, BufReader, Lines};
 
 use serde::Serialize;
 use serde_json::json;
@@ -92,14 +92,13 @@ pub struct Stdout {
     sequence: u32,
     log_template: Regex,
     timestamp_template: Regex,
-    log_entry: Option<LogEntry>,
 }
 
 impl Stdout {
     pub fn new(config: StdoutConfig, tx: BridgeTx) -> Self {
         let log_template = Regex::new(&config.log_template).unwrap();
         let timestamp_template = Regex::new(&config.timestamp_template).unwrap();
-        Self { config, tx, log_template, timestamp_template, sequence: 0, log_entry: None }
+        Self { config, tx, log_template, timestamp_template, sequence: 0 }
     }
 
     #[tokio::main(flavor = "current_thread")]
@@ -115,35 +114,40 @@ impl Stdout {
         }
     }
 
-    async fn parse_lines(&mut self, lines: &mut Lines<BufReader<Stdin>>) -> Option<Payload> {
-        match lines.next_line().await.ok()? {
-            Some(line) => match self.log_entry.take() {
-                Some(log_entry) => {
-                    self.sequence += 1;
-                    return Some(Payload {
-                        stream: self.config.stream_name.to_owned(),
-                        device_id: None,
-                        sequence: self.sequence,
-                        timestamp: log_entry.timestamp,
-                        payload: json!(log_entry),
-                    });
-                }
-                _ => match LogEntry::parse(&line, &self.log_template, &self.timestamp_template) {
-                    Some(new_log) => self.log_entry = Some(new_log),
-                    _ => {
-                        if let Some(log_entry) = &mut self.log_entry {
-                            log_entry.line += &line;
-                            match &mut log_entry.message {
-                                Some(msg) => *msg += &line,
-                                _ => log_entry.message = Some(line),
-                            };
-                        }
+    async fn parse_lines<T: AsyncBufReadExt + Unpin>(
+        &mut self,
+        lines: &mut Lines<T>,
+    ) -> Option<Payload> {
+        let mut log_entry: Option<LogEntry> = None;
+        loop {
+            match lines.next_line().await.ok()? {
+                Some(line) => match log_entry.take() {
+                    Some(log_entry) => {
+                        self.sequence += 1;
+                        return Some(Payload {
+                            stream: self.config.stream_name.to_owned(),
+                            device_id: None,
+                            sequence: self.sequence,
+                            timestamp: log_entry.timestamp,
+                            payload: json!(log_entry),
+                        });
                     }
+                    _ => match LogEntry::parse(&line, &self.log_template, &self.timestamp_template)
+                    {
+                        Some(new_log) => log_entry = Some(new_log),
+                        _ => {
+                            if let Some(log_entry) = &mut log_entry {
+                                log_entry.line += &line;
+                                match &mut log_entry.message {
+                                    Some(msg) => *msg += &line,
+                                    _ => log_entry.message = Some(line),
+                                };
+                            }
+                        }
+                    },
                 },
-            },
-            _ => {}
+                None => return None,
+            }
         }
-
-        None
     }
 }
