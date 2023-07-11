@@ -119,35 +119,33 @@ impl Stdout {
         lines: &mut Lines<T>,
     ) -> Option<Payload> {
         let mut log_entry: Option<LogEntry> = None;
-        loop {
-            match lines.next_line().await.ok()? {
-                Some(line) => match log_entry.take() {
-                    Some(log_entry) => {
-                        self.sequence += 1;
-                        return Some(Payload {
-                            stream: self.config.stream_name.to_owned(),
-                            device_id: None,
-                            sequence: self.sequence,
-                            timestamp: log_entry.timestamp,
-                            payload: json!(log_entry),
-                        });
-                    }
-                    _ => match LogEntry::parse(&line, &self.log_template, &self.timestamp_template)
-                    {
-                        Some(new_log) => log_entry = Some(new_log),
-                        _ => {
-                            if let Some(log_entry) = &mut log_entry {
-                                log_entry.line += &line;
-                                match &mut log_entry.message {
-                                    Some(msg) => *msg += &line,
-                                    _ => log_entry.message = Some(line),
-                                };
-                            }
+        while let Some(line) = lines.next_line().await.ok()? {
+            match log_entry.take() {
+                Some(log_entry) => {
+                    self.sequence += 1;
+                    return Some(Payload {
+                        stream: self.config.stream_name.to_owned(),
+                        device_id: None,
+                        sequence: self.sequence,
+                        timestamp: log_entry.timestamp,
+                        payload: json!(log_entry),
+                    });
+                }
+                _ => match LogEntry::parse(&line, &self.log_template, &self.timestamp_template) {
+                    Some(new_log) => log_entry = Some(new_log),
+                    _ => {
+                        if let Some(log_entry) = &mut log_entry {
+                            log_entry.line += &line;
+                            match &mut log_entry.message {
+                                Some(msg) => *msg += &line,
+                                _ => log_entry.message = Some(line),
+                            };
                         }
-                    },
+                    }
                 },
-                None => return None,
             }
         }
+
+        None
     }
 }
