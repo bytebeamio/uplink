@@ -208,5 +208,7 @@ mod test {
             json!({"level": "DEBUG", "line": "2023-07-03T17:59:22.979012Z DEBUG uplink::base::mqtt: Outgoing = Publish(9)", "message": "Outgoing = Publish(9)", "tag": "uplink::base::mqtt"})
         );
         assert_eq!(sequence, 1);
+
+        assert!(handle.parse_lines(&mut lines).await.is_none());
     }
 }
