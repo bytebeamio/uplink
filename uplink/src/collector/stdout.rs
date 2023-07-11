@@ -171,3 +171,42 @@ impl Stdout {
         self.log_entry.take().map(|e| e.payload(self.config.stream_name.to_owned(), self.sequence))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use flume::bounded;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn parse_single_log_line() {
+        let raw = r#"2023-07-03T17:59:22.979012Z DEBUG uplink::base::mqtt: Outgoing = Publish(9)"#;
+        let mut lines = BufReader::new(raw.as_bytes()).lines();
+
+        let config = StdoutConfig {
+            stream_name: "".to_string(),
+            log_template:
+                r#"^(?P<timestamp>.*)Z\s(?P<level>\S+)\s(?P<tag>\S+):\s(?P<message>.*)"#
+                    .to_string(),
+            timestamp_template: r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+).(?P<millisecond>\S\S\S)"#.to_string(),
+        };
+        let tx = BridgeTx {
+            events_tx: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+            shutdown_handle: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+        };
+        let mut handle = Stdout::new(config, tx);
+
+        let Payload { payload, sequence, .. } = handle.parse_lines(&mut lines).await.unwrap();
+        assert_eq!(
+            payload,
+            json!({"level": "DEBUG", "line": "2023-07-03T17:59:22.979012Z DEBUG uplink::base::mqtt: Outgoing = Publish(9)", "message": "Outgoing = Publish(9)", "tag": "uplink::base::mqtt"})
+        );
+        assert_eq!(sequence, 1);
+    }
+}
