@@ -211,4 +211,112 @@ mod test {
 
         assert!(handle.parse_lines(&mut lines).await.is_none());
     }
+
+    #[tokio::test]
+    async fn parse_multiple_log_lines() {
+        let raw = r#"2023-07-03T17:59:22.979012Z DEBUG uplink::base::mqtt: Outgoing = Publish(9)
+2023-07-03T17:59:23.012000Z DEBUG uplink::base::mqtt: Incoming = PubAck(9)"#;
+        let mut lines = BufReader::new(raw.as_bytes()).lines();
+
+        let config = StdoutConfig {
+            stream_name: "".to_string(),
+            log_template:
+                r#"^(?P<timestamp>.*)Z\s(?P<level>\S+)\s(?P<tag>\S+):\s(?P<message>.*)"#
+                    .to_string(),
+            timestamp_template: r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+).(?P<millisecond>\S\S\S)"#.to_string(),
+        };
+        let tx = BridgeTx {
+            events_tx: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+            shutdown_handle: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+        };
+        let mut handle = Stdout::new(config, tx);
+
+        let Payload { payload, sequence, .. } = handle.parse_lines(&mut lines).await.unwrap();
+        assert_eq!(
+            payload,
+            json!({"level": "DEBUG", "line": "2023-07-03T17:59:22.979012Z DEBUG uplink::base::mqtt: Outgoing = Publish(9)", "message": "Outgoing = Publish(9)", "tag": "uplink::base::mqtt"})
+        );
+        assert_eq!(sequence, 1);
+
+        let Payload { payload, sequence, .. } = handle.parse_lines(&mut lines).await.unwrap();
+        assert_eq!(
+            payload,
+            json!({"level": "DEBUG", "line": "2023-07-03T17:59:23.012000Z DEBUG uplink::base::mqtt: Incoming = PubAck(9)", "message": "Incoming = PubAck(9)", "tag": "uplink::base::mqtt"})
+        );
+        assert_eq!(sequence, 2);
+
+        assert!(handle.parse_lines(&mut lines).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn parse_beamd_log_lines() {
+        let raw = r#"2023-07-11T13:56:44.101585Z  INFO beamd::http::endpoint: Method = "POST", Uri = "/tenants/naveentest/devices/8/actions", Payload = "{\"name\":\"update_firmware\",\"id\":\"830\",\"payload\":\"{\\\"content-length\\\":35393,\\\"status\\\":false,\\\"url\\\":\\\"https://firmware.stage.bytebeam.io/api/v1/firmwares/one/artifact\\\",\\\"version\\\":\\\"one\\\"}\",\"kind\":\"process\"}"
+2023-07-11T13:56:44.113343Z  INFO beamd::http::endpoint: Method = "POST", Uri = "/tenants/rpi/devices/6/actions", Payload = "{\"name\":\"tunshell\",\"id\":\"226\",\"payload\":\"{}\",\"kind\":\"process\"}"
+2023-07-11T13:56:44.221249Z ERROR beamd::clickhouse: Flush-error: [Status - 500] Ok("Code: 243. DB::Exception: Cannot reserve 11.58 MiB, not enough space. (NOT_ENOUGH_SPACE) (version 22.6.2.12 (official build))\n"), back_up_enabled: true
+    in beamd::clickhouse::clickhouse_flush with stream: "demo.uplink_process_stats""#;
+        let mut lines = BufReader::new(raw.as_bytes()).lines();
+
+        let config = StdoutConfig {
+      stream_name: "".to_string(),
+      log_template:
+          r#"^(?P<timestamp>.*)Z\s+(?P<level>\S+)\s+(?P<tag>\S+):\s+(?P<message>.*)"#
+              .to_string(),
+      timestamp_template: r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+).(?P<millisecond>\S\S\S)"#.to_string(),
+  };
+        let tx = BridgeTx {
+            events_tx: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+            shutdown_handle: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+        };
+        let mut handle = Stdout::new(config, tx);
+
+        let Payload { payload, sequence, .. } = handle.parse_lines(&mut lines).await.unwrap();
+        assert_eq!(
+            payload,
+            json!({
+                "level": "INFO",
+                "line": "2023-07-11T13:56:44.101585Z  INFO beamd::http::endpoint: Method = \"POST\", Uri = \"/tenants/naveentest/devices/8/actions\", Payload = \"{\\\"name\\\":\\\"update_firmware\\\",\\\"id\\\":\\\"830\\\",\\\"payload\\\":\\\"{\\\\\\\"content-length\\\\\\\":35393,\\\\\\\"status\\\\\\\":false,\\\\\\\"url\\\\\\\":\\\\\\\"https://firmware.stage.bytebeam.io/api/v1/firmwares/one/artifact\\\\\\\",\\\\\\\"version\\\\\\\":\\\\\\\"one\\\\\\\"}\\\",\\\"kind\\\":\\\"process\\\"}\"",
+                "message": "Method = \"POST\", Uri = \"/tenants/naveentest/devices/8/actions\", Payload = \"{\\\"name\\\":\\\"update_firmware\\\",\\\"id\\\":\\\"830\\\",\\\"payload\\\":\\\"{\\\\\\\"content-length\\\\\\\":35393,\\\\\\\"status\\\\\\\":false,\\\\\\\"url\\\\\\\":\\\\\\\"https://firmware.stage.bytebeam.io/api/v1/firmwares/one/artifact\\\\\\\",\\\\\\\"version\\\\\\\":\\\\\\\"one\\\\\\\"}\\\",\\\"kind\\\":\\\"process\\\"}\"",
+                "tag": "beamd::http::endpoint"
+            })
+        );
+        assert_eq!(sequence, 1);
+
+        let Payload { payload, sequence, .. } = handle.parse_lines(&mut lines).await.unwrap();
+        assert_eq!(
+            payload,
+            json!({
+                "level": "INFO",
+                "line": "2023-07-11T13:56:44.113343Z  INFO beamd::http::endpoint: Method = \"POST\", Uri = \"/tenants/rpi/devices/6/actions\", Payload = \"{\\\"name\\\":\\\"tunshell\\\",\\\"id\\\":\\\"226\\\",\\\"payload\\\":\\\"{}\\\",\\\"kind\\\":\\\"process\\\"}\"",
+                "message": "Method = \"POST\", Uri = \"/tenants/rpi/devices/6/actions\", Payload = \"{\\\"name\\\":\\\"tunshell\\\",\\\"id\\\":\\\"226\\\",\\\"payload\\\":\\\"{}\\\",\\\"kind\\\":\\\"process\\\"}\"",
+                "tag": "beamd::http::endpoint"
+            })
+        );
+        assert_eq!(sequence, 2);
+
+        let Payload { payload, sequence, .. } = handle.parse_lines(&mut lines).await.unwrap();
+        assert_eq!(
+            payload,
+            json!({
+                "level": "ERROR",
+                "line": "2023-07-11T13:56:44.221249Z ERROR beamd::clickhouse: Flush-error: [Status - 500] Ok(\"Code: 243. DB::Exception: Cannot reserve 11.58 MiB, not enough space. (NOT_ENOUGH_SPACE) (version 22.6.2.12 (official build))\\n\"), back_up_enabled: true\n    in beamd::clickhouse::clickhouse_flush with stream: \"demo.uplink_process_stats\"",
+                "message": "Flush-error: [Status - 500] Ok(\"Code: 243. DB::Exception: Cannot reserve 11.58 MiB, not enough space. (NOT_ENOUGH_SPACE) (version 22.6.2.12 (official build))\\n\"), back_up_enabled: true\n    in beamd::clickhouse::clickhouse_flush with stream: \"demo.uplink_process_stats\"",
+                "tag": "beamd::clickhouse"
+            })
+        );
+        assert_eq!(sequence, 3);
+
+        assert!(handle.parse_lines(&mut lines).await.is_none());
+    }
 }
