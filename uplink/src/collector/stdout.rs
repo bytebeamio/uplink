@@ -142,9 +142,9 @@ impl Stdout {
                             );
                         }
                         _ => {
-                            old_entry.line += &line;
+                            old_entry.line += &format!("\n{line}");
                             match &mut old_entry.message {
-                                Some(msg) => *msg += &line,
+                                Some(msg) => *msg += &format!("\n{line}"),
                                 _ => old_entry.message = Some(line),
                             };
 
@@ -156,9 +156,9 @@ impl Stdout {
                     Some(new_log) => self.log_entry = Some(new_log),
                     _ => {
                         if let Some(log_entry) = &mut self.log_entry {
-                            log_entry.line += &line;
+                            log_entry.line += &format!("\n{line}");
                             match &mut log_entry.message {
-                                Some(msg) => *msg += &line,
+                                Some(msg) => *msg += &format!("\n{line}"),
                                 _ => log_entry.message = Some(line),
                             };
                         }
