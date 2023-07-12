@@ -213,6 +213,57 @@ mod test {
     }
 
     #[tokio::test]
+    async fn parse_timestamp() {
+        let raw = r#"2023-07-03T17:59:22.979012"#;
+        let mut lines = BufReader::new(raw.as_bytes()).lines();
+
+        let config = StdoutConfig {
+            stream_name: "".to_string(),
+            log_template: r#"^(?P<timestamp>.*)"#.to_string(),
+            timestamp_template: r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+).(?P<millisecond>\S\S\S).*"#.to_string(),
+        };
+        let tx = BridgeTx {
+            events_tx: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+            shutdown_handle: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+        };
+        let mut handle = Stdout::new(config, tx);
+
+        let Payload { timestamp, sequence, .. } = handle.parse_lines(&mut lines).await.unwrap();
+        assert_eq!(sequence, 1);
+        assert_eq!(timestamp, 1689138886255);
+
+        let raw = r#"23-07-11 18:03:32"#;
+        let mut lines = BufReader::new(raw.as_bytes()).lines();
+
+        let config = StdoutConfig {
+            stream_name: "".to_string(),
+            log_template: r#"^(?P<timestamp>.*)"#.to_string(),
+            timestamp_template: r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)\s(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+)"#.to_string(),
+        };
+        let tx = BridgeTx {
+            events_tx: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+            shutdown_handle: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+        };
+        let mut handle = Stdout::new(config, tx);
+
+        let Payload { timestamp, sequence, .. } = handle.parse_lines(&mut lines).await.unwrap();
+        assert_eq!(sequence, 1);
+        assert_eq!(timestamp, 1689138886255);
+    }
+
+    #[tokio::test]
     async fn parse_multiple_log_lines() {
         let raw = r#"2023-07-03T17:59:22.979012Z DEBUG uplink::base::mqtt: Outgoing = Publish(9)
 2023-07-03T17:59:23.012000Z DEBUG uplink::base::mqtt: Incoming = PubAck(9)"#;
