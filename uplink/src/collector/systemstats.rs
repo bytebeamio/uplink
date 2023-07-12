@@ -584,17 +584,18 @@ impl StatCollector {
             let payload = self.components.push(comp_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
         }
-        let files = glob::glob("/sys/devices/virtual/thermal/thermal_zone*/temp")?;
-        for thermal_zone in files {
-            let path = thermal_zone?;
-            let mut label = path.as_os_str().to_str().unwrap_or("temp_component").to_string();
-            label.retain(|c| c.is_numeric());
-            let label = "thermal_zone".to_owned() + &label;
-            let temperature = std::fs::read_to_string(path)?.trim().parse::<f32>()?;
-            let comp_data = Component { label, temperature, ..Default::default() };
-            let payload = self.components.push_custom(comp_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
-        }
+
+        // let files = glob::glob("/sys/devices/virtual/thermal/thermal_zone*/temp")?;
+        // for thermal_zone in files {
+        //     let path = thermal_zone?;
+        //     let mut label = path.as_os_str().to_str().unwrap_or("temp_component").to_string();
+        //     label.retain(|c| c.is_numeric());
+        //     let label = "thermal_zone".to_owned() + &label;
+        //     let temperature = std::fs::read_to_string(path)?.trim().parse::<f32>()?;
+        //     let comp_data = Component { label, temperature, ..Default::default() };
+        //     let payload = self.components.push_custom(comp_data, timestamp);
+        //     self.bridge_tx.send_payload_sync(payload);
+        // }
 
         // Refresh processes info
         // NOTE: This can be further optimized by storing pids of interested processes

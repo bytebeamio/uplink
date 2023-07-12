@@ -1,0 +1,132 @@
+# Collection of binaries which uplink can spawn as a process
+# This ensures that user is protected against random actions
+# triggered from cloud.
+# processes = [{ name = "echo", timeout = 10 }]
+
+# Map of action names for re-routing on partial completion. An action is considered
+# partially completed when progress is 100, but status is neither "Failed" nor "Completed".
+# action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
+
+# Location on disk for persisted streams to write backlogs into, also used to write
+persistence_path = "/data/uplink_persistence/"
+
+# MQTT client configuration
+# 
+# Required Parameters
+# - max_packet_size: Maximum packet size acceptable for MQTT messages
+# - max_inflight: Maximum number of outgoing QoS 1/2 messages that can be
+#                 handled by uplink, at a time, requiring acknowledgedment.
+# - keep_alive: Number of seconds after which the MQTT client should ping
+#               the broker if there is no other data exchange.
+# - network_timeout: Number of seconds after which the MQTT client can timeout
+#                    while waiting for a network response.
+[mqtt]
+max_packet_size = 256000
+max_inflight = 100
+keep_alive = 30
+network_timeout = 30
+
+# TCP applications that detail applications which connect with uplink
+# Required Parameters
+# - port: TCP/IP Port on which application can connect to uplink over
+# - actions: A list of actions that uplink can forward to the app,
+#   with configurable timeouts
+# [tcpapps.1]
+# port = 5555
+# actions = [{ name = "install_update" }, { name = "load_file" }]
+#
+# [tcpapps.2]
+# port = 5556
+# actions = []
+
+# Metrics configurations are available for serializer and streams. By default 
+# they are disabled and no metrics will be forwarded to platform. 
+# Parameters
+# - topic(optional): One can configure to push stats to a specific topic,
+#   different from the default by configuring it with this field.
+#
+# Serializer module can publish associated metrics, to keep track of 
+# serializer performance. 
+[serializer_metrics]
+enabled = true
+
+# Serializer module can also publishe stream metrics, to keep track of latencies 
+# and batch sizes on a per-stream basis.
+# NOTE: Leaving this configuration empty like the following tells uplink to enable
+# sending metrics, but with default topic string.
+[stream_metrics]
+enabled = true
+blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
+
+# Table of pre-configured data streams, specifies streams of data elements that are to
+# be collected, batched and forwarded to serializer to then be published onto platform.
+#
+# Required Parameters
+# - buf-size: Number of data points that shall be included in each Publish
+# - topic(optional): topic-filter to which data shall be published. If left
+#   unconfigured, stream will be created dynamically.
+# - flush-period(optional): Duration in seconds after a data point enters the stream
+#   and WILL be flushed by collector. Defaults to 60s in case not configured.
+# - compression(optional): an enum values to determine what compression the serializer
+#   should perform on the data transiting through the stream. Currently supported
+#   compression schemes are Lz4 and Disabled. Defaults to Disabled.
+# - persistence(optional): helps persist relevant information for data recovery purposes,
+#   used when there is a network/system failure. 
+#
+# In the following config for the device_shadow stream we set buf_size to 1 and mark
+# it as non-persistent. streams are internally constructed as a map of Name -> Config
+[streams.device_shadow]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
+buf_size = 100
+timeout = 10
+persistence = { max_file_size = 1048576, max_file_count = 10 }
+
+
+# Built-in streams: action status is a special case of stream and should be configured separately,
+# outside of the streams map. The action_status stream is used to push progress of Actions in
+# execution. This configuration is required or will lead to fallback to default config.
+#
+# NOTE: Action statuses are expected on a specifc topic as configured in example below.
+# This also means that we require a topic to be configured or uplink will error out.
+[action_status]
+topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
+buf_size = 10
+timeout = 5
+
+# Configurations for uplink's built-in file downloader, including the actions that can trigger
+# a download, the location in file system where uplink will download and store files from the
+# provided URL in the payload of download file actions, over HTTP(S). 
+# If left unconfigured, downloader will be disabled.
+#
+# Required Parameters
+# - actions: List of actions names that can trigger the downloader, with configurable timeouts
+# - path: Location in fs where the files are downloaded into
+[downloader]
+actions = [{ name = "update_firmware" }, { name = "send_file" }]
+path = "/data/ota-file"
+
+
+
+# Configurations associated with the system stats module of uplink, if enabled
+# system stats such as memory in use and CPU usage will be published onto special.
+#
+# Required Parameters
+# - enabled: A boolean to determine if the feature must be enabled
+# - process_names: List of process names that are to be tracked with system stats
+# - update_period: Time in seconds between each collection/publish of system stats
+[system_stats]
+enabled = true
+process_names = ["uplink"]
+update_period = 10
+
+# Define port to accept uplink control messages over HTTP.
+[console]
+enabled = false
+port = 3333
+
+# Configurations associated with in-built device-shadow collector
+#
+# Required Parameters
+# - interval: time in seconds after which device-shadow is pushed onto platform, default value is 60
+[device_shadow]
+interval = 10
