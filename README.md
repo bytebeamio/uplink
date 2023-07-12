@@ -213,6 +213,9 @@ The complete API reference for the uplink library is available within the [libra
 * set persistence path to `/data/local/uplink`
 * `chmod +x uplink_exe`
 
+NOTE: Compiling against other linux targets runs but some system calls fails or blocks. 
+      E.g `cargo build --target aarch64-unknown-linux-musl` compiled uplink throws `I/O: failed to lookup address information: Try again` error in tokio`lookup_address()`
+
 ### Contributing
 Please follow the [code of conduct][coc] while opening issues to report bugs or before you contribute fixes, also do read our [contributor guide][contribute] to get a better idea of what we'd appreciate and what we won't.
 
