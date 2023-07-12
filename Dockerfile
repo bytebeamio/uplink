@@ -12,9 +12,9 @@ RUN mkdir -p /etc/bytebeam /usr/share/bytebeam
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 
-CMD ["/usr/bin/runsvdir", "/etc/runit"]
-COPY runit/ /etc/runit
-RUN rm -rf /etc/runit/runsvdir
+#CMD ["/usr/bin/runsvdir", "/etc/runit"]
+#COPY runit/ /etc/runit
+#RUN rm -rf /etc/runit/runsvdir
 
 WORKDIR "/usr/share/bytebeam/uplink"
 
