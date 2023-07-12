@@ -319,4 +319,45 @@ mod test {
 
         assert!(handle.parse_lines(&mut lines).await.is_none());
     }
+
+    #[tokio::test]
+    async fn parse_consoled_log_lines() {
+        let raw = r#"23-07-11 18:03:32 consoled-6cd8795566-76km9 INFO [ring.logger:0] - {:request-method :get, :uri "/api/v1/devices/count", :server-name "cloud.bytebeam.io", :ring.logger/type :finish, :status 200, :ring.logger/ms 11}
+10.13.2.69 - - [11/Jul/2023:18:03:32 +0000] "GET /api/v1/devices/count?status=active HTTP/1.1" 200 1 "https://cloud.bytebeam.io/projects/kptl/device-management/devices" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"rt=0.016 uct=0.000 cn= o=
+"Notifying broker for tenant reactlabs device 305 action 683022""#;
+        let mut lines = BufReader::new(raw.as_bytes()).lines();
+
+        let config = StdoutConfig {
+      stream_name: "".to_string(),
+      log_template:
+          r#"^(?P<timestamp>\S+-\S+-\S+\s\S+:\S+:\S+)\s+(?P<tag>\S+)\s+(?P<level>\S+)\s+(?P<message>.*)"#
+              .to_string(),
+      timestamp_template: r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)\s(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+)"#.to_string(),
+  };
+        let tx = BridgeTx {
+            events_tx: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+            shutdown_handle: {
+                let (tx, _) = bounded(1);
+                tx
+            },
+        };
+        let mut handle = Stdout::new(config, tx);
+
+        let Payload { payload, sequence, .. } = handle.parse_lines(&mut lines).await.unwrap();
+        assert_eq!(
+            payload,
+            json!({
+                "level": "INFO",
+                "line": "23-07-11 18:03:32 consoled-6cd8795566-76km9 INFO [ring.logger:0] - {:request-method :get, :uri \"/api/v1/devices/count\", :server-name \"cloud.bytebeam.io\", :ring.logger/type :finish, :status 200, :ring.logger/ms 11}\n10.13.2.69 - - [11/Jul/2023:18:03:32 +0000] \"GET /api/v1/devices/count?status=active HTTP/1.1\" 200 1 \"https://cloud.bytebeam.io/projects/kptl/device-management/devices\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36\"rt=0.016 uct=0.000 cn= o=\n\"Notifying broker for tenant reactlabs device 305 action 683022\"",
+                "message": "[ring.logger:0] - {:request-method :get, :uri \"/api/v1/devices/count\", :server-name \"cloud.bytebeam.io\", :ring.logger/type :finish, :status 200, :ring.logger/ms 11}\n10.13.2.69 - - [11/Jul/2023:18:03:32 +0000] \"GET /api/v1/devices/count?status=active HTTP/1.1\" 200 1 \"https://cloud.bytebeam.io/projects/kptl/device-management/devices\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36\"rt=0.016 uct=0.000 cn= o=\n\"Notifying broker for tenant reactlabs device 305 action 683022\"",
+                "tag": "consoled-6cd8795566-76km9"
+            })
+        );
+        assert_eq!(sequence, 1);
+
+        assert!(handle.parse_lines(&mut lines).await.is_none());
+    }
 }
