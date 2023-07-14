@@ -2,4 +2,4 @@
 
 cd /usr/share/bytebeam/uplink
 
-exec uplink -h
+exec uplink
