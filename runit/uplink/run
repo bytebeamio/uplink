@@ -1,0 +1,5 @@
+#!/bin/sh
+
+cd /usr/share/bytebeam/uplink
+
+exec uplink -h
