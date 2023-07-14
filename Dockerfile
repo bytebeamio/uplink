@@ -5,16 +5,16 @@ RUN echo "APT::Acquire::Retries \"3\";" > /etc/apt/apt.conf.d/80-retries
 
 RUN apt-get upgrade
 RUN apt-get update
-RUN DEBIAN_FRONTEND=noninteractive apt-get install -y curl vim libssl-dev pkg-config
+RUN DEBIAN_FRONTEND=noninteractive apt-get install -y curl runit vim libssl-dev pkg-config
 
 RUN mkdir -p /etc/bytebeam /usr/share/bytebeam
 
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 
-#CMD ["/usr/bin/runsvdir", "/etc/runit"]
-#COPY runit/ /etc/runit
-#RUN rm -rf /etc/runit/runsvdir
+CMD ["/usr/bin/runsvdir", "/etc/runit"]
+COPY runit/ /etc/runit
+RUN rm -rf /etc/runit/runsvdir
 
 WORKDIR "/usr/share/bytebeam/uplink"
 
