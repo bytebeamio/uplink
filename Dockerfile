@@ -15,6 +15,7 @@ ENV LANG=C.UTF-8
 CMD ["/usr/bin/runsvdir", "/etc/runit"]
 COPY runit/ /etc/runit
 RUN rm -rf /etc/runit/runsvdir
+RUN chmod +x /etc/runit/uplink/run
 
 WORKDIR "/usr/share/bytebeam/uplink"
 
