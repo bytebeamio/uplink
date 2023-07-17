@@ -67,13 +67,14 @@ impl ScriptRunner {
         loop {
             select! {
                 Ok(Some(line)) = stdout.next_line() => {
-                    let status: ActionResponse = match serde_json::from_str(&line) {
+                    let mut status: ActionResponse = match serde_json::from_str(&line) {
                         Ok(status) => status,
                         Err(e) => {
                             error!("Failed to deserialize script output: \"{line}\"; Error: {e}");
                             continue;
                         },
                     };
+                    status.action_id = id.to_owned();
 
                     debug!("Action status: {:?}", status);
                     self.bridge_tx.send_action_response(status).await;
