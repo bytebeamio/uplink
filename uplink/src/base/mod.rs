@@ -24,6 +24,11 @@ fn default_timeout() -> u64 {
     DEFAULT_TIMEOUT
 }
 
+#[inline]
+fn max_buf_size() -> usize {
+    MAX_BUFFER_SIZE
+}
+
 fn default_file_size() -> usize {
     10485760 // 10MB
 }
@@ -46,6 +51,7 @@ pub enum Compression {
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamConfig {
     pub topic: String,
+    #[serde(default = "max_buf_size")]
     pub buf_size: usize,
     #[serde(default = "default_timeout")]
     /// Duration(in seconds) that bridge collector waits from

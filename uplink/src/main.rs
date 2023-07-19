@@ -2,13 +2,14 @@ mod console;
 
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use anyhow::Error;
-
 use log::info;
 use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 use signal_hook_tokio::Signals;
 use structopt::StructOpt;
+use tokio::time::sleep;
 use tokio_stream::StreamExt;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
@@ -137,6 +138,7 @@ fn main() -> Result<(), Error> {
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
+        .enable_time()
         .thread_name("tcpjson")
         .build()
         .unwrap();
@@ -164,7 +166,9 @@ fn main() -> Result<(), Error> {
         });
 
         uplink.resolve_on_shutdown().await.unwrap();
-        info!("Uplink shutting down");
+        info!("Uplink shutting down...");
+        // NOTE: wait 5s to allow serializer to write to network/disk
+        sleep(Duration::from_secs(5)).await;
     });
 
     Ok(())
