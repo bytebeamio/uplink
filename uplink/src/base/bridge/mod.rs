@@ -445,7 +445,7 @@ impl CurrentAction {
 
 #[derive(Debug)]
 pub struct ActionRouter {
-    actions_tx: Sender<Action>,
+    pub(crate) actions_tx: Sender<Action>,
     duration: Duration,
 }
 

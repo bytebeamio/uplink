@@ -38,11 +38,12 @@ pub struct ScriptRunner {
     // to receive actions and send responses back to bridge
     bridge_tx: BridgeTx,
     timeouts: HashMap<String, Duration>,
+    sequence: u32,
 }
 
 impl ScriptRunner {
     pub fn new(bridge_tx: BridgeTx) -> Self {
-        Self { bridge_tx, timeouts: HashMap::new() }
+        Self { bridge_tx, timeouts: HashMap::new(), sequence: 0 }
     }
 
     /// Spawn a child process to run the script with sh
@@ -77,12 +78,12 @@ impl ScriptRunner {
                     status.action_id = id.to_owned();
 
                     debug!("Action status: {:?}", status);
-                    self.bridge_tx.send_action_response(status).await;
+                    self.forward_status(status).await;
                 }
                 // Send a success status at the end of execution
                 status = child.wait() => {
                     info!("Action done!! Status = {:?}", status);
-                    self.bridge_tx.send_action_response(ActionResponse::success(id)).await;
+                    self.forward_status(ActionResponse::success(id)).await;
                     break;
                 },
             }
@@ -107,11 +108,21 @@ impl ScriptRunner {
             let command = match serde_json::from_str::<DownloadFile>(&action.payload) {
                 Ok(DownloadFile { download_path: Some(download_path), .. }) => download_path,
                 Ok(_) => {
-                    warn!("Action payload could not be used for script execution");
+                    let err = format!(
+                        "Action payload doesn't contain path for script execution; payload: \"{}\"",
+                        action.payload
+                    );
+                    warn!("{err}");
+                    self.forward_status(ActionResponse::failure(&action.action_id, err)).await;
                     continue;
                 }
                 Err(e) => {
-                    error!("Failed to deserialize action payload: {e}");
+                    let err = format!(
+                        "Failed to deserialize action payload: \"{e}\"; payload: \"{}\"",
+                        action.payload
+                    );
+                    error!("{err}");
+                    self.forward_status(ActionResponse::failure(&action.action_id, err)).await;
                     continue;
                 }
             };
@@ -130,5 +141,85 @@ impl ScriptRunner {
                 o?
             }
         }
+    }
+
+    // Forward action status to bridge
+    async fn forward_status(&mut self, status: ActionResponse) {
+        self.sequence += 1;
+        let status = status.set_sequence(self.sequence);
+        self.bridge_tx.send_action_response(status).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::thread;
+
+    use super::*;
+    use crate::{
+        base::bridge::{ActionRouter, Event},
+        Action,
+    };
+
+    use flume::bounded;
+    use tokio::runtime::Runtime;
+
+    #[test]
+    fn empty_payload() {
+        let (events_tx, events_rx) = bounded(1);
+        let (shutdown_handle, _) = bounded(1);
+        let script_runner = ScriptRunner::new(BridgeTx { events_tx, shutdown_handle });
+        let routes = vec![ActionRoute { name: "test".to_string(), timeout: 100 }];
+
+        thread::spawn(move || {
+            Runtime::new().unwrap().block_on(async {
+                script_runner.start(routes).await.unwrap();
+            })
+        });
+
+        let Event::RegisterActionRoute(_, ActionRouter{actions_tx,..}) = events_rx.recv().unwrap() else { unreachable!()};
+        actions_tx
+            .send(Action {
+                device_id: None,
+                action_id: "1".to_string(),
+                kind: "1".to_string(),
+                name: "test".to_string(),
+                payload: "".to_string(),
+            })
+            .unwrap();
+
+        let Event::ActionResponse(ActionResponse{state, errors,..}) = events_rx.recv().unwrap() else { unreachable!()};
+        assert_eq!(state, "Failed");
+        assert_eq!(errors, ["Failed to deserialize action payload: \"EOF while parsing a value at line 1 column 0\"; payload: \"\""]);
+    }
+
+    #[test]
+    fn missing_path() {
+        let (events_tx, events_rx) = bounded(1);
+        let (shutdown_handle, _) = bounded(1);
+        let script_runner = ScriptRunner::new(BridgeTx { events_tx, shutdown_handle });
+        let routes = vec![ActionRoute { name: "test".to_string(), timeout: 100 }];
+
+        thread::spawn(move || {
+            Runtime::new().unwrap().block_on(async {
+                script_runner.start(routes).await.unwrap();
+            })
+        });
+
+        let Event::RegisterActionRoute(_, ActionRouter{actions_tx,..}) = events_rx.recv().unwrap() else { unreachable!()};
+        actions_tx
+            .send(Action {
+                device_id: None,
+                action_id: "1".to_string(),
+                kind: "1".to_string(),
+                name: "test".to_string(),
+                payload: "{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}"
+                    .to_string(),
+            })
+            .unwrap();
+
+        let Event::ActionResponse(ActionResponse{state, errors,..}) = events_rx.recv().unwrap() else { unreachable!()};
+        assert_eq!(state, "Failed");
+        assert_eq!(errors, ["Action payload doesn't contain path for script execution; payload: \"{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}\""]);
     }
 }
