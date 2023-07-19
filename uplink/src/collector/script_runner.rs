@@ -3,12 +3,14 @@ use log::{debug, error, info, warn};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::{pin, select, time};
+use tokio::select;
+use tokio::time::timeout;
 
 use super::downloader::DownloadFile;
 use crate::base::{bridge::BridgeTx, ActionRoute};
 use crate::{ActionResponse, Package};
 
+use std::collections::HashMap;
 use std::io;
 use std::process::Stdio;
 use std::time::Duration;
@@ -35,11 +37,12 @@ pub enum Error {
 pub struct ScriptRunner {
     // to receive actions and send responses back to bridge
     bridge_tx: BridgeTx,
+    timeouts: HashMap<String, Duration>,
 }
 
 impl ScriptRunner {
     pub fn new(bridge_tx: BridgeTx) -> Self {
-        Self { bridge_tx }
+        Self { bridge_tx, timeouts: HashMap::new() }
     }
 
     /// Spawn a child process to run the script with sh
@@ -60,9 +63,6 @@ impl ScriptRunner {
     ) -> Result<(), Error> {
         let stdout = child.stdout.take().ok_or(Error::NoStdout)?;
         let mut stdout = BufReader::new(stdout).lines();
-
-        let timeout = time::sleep(Duration::from_secs(10));
-        pin!(timeout);
 
         loop {
             select! {
@@ -85,7 +85,6 @@ impl ScriptRunner {
                     self.bridge_tx.send_action_response(ActionResponse::success(id)).await;
                     break;
                 },
-                _ = &mut timeout => break
             }
         }
 
@@ -93,6 +92,9 @@ impl ScriptRunner {
     }
 
     pub async fn start(mut self, routes: Vec<ActionRoute>) -> Result<(), Error> {
+        self.timeouts =
+            routes.iter().map(|s| (s.name.to_owned(), Duration::from_secs(s.timeout))).collect();
+
         let action_rx = match self.bridge_tx.register_action_routes(routes).await {
             Some(r) => r,
             _ => return Ok(()),
@@ -113,10 +115,20 @@ impl ScriptRunner {
                     continue;
                 }
             };
-
+            let duration = match self.timeouts.get(&action.name) {
+                Some(d) => *d,
+                _ => {
+                    error!("Unconfigured action: {}", action.name);
+                    continue;
+                }
+            };
             // Spawn the action and capture its stdout
             let child = self.run(command).await?;
-            self.spawn_and_capture_stdout(child, &action.action_id).await?;
+            if let Ok(o) =
+                timeout(duration, self.spawn_and_capture_stdout(child, &action.action_id)).await
+            {
+                o?
+            }
         }
     }
 }
