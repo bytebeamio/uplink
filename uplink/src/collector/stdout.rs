@@ -7,10 +7,6 @@ use serde_json::json;
 use crate::base::bridge::{BridgeTx, Payload};
 use crate::base::StdoutConfig;
 
-lazy_static::lazy_static! {
-    pub static ref COLORS_RE: Regex = Regex::new(r#"\u{1b}\[[0-9;]*m"#).unwrap();
-}
-
 #[derive(Debug, Serialize)]
 struct LogEntry {
     pub line: String,
@@ -62,9 +58,8 @@ impl LogEntry {
     fn parse(line: &str, log_template: &Regex, timestamp_template: &Regex) -> Option<Self> {
         let to_string = |x: Match| x.as_str().to_string();
         let to_timestamp = |t: Match| parse_timestamp(t.as_str(), timestamp_template);
-        // NOTE: remove any tty color escape characters
-        let line = COLORS_RE.replace_all(&line, "").trim().to_string();
-        let captures = log_template.captures(&line)?;
+        let line = line.trim().to_string();
+        let captures = dbg!(log_template.captures(&line))?;
         // Use current time if not able to parse properly
         let timestamp = match captures.name("timestamp").map(to_timestamp).flatten() {
             Some(t) => t,
