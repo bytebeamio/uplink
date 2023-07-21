@@ -54,22 +54,36 @@ pub fn parse_timestamp(s: &str, template: &Regex) -> Option<u64> {
 }
 
 impl LogEntry {
-    // NOTE: expects log lines to contain information in the format "{log_timestamp} {level} {tag}: {message}"
-    fn parse(line: &str, log_template: &Regex, timestamp_template: &Regex) -> Option<Self> {
+    // NOTE: expects log lines to contain information as defined in log_template e.g. "{log_timestamp} {level} {tag}: {message}" else treats them as message lines
+    fn parse(
+        current_line: &mut Option<Self>,
+        line: &str,
+        log_template: &Regex,
+        timestamp_template: &Regex,
+    ) -> Option<Self> {
         let to_string = |x: Match| x.as_str().to_string();
         let to_timestamp = |t: Match| parse_timestamp(t.as_str(), timestamp_template);
         let line = line.trim().to_string();
-        let captures = dbg!(log_template.captures(&line))?;
-        // Use current time if not able to parse properly
-        let timestamp = match captures.name("timestamp").map(to_timestamp).flatten() {
-            Some(t) => t,
-            _ => (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as u64,
-        };
-        let level = captures.name("level").map(to_string);
-        let tag = captures.name("tag").map(to_string);
-        let message = captures.name("message").map(to_string);
+        if let Some(captures) = log_template.captures(&line) {
+            // Use current time if not able to parse properly
+            let timestamp = match captures.name("timestamp").map(to_timestamp).flatten() {
+                Some(t) => t,
+                _ => (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as u64,
+            };
+            let level = captures.name("level").map(to_string);
+            let tag = captures.name("tag").map(to_string);
+            let message = captures.name("message").map(to_string);
 
-        Some(Self { line, level, tag, timestamp, message })
+            return current_line.replace(LogEntry { line, tag, level, timestamp, message });
+        } else if let Some(log_entry) = current_line {
+            log_entry.line += &format!("\n{line}");
+            match &mut log_entry.message {
+                Some(msg) => *msg += &format!("\n{line}"),
+                _ => log_entry.message = Some(line),
+            };
+        }
+
+        None
     }
 
     fn payload(self, stream: String, sequence: u32) -> Payload {
@@ -125,45 +139,20 @@ impl Stdout {
         lines: &mut Lines<T>,
     ) -> Option<Payload> {
         while let Some(line) = lines.next_line().await.ok()? {
-            match self.log_entry.take() {
-                Some(mut old_entry) => {
-                    match LogEntry::parse(&line, &self.log_template, &self.timestamp_template) {
-                        Some(new_entry) => {
-                            self.sequence += 1;
-                            self.log_entry = Some(new_entry);
-                            return Some(
-                                old_entry
-                                    .payload(self.config.stream_name.to_owned(), self.sequence),
-                            );
-                        }
-                        _ => {
-                            old_entry.line += &format!("\n{line}");
-                            match &mut old_entry.message {
-                                Some(msg) => *msg += &format!("\n{line}"),
-                                _ => old_entry.message = Some(line),
-                            };
-
-                            self.log_entry = Some(old_entry)
-                        }
-                    }
-                }
-                _ => match LogEntry::parse(&line, &self.log_template, &self.timestamp_template) {
-                    Some(new_log) => self.log_entry = Some(new_log),
-                    _ => {
-                        if let Some(log_entry) = &mut self.log_entry {
-                            log_entry.line += &format!("\n{line}");
-                            match &mut log_entry.message {
-                                Some(msg) => *msg += &format!("\n{line}"),
-                                _ => log_entry.message = Some(line),
-                            };
-                        }
-                    }
-                },
+            if let Some(entry) = LogEntry::parse(
+                &mut self.log_entry,
+                &line,
+                &self.log_template,
+                &self.timestamp_template,
+            ) {
+                self.sequence += 1;
+                return Some(entry.payload(self.config.stream_name.to_owned(), self.sequence));
             }
         }
 
-        self.sequence += 1;
-        self.log_entry.take().map(|e| e.payload(self.config.stream_name.to_owned(), self.sequence))
+        self.log_entry
+            .take()
+            .map(|e| e.payload(self.config.stream_name.to_owned(), self.sequence + 1))
     }
 }
 
