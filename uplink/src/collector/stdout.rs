@@ -1,5 +1,5 @@
 use regex::{Match, Regex};
-use time::Month;
+use time::{Month, OffsetDateTime};
 use tokio::io::{stdin, AsyncBufReadExt, BufReader, Lines};
 
 use serde::Serialize;
@@ -19,39 +19,39 @@ struct LogEntry {
 }
 
 /// Parse timestamp from log line, use current time as default if unable to ascertain partially
-pub fn parse_timestamp(s: &str, template: &Regex) -> Option<u64> {
+pub fn parse_timestamp(date: &mut OffsetDateTime, s: &str, template: &Regex) -> Option<()> {
     let matches = template.captures(s)?;
-    let mut date = time::OffsetDateTime::now_utc();
     if let Some(year) = matches.name("year") {
         let year = year.as_str().parse().ok()?;
-        date = date.replace_year(year).ok()?;
+        *date = date.replace_year(year).ok()?;
     }
     if let Some(month) = matches.name("month") {
         let month: u8 = month.as_str().parse().ok()?;
         let month = Month::try_from(month).ok()?;
+        *date = date.replace_month(month).ok()?;
     }
     if let Some(day) = matches.name("day") {
         let day = day.as_str().parse().ok()?;
-        date = date.replace_day(day).ok()?;
+        *date = date.replace_day(day).ok()?;
     }
     if let Some(hour) = matches.name("hour") {
         let hour = hour.as_str().parse().ok()?;
-        date = date.replace_hour(hour).ok()?;
+        *date = date.replace_hour(hour).ok()?;
     }
     if let Some(minute) = matches.name("minute") {
         let minute = minute.as_str().parse().ok()?;
-        date = date.replace_minute(minute).ok()?;
+        *date = date.replace_minute(minute).ok()?;
     }
     if let Some(second) = matches.name("second") {
         let second = second.as_str().parse().ok()?;
-        date = date.replace_second(second).ok()?;
+        *date = date.replace_second(second).ok()?;
     }
     if let Some(microsecond) = matches.name("microsecond") {
         let microsecond = microsecond.as_str().parse().ok()?;
-        date = date.replace_microsecond(microsecond).ok()?;
+        *date = date.replace_microsecond(microsecond).ok()?;
     }
 
-    Some((date.unix_timestamp_nanos() / 1_000_000) as u64)
+    Some(())
 }
 
 impl LogEntry {
@@ -63,14 +63,15 @@ impl LogEntry {
         timestamp_template: &Regex,
     ) -> Option<Self> {
         let to_string = |x: Match| x.as_str().to_string();
-        let to_timestamp = |t: Match| parse_timestamp(t.as_str(), timestamp_template);
         let line = line.trim().to_string();
         if let Some(captures) = log_template.captures(&line) {
             // Use current time if not able to parse properly
-            let timestamp = match captures.name("timestamp").map(to_timestamp).flatten() {
-                Some(t) => t,
-                _ => (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as u64,
-            };
+            let mut date = time::OffsetDateTime::now_utc();
+            if let Some(t) = captures.name("timestamp") {
+                parse_timestamp(&mut date, t.as_str(), timestamp_template);
+            }
+
+            let timestamp = (date.unix_timestamp_nanos() / 1_000_000) as u64;
             let level = captures.name("level").map(to_string);
             let tag = captures.name("tag").map(to_string);
             let message = captures.name("message").map(to_string);
