@@ -1,4 +1,5 @@
 use regex::{Match, Regex};
+use time::Month;
 use tokio::io::{stdin, AsyncBufReadExt, BufReader, Lines};
 
 use serde::Serialize;
@@ -26,8 +27,8 @@ pub fn parse_timestamp(s: &str, template: &Regex) -> Option<u64> {
         date = date.replace_year(year).ok()?;
     }
     if let Some(month) = matches.name("month") {
-        let month = month.as_str().parse().ok()?;
-        date = date.replace_month(month).ok()?;
+        let month: u8 = month.as_str().parse().ok()?;
+        let month = Month::try_from(month).ok()?;
     }
     if let Some(day) = matches.name("day") {
         let day = day.as_str().parse().ok()?;
