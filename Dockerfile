@@ -15,6 +15,7 @@ ENV LANG=C.UTF-8
 CMD ["/usr/bin/runsvdir", "/etc/runit"]
 COPY runit/ /etc/runit
 RUN rm -rf /etc/runit/runsvdir
+RUN chmod +x /etc/runit/uplink/run
 
 WORKDIR "/usr/share/bytebeam/uplink"
 
@@ -42,8 +43,11 @@ RUN cp target/release/uplink /usr/share/bytebeam/uplink/bin/
 FROM base AS production
 
 RUN mkdir -p /usr/share/bytebeam/uplink
+RUN mkdir -p /usr/share/bytebeam/uplink/shared
+#RUN mkdir -P /usr/share/bytebeam/uplink/bin
 COPY --from=staging /usr/share/bytebeam/uplink/bin /usr/bin
 COPY --from=staging /usr/share/bytebeam/uplink/paths /usr/share/bytebeam/uplink/paths
 COPY --from=staging /usr/share/bytebeam/uplink/simulator.sh /usr/share/bytebeam/uplink
 COPY --from=staging /usr/share/bytebeam/uplink/bin /usr/share/bytebeam/uplink
-CMD  cp /usr/share/bytebeam/uplink/uplink /usr/share/bytebeam/uplink/shared/uplink
+#CMD uplink -a /usr/share/bytebeam/uplink/shared/device.json
+#CMD  cp /usr/share/bytebeam/uplink/uplink /usr/share/bytebeam/uplink/shared/uplink
