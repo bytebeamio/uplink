@@ -196,4 +196,4 @@ interval = 30
 [stdout]
 stream_name = "logs"
 log_template = '''^(?P<timestamp>.*)Z\s(?P<level>\S+)\s(?P<tag>\S+):\s(?P<message>.*)'''
-timestamp_template = '''^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+).(?P<microsecond>\S+)'''
+timestamp_template = '''^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+)\.(?P<microsecond>\S+)'''
