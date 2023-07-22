@@ -18,6 +18,7 @@ def recv_action(s):
 # Constructs a payload and sends it over TCP to uplink
 def send_data(s, payload):
     send = json.dumps(payload) + "\n"
+    print(bytes(send, encoding="utf-8"))
     s.sendall(bytes(send, encoding="utf-8"))
 
 # Constructs a JSON `action_status` as a response to received action on completion
@@ -134,13 +135,17 @@ def recv_actions():
         action_id = action["action_id"]
         action_payload = action["payload"]
 
-        resp = action_failed(action_id, "Action {name} does not exist".format(name=action_name))
+        #resp = action_failed(action_id, "Action {name} does not exist".format(name=action_name))
 
         try:
             if action_name == "update_firmware":
                 resp = update_firmware(action_id, action_payload)
             elif action_name == "send_file":
                 resp = action_complete(action_id)
+            elif action["name"] == "update_config":
+                print("update_config action received")
+                print(json.loads(action['payload']))
+                update_config(action)
         except Exception as e: 
             print(e)
             resp = action_failed(action_id, "Failed with exception: {msg}".format(msg=str(e)))
