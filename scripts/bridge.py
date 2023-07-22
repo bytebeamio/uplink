@@ -43,6 +43,19 @@ def action_failed(id, reason):
         "errors": [reason]
     }
 
+def update_config(action):
+    payload = json.loads(action['payload'])
+    print(payload)
+    app = payload["name"]
+    print(app)
+    ver = payload["version"]
+    print(ver)
+    if(ver == "latest"):
+        cmd = "sudo apt update && sudo apt install " + app
+        print(cmd)
+    resp = action_complete(action["action_id"])
+    print(resp)
+    send_data(s, resp)
 
 def update_firmware(action_id, payload_json):
     payload = json.loads(payload_json)
