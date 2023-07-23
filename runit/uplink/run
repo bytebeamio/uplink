@@ -1,5 +1,3 @@
 #!/bin/sh
 
-cd /usr/share/bytebeam/uplink
-
-exec uplink -a /usr/share/bytebeam/uplink/shared/device.json
+exec uplink -a /usr/share/bytebeam/uplink/auth/device.json -c /usr/share/bytebeam/uplink/config/config.toml
