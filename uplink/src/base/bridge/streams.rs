@@ -12,6 +12,8 @@ use crate::{Config, Package, Payload, Stream};
 
 use super::delaymap::DelayMap;
 
+const MAX_STREAM_COUNT: usize = 100;
+
 pub struct Streams {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
@@ -56,8 +58,11 @@ impl Streams {
         let stream = match self.map.get_mut(&stream_id) {
             Some(partition) => partition,
             None => {
-                if self.config.simulator.is_none() && self.map.keys().len() > 20 {
-                    error!("Failed to create {:?} stream. More than max 20 streams", stream_id);
+                if self.config.simulator.is_none() && self.map.keys().len() > MAX_STREAM_COUNT {
+                    error!(
+                        "Failed to create {:?} stream. More than max {MAX_STREAM_COUNT} streams",
+                        stream_id
+                    );
                     return;
                 }
 
