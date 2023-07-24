@@ -1,11 +1,13 @@
+use std::process::Stdio;
+
 use log::error;
 use regex::{Match, Regex};
 use time::{Month, OffsetDateTime};
-use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader, Lines};
 
 use serde::Serialize;
 use serde_json::json;
+use tokio::process::Command;
 use tokio::task::JoinSet;
 
 use crate::base::bridge::{BridgeTx, Payload};
@@ -156,7 +158,13 @@ impl LogFileReader {
         let mut set = JoinSet::new();
 
         for path in self.config.paths {
-            let file = File::open(path).await?;
+            let tail = dbg!(Command::new("tail")
+                .args(&["-F", &path])
+                .stdout(Stdio::piped())
+                .kill_on_drop(true))
+            .spawn()?;
+            let file = tail.stdout.expect("Failed to open stdin");
+
             let lines = BufReader::new(file).lines();
             let mut parser =
                 LogParser::new(lines, self.log_template.clone(), self.timestamp_template.clone());
