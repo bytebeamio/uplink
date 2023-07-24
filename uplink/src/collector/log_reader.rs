@@ -108,7 +108,7 @@ pub enum Error {
     Json(#[from] serde_json::error::Error),
 }
 
-pub struct LogParser<T: AsyncBufReadExt + Unpin> {
+pub struct LogParser<T> {
     lines: Lines<T>,
     log_entry: Option<LogEntry>,
     log_template: Regex,
@@ -165,15 +165,10 @@ impl LogFileReader {
             let tx = self.tx.clone();
 
             set.spawn(async move {
-                loop {
-                    match parser.next().await {
-                        Some(entry) => {
-                            sequence += 1;
-                            let payload = entry.payload(stream_name.clone(), sequence);
-                            tx.send_payload(payload).await
-                        }
-                        None => return,
-                    }
+                while let Some(entry) = parser.next().await {
+                    sequence += 1;
+                    let payload = entry.payload(stream_name.clone(), sequence);
+                    tx.send_payload(payload).await
                 }
             });
         }
@@ -206,9 +201,8 @@ mod test {
             entry,
             LogEntry {
                 level: Some("DEBUG".to_string()),
-                line: 
-                    "2023-07-03T17:59:22.979012Z DEBUG uplink::base::mqtt: Outgoing = Publish(9)".to_string()
-                ,
+                line: "2023-07-03T17:59:22.979012Z DEBUG uplink::base::mqtt: Outgoing = Publish(9)"
+                    .to_string(),
                 timestamp: 1688407162000,
                 message: Some("Outgoing = Publish(9)".to_string()),
                 tag: Some("uplink::base::mqtt".to_string())
@@ -258,9 +252,8 @@ mod test {
             entry,
             LogEntry {
                 level: Some("DEBUG".to_string()),
-                line: 
-                    "2023-07-03T17:59:22.979012Z DEBUG uplink::base::mqtt: Outgoing = Publish(9)".to_string()
-                ,
+                line: "2023-07-03T17:59:22.979012Z DEBUG uplink::base::mqtt: Outgoing = Publish(9)"
+                    .to_string(),
                 timestamp: 1688407162979,
                 message: Some("Outgoing = Publish(9)".to_string()),
                 tag: Some("uplink::base::mqtt".to_string())
@@ -272,9 +265,8 @@ mod test {
             entry,
             LogEntry {
                 level: Some("DEBUG".to_string()),
-                line: 
-                    "2023-07-03T17:59:23.012000Z DEBUG uplink::base::mqtt: Incoming = PubAck(9)".to_string()
-                ,
+                line: "2023-07-03T17:59:23.012000Z DEBUG uplink::base::mqtt: Incoming = PubAck(9)"
+                    .to_string(),
                 timestamp: 1688407163012,
                 message: Some("Incoming = PubAck(9)".to_string()),
                 tag: Some("uplink::base::mqtt".to_string())
@@ -300,36 +292,39 @@ mod test {
 
         let entry = parser.next().await.unwrap();
         assert_eq!(
-          entry,
-          LogEntry {
-              level: Some("INFO".to_string()),
-              line: 
-                  "2023-07-11T13:56:44.101585Z  INFO beamd::http::endpoint: Method = \"POST\", Uri = \"/tenants/naveentest/devices/8/actions\", Payload = \"{\\\"name\\\":\\\"update_firmware\\\",\\\"id\\\":\\\"830\\\",\\\"payload\\\":\\\"{\\\\\\\"content-length\\\\\\\":35393,\\\\\\\"status\\\\\\\":false,\\\\\\\"url\\\\\\\":\\\\\\\"https://firmware.stage.bytebeam.io/api/v1/firmwares/one/artifact\\\\\\\",\\\\\\\"version\\\\\\\":\\\\\\\"one\\\\\\\"}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string()
-              ,
-              timestamp: 1689083804101,
-              message: Some("Method = \"POST\", Uri = \"/tenants/naveentest/devices/8/actions\", Payload = \"{\\\"name\\\":\\\"update_firmware\\\",\\\"id\\\":\\\"830\\\",\\\"payload\\\":\\\"{\\\\\\\"content-length\\\\\\\":35393,\\\\\\\"status\\\\\\\":false,\\\\\\\"url\\\\\\\":\\\\\\\"https://firmware.stage.bytebeam.io/api/v1/firmwares/one/artifact\\\\\\\",\\\\\\\"version\\\\\\\":\\\\\\\"one\\\\\\\"}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string()),
-              tag: Some("beamd::http::endpoint".to_string())
-          }
-      );
+            entry,
+            LogEntry {
+                level: Some("INFO".to_string()),
+                line: "2023-07-11T13:56:44.101585Z  INFO beamd::http::endpoint: Method = \"POST\", Uri = \"/tenants/naveentest/devices/8/actions\", Payload = \"{\\\"name\\\":\\\"update_firmware\\\",\\\"id\\\":\\\"830\\\",\\\"payload\\\":\\\"{\\\\\\\"content-length\\\\\\\":35393,\\\\\\\"status\\\\\\\":false,\\\\\\\"url\\\\\\\":\\\\\\\"https://firmware.stage.bytebeam.io/api/v1/firmwares/one/artifact\\\\\\\",\\\\\\\"version\\\\\\\":\\\\\\\"one\\\\\\\"}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string(),
+                timestamp: 1689083804101,
+                message: Some("Method = \"POST\", Uri = \"/tenants/naveentest/devices/8/actions\", Payload = \"{\\\"name\\\":\\\"update_firmware\\\",\\\"id\\\":\\\"830\\\",\\\"payload\\\":\\\"{\\\\\\\"content-length\\\\\\\":35393,\\\\\\\"status\\\\\\\":false,\\\\\\\"url\\\\\\\":\\\\\\\"https://firmware.stage.bytebeam.io/api/v1/firmwares/one/artifact\\\\\\\",\\\\\\\"version\\\\\\\":\\\\\\\"one\\\\\\\"}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string()),
+                tag: Some("beamd::http::endpoint".to_string())
+            }
+        );
 
         let entry = parser.next().await.unwrap();
         assert_eq!(
-        entry,
-        LogEntry { level: Some("INFO".to_string()),
-        line: 
-            "2023-07-11T13:56:44.113343Z  INFO beamd::http::endpoint: Method = \"POST\", Uri = \"/tenants/rpi/devices/6/actions\", Payload = \"{\\\"name\\\":\\\"tunshell\\\",\\\"id\\\":\\\"226\\\",\\\"payload\\\":\\\"{}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string()
-        ,
-        timestamp: 1689083804113,
-        message: Some("Method = \"POST\", Uri = \"/tenants/rpi/devices/6/actions\", Payload = \"{\\\"name\\\":\\\"tunshell\\\",\\\"id\\\":\\\"226\\\",\\\"payload\\\":\\\"{}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string()),
-        tag: Some("beamd::http::endpoint".to_string())
-    }
-);
+            entry,
+            LogEntry {
+                level: Some("INFO".to_string()),
+                line: "2023-07-11T13:56:44.113343Z  INFO beamd::http::endpoint: Method = \"POST\", Uri = \"/tenants/rpi/devices/6/actions\", Payload = \"{\\\"name\\\":\\\"tunshell\\\",\\\"id\\\":\\\"226\\\",\\\"payload\\\":\\\"{}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string(),
+                timestamp: 1689083804113,
+                message: Some("Method = \"POST\", Uri = \"/tenants/rpi/devices/6/actions\", Payload = \"{\\\"name\\\":\\\"tunshell\\\",\\\"id\\\":\\\"226\\\",\\\"payload\\\":\\\"{}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string()),
+                tag: Some("beamd::http::endpoint".to_string())
+            }
+        );
 
         let entry = parser.next().await.unwrap();
         assert_eq!(
-        entry,
-        LogEntry { line: "2023-07-11T13:56:44.221249Z ERROR beamd::clickhouse: Flush-error: [Status - 500] Ok(\"Code: 243. DB::Exception: Cannot reserve 11.58 MiB, not enough space. (NOT_ENOUGH_SPACE) (version 22.6.2.12 (official build))\\n\"), back_up_enabled: true\nin beamd::clickhouse::clickhouse_flush with stream: \"demo.uplink_process_stats\"".to_string(), tag: Some("beamd::clickhouse".to_string()), level: Some("ERROR".to_string()), timestamp: 1689083804221, message: Some("Flush-error: [Status - 500] Ok(\"Code: 243. DB::Exception: Cannot reserve 11.58 MiB, not enough space. (NOT_ENOUGH_SPACE) (version 22.6.2.12 (official build))\\n\"), back_up_enabled: true\nin beamd::clickhouse::clickhouse_flush with stream: \"demo.uplink_process_stats\"".to_string()) }
-);
+            entry,
+            LogEntry {
+                line: "2023-07-11T13:56:44.221249Z ERROR beamd::clickhouse: Flush-error: [Status - 500] Ok(\"Code: 243. DB::Exception: Cannot reserve 11.58 MiB, not enough space. (NOT_ENOUGH_SPACE) (version 22.6.2.12 (official build))\\n\"), back_up_enabled: true\nin beamd::clickhouse::clickhouse_flush with stream: \"demo.uplink_process_stats\"".to_string(),
+                tag: Some("beamd::clickhouse".to_string()),
+                level: Some("ERROR".to_string()),
+                timestamp: 1689083804221,
+                message: Some("Flush-error: [Status - 500] Ok(\"Code: 243. DB::Exception: Cannot reserve 11.58 MiB, not enough space. (NOT_ENOUGH_SPACE) (version 22.6.2.12 (official build))\\n\"), back_up_enabled: true\nin beamd::clickhouse::clickhouse_flush with stream: \"demo.uplink_process_stats\"".to_string())
+            }
+        );
 
         assert!(parser.next().await.is_none());
     }
@@ -341,24 +336,21 @@ mod test {
 "Notifying broker for tenant reactlabs device 305 action 683022""#;
         let lines = BufReader::new(raw.as_bytes()).lines();
 
-        let log_template = Regex::new(
-          r#"^(?P<timestamp>\S+-\S+-\S+\s\S+:\S+:\S+)\s+(?P<tag>\S+)\s+(?P<level>\S+)\s+(?P<message>.*)"#
-        ).unwrap();
+        let log_template = Regex::new(r#"^(?P<timestamp>\S+-\S+-\S+\s\S+:\S+:\S+)\s+(?P<tag>\S+)\s+(?P<level>\S+)\s+(?P<message>.*)"#).unwrap();
         let timestamp_template = Regex::new(r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)\s(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+)"#).unwrap();
         let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template);
 
         let entry = parser.next().await.unwrap();
         assert_eq!(
-        entry,
-        LogEntry { level: Some("INFO".to_string()),
-        line: 
-            "23-07-11 18:03:32 consoled-6cd8795566-76km9 INFO [ring.logger:0] - {:request-method :get, :uri \"/api/v1/devices/count\", :server-name \"cloud.bytebeam.io\", :ring.logger/type :finish, :status 200, :ring.logger/ms 11}\n10.13.2.69 - - [11/Jul/2023:18:03:32 +0000] \"GET /api/v1/devices/count?status=active HTTP/1.1\" 200 1 \"https://cloud.bytebeam.io/projects/kptl/device-management/devices\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36\"rt=0.016 uct=0.000 cn= o=\n\"Notifying broker for tenant reactlabs device 305 action 683022\"".to_string()
-        ,
-        timestamp: 1689098612000,
-        message: Some("[ring.logger:0] - {:request-method :get, :uri \"/api/v1/devices/count\", :server-name \"cloud.bytebeam.io\", :ring.logger/type :finish, :status 200, :ring.logger/ms 11}\n10.13.2.69 - - [11/Jul/2023:18:03:32 +0000] \"GET /api/v1/devices/count?status=active HTTP/1.1\" 200 1 \"https://cloud.bytebeam.io/projects/kptl/device-management/devices\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36\"rt=0.016 uct=0.000 cn= o=\n\"Notifying broker for tenant reactlabs device 305 action 683022\"".to_string()),
-        tag: Some("consoled-6cd8795566-76km9".to_string())
-    }
-);
+            entry,
+            LogEntry {
+                level: Some("INFO".to_string()),
+                line: "23-07-11 18:03:32 consoled-6cd8795566-76km9 INFO [ring.logger:0] - {:request-method :get, :uri \"/api/v1/devices/count\", :server-name \"cloud.bytebeam.io\", :ring.logger/type :finish, :status 200, :ring.logger/ms 11}\n10.13.2.69 - - [11/Jul/2023:18:03:32 +0000] \"GET /api/v1/devices/count?status=active HTTP/1.1\" 200 1 \"https://cloud.bytebeam.io/projects/kptl/device-management/devices\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36\"rt=0.016 uct=0.000 cn= o=\n\"Notifying broker for tenant reactlabs device 305 action 683022\"".to_string(),
+                timestamp: 1689098612000,
+                message: Some("[ring.logger:0] - {:request-method :get, :uri \"/api/v1/devices/count\", :server-name \"cloud.bytebeam.io\", :ring.logger/type :finish, :status 200, :ring.logger/ms 11}\n10.13.2.69 - - [11/Jul/2023:18:03:32 +0000] \"GET /api/v1/devices/count?status=active HTTP/1.1\" 200 1 \"https://cloud.bytebeam.io/projects/kptl/device-management/devices\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36\"rt=0.016 uct=0.000 cn= o=\n\"Notifying broker for tenant reactlabs device 305 action 683022\"".to_string()),
+                tag: Some("consoled-6cd8795566-76km9".to_string())
+            }
+        );
 
         assert!(parser.next().await.is_none());
     }
