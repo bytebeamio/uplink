@@ -167,7 +167,7 @@ impl Bridge {
     }
 
     fn clear_current_action(&mut self) {
-        self.current_action = None;
+        self.current_action.take();
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -217,6 +217,9 @@ impl Bridge {
 
                     error!("Failed to route action to app. Error = {:?}", error);
                     self.forward_action_error(action, error).await;
+
+                    // Remove action because it couldn't be routed
+                    self.clear_current_action()
                 }
                 event = self.bridge_rx.recv_async() => {
                     let event = event?;
@@ -236,6 +239,9 @@ impl Bridge {
                     let action = self.current_action.take().unwrap();
                     error!("Timeout waiting for action response. Action ID = {}", action.id);
                     self.forward_action_error(action.action, Error::ActionTimeout).await;
+
+                    // Remove action because it timedout
+                    self.clear_current_action()
                 }
                 // Flush streams that timeout
                 Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
@@ -366,6 +372,9 @@ impl Bridge {
             if let Err(e) = self.try_route_action(fwd_action.clone()) {
                 error!("Failed to route action to app. Error = {:?}", e);
                 self.forward_action_error(fwd_action, e).await;
+
+                // Remove action because it couldn't be forwarded
+                self.clear_current_action()
             }
         }
     }
@@ -386,12 +395,6 @@ impl Bridge {
 
         if let Err(e) = self.action_status.fill(status).await {
             error!("Failed to send status. Error = {:?}", e);
-        }
-
-        // Clear current action only if the error being forwarded was triggered by it
-        match self.current_action.as_ref() {
-            Some(c) if c.id == action.action_id => self.clear_current_action(),
-            _ => {}
         }
     }
 }
