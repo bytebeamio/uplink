@@ -434,7 +434,7 @@ impl Uplink {
         let processes = config.processes.clone();
         thread::spawn(move || process_handler.start(processes));
 
-        if let Some(config) = &config.log_reader {
+        for (_logger, config) in config.log_reader.iter() {
             let stdout_collector = LogFileReader::new(config.clone(), bridge_tx.clone());
             thread::spawn(move || stdout_collector.start());
         }

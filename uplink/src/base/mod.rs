@@ -193,7 +193,7 @@ impl Default for DeviceShadowConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct LogReaderConfig {
-    pub paths: Vec<String>,
+    pub path: String,
     pub stream_name: String,
     pub log_template: String,
     pub timestamp_template: String,
@@ -232,7 +232,7 @@ pub struct Config {
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
     pub ota_installer: Option<InstallerConfig>,
-    pub log_reader: Option<LogReaderConfig>,
+    pub log_reader: HashMap<String, LogReaderConfig>,
     pub prometheus: Option<PrometheusConfig>,
     #[serde(default)]
     pub device_shadow: DeviceShadowConfig,

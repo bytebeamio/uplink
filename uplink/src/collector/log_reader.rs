@@ -1,12 +1,13 @@
+use std::process::Stdio;
+
 use log::error;
 use regex::{Match, Regex};
 use time::{Month, OffsetDateTime};
-use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader, Lines};
 
 use serde::Serialize;
 use serde_json::json;
-use tokio::task::JoinSet;
+use tokio::process::Command;
 
 use crate::base::bridge::{BridgeTx, Payload};
 use crate::base::LogReaderConfig;
@@ -153,28 +154,20 @@ impl LogFileReader {
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) -> Result<(), Error> {
-        let mut set = JoinSet::new();
+        let mut cmd =
+            Command::new("tail").args(&["-F", &self.config.path]).stdout(Stdio::piped()).spawn()?;
+        let file = cmd.stdout.take().expect("Expected stdout");
+        let lines = BufReader::new(file).lines();
+        let mut parser =
+            LogParser::new(lines, self.log_template.clone(), self.timestamp_template.clone());
+        let mut sequence = 0;
+        let stream_name = self.config.stream_name.to_owned();
+        let tx = self.tx.clone();
 
-        for path in self.config.paths {
-            let file = File::open(path).await?;
-            let lines = BufReader::new(file).lines();
-            let mut parser =
-                LogParser::new(lines, self.log_template.clone(), self.timestamp_template.clone());
-            let mut sequence = 0;
-            let stream_name = self.config.stream_name.to_owned();
-            let tx = self.tx.clone();
-
-            set.spawn(async move {
-                while let Some(entry) = parser.next().await {
-                    sequence += 1;
-                    let payload = entry.payload(stream_name.clone(), sequence);
-                    tx.send_payload(payload).await
-                }
-            });
-        }
-
-        while let Some(Err(e)) = set.join_next().await {
-            error!("{e}")
+        while let Some(entry) = parser.next().await {
+            sequence += 1;
+            let payload = entry.payload(stream_name.clone(), sequence);
+            tx.send_payload(payload).await
         }
 
         Ok(())
