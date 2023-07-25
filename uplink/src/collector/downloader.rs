@@ -154,8 +154,10 @@ impl FileDownloader {
             };
 
             // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
-            if let Ok(Err(e)) = timeout(duration, self.retry_thrice(action)).await {
-                self.forward_error(e).await;
+            match timeout(duration, self.retry_thrice(action)).await {
+                Ok(Err(e)) => self.forward_error(e).await,
+                Err(_) => error!("Last download has timedout"),
+                _ => {}
             }
         }
     }
