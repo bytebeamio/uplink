@@ -4,9 +4,9 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use crate::collector::journalctl::JournalCtlConfig;
-#[cfg(any(target_os = "android"))]
+#[cfg(target_os = "android")]
 use crate::collector::logcat::LogcatConfig;
 
 use self::bridge::stream::MAX_BUFFER_SIZE;
@@ -224,8 +224,8 @@ pub struct Config {
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
-    #[cfg(any(target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     pub logging: Option<JournalCtlConfig>,
-    #[cfg(any(target_os = "android"))]
+    #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
 }
