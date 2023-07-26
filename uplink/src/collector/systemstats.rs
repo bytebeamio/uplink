@@ -630,10 +630,17 @@ impl StatCollector {
 
     // Refresh special component stats
     fn update_special_stats(&mut self) -> Result<(), Error> {
-        let files = glob::glob("/sys/devices/virtual/thermal/thermal_zone*/temp")?;
+        let paths = glob::glob("/sys/devices/virtual/thermal/thermal_zone*/temp")?;
         let timestamp = clock() as u64;
-        for thermal_zone in files {
-            let path = thermal_zone?;
+
+        for path in paths {
+            let path = match path {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("Couldn't extract file path from glob: {e}");
+                    continue;
+                }
+            };
             let mut label = path.as_os_str().to_str().unwrap_or("temp_component").to_string();
             label.retain(|c| c.is_numeric());
             let label = "thermal_zone".to_owned() + &label;
