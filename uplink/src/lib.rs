@@ -104,9 +104,6 @@ pub mod config {
     keep_alive = 30
     network_timeout = 30
 
-    # Create empty streams map
-    [streams]
-
     # Downloader config
     [downloader]
     actions = []
