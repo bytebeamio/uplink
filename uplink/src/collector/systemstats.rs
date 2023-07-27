@@ -361,14 +361,6 @@ impl ComponentStats {
 
         comp.into()
     }
-
-    fn push_custom(&mut self, mut comp_data: Component, timestamp: u64) -> Payload {
-        self.sequence += 1;
-        comp_data.timestamp = timestamp;
-        comp_data.sequence = self.sequence;
-
-        (&mut comp_data).into()
-    }
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
@@ -560,10 +552,6 @@ impl StatCollector {
                 error!("Error refreshing component statistics: {}", e);
             }
 
-            if let Err(e) = self.update_special_stats() {
-                error!("Error refreshing special component statistics: {}", e);
-            }
-
             if let Err(e) = self.update_process_stats() {
                 error!("Error refreshing process statistics: {}", e);
             }
@@ -622,31 +610,6 @@ impl StatCollector {
         let timestamp = clock() as u64;
         for comp_data in self.sys.components().iter() {
             let payload = self.components.push(comp_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
-        }
-
-        Ok(())
-    }
-
-    // Refresh special component stats
-    fn update_special_stats(&mut self) -> Result<(), Error> {
-        let paths = glob::glob("/sys/devices/virtual/thermal/thermal_zone*/temp")?;
-        let timestamp = clock() as u64;
-
-        for path in paths {
-            let path = match path {
-                Ok(p) => p,
-                Err(e) => {
-                    error!("Couldn't extract file path from glob: {e}");
-                    continue;
-                }
-            };
-            let mut label = path.as_os_str().to_str().unwrap_or("temp_component").to_string();
-            label.retain(|c| c.is_numeric());
-            let label = "thermal_zone".to_owned() + &label;
-            let temperature = std::fs::read_to_string(path)?.trim().parse::<f32>()?;
-            let comp_data = Component { label, temperature, ..Default::default() };
-            let payload = self.components.push_custom(comp_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
         }
 
