@@ -50,10 +50,12 @@
 use bytes::BytesMut;
 use flume::RecvError;
 use futures_util::StreamExt;
-use log::{error, info};
+use log::{error, info, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
+use tokio::time::timeout;
 
+use std::collections::HashMap;
 use std::fs::{create_dir_all, metadata, remove_dir_all, File};
 use std::sync::Arc;
 use std::time::Duration;
@@ -91,6 +93,7 @@ pub struct FileDownloader {
     bridge_tx: BridgeTx,
     client: Client,
     sequence: u32,
+    timeouts: HashMap<String, Duration>,
 }
 
 impl FileDownloader {
@@ -111,8 +114,16 @@ impl FileDownloader {
         }
         .build()?;
 
+        let timeouts = config
+            .downloader
+            .actions
+            .iter()
+            .map(|s| (s.name.to_owned(), Duration::from_secs(s.timeout)))
+            .collect();
+
         Ok(Self {
             config: config.downloader.clone(),
+            timeouts,
             client,
             bridge_tx,
             sequence: 0,
@@ -134,27 +145,46 @@ impl FileDownloader {
             let action = download_rx.recv_async().await?;
             self.action_id = action.action_id.clone();
 
-            let mut error = None;
-            // NOTE: retry mechanism tries atleast 3 times before returning an error
-            for _ in 0..3 {
-                match self.run(action.clone()).await {
-                    Ok(_) => {
-                        error = None;
-                        break;
-                    }
-                    Err(e) => {
-                        error!("Download failed: {e}\nretrying");
-                        error = Some(e);
-                    }
+            let duration = match self.timeouts.get(&action.name) {
+                Some(t) => *t,
+                _ => {
+                    error!("Action: {} unconfigured", action.name);
+                    continue;
                 }
-                tokio::time::sleep(Duration::from_secs(30)).await;
-            }
-            if let Some(e) = error {
-                let status = ActionResponse::failure(&self.action_id, e.to_string());
-                let status = status.set_sequence(self.sequence());
-                self.bridge_tx.send_action_response(status).await;
+            };
+
+            // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
+            match timeout(duration, self.retry_thrice(action)).await {
+                Ok(Err(e)) => self.forward_error(e).await,
+                Err(_) => error!("Last download has timedout"),
+                _ => {}
             }
         }
+    }
+
+    // Forward errors as action response to bridge
+    async fn forward_error(&mut self, err: Error) {
+        let status =
+            ActionResponse::failure(&self.action_id, err.to_string()).set_sequence(self.sequence());
+        self.bridge_tx.send_action_response(status).await;
+    }
+
+    // Retry mechanism tries atleast 3 times before returning an error
+    async fn retry_thrice(&mut self, action: Action) -> Result<(), Error> {
+        let mut res = Ok(());
+        for _ in 0..3 {
+            match self.run(action.clone()).await {
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    error!("Download failed: {e}");
+                    res = Err(e);
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            warn!("Retrying download");
+        }
+
+        res
     }
 
     // Accepts a download `Action` and performs necessary data extraction to actually download the file
