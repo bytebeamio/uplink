@@ -53,6 +53,7 @@ use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
+use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellSession;
 use flume::{bounded, Receiver, RecvError, Sender};
@@ -427,6 +428,23 @@ impl Uplink {
         let process_handler = ProcessHandler::new(bridge_tx.clone());
         let processes = config.processes.clone();
         thread::spawn(move || process_handler.start(processes));
+
+        let script_runner = ScriptRunner::new(bridge_tx.clone());
+        let routes: Vec<ActionRoute> = config.script_runner.clone();
+        thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .thread_name("script_runner")
+                .enable_io()
+                .enable_time()
+                .build()
+                .unwrap();
+
+            rt.block_on(async move {
+                if let Err(e) = script_runner.start(routes).await {
+                    error!("Monitor stopped!! Error = {:?}", e);
+                }
+            })
+        });
 
         let monitor = Monitor::new(
             self.config.clone(),
