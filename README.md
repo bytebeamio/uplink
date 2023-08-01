@@ -14,42 +14,12 @@ Uplink is a rust based utility for efficiently sending data and receiving comman
 - Provides remote shell access through [Tunshell][tunshell]
 - Supports TLS with easy cross-compilation.
 
-### Install Pre-built Binary
 
-Pre-built binaries for select platform targets have been made available in the [repo's releases page](https://github.com/bytebeamio/uplink/releases/), download the binary specific to your system and add it's location to PATH.
+### Quickstart
 
-### Build and Install
+#### Install Uplink
 
-Build and install with [Cargo][crates.io]:
-
-```sh
-cargo install uplink # NOTE: This should work once crate is published
-```
-
-#### Build and run from source:
-
-```sh
-git clone https://github.com/bytebeamio/uplink.git
-cd uplink
-cargo run --bin uplink -- -a <device auth json file>
-```
-#### Build from source for ARM systems
-
-In case you want to run uplink on an ARM system, follow instruction given below to create an ARM compatible binary.
-
-1. Install `cross`, a `Zero setup` cross compilation crate.
-```sh
-cargo install cross
-```
-2. Build binary for the target `armv7-unknown-linux-gnueabihf`.
-```sh
-cross build --release --target armv7-unknown-linux-gnueabihf
-```
-3. Retreive executable from `/target/armv7-unknown-linux-gnueabihf/release/uplink` and execute it on target device.
-
-See [releases][releases] for other options.
-
-### Getting Started
+Pre-built binaries for select platform targets have been made available in [releases], download the binary specific to your system and add it's location to PATH. You can also follow the [build guide].
 
 #### Setup
 You can start uplink with the following command, where you will need to provide an `auth.json` file:
@@ -203,19 +173,11 @@ nc localhost 5555
 
 The complete API reference for the uplink library is available within the [library documentation][docs.rs].
 
-# Android executable instructions
-
-* install `cargo-ndk` v2.11.0 (`cargo install cargo-ndk --version 2.11.0`)
-* `export ANDROID_NDK_HOME=~/Android/Sdk/ndk/25.0.8775105`
-* `cargo ndk --target x86_64-linux-android --platform 23 build --bin uplink`
-* move executable to `/data/local/`
-* set port to something else
-* set persistence path to `/data/local/uplink`
-* `chmod +x uplink_exe`
-
 ### Contributing
 Please follow the [code of conduct][coc] while opening issues to report bugs or before you contribute fixes, also do read our [contributor guide][contribute] to get a better idea of what we'd appreciate and what we won't.
 
+
+[build guide]: docs/build.md
 [workflow-badge]: https://github.com/bytebeamio/uplink/actions/workflows/rust.yml/badge.svg
 [workflow]: https://github.com/bytebeamio/uplink/actions/workflows/rust.yml
 [twitter-badge]: https://img.shields.io/twitter/follow/bytebeamio.svg?style=social&label=Follow
