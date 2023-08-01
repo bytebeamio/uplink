@@ -1,3 +1,4 @@
+use std::env::current_dir;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
@@ -34,7 +35,9 @@ fn default_file_size() -> usize {
 }
 
 fn default_persistence_path() -> PathBuf {
-    PathBuf::from("/var/lib/uplink")
+    let mut path = current_dir().expect("Couldn't figure out current directory");
+    path.push(".persistence");
+    path
 }
 
 pub fn clock() -> u128 {
