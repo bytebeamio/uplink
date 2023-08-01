@@ -4,9 +4,9 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use crate::collector::journalctl::JournalCtlConfig;
-#[cfg(any(target_os = "android"))]
+#[cfg(target_os = "android")]
 use crate::collector::logcat::LogcatConfig;
 
 use self::bridge::stream::MAX_BUFFER_SIZE;
@@ -22,6 +22,11 @@ pub const DEFAULT_TIMEOUT: u64 = 60;
 #[inline]
 fn default_timeout() -> u64 {
     DEFAULT_TIMEOUT
+}
+
+#[inline]
+fn max_buf_size() -> usize {
+    MAX_BUFFER_SIZE
 }
 
 fn default_file_size() -> usize {
@@ -46,6 +51,7 @@ pub enum Compression {
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamConfig {
     pub topic: String,
+    #[serde(default = "max_buf_size")]
     pub buf_size: usize,
     #[serde(default = "default_timeout")]
     /// Duration(in seconds) that bridge collector waits from
@@ -224,8 +230,8 @@ pub struct Config {
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
-    #[cfg(any(target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     pub logging: Option<JournalCtlConfig>,
-    #[cfg(any(target_os = "android"))]
+    #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
 }

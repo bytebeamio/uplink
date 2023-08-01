@@ -129,12 +129,11 @@ pub mod config {
 
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
-    buf_size = 1
-    timeout = 10
+    flush_period = 2
 
     [streams.device_shadow]
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
-    buf_size = 1
+    flush_period = 5
 
     [streams.logs]
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
