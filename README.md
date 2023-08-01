@@ -19,7 +19,7 @@ Uplink is a rust based utility for efficiently sending data and receiving comman
 
 #### Install Uplink
 
-Pre-built binaries for select platform targets have been made available in [releases], download the binary specific to your system and add it's location to PATH. You can also follow the [build guide].
+Pre-built binaries for select platform targets have been made available in [releases], download the binary specific to your system and add it's location to PATH. To compile uplink on your own, please follow the [build guide].
 
 #### Setup
 You can start uplink with the following command, where you will need to provide an `auth.json` file:
