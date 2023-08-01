@@ -48,6 +48,6 @@ persistence_path = "/data/local/uplink"
 chmod +x uplink_exe
 ```
 
-See [releases] for other options.
+See [releases] for pre-compiled binaries to select platforms/architectures.
 
 [releases]: https://github.com/bytebeamio/uplink/releases/
