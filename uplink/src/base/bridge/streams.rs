@@ -12,7 +12,7 @@ use crate::{Config, Package, Payload, Stream};
 
 use super::delaymap::DelayMap;
 
-const MAX_STREAM_COUNT: usize = 100;
+const MAX_STREAM_COUNT: usize = 1000;
 
 pub struct Streams {
     config: Arc<Config>,
