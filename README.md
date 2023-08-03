@@ -67,6 +67,7 @@ Data from the connected application is handled as payload within a stream. uplin
     // ...payload: more JSON data
 }
 ```
+> **NOTE**: Connected application should forward all data events as JSON text, following ASCII newline encoding.
 
 An example data packet on the stream `"location"`, with the fields `"city"` being a string and `"altitude"` being a number would look like:
 ```js
@@ -94,6 +95,8 @@ Applications can use Action Response messages to update uplink on the progress o
     "errors": [...]
 }
 ```
+
+> **NOTE**: Connected application should forward all response events as JSON text, following ASCII newline encoding.
 
 An example success response to an action with the id `"123"`, would look like:
 ```js
