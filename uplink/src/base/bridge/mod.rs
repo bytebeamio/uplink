@@ -538,7 +538,7 @@ mod tests {
         Action, ActionResponse, Config,
     };
 
-    use super::{stream::Stream, Bridge, BridgeTx, Package};
+    use super::*;
 
     fn default_config() -> Config {
         Config {
@@ -790,4 +790,163 @@ mod tests {
         let status = recv_response(&package_rx);
         assert!(status.is_completed());
     }
+
+    #[tokio::test]
+    async fn accept_regular_actions_during_tunshell() {
+        let config = default_config();
+        let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
+        let bridge_tx_clone = bridge_tx.clone();
+
+        std::thread::spawn(move || loop {
+            let rt = Runtime::new().unwrap();
+            let test_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "1");
+            let response = ActionResponse::progress(&action.action_id, "Launched", 0);
+            rt.block_on(bridge_tx.send_action_response(response));
+            std::thread::sleep(Duration::from_secs(3));
+            let response = ActionResponse::success(&action.action_id);
+            rt.block_on(bridge_tx.send_action_response(response));
+        });
+
+        std::thread::spawn(move || loop {
+            let rt = Runtime::new().unwrap();
+            let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "2");
+            let response = ActionResponse::progress(&action.action_id, "Running", 0);
+            rt.block_on(bridge_tx_clone.send_action_response(response));
+            std::thread::sleep(Duration::from_secs(1));
+            let response = ActionResponse::success(&action.action_id);
+            rt.block_on(bridge_tx_clone.send_action_response(response));
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            device_id: None,
+            action_id: "1".to_string(),
+            kind: "tunshell".to_string(),
+            name: "launch_shell".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            device_id: None,
+            action_id: "2".to_string(),
+            kind: "test".to_string(),
+            name: "test".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Received");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Launched");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "2");
+        assert_eq!(state, "Received");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "2");
+        assert_eq!(state, "Running");
+
+        let status = recv_response(&package_rx);
+        assert_eq!(status.action_id, "2");
+        assert!(status.is_completed());
+
+        let status = recv_response(&package_rx);
+        assert_eq!(status.action_id, "1");
+        assert!(status.is_completed());
+    }
+
+    #[tokio::test]
+    async fn accept_tunshell_during_regular_action() {
+        let config = default_config();
+        let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
+        let bridge_tx_clone = bridge_tx.clone();
+
+        std::thread::spawn(move || loop {
+            let rt = Runtime::new().unwrap();
+            let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "1");
+            let response = ActionResponse::progress(&action.action_id, "Running", 0);
+            rt.block_on(bridge_tx_clone.send_action_response(response));
+            std::thread::sleep(Duration::from_secs(3));
+            let response = ActionResponse::success(&action.action_id);
+            rt.block_on(bridge_tx_clone.send_action_response(response));
+        });
+
+        std::thread::spawn(move || loop {
+            let rt = Runtime::new().unwrap();
+            let test_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "2");
+            let response = ActionResponse::progress(&action.action_id, "Launched", 0);
+            rt.block_on(bridge_tx.send_action_response(response));
+            std::thread::sleep(Duration::from_secs(1));
+            let response = ActionResponse::success(&action.action_id);
+            rt.block_on(bridge_tx.send_action_response(response));
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            device_id: None,
+            action_id: "1".to_string(),
+            kind: "test".to_string(),
+            name: "test".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            device_id: None,
+            action_id: "2".to_string(),
+            kind: "tunshell".to_string(),
+            name: "launch_shell".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Received");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Running");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "2");
+        assert_eq!(state, "Received");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "2");
+        assert_eq!(state, "Launched");
+
+        let status = recv_response(&package_rx);
+        assert_eq!(status.action_id, "2");
+        assert!(status.is_completed());
+
+        let status = recv_response(&package_rx);
+        assert_eq!(status.action_id, "1");
+        assert!(status.is_completed());
+    }
+
 }
