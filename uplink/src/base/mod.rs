@@ -1,5 +1,4 @@
 use std::env::current_dir;
-use std::net::TcpListener;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
@@ -41,15 +40,10 @@ fn default_persistence_path() -> PathBuf {
     path
 }
 
-// Automatically assign an unoccupied port for main larger than 5555, or empty
+// Automatically assigns port 5555 for default main app, if left unconfigured
 fn default_tcpapps() -> HashMap<String, AppConfig> {
     let mut apps = HashMap::new();
-    for port in 5555..=u16::MAX {
-        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            apps.insert("main".to_string(), AppConfig { port, actions: vec![] });
-            break;
-        }
-    }
+    apps.insert("main".to_string(), AppConfig { port: 5555, actions: vec![] });
 
     apps
 }
