@@ -1,4 +1,5 @@
 use std::env::current_dir;
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
@@ -38,6 +39,19 @@ fn default_persistence_path() -> PathBuf {
     let mut path = current_dir().expect("Couldn't figure out current directory");
     path.push(".persistence");
     path
+}
+
+// Automatically assign an unoccupied port for main larger than 5555, or empty
+fn default_tcpapps() -> HashMap<String, AppConfig> {
+    let mut apps = HashMap::new();
+    for port in 5555..=u16::MAX {
+        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            apps.insert("main".to_string(), AppConfig { port, actions: vec![] });
+            break;
+        }
+    }
+
+    apps
 }
 
 pub fn clock() -> u128 {
@@ -209,7 +223,7 @@ pub struct Config {
     #[serde(default)]
     pub console: ConsoleConfig,
     pub authentication: Option<Authentication>,
-    #[serde(default)]
+    #[serde(default = "default_tcpapps")]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
     #[serde(default)]
