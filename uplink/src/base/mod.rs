@@ -40,10 +40,10 @@ fn default_persistence_path() -> PathBuf {
     path
 }
 
-// Automatically assigns port 5555 for default main app, if left unconfigured
+// Automatically assigns port 5050 for default main app, if left unconfigured
 fn default_tcpapps() -> HashMap<String, AppConfig> {
     let mut apps = HashMap::new();
-    apps.insert("main".to_string(), AppConfig { port: 5555, actions: vec![] });
+    apps.insert("main".to_string(), AppConfig { port: 5050, actions: vec![] });
 
     apps
 }
