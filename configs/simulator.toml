@@ -5,4 +5,4 @@ action_redirections = { "update_firmware" = "install_update", "send_file" = "loa
 persistence_path = "/tmp/uplink"
 
 [tcpapps.1]
-port = 5555
+port = 5050

@@ -40,6 +40,14 @@ fn default_persistence_path() -> PathBuf {
     path
 }
 
+// Automatically assigns port 5050 for default main app, if left unconfigured
+fn default_tcpapps() -> HashMap<String, AppConfig> {
+    let mut apps = HashMap::new();
+    apps.insert("main".to_string(), AppConfig { port: 5050, actions: vec![] });
+
+    apps
+}
+
 pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
@@ -209,7 +217,7 @@ pub struct Config {
     #[serde(default)]
     pub console: ConsoleConfig,
     pub authentication: Option<Authentication>,
-    #[serde(default)]
+    #[serde(default = "default_tcpapps")]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
     #[serde(default)]

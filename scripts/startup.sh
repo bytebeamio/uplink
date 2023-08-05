@@ -1,7 +1,7 @@
 #!/bin/bash
 root_part=`awk -F"root=" '{ print $NF; }' /proc/cmdline | cut -d" " -f1`
 
-coproc nc localhost 5555
+coproc nc localhost 5050
 
 if [ -f "/mnt/download/action_id" ]
 then
