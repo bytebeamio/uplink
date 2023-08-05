@@ -195,7 +195,7 @@ With the help of tunshell, uplink allows you to remotely connect to a device she
 You can test sending JSON data to Bytebeam over uplink with the following command while uplink is active
 
 ```sh
-nc localhost 5555
+nc localhost 5050
 { "stream": "can", "sequence": 1, "timestamp": 12345, "data": 100 }
 { "stream": "can", "sequence": 1, "timestamp": 12345, "data": 100 }
 { "stream": "can", "sequence": 1, "timestamp": 12345, "data": 100 }

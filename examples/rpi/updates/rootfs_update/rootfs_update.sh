@@ -9,7 +9,7 @@
 
 # COPROC[1] is the stdin for netcat
 # COPROC[0] is the stdout of netcat
-# By echoing to the stdin of nc, we write to the port 5555
+# By echoing to the stdin of nc, we write to the port 5050
 
 PORT=$2
 coproc nc localhost $PORT 

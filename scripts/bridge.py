@@ -9,7 +9,7 @@ import zipfile
 import subprocess
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.connect(("localhost", 5555))
+s.connect(("localhost", 5050))
 
 # Converts JSON data received over TCP into a python dictionary
 def recv_action(s):

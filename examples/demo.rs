@@ -4,7 +4,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn main() -> Result<()> {
-    let mut stream = TcpStream::connect("localhost:5555").expect("couldn't connect to server");
+    let mut stream = TcpStream::connect("localhost:5050").expect("couldn't connect to server");
     let stream_clone = stream.try_clone().expect("clone failed...");
     println!("Connected to the server!");
  

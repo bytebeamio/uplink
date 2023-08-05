@@ -2,13 +2,13 @@
 uplink is a service that runs in the background and connects user applications to the bytebeam platform. 
 
 ## Configuring uplink
-Applications can connect to the uplink service over TCP to send and receive JSON data, and for this uplink has to expose a TCP port per application. The following example configuration describes to uplink that two applications require it to expose the ports 5555 and 6666, where one of them also expects to receive `install_firmware` actions:
+Applications can connect to the uplink service over TCP to send and receive JSON data, and for this uplink has to expose a TCP port per application. The following example configuration describes to uplink that two applications require it to expose the ports 5050 and 6060, where one of them also expects to receive `install_firmware` actions:
 ```
 [tcpapps.main_app]
-port = 5555
+port = 5050
 
 [tcpapps.ota_installer]
-port = 5555
+port = 6060
 actions = [{ name = "install_firmware" }]
 ```
 NOTE: Only one client can connect to a TCP port at a time. If a second client attempts to connect to a port which is already occupied, the first client will be disconnected from uplink.
@@ -77,7 +77,7 @@ An example success response to an action with the id `"123"`, would look like:
 > **NOTE:** There is a timeout mechanism which on being triggered will send a ***Failed*** response to platform and stop forwarding any *Progress* responses from the connected applications. In order to not trigger this timeout, an application must send a ***Failed*** or ***Completed*** response before the action timeout. Once an action has timedout, a failure response is sent and all it's future responses are dropped. Action timeouts can be configured per action when setting up uplink, as follows:
 > ```
 > [tcpapps.main_app]
-> port = 5555
+> port = 5050
 > actions = [{ name = "abc", timeout = 300 }] # Allow the connected app to send responses for action abc upto 5 minutes from receive, send a failure response and drop all responses afterwards if not yet completed.
 > ```
 
@@ -86,7 +86,7 @@ We have provided examples written in python and golang to demonstrate how you ca
 1. Ensure uplink is running on the device, connected to relevant broker and using the following config:
 ```toml
 [tcpapps.main_app]
-port = 5555
+port = 5050
 actions = [{ name = "update_firmware" }, { name = "reboot" }, { name = "update_config" }]
 ```
 2. Run the python/golang examples
