@@ -4,7 +4,7 @@ processes = [{ name = "echo" }]
 action_redirections = { "update_firmware" = "install_update", "send_file" = "load_file" }
 
 [tcpapps.1]
-port = 5555
+port = 5050
 actions = [{ name = "install_update" }, { name = "load_file" }]
 
 [persistence]

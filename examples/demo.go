@@ -26,7 +26,7 @@ type Action struct {
 
 func main() {
 	// Connect to uplink via bridge port
-	c, err := net.Dial("tcp", "localhost:5555")
+	c, err := net.Dial("tcp", "localhost:5050")
 	if err != nil {
 		fmt.Println(err)
 		return

@@ -1,3 +1,9 @@
+processes = [{ name = "echo" }]
+
+action_redirections = { "update_firmware" = "install_update", "send_file" = "load_file" }
+
+persistence_path = "/tmp/uplink"
+
 [tcpapps.configurator]
-port = 5555
-actions = [{ name = "update_config", "timeout" = 300 }]
+port = 5050
+actions = [{ name = "update_config" }, { name = "update_firmware" }, { name = "install_update" }, { name = "send_file" }, { name = "load_file" }]

@@ -24,7 +24,7 @@ async fn main() {
         println!("Using default value \"Completed\"");
         "Completed".to_string()
     });
-    let port = std::env::args().nth(2).unwrap_or_else(|| "127.0.0.1:5555".to_string());
+    let port = std::env::args().nth(2).unwrap_or_else(|| "127.0.0.1:5050".to_string());
     let stream = TcpStream::connect(port).await.unwrap();
     let mut framed = Framed::new(stream, LinesCodec::new());
     async fn respond<'a>(

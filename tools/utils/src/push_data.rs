@@ -18,7 +18,7 @@ struct ShadowPayload {
 
 #[tokio::main]
 async fn main() {
-    let port = std::env::args().nth(2).unwrap_or_else(|| "127.0.0.1:5555".to_string());
+    let port = std::env::args().nth(2).unwrap_or_else(|| "127.0.0.1:5050".to_string());
     let mut framed = Framed::new(TcpStream::connect(port).await.unwrap(), LinesCodec::new());
     let mut idx = 0;
     loop {

@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::process::ChildStdout;
 
 use crate::{base::clock, ActionResponse, ActionRoute, BridgeTx, Payload};
 
@@ -133,14 +134,18 @@ impl LogEntry {
     }
 
     pub fn to_payload(&self, sequence: u32) -> anyhow::Result<Payload> {
-        let payload = serde_json::to_value(self)?;
-
         Ok(Payload {
             stream: "logs".to_string(),
             device_id: None,
             sequence,
-            timestamp: self.timestamp,
-            payload,
+            timestamp: self.log_timestamp,
+            payload: serde_json::json!({
+                "level": self.level,
+                "log_timestamp": self.log_timestamp,
+                "tag": self.tag,
+                "message": self.message,
+                "line": self.line
+            }),
         })
     }
 }
@@ -238,19 +243,13 @@ impl Logcat {
                     logger.kill().unwrap();
                     break;
                 }
-                let mut next_line = String::new();
-                match buf_stdout.read_line(&mut next_line) {
-                    Ok(0) => {
-                        log::info!("logger output has ended");
-                        break;
-                    }
+                let next_line = match read_line_lossy(&mut buf_stdout) {
+                    Ok(l) => l,
                     Err(e) => {
-                        log::error!("error while reading logger output: {}", e);
+                        log::error!("Logcat error: {e}");
                         break;
                     }
-                    _ => (),
                 };
-
                 let next_line = next_line.trim();
                 let entry = match LogEntry::from_string(next_line) {
                     Ok(entry) => entry,
@@ -271,5 +270,14 @@ impl Logcat {
                 log_index += 1;
             }
         });
+    }
+}
+
+fn read_line_lossy(reader: &mut BufReader<ChildStdout>) -> Result<String, String> {
+    let mut buf = Vec::with_capacity(256);
+    match reader.read_until(b'\n', &mut buf) {
+        Err(e) => Err(format!("Error when reading from logcat: {e}")),
+        Ok(0) => Err("logcat output has ended".to_string()),
+        Ok(_) => Ok(String::from_utf8_lossy(buf.as_slice()).to_string()),
     }
 }

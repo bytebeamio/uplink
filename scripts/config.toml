@@ -1,7 +1,7 @@
 persistence_path = "/tmp/uplink"
 action_redirections={update_firmware="install_firmware"}
 [tcpapps.1]
-port=5555
+port=5050
 actions=[{name="reboot"}]
 
 [downloader]
@@ -15,7 +15,7 @@ port=3333
 [ota_installer]
 path="/tmp/uplink/installer"
 actions=[{name="install_firmware", timeout=610}]
-uplink_port=5555
+uplink_port=5050
 
 [logging]
 tags=["sshd", "systemd"]
