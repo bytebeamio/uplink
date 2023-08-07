@@ -18,6 +18,7 @@ def recv_action(s):
 # Constructs a payload and sends it over TCP to uplink
 def send_data(s, payload):
     send = json.dumps(payload) + "\n"
+    print(bytes(send, encoding="utf-8"))
     s.sendall(bytes(send, encoding="utf-8"))
 
 # Constructs a JSON `action_status` as a response to received action on completion
@@ -125,6 +126,15 @@ def update_firmware(action_id, payload_json):
             return action_failed(action_id, "Could not find the script, reboot.sh")
     return action_complete(action_id)
 
+# Reboots the device
+def reboot(action):
+    payload = json.loads(action['payload'])
+    print(payload)
+    resp = action_complete(action["action_id"])
+    print(resp)
+    send_data(s, resp)
+    os.system('sudo reboot')
+
 def recv_actions():
     while True:
         action = recv_action(s)
@@ -133,14 +143,20 @@ def recv_actions():
         action_name = action["name"]
         action_id = action["action_id"]
         action_payload = action["payload"]
-
-        resp = action_failed(action_id, "Action {name} does not exist".format(name=action_name))
-
+        #resp = action_failed(action_id, "Action {name} does not exist".format(name=action_name))
         try:
             if action_name == "update_firmware":
+                print("update_firmware action received")
                 resp = update_firmware(action_id, action_payload)
             elif action_name == "send_file":
                 resp = action_complete(action_id)
+            elif action_name == "update_config":
+                print("update_config action received")
+                print(json.loads(action['payload']))
+                update_config(action)
+			elif action_name == "reboot":
+            print("reboot action received")
+            reboot(action)
         except Exception as e: 
             print(e)
             resp = action_failed(action_id, "Failed with exception: {msg}".format(msg=str(e)))

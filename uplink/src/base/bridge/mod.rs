@@ -252,9 +252,14 @@ impl Bridge {
                 }
                 // Handle a shutdown signal
                 _ = self.ctrl_rx.recv_async() => {
-                    self.save_current_action()?;
-
+                    if let Err(e) = self.save_current_action() {
+                        error!("Failed to save current action: {e}");
+                    }
+                    streams.flush_all().await;
+                    // NOTE: there might be events still waiting for recv on bridge_rx
                     self.shutdown_handle.send(()).unwrap();
+
+                    return Ok(())
                 }
             }
         }

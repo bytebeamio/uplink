@@ -1,3 +1,3 @@
 #!/bin/bash
 
-tar -cf rootfs_update.tar.gz ./*.tar.gz update.sh rootfs_update.sh
+tar -cf rootfs_update.tar.gz ./*.tar.gz updater rootfs_update.sh
