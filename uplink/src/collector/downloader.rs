@@ -56,7 +56,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::timeout;
 
 use std::collections::HashMap;
-use std::fs::{metadata, remove_dir_all, File, Permissions, create_dir, set_permissions};
+use std::fs::{metadata, remove_dir_all, File, Permissions, create_dir, set_permissions, create_dir_all};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
@@ -249,8 +249,11 @@ impl FileDownloader {
         let mut download_path = PathBuf::from(self.config.path.clone());
         download_path.push(name);
         // do manual create_dir_all while setting permissions on each created directory
-        #[cfg(unix)]
-        self.create_dirs_with_perms(download_path.as_path(), std::os::unix::fs::PermissionsExt::from_mode(0o777))?;
+        if cfg!(unix) {
+            self.create_dirs_with_perms(download_path.as_path(), std::os::unix::fs::PermissionsExt::from_mode(0o777))?;
+        } else {
+            create_dir_all(&download_path)?;
+        }
 
         let mut file_path = download_path.to_owned();
         file_path.push(file_name);
