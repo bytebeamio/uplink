@@ -19,7 +19,7 @@ tokio-util = { version = "0.7", features = ["codec", "time"] }
 tokio-stream = "0.1"
 tokio-compat-02 = "0.2.0"
 flume = "0.10"
-rumqttc = { git = "https://github.com/bytebeamio/rumqtt" }
+#rumqttc = { git = "https://github.com/bytebeamio/rumqtt" }
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
