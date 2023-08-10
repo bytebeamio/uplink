@@ -50,17 +50,19 @@
 use bytes::BytesMut;
 use flume::RecvError;
 use futures_util::StreamExt;
-use log::{error, info, warn};
+use log::{debug, error, info, trace, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 use tokio::time::timeout;
 
 use std::collections::HashMap;
-use std::fs::{metadata, remove_dir_all, File, Permissions, create_dir, set_permissions, create_dir_all};
-use std::sync::Arc;
-use std::time::Duration;
-use std::{io::Write, path::PathBuf};
+use std::fs::{
+    create_dir, create_dir_all, metadata, remove_dir_all, set_permissions, File, Permissions,
+};
 use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use std::{io::Write, path::PathBuf};
 
 use crate::base::bridge::BridgeTx;
 use crate::base::DownloaderConfig;
@@ -237,7 +239,6 @@ impl FileDownloader {
                 create_dir(&current_path)?;
                 set_permissions(&current_path, perms.clone())?;
             }
-
         }
 
         Ok(())
@@ -250,7 +251,10 @@ impl FileDownloader {
         download_path.push(name);
         // do manual create_dir_all while setting permissions on each created directory
         if cfg!(unix) {
-            self.create_dirs_with_perms(download_path.as_path(), std::os::unix::fs::PermissionsExt::from_mode(0o777))?;
+            self.create_dirs_with_perms(
+                download_path.as_path(),
+                std::os::unix::fs::PermissionsExt::from_mode(0o777),
+            )?;
         } else {
             create_dir_all(&download_path)?;
         }
@@ -280,9 +284,13 @@ impl FileDownloader {
         mut file: File,
         content_length: usize,
     ) -> Result<(), Error> {
+        let start = Instant::now();
         let mut downloaded = 0;
         let mut next = 1;
         let mut stream = resp.bytes_stream();
+        let size = human_bytes::human_bytes(content_length as f64);
+
+        debug!("Download started: size = {size}",);
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
@@ -292,10 +300,19 @@ impl FileDownloader {
 
             // Calculate percentage on the basis of content_length
             let percentage = 99 * downloaded / content_length;
+
+            trace!(
+                "Downloading: size = {size}, percentage = {percentage}, elapsed = {}s",
+                start.elapsed().as_secs()
+            );
             // NOTE: ensure lesser frequency of action responses, once every percentage points
             if percentage >= next {
                 next += 1;
 
+                debug!(
+                    "Downloading: size = {size}, percentage = {percentage}, elapsed = {}s",
+                    start.elapsed().as_secs()
+                );
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
                 let status =
