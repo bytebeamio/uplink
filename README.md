@@ -19,29 +19,25 @@ Uplink is a rust based utility for efficiently sending data and receiving comman
 
 #### Install Uplink
 
-Pre-built binaries for select platform targets have been made available in [releases], download the binary specific to your system and add it's location to PATH. To compile uplink on your own, please follow the [build guide].
+Pre-built binaries for select platform targets have been made available on the [releases] page, download the binary specific to your system and add it's location to `PATH`. To compile uplink on your own, please follow the [build guide].
 
 #### Setup
-You can start uplink with the following command, where you will need to provide an `auth.json` file:
+To start uplink on your device, run the following command, where you will need to provide the path to the appropriate **device config** as an argument with the `-a` flag:
 ```sh
 uplink -a auth.json
 ```
 
-The `auth.json` file must contain information such as the device's ID, the broker's URL, the port to connect to and the TLS certificates to be used while connecting as can be seen inside [dummy.json][dummy]. When connecting over non-TLS connections, authentication information is unncessary as illustrated by [noauth.json][noauth].
+The `auth.json` file must contain information such as the device's ID, the broker's URL, the port to connect to and the TLS certificates to be used while connecting. An example of what such a file's contents would look like is given in [dummy.json][dummy]. When connecting over non-TLS connections, authentication information is unncessary, as given in the example file contents of [noauth.json][noauth].
 
 
-> **NOTE**: If you are using [Bytebeam][bytebeam], you could use the file downloaded [from the Bytebeam UI][platform]. If you are using your own broker instead, you could use uplink [without TLS][unsecure], but we recommend that you use TLS and [provision your own certificates][provision] to do it. You can read more about securing uplink in the [uplink Security document][security].
+> **NOTE**: If you are using the [Bytebeam][bytebeam] platform, you could use the file downloaded [from the Bytebeam UI][platform]. If you are using your own broker instead, you could use uplink [without TLS][unsecure], but we recommend that you use TLS and [provision your own certificates][provision] to do it. You can read more about securing uplink in the [uplink Security document][security].
 
-#### Configuring `uplink`
-One may configure certain features of uplink with the help of a `config.toml` file by using the commandline arguments `-c` or `--config`:
-```sh
-uplink -a auth.json -c config.toml
-```
-
-It must be noted that parts of, or the entirety of the config file is optional and a user may choose to omit it, letting uplink default to configuration values that are compiled into the binary. uplink only expects the `config.toml` to contain configuration details as given in the [example config.toml][config] file in the configs folder.
+For more details on how to configure uplink to run on your edge device, read the [configuration guide][config].
 
 #### Writing Applications
-uplink acts as an intermediary between the user's application running on edge devices and the Bytebeam platform/MQTT 3.1.1 broker of choice. One can accept [Action][action]s from the cloud and push data(from applications such as sensing) or [Action Response][action_response]s back.
+uplink acts as an intermediary between the user's application running on edge devices and the Bytebeam platform or an MQTT 3.1.1 broker of choice. One can accept commands in the form of [Action][action]s and update progress of said commands with [Action Response][action_response]s or even push the latest data from applications(such as sensing), with the help of uplink.
+
+Uplink acts as a sidecar, simplifying the programmer's experience of interacting with Bytebeam. By just opening a TCP connection with the uplink daemon and reading/writing JSON as text through the same, the user application is able to take advantage of a secure and reliabale data-pipeline.
 
 <img src="docs/uplink.png" height="150px" alt="uplink architecture">
 
@@ -55,7 +51,7 @@ Actions are messages that uplink expects to receive from the broker and is execu
     "payload": "..."
 }
 ```
-> **NOTE**: Some Actions are executed by built-in "collectors", e.g. Actions with `kind: process` and `kind: collector`. The tunshell action, i.e. Action with `name: tunshell` is used to [initiate a remote connection over tunshell](#Remote-Shell-Connection) while the OTA action, i.e. Action with `name: update_firmware` can [download OTA updates](#Downloading-OTA-updates).
+> **NOTE**: Some Actions are executed by built-in handlers, e.g. Actions. The tunshell action, i.e. Action with `name: tunshell` is used to [initiate a remote connection over tunshell](#Remote-Shell-Connection) while the OTA action, i.e. Action with `name: update_firmware` can [download OTA updates](#Downloading-OTA-updates).
 
 **Streaming data**:
 Data from the connected application is handled as payload within a stream. uplink expects the following JSON format for Streamed Payload:
@@ -181,6 +177,7 @@ Please follow the [code of conduct][coc] while opening issues to report bugs or 
 
 
 [build guide]: docs/build.md
+[config]: docs/configure.md
 [workflow-badge]: https://github.com/bytebeamio/uplink/actions/workflows/rust.yml/badge.svg
 [workflow]: https://github.com/bytebeamio/uplink/actions/workflows/rust.yml
 [twitter-badge]: https://img.shields.io/twitter/follow/bytebeamio.svg?style=social&label=Follow
@@ -201,5 +198,4 @@ Please follow the [code of conduct][coc] while opening issues to report bugs or 
 [contribute]: CONTRIBUTING.md
 [dummy]: configs/dummy.json
 [noauth]: configs/noauth.json
-[config]: configs/config.toml
 [bytebeam]: https://bytebeam.io
