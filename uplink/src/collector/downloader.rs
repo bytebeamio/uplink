@@ -50,9 +50,11 @@
 use bytes::BytesMut;
 use flume::RecvError;
 use futures_util::StreamExt;
+use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
+use sysinfo::{DiskExt, System, SystemExt};
 use tokio::time::timeout;
 
 use std::collections::HashMap;
@@ -84,6 +86,8 @@ pub enum Error {
     FilePathMissing,
     #[error("Download failed, content length zero")]
     EmptyFile,
+    #[error("Disk space is insufficient: {0}")]
+    InsufficientDisk(String),
 }
 
 /// This struct contains the necessary components to download and store file as notified by a download file
@@ -97,6 +101,7 @@ pub struct FileDownloader {
     client: Client,
     sequence: u32,
     timeouts: HashMap<String, Duration>,
+    sys: System,
 }
 
 impl FileDownloader {
@@ -131,6 +136,7 @@ impl FileDownloader {
             bridge_tx,
             sequence: 0,
             action_id: String::default(),
+            sys: System::new(),
         })
     }
 
@@ -211,6 +217,8 @@ impl FileDownloader {
         // Create file to actually download into
         let (file, file_path) = self.create_file(&action.name, &update.file_name)?;
 
+        self.check_disk_size(&update, &file_path)?;
+
         // Create handler to perform download from URL
         // TODO: Error out for 1XX/3XX responses
         let resp = self.client.get(&url).send().await?.error_for_status()?;
@@ -224,6 +232,30 @@ impl FileDownloader {
         let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
         let status = status.set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
+
+        Ok(())
+    }
+
+    fn check_disk_size(&mut self, download: &DownloadFile, path: &str) -> Result<(), Error> {
+        let path = PathBuf::from(path);
+        self.sys.refresh_disks();
+        let disk_free_space = self
+            .sys
+            .disks()
+            .iter()
+            .filter(|x| {
+                let mount = x.mount_point();
+                path.starts_with(mount)
+            })
+            .fold(0, |acc, x| acc + x.available_space()) as usize;
+
+        let req_size = human_bytes(download.content_length as f64);
+        let free_size = human_bytes(disk_free_space as f64);
+        debug!("Download requires {req_size}; Disk free space is {free_size}");
+
+        if download.content_length > disk_free_space {
+            return Err(Error::InsufficientDisk(free_size));
+        }
 
         Ok(())
     }
@@ -288,7 +320,7 @@ impl FileDownloader {
         let mut downloaded = 0;
         let mut next = 1;
         let mut stream = resp.bytes_stream();
-        let size = human_bytes::human_bytes(content_length as f64);
+        let size = human_bytes(content_length as f64);
 
         debug!("Download started: size = {size}",);
 
