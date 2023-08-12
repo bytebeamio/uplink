@@ -5,40 +5,53 @@ authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2021"
 
 [dependencies]
-axum = "0.6"
-structopt = "0.3"
-config = { version = "0.13.2", default-features = false, features = ["toml", "json"] }
-log = "0.4"
-lz4_flex = "0.10"
-tracing = { version="0.1", features=["log"] }
-tracing-subscriber = { version="=0.3.14", features=["env-filter"] }
-time = "0.3"
-storage = { path = "../storage" }
+bytes = "1"
+flume = "0.10"
+rumqttc = { git = "https://github.com/bytebeamio/rumqtt" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec", "time"] }
 tokio-stream = "0.1"
-tokio-compat-02 = "0.2.0"
-flume = "0.10"
-rumqttc = { git = "https://github.com/bytebeamio/rumqtt" }
-bytes = "1"
-serde = { version = "1", features = ["derive"] }
-thiserror = "1"
+
+# binary utils
 anyhow = "1"
-serde_json = "1.0"
-rand = "0.8"
-tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch" }
-reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
-futures-util = "0.3"
-async-trait = "0.1"
-sysinfo = "0.26"
-lazy_static = "1.4.0"
-glob = "0.3"
-pretty-bytes = "0.2.2"
-regex = "1.7.1"
-flate2 = "1"
-tar = "0.4"
+axum = "0.6"
+config = { version = "0.13.2", default-features = false, features = ["toml", "json"] }
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
+structopt = "0.3"
+
+# serializer
+async-trait = "0.1"
+lz4_flex = "0.10"
+pretty-bytes = "0.2.2"
+storage = { path = "../storage" }
+
+# logging
+log = "0.4"
+regex = "1.7.1"
+tracing = { version="0.1", features=["log"] }
+tracing-subscriber = { version="=0.3.14", features=["env-filter"] }
+
+# collectors
+# tunshell
+tokio-compat-02 = "0.2.0"
+tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch" }
+# simulator
+rand = "0.8"
+# downloader
+futures-util = "0.3"
+reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
+# systemstats
+sysinfo = "0.26"
+# logcat
+lazy_static = "1.4.0"
+# installer
+tar = "0.4"
+
+# device_shadow
 surge-ping = "0.8"
 
 [build-dependencies]
