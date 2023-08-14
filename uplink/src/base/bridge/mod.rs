@@ -948,5 +948,4 @@ mod tests {
         assert_eq!(status.action_id, "1");
         assert!(status.is_completed());
     }
-
 }

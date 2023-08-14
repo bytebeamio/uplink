@@ -20,12 +20,6 @@ use crate::{
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] std::io::Error),
-    #[error("Pattern error {0}")]
-    Pattern(#[from] glob::PatternError),
-    #[error("Glob error {0}")]
-    Glob(#[from] glob::GlobError),
-    #[error("Parse float error {0}")]
-    ParseFloat(#[from] std::num::ParseFloatError),
 }
 
 type Pid = u32;

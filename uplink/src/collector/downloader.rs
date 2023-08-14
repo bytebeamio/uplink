@@ -170,7 +170,7 @@ impl FileDownloader {
             }
         }
     }
-
+  
     // Forward errors as action response to bridge
     async fn forward_error(&mut self, err: Error) {
         let status =
