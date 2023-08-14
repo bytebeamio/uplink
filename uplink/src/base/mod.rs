@@ -129,7 +129,7 @@ pub struct SimulatorConfig {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct DownloaderConfig {
-    pub path: String,
+    pub path: PathBuf,
     #[serde(default)]
     pub actions: Vec<ActionRoute>,
 }

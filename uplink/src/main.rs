@@ -92,7 +92,8 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
 
     println!(
         "    downloader:\n\tpath: {}\n\tactions: {:?}",
-        config.downloader.path, config.downloader.actions
+        config.downloader.path.display(),
+        config.downloader.actions
     );
     if let Some(installer) = &config.ota_installer {
         println!("    installer:\n\tpath: {}\n\tactions: {:?}", installer.path, installer.actions);

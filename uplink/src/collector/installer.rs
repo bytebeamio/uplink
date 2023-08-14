@@ -60,7 +60,7 @@ impl OTAInstaller {
         let info: DownloadFile = serde_json::from_str(&action.payload)?;
         let path = info.download_path.ok_or(Error::MissingPath)?;
 
-        debug!("Extracting tar from:{path}; to: {}", self.config.path);
+        debug!("Extracting tar from:{}; to: {}", path.display(), self.config.path);
         let dst = PathBuf::from(&self.config.path);
         if dst.exists() {
             warn!("Cleaning up {}", &self.config.path);
