@@ -2931,7 +2931,6 @@ dependencies = [
  "config",
  "flume",
  "futures-util",
- "glob",
  "human_bytes",
  "lazy_static",
  "log",
