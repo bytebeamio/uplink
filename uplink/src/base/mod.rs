@@ -40,6 +40,12 @@ fn default_persistence_path() -> PathBuf {
     path
 }
 
+fn default_download_path() -> PathBuf {
+    let mut path = current_dir().expect("Couldn't figure out current directory");
+    path.push(".downloads");
+    path
+}
+
 // Automatically assigns port 5050 for default main app, if left unconfigured
 fn default_tcpapps() -> HashMap<String, AppConfig> {
     let mut apps = HashMap::new();
@@ -127,11 +133,18 @@ pub struct SimulatorConfig {
     pub actions_subscriptions: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DownloaderConfig {
+    #[serde(default = "default_download_path")]
     pub path: PathBuf,
     #[serde(default)]
     pub actions: Vec<ActionRoute>,
+}
+
+impl Default for DownloaderConfig {
+    fn default() -> Self {
+        Self { path: default_download_path(), actions: vec![] }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -233,6 +246,7 @@ pub struct Config {
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
+    #[serde(default)]
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
