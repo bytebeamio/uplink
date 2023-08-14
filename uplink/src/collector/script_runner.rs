@@ -12,6 +12,7 @@ use crate::{Action, ActionResponse, Package};
 
 use std::collections::HashMap;
 use std::io;
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -55,7 +56,7 @@ impl ScriptRunner {
     }
 
     /// Spawn a child process to run the script with sh
-    pub async fn run(&mut self, command: String) -> Result<Child, Error> {
+    pub async fn run(&mut self, command: PathBuf) -> Result<Child, Error> {
         let mut cmd = Command::new("sh");
         cmd.arg(command).kill_on_drop(true).stdout(Stdio::piped());
 

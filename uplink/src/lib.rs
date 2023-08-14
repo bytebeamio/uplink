@@ -108,11 +108,6 @@ pub mod config {
     keep_alive = 30
     network_timeout = 30
 
-    # Downloader config
-    [downloader]
-    actions = []
-    path = "/var/tmp/ota-file"
-
     [stream_metrics]
     enabled = false
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"

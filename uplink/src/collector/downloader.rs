@@ -224,7 +224,7 @@ impl FileDownloader {
         // Create handler to perform download from URL
         // TODO: Error out for 1XX/3XX responses
         let resp = self.client.get(&url).send().await?.error_for_status()?;
-        info!("Downloading from {} into {}", url, file_path);
+        info!("Downloading from {} into {}", url, file_path.display());
         self.download(resp, file, update.content_length).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
@@ -255,9 +255,9 @@ impl FileDownloader {
     }
 
     /// Creates file to download into
-    fn create_file(&self, name: &str, file_name: &str) -> Result<(File, String), Error> {
+    fn create_file(&self, name: &str, file_name: &str) -> Result<(File, PathBuf), Error> {
         // Ensure that directory for downloading file into, exists
-        let mut download_path = PathBuf::from(self.config.path.clone());
+        let mut download_path = self.config.path.clone();
         download_path.push(name);
         // do manual create_dir_all while setting permissions on each created directory
 
@@ -272,18 +272,15 @@ impl FileDownloader {
 
         let mut file_path = download_path.to_owned();
         file_path.push(file_name);
-        let file_path = file_path.as_path();
         // NOTE: if file_path is occupied by a directory due to previous working of uplink, remove it
-        if let Ok(f) = metadata(file_path) {
+        if let Ok(f) = metadata(&file_path) {
             if f.is_dir() {
-                remove_dir_all(file_path)?;
+                remove_dir_all(&file_path)?;
             }
         }
-        let file = File::create(file_path)?;
+        let file = File::create(&file_path)?;
         #[cfg(unix)]
         file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666))?;
-
-        let file_path = file_path.to_str().ok_or(Error::FilePathMissing)?.to_owned();
 
         Ok((file, file_path))
     }
@@ -342,7 +339,7 @@ pub struct DownloadFile {
     #[serde(alias = "version")]
     file_name: String,
     /// Path to location in fs where file will be stored
-    pub download_path: Option<String>,
+    pub download_path: Option<PathBuf>,
 }
 
 #[cfg(test)]
@@ -375,9 +372,11 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
+        let mut path = PathBuf::from(DOWNLOAD_DIR);
+        path.push("uplink-test");
         let downloader_cfg = DownloaderConfig {
             actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
-            path: format!("{DOWNLOAD_DIR}/uplink-test"),
+            path,
         };
         let config = config(downloader_cfg.clone());
         let (events_tx, events_rx) = flume::bounded(2);
@@ -399,7 +398,10 @@ mod test {
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
+        let mut download_path = downloader_cfg.path;
+        download_path.push("firmware_update");
+        download_path.push("test.txt");
+        expected_forward.download_path = Some(download_path);
         let download_action = Action {
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
@@ -446,9 +448,11 @@ mod test {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
+        let mut path = PathBuf::from(DOWNLOAD_DIR);
+        path.push("download");
         let downloader_cfg = DownloaderConfig {
             actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
-            path: format!("{}/download", DOWNLOAD_DIR),
+            path,
         };
         let config = config(downloader_cfg.clone());
         let (events_tx, _) = flume::bounded(3);
@@ -470,7 +474,10 @@ mod test {
             download_path: None,
         };
         let mut expected_forward = download_update.clone();
-        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
+        let mut download_path = downloader_cfg.path;
+        download_path.push("firmware_update");
+        download_path.push("test.txt");
+        expected_forward.download_path = Some(download_path);
         let download_action = Action {
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),

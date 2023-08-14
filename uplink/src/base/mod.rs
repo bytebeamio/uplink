@@ -123,11 +123,17 @@ pub struct SimulatorConfig {
     pub actions: Vec<ActionRoute>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DownloaderConfig {
-    pub path: String,
+    pub path: PathBuf,
     #[serde(default)]
     pub actions: Vec<ActionRoute>,
+}
+
+impl Default for DownloaderConfig {
+    fn default() -> Self {
+        Self { path: PathBuf::from("/var/tmp/ota-file"), actions: vec![] }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -229,6 +235,7 @@ pub struct Config {
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
+    #[serde(default)]
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
