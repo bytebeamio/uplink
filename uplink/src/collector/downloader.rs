@@ -266,7 +266,7 @@ impl FileDownloader {
     /// Creates file to download into
     fn create_file(&self, name: &str, file_name: &str) -> Result<(File, PathBuf), Error> {
         // Ensure that directory for downloading file into, exists
-        let mut download_path = PathBuf::from(self.config.path.clone());
+        let mut download_path = self.config.path.clone();
         download_path.push(name);
         // do manual create_dir_all while setting permissions on each created directory
         if cfg!(unix) {
