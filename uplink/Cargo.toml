@@ -54,6 +54,9 @@ tar = "0.4"
 # device_shadow
 surge-ping = "0.8"
 
+[target.'cfg(target_os = "android")'.dependencies]
+time = "0.3"
+
 [build-dependencies]
 vergen = { version = "7", features = ["git", "build", "time"] }
 
