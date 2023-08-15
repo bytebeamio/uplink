@@ -6,11 +6,8 @@ use std::time::Duration;
 
 use anyhow::Error;
 use log::info;
-use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
-use signal_hook_tokio::Signals;
 use structopt::StructOpt;
 use tokio::time::sleep;
-use tokio_stream::StreamExt;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
 use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
@@ -153,9 +150,13 @@ fn main() -> Result<(), Error> {
             });
         }
 
-        let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT]).unwrap();
-
+        #[cfg(unix)]
         tokio::spawn(async move {
+            use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
+            use signal_hook_tokio::Signals;
+            use tokio_stream::StreamExt;
+
+            let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT]).unwrap();
             // Handle a shutdown signal from POSIX
             while let Some(signal) = signals.next().await {
                 match signal {
