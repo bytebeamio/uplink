@@ -179,8 +179,11 @@ impl FileDownloader {
             match self.run(action.clone()).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
-                    error!("Download failed: {e}");
-                    res = Err(e);
+                    if let Error::Reqwest(e) = e {
+                        error!("Download failed: {e}");
+                    } else {
+                        return Err(e);
+                    }
                 }
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
