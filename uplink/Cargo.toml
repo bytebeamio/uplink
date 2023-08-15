@@ -19,8 +19,6 @@ tokio-stream = "0.1"
 anyhow = "1"
 axum = "0.6"
 config = { version = "0.13.2", default-features = false, features = ["toml", "json"] }
-signal-hook = "0.3"
-signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 structopt = "0.3"
 
 # serializer
@@ -55,6 +53,13 @@ tar = "0.4"
 # device_shadow
 surge-ping = "0.8"
 human_bytes = "0.4"
+
+[target.'cfg(target_os = "android")'.dependencies]
+time = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 
 [build-dependencies]
 vergen = { version = "7", features = ["git", "build", "time"] }
