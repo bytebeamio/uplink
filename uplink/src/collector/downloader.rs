@@ -54,7 +54,6 @@ use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
-use sysinfo::{DiskExt, System, SystemExt};
 use tokio::time::timeout;
 
 use std::collections::HashMap;
@@ -101,7 +100,6 @@ pub struct FileDownloader {
     client: Client,
     sequence: u32,
     timeouts: HashMap<String, Duration>,
-    sys: System,
 }
 
 impl FileDownloader {
@@ -136,7 +134,6 @@ impl FileDownloader {
             bridge_tx,
             sequence: 0,
             action_id: String::default(),
-            sys: System::new(),
         })
     }
 
@@ -212,12 +209,12 @@ impl FileDownloader {
             u => u,
         };
 
+        self.check_disk_size(&update)?;
+
         let url = update.url.clone();
 
         // Create file to actually download into
         let (file, file_path) = self.create_file(&action.name, &update.file_name)?;
-
-        self.check_disk_size(&update, &file_path)?;
 
         // Create handler to perform download from URL
         // TODO: Error out for 1XX/3XX responses
@@ -236,18 +233,8 @@ impl FileDownloader {
         Ok(())
     }
 
-    fn check_disk_size(&mut self, download: &DownloadFile, path: &PathBuf) -> Result<(), Error> {
-        let path = PathBuf::from(path);
-        self.sys.refresh_disks();
-        let disk_free_space = self
-            .sys
-            .disks()
-            .iter()
-            .filter(|x| {
-                let mount = x.mount_point();
-                path.starts_with(mount)
-            })
-            .fold(0, |acc, x| acc + x.available_space()) as usize;
+    fn check_disk_size(&mut self, download: &DownloadFile) -> Result<(), Error> {
+        let disk_free_space = fs2::free_space(&self.config.path)? as usize;
 
         let req_size = human_bytes(download.content_length as f64);
         let free_size = human_bytes(disk_free_space as f64);
