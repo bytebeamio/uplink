@@ -176,20 +176,22 @@ impl FileDownloader {
 
     // Retry mechanism tries atleast 3 times before returning an error
     async fn retry_thrice(&mut self, action: Action) -> Result<(), Error> {
-        let mut res = Ok(());
         for _ in 0..3 {
             match self.run(action.clone()).await {
-                Ok(_) => return Ok(()),
+                Ok(_) => break,
                 Err(e) => {
-                    error!("Download failed: {e}");
-                    res = Err(e);
+                    if let Error::Reqwest(e) = e {
+                        error!("Download failed: {e}");
+                    } else {
+                        return Err(e);
+                    }
                 }
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
             warn!("Retrying download");
         }
 
-        res
+        Ok(())
     }
 
     // Accepts a download `Action` and performs necessary data extraction to actually download the file
