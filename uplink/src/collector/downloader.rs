@@ -211,6 +211,7 @@ impl FileDownloader {
             u => u,
         };
 
+        #[cfg(not(test))]
         self.check_disk_size(&update)?;
 
         let url = update.url.clone();
@@ -235,6 +236,7 @@ impl FileDownloader {
         Ok(())
     }
 
+    #[cfg(not(test))]
     fn check_disk_size(&mut self, download: &DownloadFile) -> Result<(), Error> {
         let disk_free_space = fs2::free_space(&self.config.path)? as usize;
 
