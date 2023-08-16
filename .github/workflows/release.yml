@@ -92,10 +92,16 @@ jobs:
             rustembedded/cross:aarch64-unknown-linux-gnu \
             aarch64-linux-gnu-strip \
             /target/aarch64-unknown-linux-gnu/release/uplink
+
+      - name: Rename ${{ matrix.target }} binary
+        if: matrix.build != 'windows'
+        run: mv "target/${{ matrix.target }}/release/uplink" "uplink-${{ matrix.target }}"
+      
+      - name: Rename ${{ matrix.target }} binary
+        if: matrix.build == 'windows'
+        run: mv "target/${{ matrix.target }}/release/uplink.exe" "uplink-${{ matrix.target }}.exe"
       
       - name: Upload release archive
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            target/*/release/uplink
-            target/*/release/uplink.exe
+          files: uplink*
