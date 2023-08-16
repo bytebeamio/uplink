@@ -202,6 +202,19 @@ impl FileDownloader {
         let status = status.set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
 
+        // Ensure that directory for downloading file into, exists
+        let mut download_path = self.config.path.clone();
+        download_path.push(&action.name);
+
+        #[cfg(unix)]
+        self.create_dirs_with_perms(
+            download_path.as_path(),
+            std::os::unix::fs::PermissionsExt::from_mode(0o777),
+        )?;
+
+        #[cfg(not(unix))]
+        std::fs::create_dir_all(&download_path)?;
+
         // Extract url information from action payload
         let mut update = match serde_json::from_str::<DownloadFile>(&action.payload)? {
             DownloadFile { file_name, .. } if file_name.is_empty() => {
@@ -217,7 +230,7 @@ impl FileDownloader {
         let url = update.url.clone();
 
         // Create file to actually download into
-        let (file, file_path) = self.create_file(&action.name, &update.file_name)?;
+        let (file, file_path) = self.create_file(&download_path, &update.file_name)?;
 
         // Create handler to perform download from URL
         // TODO: Error out for 1XX/3XX responses
@@ -252,6 +265,7 @@ impl FileDownloader {
     }
 
     #[cfg(unix)]
+    /// Custom create_dir_all which sets permissions on each created directory, only works on unix
     fn create_dirs_with_perms(&self, path: &Path, perms: Permissions) -> std::io::Result<()> {
         let mut current_path = PathBuf::new();
 
@@ -268,21 +282,11 @@ impl FileDownloader {
     }
 
     /// Creates file to download into
-    fn create_file(&self, name: &str, file_name: &str) -> Result<(File, PathBuf), Error> {
-        // Ensure that directory for downloading file into, exists
-        let mut download_path = self.config.path.clone();
-        download_path.push(name);
-        // do manual create_dir_all while setting permissions on each created directory
-
-        #[cfg(unix)]
-        self.create_dirs_with_perms(
-            download_path.as_path(),
-            std::os::unix::fs::PermissionsExt::from_mode(0o777),
-        )?;
-
-        #[cfg(not(unix))]
-        std::fs::create_dir_all(&download_path)?;
-
+    fn create_file(
+        &self,
+        download_path: &PathBuf,
+        file_name: &str,
+    ) -> Result<(File, PathBuf), Error> {
         let mut file_path = download_path.to_owned();
         file_path.push(file_name);
         let file_path = file_path.as_path();
