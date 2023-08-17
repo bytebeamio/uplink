@@ -139,15 +139,21 @@ impl FileDownloader {
     /// Spawn a thread to handle downloading files as notified by download actions and for forwarding the updated actions
     /// back to bridge for further processing, e.g. OTA update installation.
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(mut self) -> Result<(), Error> {
+    pub async fn start(mut self) {
         let routes = &self.config.actions;
         let download_rx = match self.bridge_tx.register_action_routes(routes).await {
             Some(r) => r,
-            _ => return Ok(()),
+            _ => return,
         };
         loop {
             self.sequence = 0;
-            let action = download_rx.recv_async().await?;
+            let action = match download_rx.recv_async().await {
+                Ok(a) => a,
+                Err(e) => {
+                    error!("Downloader thread had to stop: {e}");
+                    break;
+                }
+            };
             self.action_id = action.action_id.clone();
 
             let duration = match self.timeouts.get(&action.name) {
@@ -382,7 +388,7 @@ mod test {
         let downloader = FileDownloader::new(Arc::new(config), bridge_tx).unwrap();
 
         // Start FileDownloader in separate thread
-        std::thread::spawn(|| downloader.start().unwrap());
+        std::thread::spawn(|| downloader.start());
 
         // Create a firmware update action
         let download_update = DownloadFile {
@@ -458,7 +464,7 @@ mod test {
         let downloader = FileDownloader::new(Arc::new(config), bridge_tx).unwrap();
 
         // Start FileDownloader in separate thread
-        std::thread::spawn(|| downloader.start().unwrap());
+        std::thread::spawn(|| downloader.start());
 
         // Create a firmware update action
         let download_update = DownloadFile {
