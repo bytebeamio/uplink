@@ -145,6 +145,8 @@ impl FileDownloader {
             Some(r) => r,
             _ => return,
         };
+
+        info!("Downloader thread is ready to receive download actions");
         loop {
             self.sequence = 0;
             let action = match download_rx.recv_async().await {
