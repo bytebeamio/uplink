@@ -48,7 +48,6 @@
 //! [`action_redirections`]: Config#structfield.action_redirections
 
 use bytes::BytesMut;
-use flume::RecvError;
 use futures_util::StreamExt;
 use log::{error, info, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
@@ -78,8 +77,6 @@ pub enum Error {
     Reqwest(#[from] reqwest::Error),
     #[error("File io Error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Error receiving action: {0}")]
-    Recv(#[from] RecvError),
     #[error("Empty file name")]
     EmptyFileName,
     #[error("Missing file path")]
