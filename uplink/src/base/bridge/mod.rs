@@ -225,7 +225,10 @@ impl Bridge {
                     let event = event?;
                     match event {
                         Event::RegisterActionRoute(name, tx) => {
-                            self.action_routes.insert(name, tx);
+                            if self.action_routes.insert(name.clone(), tx).is_some() {
+                                error!("Action Route clash: {name}");
+                                self.ctrl_tx.send_async(BridgeCtrl::Shutdown).await.unwrap();
+                            }
                         }
                         Event::Data(v) => {
                             streams.forward(v).await;
