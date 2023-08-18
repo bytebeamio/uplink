@@ -752,7 +752,7 @@ mod tests {
         let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
         let bridge_tx_clone = bridge_tx.clone();
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
@@ -763,7 +763,7 @@ mod tests {
             rt.block_on(bridge_tx.send_action_response(response));
         });
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: "redirect".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
@@ -810,10 +810,10 @@ mod tests {
         let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
         let bridge_tx_clone = bridge_tx.clone();
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
-            let test_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
-            let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
+            let tunshell_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx.register_action_route(tunshell_route));
             let action = action_rx.recv().unwrap();
             assert_eq!(action.action_id, "1");
             let response = ActionResponse::progress(&action.action_id, "Launched", 0);
@@ -823,7 +823,7 @@ mod tests {
             rt.block_on(bridge_tx.send_action_response(response));
         });
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
@@ -891,7 +891,7 @@ mod tests {
         let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
         let bridge_tx_clone = bridge_tx.clone();
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
@@ -904,7 +904,7 @@ mod tests {
             rt.block_on(bridge_tx_clone.send_action_response(response));
         });
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
