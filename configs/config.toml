@@ -199,3 +199,10 @@ stream_name = "logs"
 path = "/path/to/file.log"
 log_template = '''^(?P<timestamp>.*)Z\s(?P<level>\S+)\s(?P<tag>\S+):\s(?P<message>.*)'''
 timestamp_template = '''^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+)\.(?P<microsecond>\S+)'''
+
+[clickhouse]
+stream = "query_log"
+table = "system.query_log"
+cloumns = ["event_time", "query_duration_ms", "read_rows", "written_rows", "result_rows", "memory_usage", "current_database", "query"]
+query_time_threshold = 3000
+interval = 30

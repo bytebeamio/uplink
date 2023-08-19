@@ -49,6 +49,7 @@ use anyhow::Error;
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
 use base::Compression;
+use collector::clickhouse::ClickhouseReader;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
@@ -450,6 +451,11 @@ impl Uplink {
         if let Some(config) = self.config.prometheus.clone() {
             let prometheus = Prometheus::new(config, bridge_tx.clone());
             thread::spawn(|| prometheus.start());
+        }
+
+        if let Some(config) = &config.clickhouse {
+            let clickhouse_reader = ClickhouseReader::new(config.clone(), bridge_tx.clone());
+            thread::spawn(|| clickhouse_reader.start());
         }
 
         // Metrics monitor thread

@@ -1,3 +1,4 @@
+use std::env;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
@@ -30,6 +31,22 @@ fn default_file_size() -> usize {
 
 fn default_persistence_path() -> PathBuf {
     PathBuf::from("/var/lib/uplink")
+}
+
+fn default_clickhouse_host() -> String {
+    "localhost".to_string()
+}
+
+fn default_clickhouse_port() -> u16 {
+    8123
+}
+
+fn default_clickhouse_username() -> String {
+    env::var("CLICKHOUSE_USERNAME").expect("The env variable CLICKHOUSE_USERNAME is not set")
+}
+
+fn default_clickhouse_password() -> String {
+    env::var("CLICKHOUSE_PASSWORD").expect("The env variable CLICKHOUSE_PASSWORD is not set")
 }
 
 pub fn clock() -> u128 {
@@ -205,6 +222,23 @@ pub struct PrometheusConfig {
     pub interval: u64,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct ClickhouseConfig {
+    #[serde(default = "default_clickhouse_host")]
+    pub host: String,
+    #[serde(default = "default_clickhouse_port")]
+    pub port: u16,
+    #[serde(default = "default_clickhouse_username")]
+    pub username: String,
+    #[serde(default = "default_clickhouse_password")]
+    pub password: String,
+    pub stream: String,
+    pub table: String,
+    pub cloumns: Vec<String>,
+    pub query_time_threshold: u64,
+    pub interval: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
@@ -234,6 +268,7 @@ pub struct Config {
     pub ota_installer: Option<InstallerConfig>,
     pub log_reader: HashMap<String, LogReaderConfig>,
     pub prometheus: Option<PrometheusConfig>,
+    pub clickhouse: Option<ClickhouseConfig>,
     #[serde(default)]
     pub device_shadow: DeviceShadowConfig,
     #[serde(default)]
