@@ -235,7 +235,6 @@ pub struct Config {
     pub mqtt_metrics: MqttMetricsConfig,
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,
-    pub simulator: Option<SimulatorConfig>,
     pub ota_installer: Option<InstallerConfig>,
     #[serde(default)]
     pub device_shadow: DeviceShadowConfig,

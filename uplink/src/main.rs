@@ -18,7 +18,7 @@ pub type ReloadHandle =
 
 use uplink::base::AppConfig;
 use uplink::config::{get_configs, initialize, CommandLine};
-use uplink::{simulator, Config, TcpJson, Uplink};
+use uplink::{Config, TcpJson, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
     let level = match commandline.verbose {
@@ -119,13 +119,6 @@ fn main() -> Result<(), Error> {
 
     let mut uplink = Uplink::new(config.clone())?;
     let bridge = uplink.spawn()?;
-
-    if let Some(config) = config.simulator.clone() {
-        let bridge = bridge.clone();
-        thread::spawn(move || {
-            simulator::start(bridge, &config).unwrap();
-        });
-    }
 
     if config.console.enabled {
         let port = config.console.port;

@@ -222,15 +222,6 @@ pub mod config {
         replace_topic_placeholders(&mut device_action_topic, tenant_id, device_id);
         config.actions_subscription = device_action_topic;
 
-        // Add topics to be subscribed to for simulation purposes, if in simulator mode
-        if let Some(sim_cfg) = &mut config.simulator {
-            for n in 1..=sim_cfg.num_devices {
-                let mut topic = action_topic_template.to_string();
-                replace_topic_placeholders(&mut topic, tenant_id, &n.to_string());
-                sim_cfg.actions_subscriptions.push(topic);
-            }
-        }
-
         Ok(config)
     }
 
@@ -273,7 +264,7 @@ use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
-pub use collector::{simulator, tcpjson::TcpJson};
+pub use collector::tcpjson::TcpJson;
 pub use storage::Storage;
 
 pub struct Uplink {
