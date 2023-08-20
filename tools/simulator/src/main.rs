@@ -51,8 +51,9 @@ pub enum Error {
 #[derive(Serialize)]
 pub struct ActionResponse {
     action_id: String,
-    status: String,
+    state: String,
     progress: u8,
+    errors: Vec<String>,
 }
 
 impl ActionResponse {
@@ -60,14 +61,15 @@ impl ActionResponse {
         let action_id = action.action_id;
         info!("Generating action events for action: {action_id}");
         let mut sequence = 0;
-        let mut interval = interval(Duration::from_secs(10));
+        let mut interval = interval(Duration::from_secs(1));
 
         // Action response, 10% completion per second
         for i in 1..10 {
             let response = ActionResponse {
                 action_id: action_id.clone(),
                 progress: i * 10 + rand::thread_rng().gen_range(0..10),
-                status: String::from("in_progress"),
+                state: String::from("in_progress"),
+                errors: vec![],
             };
             sequence += 1;
             if let Err(e) = tx
@@ -81,8 +83,12 @@ impl ActionResponse {
             interval.tick().await;
         }
 
-        let response =
-            ActionResponse { action_id, progress: 100, status: String::from("Completed") };
+        let response = ActionResponse {
+            action_id,
+            progress: 100,
+            state: String::from("Completed"),
+            errors: vec![],
+        };
         sequence += 1;
         if let Err(e) = tx
             .send_async(Payload::new("action_status".to_string(), sequence, json!(response)))
