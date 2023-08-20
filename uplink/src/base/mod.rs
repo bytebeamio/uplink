@@ -223,6 +223,14 @@ pub struct PrometheusConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct TableConfig {
+    pub name: String,
+    pub cloumns: Vec<String>,
+    pub where_clause: String,
+    pub interval: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct ClickhouseConfig {
     #[serde(default = "default_clickhouse_host")]
     pub host: String,
@@ -232,11 +240,19 @@ pub struct ClickhouseConfig {
     pub username: String,
     #[serde(default = "default_clickhouse_password")]
     pub password: String,
-    pub stream: String,
-    pub table: String,
-    pub cloumns: Vec<String>,
-    pub query_time_threshold: u64,
-    pub interval: u64,
+    pub tables: HashMap<String, TableConfig>,
+}
+
+impl Default for ClickhouseConfig {
+    fn default() -> Self {
+        Self {
+            host: default_clickhouse_host(),
+            port: default_clickhouse_port(),
+            username: default_clickhouse_username(),
+            password: default_clickhouse_password(),
+            tables: HashMap::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -268,7 +284,7 @@ pub struct Config {
     pub ota_installer: Option<InstallerConfig>,
     pub log_reader: HashMap<String, LogReaderConfig>,
     pub prometheus: Option<PrometheusConfig>,
-    pub clickhouse: Option<ClickhouseConfig>,
+    pub clickhouse: ClickhouseConfig,
     #[serde(default)]
     pub device_shadow: DeviceShadowConfig,
     #[serde(default)]

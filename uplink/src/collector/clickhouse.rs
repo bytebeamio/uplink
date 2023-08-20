@@ -1,13 +1,17 @@
 use clickhouse::{error::Error, Client};
 use log::error;
 use serde_json::Value;
-use tokio::time::{interval, Duration};
+use tokio::{
+    task::JoinSet,
+    time::{interval, Duration},
+};
 
 use crate::base::{
     bridge::{BridgeTx, Payload},
-    clock, ClickhouseConfig,
+    clock, ClickhouseConfig, TableConfig,
 };
 
+// Row has arbitrary JSON structure
 #[derive(clickhouse::Row, serde::Deserialize)]
 struct Row {
     #[serde(flatten)]
@@ -29,34 +33,67 @@ impl From<Row> for Payload {
 pub struct ClickhouseReader {
     config: ClickhouseConfig,
     bridge_tx: BridgeTx,
-    sequence: u32,
 }
 
 impl ClickhouseReader {
     pub fn new(config: ClickhouseConfig, bridge_tx: BridgeTx) -> Self {
-        Self { config, bridge_tx, sequence: 0 }
+        Self { config, bridge_tx }
     }
 
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(mut self) {
+    pub async fn start(self) {
         let url = format!("http://{}:{}", self.config.host, self.config.port);
         let client = clickhouse::Client::default()
             .with_url(url)
             .with_user(&self.config.username)
             .with_password(&self.config.password);
 
-        let columns = self.config.cloumns.join(",");
-        let table = &self.config.table;
-        let query_time_threshold = self.config.query_time_threshold;
-        let sync_interval = self.config.interval;
+        let mut join_set = JoinSet::new();
+
+        for (stream, table_config) in self.config.tables {
+            let reader =
+                TableReader::new(table_config, stream, client.clone(), self.bridge_tx.clone());
+            join_set.spawn(reader.start());
+        }
+
+        while let Some(r) = join_set.join_next().await {
+            if let Err(e) = r {
+                error!("Error running reader: {e}")
+            }
+        }
+    }
+}
+
+pub struct TableReader {
+    config: TableConfig,
+    client: Client,
+    stream: String,
+    query: String,
+    bridge_tx: BridgeTx,
+    sequence: u32,
+}
+
+impl TableReader {
+    fn new(config: TableConfig, stream: String, client: Client, bridge_tx: BridgeTx) -> Self {
+        // Construct clickhouse query string
+        let columns = config.cloumns.join(",");
+        let table = &config.name;
+        let where_clause = &config.where_clause;
+        let sync_interval = config.interval;
         let query = format!(
             r#"SELECT {columns} FROM {table} 
-            WHERE query_duration_ms > {query_time_threshold} 
+            WHERE {where_clause} 
             AND event_time > (now() - toIntervalSecond({sync_interval}));"#
         );
+
+        Self { config, client, stream, query, bridge_tx, sequence: 0 }
+    }
+
+    async fn start(mut self) {
+        // Execute query on an interval basis
         let mut interval = interval(Duration::from_secs(self.config.interval));
         loop {
-            if let Err(e) = self.run(&client, &query).await {
+            if let Err(e) = self.run().await {
                 error!("Clickhouse query failed: {e}");
             };
 
@@ -64,13 +101,14 @@ impl ClickhouseReader {
         }
     }
 
-    async fn run(&mut self, client: &Client, query: &str) -> Result<(), Error> {
-        let mut cursor = client.query(&query).fetch::<Row>()?;
+    /// Read rows from clikchouse, construct payload and push onto relevant stream
+    async fn run(&mut self) -> Result<(), Error> {
+        let mut cursor = self.client.query(&self.query).fetch::<Row>()?;
 
         while let Some(row) = cursor.next().await? {
             let mut payload: Payload = row.into();
             payload.timestamp = clock() as u64;
-            payload.stream = self.config.stream.to_owned();
+            payload.stream = self.stream.to_owned();
             self.sequence += 1;
             payload.sequence = self.sequence;
             self.bridge_tx.send_payload(payload).await;
