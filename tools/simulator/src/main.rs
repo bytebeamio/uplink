@@ -1,5 +1,5 @@
 use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
-use flume::{bounded, SendError, Sender};
+use flume::{bounded, Sender};
 use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
 use log::{error, info, LevelFilter};
@@ -56,7 +56,7 @@ pub struct ActionResponse {
 }
 
 impl ActionResponse {
-    pub async fn simulate(action: Action, tx: Sender<Payload>) -> Result<(), SendError<Payload>> {
+    pub async fn simulate(action: Action, tx: Sender<Payload>) {
         let action_id = action.action_id;
         info!("Generating action events for action: {action_id}");
         let mut sequence = 0;
@@ -70,8 +70,13 @@ impl ActionResponse {
                 status: String::from("in_progress"),
             };
             sequence += 1;
-            tx.send_async(Payload::new("action_status".to_string(), sequence, json!(response)))
-                .await?;
+            if let Err(e) = tx
+                .send_async(Payload::new("action_status".to_string(), sequence, json!(response)))
+                .await
+            {
+                error!("{e}");
+                break;
+            }
 
             interval.tick().await;
         }
@@ -79,10 +84,13 @@ impl ActionResponse {
         let response =
             ActionResponse { action_id, progress: 100, status: String::from("Completed") };
         sequence += 1;
-        tx.send_async(Payload::new("action_status".to_string(), sequence, json!(response))).await?;
+        if let Err(e) = tx
+            .send_async(Payload::new("action_status".to_string(), sequence, json!(response)))
+            .await
+        {
+            error!("{e}");
+        }
         info!("Successfully sent all action responses");
-
-        Ok(())
     }
 }
 
