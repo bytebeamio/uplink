@@ -103,8 +103,6 @@ pub struct ActionResponseEvent {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
     pub stream: String,
-    #[serde(skip)]
-    pub device_id: Option<String>,
     pub sequence: u32,
     pub timestamp: u64,
     #[serde(flatten)]
@@ -127,7 +125,6 @@ pub fn generate_gps_data(device: &DeviceData, sequence: u32) -> Payload {
 
     Payload {
         timestamp,
-        device_id: None,
         sequence,
         stream: "gps".to_string(),
         payload: json!(position),
@@ -246,7 +243,6 @@ pub fn generate_bms_data(sequence: u32) -> Payload {
 
     Payload {
         timestamp,
-        device_id: None,
         sequence,
         stream: "bms".to_string(),
         payload: json!(payload),
@@ -283,7 +279,6 @@ pub fn generate_imu_data(sequence: u32) -> Payload {
 
     Payload {
         timestamp,
-        device_id: None,
         sequence,
         stream: "imu".to_string(),
         payload: json!(payload),
@@ -314,7 +309,6 @@ pub fn generate_motor_data(sequence: u32) -> Payload {
 
     Payload {
         timestamp,
-        device_id: None,
         sequence,
         stream: "motor".to_string(),
         payload: json!(payload),
@@ -351,7 +345,6 @@ pub fn generate_peripheral_state_data(sequence: u32) -> Payload {
 
     Payload {
         timestamp,
-        device_id: None,
         sequence,
         stream: "peripheral_state".to_string(),
         payload: json!(payload),
@@ -385,7 +378,6 @@ pub fn generate_device_shadow_data(sequence: u32) -> Payload {
 
     Payload {
         timestamp,
-        device_id: None,
         sequence,
         stream: "device_shadow".to_string(),
         payload: json!(payload),
@@ -519,7 +511,6 @@ async fn process_action_response_event(
     //info!("Sending action response {:?} {} {} {}", event.action_id, event.progress, event.status);
     let payload = Payload {
         stream: "action_status".to_string(),
-        device_id: None,
         sequence: 0,
         timestamp: SystemTime::UNIX_EPOCH.elapsed().unwrap().as_millis() as u64,
         payload: json!({
