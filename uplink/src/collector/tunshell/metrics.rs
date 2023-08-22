@@ -59,7 +59,7 @@ impl TunshellMetrics {
         let time_elapsed = self
             .session_start_times
             .remove(&action_id)
-            .expect(&format!("Unexpected action_id: {action_id}"))
+            .unwrap_or_else(|| panic!("Unexpected action_id: {action_id}"))
             .elapsed()
             .as_secs();
         self.current_actions.remove(&action_id);
