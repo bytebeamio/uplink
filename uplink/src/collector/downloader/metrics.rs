@@ -8,17 +8,23 @@ use crate::base::clock;
 pub struct DownloaderMetrics {
     pub timestamp: u128,
     pub sequence: u32,
+    /// Action that triggered current download
     pub current_action: String,
-    pub downloads: u64,
+    /// Total count of downloads since uplink start
+    pub total_downloads: u64,
     #[serde(skip_serializing)]
     pub download_start_time: Instant,
     #[serde(skip_serializing)]
     pub last_checkpoint_time: Instant,
     #[serde(skip_serializing)]
     pub bytes_downloaded: usize,
+    /// Minimum rate of download observed
     pub min_download_speed: f64,
+    /// Maximum rate of download observed
     pub max_download_speed: f64,
+    /// Average rate of download observed
     pub avg_download_speed: f64,
+    /// Errors observed since last metrics push
     pub errors: Vec<String>,
 }
 
@@ -27,7 +33,7 @@ impl DownloaderMetrics {
         Self {
             timestamp: clock(),
             sequence: 1,
-            downloads: 0,
+            total_downloads: 0,
             current_action: "".to_owned(),
             download_start_time: Instant::now(),
             last_checkpoint_time: Instant::now(),
@@ -41,7 +47,7 @@ impl DownloaderMetrics {
 
     pub fn new_download(&mut self, action_id: String) {
         self.current_action = action_id;
-        self.downloads += 1;
+        self.total_downloads += 1;
     }
 
     pub fn add_bytes(&mut self, bytes: usize) {
