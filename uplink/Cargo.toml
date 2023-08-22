@@ -41,6 +41,8 @@ tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch =
 rand = "0.8"
 # downloader
 futures-util = "0.3"
+hex = "0.4"
+md-5 = "0.10"
 reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
 # systemstats
 sysinfo = "0.26"

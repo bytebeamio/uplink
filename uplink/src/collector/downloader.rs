@@ -50,12 +50,14 @@
 use bytes::BytesMut;
 use futures_util::StreamExt;
 use log::{error, info, warn};
+use md5::{Digest, Md5};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 use tokio::time::timeout;
 
 use std::collections::HashMap;
 use std::fs::{metadata, remove_dir_all, File};
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(unix)]
@@ -83,6 +85,10 @@ pub enum Error {
     FilePathMissing,
     #[error("Download failed, content length zero")]
     EmptyFile,
+    #[error("Checksum provided couldn't be decoded as hex: {0}")]
+    BadHex(#[from] hex::FromHexError),
+    #[error("Downloaded file has unexpected checksum")]
+    BadChecksum,
 }
 
 /// This struct contains the necessary components to download and store file as notified by a download file
@@ -227,10 +233,24 @@ impl FileDownloader {
         self.download(resp, file, update.content_length).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
-        update.download_path = Some(file_path.clone());
+        update.insert_path(file_path.clone());
         action.payload = serde_json::to_string(&update)?;
 
-        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
+        let success = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
+        let status = match update.checksum {
+            Some(c) => {
+                let file = File::open(file_path)?;
+                let hash = compute_md5(file)?;
+
+                if hex::encode(hash) == c {
+                    success
+                } else {
+                    ActionResponse::failure(&self.action_id, Error::BadChecksum.to_string())
+                }
+            }
+            _ => success,
+        };
+
         let status = status.set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
 
@@ -342,11 +362,27 @@ pub struct DownloadFile {
     file_name: String,
     /// Path to location in fs where file will be stored
     pub download_path: Option<String>,
+    /// Checksum that can be used to verify download was successful
+    pub checksum: Option<String>,
+}
+
+impl DownloadFile {
+    fn insert_path(&mut self, download_path: String) {
+        self.download_path = Some(download_path);
+    }
+}
+
+pub fn compute_md5(mut file: File) -> Result<Vec<u8>, Error> {
+    let mut hasher = Md5::new();
+    io::copy(&mut file, &mut hasher)?;
+    let hash = hasher.finalize().to_vec();
+
+    Ok(hash)
 }
 
 #[cfg(test)]
 mod test {
-    use flume::{bounded, TrySendError};
+    use flume::bounded;
     use serde_json::json;
 
     use std::{collections::HashMap, time::Duration};
@@ -395,6 +431,7 @@ mod test {
             content_length: 296658,
             file_name: "test.txt".to_string(),
             download_path: None,
+            checksum: None,
         };
         let mut expected_forward = download_update.clone();
         expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
@@ -439,23 +476,22 @@ mod test {
                 let fwd = serde_json::from_str(&fwd_action.payload).unwrap();
                 assert_eq!(expected_forward, fwd);
                 break;
-            } else if status.is_failed() {
-                break;
             }
         }
     }
 
     #[test]
-    fn multiple_actions_at_once() {
+    // Once a file is downloaded FileDownloader must check it's checksum value against what is provided
+    fn checksum_of_file() {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
         // Prepare config
         let downloader_cfg = DownloaderConfig {
             actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
-            path: format!("{}/download", DOWNLOAD_DIR),
+            path: format!("{DOWNLOAD_DIR}/uplink-test"),
         };
         let config = config(downloader_cfg.clone());
-        let (events_tx, events_rx) = flume::bounded(3);
+        let (events_tx, events_rx) = flume::bounded(2);
         let (shutdown_handle, _) = bounded(1);
         let bridge_tx = BridgeTx { events_tx, shutdown_handle };
 
@@ -465,23 +501,6 @@ mod test {
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start());
 
-        // Create a firmware update action
-        let download_update = DownloadFile {
-            content_length: 0,
-            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            file_name: "1.0".to_string(),
-            download_path: None,
-        };
-        let mut expected_forward = download_update.clone();
-        expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
-        let download_action = Action {
-            device_id: None,
-            action_id: "1".to_string(),
-            kind: "firmware_update".to_string(),
-            name: "firmware_update".to_string(),
-            payload: json!(download_update).to_string(),
-        };
-
         let download_tx = match events_rx.recv().unwrap() {
             Event::RegisterActionRoute(_, download_tx) => download_tx,
             e => unreachable!("Unexpected event: {e:#?}"),
@@ -489,13 +508,90 @@ mod test {
 
         std::thread::sleep(Duration::from_millis(10));
 
-        // Send action to FileDownloader with Sender<Action>
-        download_tx.try_send(download_action.clone()).unwrap();
+        // Correct firmware update action
+        let correct_update = DownloadFile {
+            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
+            content_length: 296658,
+            file_name: "logo.png".to_string(),
+            download_path: None,
+            checksum: Some("34b0aa8725dd29cf7f8757a625b07cc8".to_string()),
+        };
+        let correct_action = Action {
+            device_id: None,
+            action_id: "1".to_string(),
+            kind: "firmware_update".to_string(),
+            name: "firmware_update".to_string(),
+            payload: json!(correct_update).to_string(),
+        };
 
-        // Send action to FileDownloader immediately after, this must fail
-        match download_tx.try_send(download_action).unwrap_err() {
-            TrySendError::Full(_) => {}
-            TrySendError::Disconnected(_) => panic!("Unexpected disconnect"),
+        // Send the correct action to FileDownloader
+        download_tx.try_send(correct_action).unwrap();
+
+        // Collect action_status and ensure it is as expected
+        let status = match events_rx.recv().unwrap() {
+            Event::ActionResponse(status) => status,
+            e => unreachable!("Unexpected event: {e:#?}"),
+        };
+        assert_eq!(status.state, "Downloading");
+        let mut progress = 0;
+
+        // Collect and ensure forwarded action contains expected info
+        loop {
+            let status = match events_rx.recv().unwrap() {
+                Event::ActionResponse(status) => status,
+                e => unreachable!("Unexpected event: {e:#?}"),
+            };
+
+            assert!(progress <= status.progress);
+            progress = status.progress;
+
+            if status.is_done() {
+                assert_eq!(status.state, "Downloaded");
+                break;
+            }
+        }
+
+        // Wrong firmware update action
+        let wrong_update = DownloadFile {
+            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
+            content_length: 296658,
+            file_name: "logo.png".to_string(),
+            download_path: None,
+            checksum: Some("abcd1234efgh5678".to_string()),
+        };
+        let wrong_action = Action {
+            device_id: None,
+            action_id: "1".to_string(),
+            kind: "firmware_update".to_string(),
+            name: "firmware_update".to_string(),
+            payload: json!(wrong_update).to_string(),
+        };
+
+        // Send the wrong action to FileDownloader
+        download_tx.try_send(wrong_action).unwrap();
+
+        // Collect action_status and ensure it is as expected
+        let status = match events_rx.recv().unwrap() {
+            Event::ActionResponse(status) => status,
+            e => unreachable!("Unexpected event: {e:#?}"),
+        };
+        assert_eq!(status.state, "Downloading");
+        let mut progress = 0;
+
+        // Collect and ensure forwarded action contains expected info
+        loop {
+            let status = match events_rx.recv().unwrap() {
+                Event::ActionResponse(status) => status,
+                e => unreachable!("Unexpected event: {e:#?}"),
+            };
+
+            assert!(progress <= status.progress);
+            progress = status.progress;
+
+            if status.is_done() {
+                assert!(status.is_failed());
+                break;
+            }
         }
     }
 }
