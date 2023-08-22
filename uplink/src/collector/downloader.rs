@@ -85,8 +85,6 @@ pub enum Error {
     FilePathMissing,
     #[error("Download failed, content length zero")]
     EmptyFile,
-    #[error("Checksum provided couldn't be decoded as hex: {0}")]
-    BadHex(#[from] hex::FromHexError),
     #[error("Downloaded file has unexpected checksum")]
     BadChecksum,
 }
@@ -234,22 +232,10 @@ impl FileDownloader {
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.insert_path(file_path.clone());
+        update.verify_checksum()?;
+
         action.payload = serde_json::to_string(&update)?;
-
-        let success = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
-        let status = match update.checksum {
-            Some(c) => {
-                let file = File::open(file_path)?;
-                let hash = compute_md5(file)?;
-
-                if hex::encode(hash) == c {
-                    success
-                } else {
-                    ActionResponse::failure(&self.action_id, Error::BadChecksum.to_string())
-                }
-            }
-            _ => success,
-        };
+        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
 
         let status = status.set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
@@ -369,6 +355,20 @@ pub struct DownloadFile {
 impl DownloadFile {
     fn insert_path(&mut self, download_path: String) {
         self.download_path = Some(download_path);
+    }
+
+    fn verify_checksum(&self) -> Result<(), Error> {
+        let path = self.download_path.as_ref().expect("Downloader didn't set \"download_path\"");
+        let file = File::open(path)?;
+        let hash = compute_md5(file)?;
+
+        if let Some(c) = &self.checksum {
+            if c != &hex::encode(hash) {
+                return Err(Error::BadChecksum);
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -590,6 +590,7 @@ mod test {
 
             if status.is_done() {
                 assert!(status.is_failed());
+                assert_eq!(status.errors, vec!["Downloaded file has unexpected checksum"]);
                 break;
             }
         }
