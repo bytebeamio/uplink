@@ -19,13 +19,12 @@ pub struct Keys {
 
 pub struct TunshellSession {
     _config: Arc<base::Config>,
-    echo_stdout: bool,
     bridge: BridgeTx,
 }
 
 impl TunshellSession {
-    pub fn new(config: Arc<base::Config>, echo_stdout: bool, bridge: BridgeTx) -> Self {
-        Self { _config: config, echo_stdout, bridge }
+    pub fn new(config: Arc<base::Config>, bridge: BridgeTx) -> Self {
+        Self { _config: config, bridge }
     }
 
     fn config(&self, keys: Keys) -> Config {
@@ -37,7 +36,7 @@ impl TunshellSession {
             443,
             &keys.encryption,
             true,
-            self.echo_stdout,
+            false,
         )
     }
 

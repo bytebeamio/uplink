@@ -392,7 +392,7 @@ impl Uplink {
             })
         });
 
-        let tunshell_session = TunshellSession::new(config.clone(), false, bridge_tx.clone());
+        let tunshell_session = TunshellSession::new(config.clone(), bridge_tx.clone());
         thread::spawn(move || tunshell_session.start());
 
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
