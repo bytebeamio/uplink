@@ -69,6 +69,10 @@ use crate::base::bridge::BridgeTx;
 use crate::base::DownloaderConfig;
 use crate::{Action, ActionResponse, Config};
 
+use self::metrics::DownloaderMetrics;
+
+mod metrics;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Serde error: {0}")]
@@ -96,6 +100,7 @@ pub struct FileDownloader {
     client: Client,
     sequence: u32,
     timeouts: HashMap<String, Duration>,
+    metrics: DownloaderMetrics,
 }
 
 impl FileDownloader {
@@ -130,6 +135,7 @@ impl FileDownloader {
             bridge_tx,
             sequence: 0,
             action_id: String::default(),
+            metrics: DownloaderMetrics::new(),
         })
     }
 
@@ -182,9 +188,11 @@ impl FileDownloader {
     // Retry mechanism tries atleast 3 times before returning an error
     async fn retry_thrice(&mut self, action: Action) -> Result<(), Error> {
         for _ in 0..3 {
+            self.metrics.new_download(action.action_id.clone());
             match self.run(action.clone()).await {
                 Ok(_) => break,
                 Err(e) => {
+                    self.metrics.add_error(&e);
                     if let Error::Reqwest(e) = e {
                         error!("Download failed: {e}");
                     } else {
@@ -192,6 +200,7 @@ impl FileDownloader {
                     }
                 }
             }
+            self.metrics.prepare_next();
             tokio::time::sleep(Duration::from_secs(30)).await;
             warn!("Retrying download");
         }
@@ -301,7 +310,9 @@ impl FileDownloader {
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
             let chunk = item?;
-            downloaded += chunk.len();
+            let bytes = chunk.len();
+            self.metrics.add_bytes(bytes);
+            downloaded += bytes;
             file.write_all(&chunk)?;
 
             // Calculate percentage on the basis of content_length
