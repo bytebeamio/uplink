@@ -18,11 +18,11 @@ pub struct DownloaderMetrics {
     pub last_checkpoint_time: Instant,
     #[serde(skip_serializing)]
     pub bytes_downloaded: usize,
-    /// Minimum rate of download observed
+    /// Minimum rate of download observed (bytes/second)
     pub min_download_speed: f64,
-    /// Maximum rate of download observed
+    /// Maximum rate of download observed (bytes/second)
     pub max_download_speed: f64,
-    /// Average rate of download observed
+    /// Average rate of download observed (bytes/second)
     pub avg_download_speed: f64,
     /// Errors observed since last metrics push
     pub errors: Vec<String>,

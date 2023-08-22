@@ -18,13 +18,13 @@ pub struct TunshellMetrics {
     pub current_sessions: u32,
     #[serde(skip_serializing)]
     pub session_start_times: HashMap<String, Instant>,
-    /// Shortest session duration in seconds
+    /// Shortest session duration (seconds)
     pub shortest_session: u64,
-    /// Longest session duration in seconds
+    /// Longest session duration (seconds)
     pub longest_session: u64,
-    /// Actions that triggered a tunshell session to start
+    /// Actions that triggered a tunshell session since last metrics push
     pub actions: Vec<String>,
-    /// Errors faced while running an tunshell session
+    /// Errors faced since last metrics push
     pub errors: Vec<String>,
 }
 
