@@ -10,6 +10,8 @@ use crate::{
     ActionResponse,
 };
 
+mod metrics;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Keys {
     session: String,
