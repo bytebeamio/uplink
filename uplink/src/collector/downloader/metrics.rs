@@ -8,7 +8,7 @@ use crate::base::clock;
 pub struct DownloaderMetrics {
     pub timestamp: u128,
     pub sequence: u32,
-    pub action_id: String,
+    pub current_action: String,
     pub downloads: u64,
     #[serde(skip_serializing)]
     pub download_start_time: Instant,
@@ -28,7 +28,7 @@ impl DownloaderMetrics {
             timestamp: clock(),
             sequence: 1,
             downloads: 0,
-            action_id: "".to_owned(),
+            current_action: "".to_owned(),
             download_start_time: Instant::now(),
             last_checkpoint_time: Instant::now(),
             bytes_downloaded: 0,
@@ -40,7 +40,7 @@ impl DownloaderMetrics {
     }
 
     pub fn new_download(&mut self, action_id: String) {
-        self.action_id = action_id;
+        self.current_action = action_id;
         self.downloads += 1;
     }
 
