@@ -182,6 +182,8 @@ pub mod config {
         replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.serializer_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.mqtt_metrics.topic, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.downloader_metrics.topic, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.tunshell_metrics.topic, tenant_id, device_id);
 
         // for config in [&mut config.serializer_metrics, &mut config.stream_metrics] {
         //     if let Some(topic) = &config.topic {
