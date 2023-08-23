@@ -75,7 +75,6 @@ impl Gps {
 
             if let Err(e) = tx
                 .send_async(Payload {
-                    device_id: None,
                     timestamp: clock() as u64,
                     stream: "gps".to_string(),
                     sequence,
@@ -207,7 +206,6 @@ impl Bms {
 
             if let Err(e) = tx
                 .send_async(Payload {
-                    device_id: None,
                     timestamp: clock() as u64,
                     stream: "bms".to_string(),
                     sequence,
@@ -257,7 +255,6 @@ impl Imu {
 
             if let Err(e) = tx
                 .send_async(Payload {
-                    device_id: None,
                     timestamp: clock() as u64,
                     stream: "imu".to_string(),
                     sequence,
@@ -301,7 +298,6 @@ impl Motor {
 
             if let Err(e) = tx
                 .send_async(Payload {
-                    device_id: None,
                     timestamp: clock() as u64,
                     stream: "motor".to_string(),
                     sequence,
@@ -351,7 +347,6 @@ impl PeripheralState {
 
             if let Err(e) = tx
                 .send_async(Payload {
-                    device_id: None,
                     timestamp: clock() as u64,
                     stream: "peripheral_state".to_string(),
                     sequence,
@@ -398,7 +393,6 @@ impl DeviceShadow {
 
             if let Err(e) = tx
                 .send_async(Payload {
-                    device_id: None,
                     timestamp: clock() as u64,
                     stream: "device_shadow".to_string(),
                     sequence,

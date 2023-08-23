@@ -55,7 +55,6 @@ impl ActionResponse {
                     stream: "action_status".to_string(),
                     sequence,
                     payload: json!(response),
-                    device_id: None,
                     timestamp: clock() as u64,
                 })
                 .await
@@ -79,7 +78,6 @@ impl ActionResponse {
                 stream: "action_status".to_string(),
                 sequence,
                 payload: json!(response),
-                device_id: None,
                 timestamp: clock() as u64,
             })
             .await

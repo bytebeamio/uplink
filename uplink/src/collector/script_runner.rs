@@ -177,10 +177,13 @@ mod tests {
             })
         });
 
-        let Event::RegisterActionRoute(_, ActionRouter{actions_tx,..}) = events_rx.recv().unwrap() else { unreachable!()};
+        let Event::RegisterActionRoute(_, ActionRouter { actions_tx, .. }) =
+            events_rx.recv().unwrap()
+        else {
+            unreachable!()
+        };
         actions_tx
             .send(Action {
-                device_id: None,
                 action_id: "1".to_string(),
                 kind: "1".to_string(),
                 name: "test".to_string(),
@@ -188,7 +191,10 @@ mod tests {
             })
             .unwrap();
 
-        let Event::ActionResponse(ActionResponse{state, errors,..}) = events_rx.recv().unwrap() else { unreachable!()};
+        let Event::ActionResponse(ActionResponse { state, errors, .. }) = events_rx.recv().unwrap()
+        else {
+            unreachable!()
+        };
         assert_eq!(state, "Failed");
         assert_eq!(errors, ["Failed to deserialize action payload: \"EOF while parsing a value at line 1 column 0\"; payload: \"\""]);
     }
@@ -206,10 +212,13 @@ mod tests {
             })
         });
 
-        let Event::RegisterActionRoute(_, ActionRouter{actions_tx,..}) = events_rx.recv().unwrap() else { unreachable!()};
+        let Event::RegisterActionRoute(_, ActionRouter { actions_tx, .. }) =
+            events_rx.recv().unwrap()
+        else {
+            unreachable!()
+        };
         actions_tx
             .send(Action {
-                device_id: None,
                 action_id: "1".to_string(),
                 kind: "1".to_string(),
                 name: "test".to_string(),
@@ -218,7 +227,10 @@ mod tests {
             })
             .unwrap();
 
-        let Event::ActionResponse(ActionResponse{state, errors,..}) = events_rx.recv().unwrap() else { unreachable!()};
+        let Event::ActionResponse(ActionResponse { state, errors, .. }) = events_rx.recv().unwrap()
+        else {
+            unreachable!()
+        };
         assert_eq!(state, "Failed");
         assert_eq!(errors, ["Action payload doesn't contain path for script execution; payload: \"{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}\""]);
     }
