@@ -73,11 +73,14 @@ impl TunshellMetrics {
         self.errors.push(error.to_string());
     }
 
-    pub fn prepare_next(&mut self) {
+    pub fn capture(&mut self) -> Self {
         self.timestamp = clock();
-        self.sequence += 1;
+        let metrics = self.clone();
 
+        self.sequence += 1;
         self.actions.clear();
         self.errors.clear();
+
+        metrics
     }
 }

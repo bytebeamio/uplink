@@ -68,13 +68,17 @@ impl DownloaderMetrics {
         self.errors.push(error.to_string());
     }
 
-    pub fn prepare_next(&mut self) {
+    pub fn capture(&mut self) -> Self {
         self.timestamp = clock();
+        let metrics = self.clone();
+
         self.sequence += 1;
         self.bytes_downloaded = 0;
         self.download_start_time = Instant::now();
         self.max_download_speed = 0.0;
         self.min_download_speed = 0.0;
         self.avg_download_speed = 0.0;
+
+        metrics
     }
 }

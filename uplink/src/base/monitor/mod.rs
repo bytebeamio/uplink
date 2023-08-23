@@ -105,19 +105,15 @@ impl Monitor {
                 }
                 _ = downloader_metrics_interval.tick() => {
                     let payload = {
-                        let mut metrics = self.downloader_metrics.lock().await;
-                        let p = serde_json::to_string(&vec![metrics.clone()]).unwrap();
-                        metrics.prepare_next();
-                        p
+                        let metrics = self.downloader_metrics.lock().await.capture();
+                        serde_json::to_string(&vec![metrics]).unwrap()
                     };
                     self.client.publish(&self.config.downloader_metrics.topic, QoS::AtLeastOnce, false, payload).await.unwrap();
                 }
                 _ = tunshell_metrics_interval.tick() => {
                     let payload = {
-                        let mut metrics = self.tunshell_metrics.lock().await;
-                        let p = serde_json::to_string(&vec![metrics.clone()]).unwrap();
-                        metrics.prepare_next();
-                        p
+                        let metrics = self.tunshell_metrics.lock().await.capture();
+                        serde_json::to_string(&vec![metrics]).unwrap()
                     };
                     self.client.publish(&self.config.tunshell_metrics.topic, QoS::AtLeastOnce, false, payload).await.unwrap();
                 }
