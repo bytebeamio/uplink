@@ -59,15 +59,13 @@ impl DownloaderMetrics {
         let time_delta = self.last_checkpoint_time.elapsed().as_secs_f64();
         let download_speed = bytes as f64 / time_delta;
 
-        if let Some(max_speed) = &mut self.max_download_speed {
-            *max_speed = max_speed.max(download_speed)
-        } else {
-            self.max_download_speed = Some(download_speed)
+        match &mut self.max_download_speed {
+            Some(max_speed) => *max_speed = max_speed.max(download_speed),
+            _ => self.max_download_speed = Some(download_speed),
         }
-        if let Some(min_speed) = &mut self.min_download_speed {
-            *min_speed = min_speed.min(download_speed)
-        } else {
-            self.max_download_speed = Some(download_speed)
+        match &mut self.min_download_speed {
+            Some(min_speed) => *min_speed = min_speed.min(download_speed),
+            _ => self.max_download_speed = Some(download_speed),
         }
 
         let elapsed_time = self.download_start_time.elapsed().as_secs_f64();

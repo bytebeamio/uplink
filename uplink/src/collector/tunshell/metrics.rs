@@ -50,15 +50,13 @@ impl TunshellMetrics {
             .as_secs_f64();
         self.current_actions.remove(&action_id);
 
-        if let Some(longest_session) = &mut self.longest_session {
-            *longest_session = longest_session.max(time_elapsed);
-        } else {
-            self.longest_session = Some(time_elapsed)
+        match &mut self.longest_session {
+            Some(longest_session) => *longest_session = longest_session.max(time_elapsed),
+            _ => self.longest_session = Some(time_elapsed),
         }
-        if let Some(shortest_session) = &mut self.shortest_session {
-            *shortest_session = shortest_session.min(time_elapsed);
-        } else {
-            self.longest_session = Some(time_elapsed)
+        match &mut self.shortest_session {
+            Some(shortest_session) => *shortest_session = shortest_session.min(time_elapsed),
+            _ => self.longest_session = Some(time_elapsed),
         }
     }
 
