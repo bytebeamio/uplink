@@ -55,7 +55,7 @@ use collector::installer::OTAInstaller;
 use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
-use collector::tunshell::TunshellSession;
+use collector::tunshell::TunshellClient;
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
@@ -392,8 +392,8 @@ impl Uplink {
             })
         });
 
-        let tunshell_session = TunshellSession::new(config.clone(), bridge_tx.clone());
-        thread::spawn(move || tunshell_session.start());
+        let tunshell_client = TunshellClient::new(bridge_tx.clone());
+        thread::spawn(move || tunshell_client.start());
 
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
