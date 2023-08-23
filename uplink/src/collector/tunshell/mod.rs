@@ -40,7 +40,7 @@ pub struct TunshellClient {
 
 impl TunshellClient {
     pub fn new(bridge: BridgeTx) -> Self {
-        Self { bridge, metrics: Arc::new(Mutex::new(TunshellMetrics::new())) }
+        Self { bridge, metrics: Arc::new(Mutex::new(TunshellMetrics::default())) }
     }
 
     pub fn metrics(&self) -> Arc<Mutex<TunshellMetrics>> {

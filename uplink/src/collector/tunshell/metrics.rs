@@ -7,7 +7,7 @@ use std::{
 use super::Error as TunshellError;
 use crate::base::clock;
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Default)]
 pub struct TunshellMetrics {
     pub timestamp: u128,
     pub sequence: u32,
@@ -20,9 +20,9 @@ pub struct TunshellMetrics {
     #[serde(skip_serializing)]
     pub session_start_times: HashMap<String, Instant>,
     /// Shortest session duration (seconds)
-    pub shortest_session: u64,
+    pub shortest_session: Option<f64>,
     /// Longest session duration (seconds)
-    pub longest_session: u64,
+    pub longest_session: Option<f64>,
     /// Actions that triggered a tunshell session since last metrics push
     pub actions: Vec<String>,
     /// Errors faced since last metrics push
@@ -30,21 +30,6 @@ pub struct TunshellMetrics {
 }
 
 impl TunshellMetrics {
-    pub fn new() -> Self {
-        Self {
-            timestamp: clock(),
-            sequence: 1,
-            total_sessions: 0,
-            current_sessions: 0,
-            current_actions: HashSet::new(),
-            session_start_times: HashMap::new(),
-            shortest_session: 0,
-            longest_session: 0,
-            actions: vec![],
-            errors: vec![],
-        }
-    }
-
     pub fn new_session(&mut self, action_id: String) {
         self.current_actions.insert(action_id.to_owned());
         self.session_start_times.insert(action_id.to_owned(), Instant::now());
@@ -62,11 +47,19 @@ impl TunshellMetrics {
             .remove(&action_id)
             .unwrap_or_else(|| panic!("Unexpected action_id: {action_id}"))
             .elapsed()
-            .as_secs();
+            .as_secs_f64();
         self.current_actions.remove(&action_id);
 
-        self.longest_session = self.longest_session.max(time_elapsed);
-        self.shortest_session = self.shortest_session.min(time_elapsed);
+        if let Some(longest_session) = &mut self.longest_session {
+            *longest_session = longest_session.max(time_elapsed);
+        } else {
+            self.longest_session = Some(time_elapsed)
+        }
+        if let Some(shortest_session) = &mut self.shortest_session {
+            *shortest_session = shortest_session.min(time_elapsed);
+        } else {
+            self.longest_session = Some(time_elapsed)
+        }
     }
 
     pub fn add_error(&mut self, error: &TunshellError) {
@@ -78,6 +71,8 @@ impl TunshellMetrics {
         let metrics = self.clone();
 
         self.sequence += 1;
+        self.longest_session.take();
+        self.shortest_session.take();
         self.actions.clear();
         self.errors.clear();
 

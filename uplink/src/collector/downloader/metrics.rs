@@ -19,32 +19,34 @@ pub struct DownloaderMetrics {
     #[serde(skip_serializing)]
     pub bytes_downloaded: usize,
     /// Minimum rate of download observed (bytes/second)
-    pub min_download_speed: f64,
+    pub min_download_speed: Option<f64>,
     /// Maximum rate of download observed (bytes/second)
-    pub max_download_speed: f64,
+    pub max_download_speed: Option<f64>,
     /// Average rate of download observed (bytes/second)
     pub avg_download_speed: f64,
     /// Errors observed since last metrics push
     pub errors: Vec<String>,
 }
 
-impl DownloaderMetrics {
-    pub fn new() -> Self {
+impl Default for DownloaderMetrics {
+    fn default() -> Self {
         Self {
-            timestamp: clock(),
-            sequence: 1,
+            timestamp: 0,
+            sequence: 0,
+            current_action: "".to_string(),
             total_downloads: 0,
-            current_action: "".to_owned(),
             download_start_time: Instant::now(),
             last_checkpoint_time: Instant::now(),
             bytes_downloaded: 0,
-            min_download_speed: 0.0,
-            max_download_speed: 0.0,
+            min_download_speed: None,
+            max_download_speed: None,
             avg_download_speed: 0.0,
             errors: vec![],
         }
     }
+}
 
+impl DownloaderMetrics {
     pub fn new_download(&mut self, action_id: String) {
         self.current_action = action_id;
         self.total_downloads += 1;
@@ -57,8 +59,16 @@ impl DownloaderMetrics {
         let time_delta = self.last_checkpoint_time.elapsed().as_secs_f64();
         let download_speed = bytes as f64 / time_delta;
 
-        self.max_download_speed = self.max_download_speed.max(download_speed);
-        self.min_download_speed = self.min_download_speed.min(download_speed);
+        if let Some(max_speed) = &mut self.max_download_speed {
+            *max_speed = max_speed.max(download_speed)
+        } else {
+            self.max_download_speed = Some(download_speed)
+        }
+        if let Some(min_speed) = &mut self.min_download_speed {
+            *min_speed = min_speed.min(download_speed)
+        } else {
+            self.max_download_speed = Some(download_speed)
+        }
 
         let elapsed_time = self.download_start_time.elapsed().as_secs_f64();
         self.avg_download_speed = self.bytes_downloaded as f64 / elapsed_time;
@@ -68,15 +78,19 @@ impl DownloaderMetrics {
         self.errors.push(error.to_string());
     }
 
+    pub fn remove_download(&mut self) {
+        self.current_action.clear();
+    }
+
     pub fn capture(&mut self) -> Self {
         self.timestamp = clock();
         let metrics = self.clone();
 
         self.sequence += 1;
         self.bytes_downloaded = 0;
-        self.download_start_time = Instant::now();
-        self.max_download_speed = 0.0;
-        self.min_download_speed = 0.0;
+        self.last_checkpoint_time = Instant::now();
+        self.max_download_speed = None;
+        self.min_download_speed = None;
         self.avg_download_speed = 0.0;
 
         metrics

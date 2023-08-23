@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use flume::{Receiver, RecvError};
+use log::debug;
 use rumqttc::{AsyncClient, ClientError, QoS, Request};
 use tokio::select;
 use tokio::sync::Mutex;
@@ -108,6 +109,7 @@ impl Monitor {
                         let metrics = self.downloader_metrics.lock().await.capture();
                         serde_json::to_string(&vec![metrics]).unwrap()
                     };
+                    debug!("Pushing downloader metrics");
                     self.client.publish(&self.config.downloader_metrics.topic, QoS::AtLeastOnce, false, payload).await.unwrap();
                 }
                 _ = tunshell_metrics_interval.tick() => {
@@ -115,6 +117,7 @@ impl Monitor {
                         let metrics = self.tunshell_metrics.lock().await.capture();
                         serde_json::to_string(&vec![metrics]).unwrap()
                     };
+                    debug!("Pushing downloader metrics");
                     self.client.publish(&self.config.tunshell_metrics.topic, QoS::AtLeastOnce, false, payload).await.unwrap();
                 }
             }

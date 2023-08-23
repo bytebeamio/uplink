@@ -136,7 +136,7 @@ impl FileDownloader {
             bridge_tx,
             sequence: 0,
             action_id: String::default(),
-            metrics: Arc::new(Mutex::new(DownloaderMetrics::new())),
+            metrics: Arc::new(Mutex::new(DownloaderMetrics::default())),
         })
     }
 
@@ -213,6 +213,11 @@ impl FileDownloader {
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
             warn!("Retrying download");
+        }
+
+        {
+            let mut metrics = self.metrics.lock().await;
+            metrics.remove_download();
         }
 
         Ok(())
