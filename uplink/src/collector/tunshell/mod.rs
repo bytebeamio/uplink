@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use log::error;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
@@ -7,6 +10,10 @@ use crate::{
     base::{bridge::BridgeTx, ActionRoute},
     Action, ActionResponse,
 };
+
+pub use metrics::TunshellMetrics;
+
+mod metrics;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -28,11 +35,16 @@ pub struct Keys {
 #[derive(Debug, Clone)]
 pub struct TunshellClient {
     bridge: BridgeTx,
+    metrics: Arc<Mutex<TunshellMetrics>>,
 }
 
 impl TunshellClient {
     pub fn new(bridge: BridgeTx) -> Self {
-        Self { bridge }
+        Self { bridge, metrics: Arc::new(Mutex::new(TunshellMetrics::new())) }
+    }
+
+    pub fn metrics(&self) -> Arc<Mutex<TunshellMetrics>> {
+        self.metrics.clone()
     }
 
     fn config(&self, keys: Keys) -> Config {
@@ -54,10 +66,19 @@ impl TunshellClient {
         let actions_rx = self.bridge.register_action_route(route).await;
 
         while let Ok(action) = actions_rx.recv_async().await {
-            let session = self.clone();
+            let mut session = self.clone();
             //TODO(RT): Findout why this is spawned. We want to send other action's with shell?
             tokio::spawn(async move {
+                {
+                    let mut metrics = session.metrics.lock().await;
+                    metrics.new_session(action.action_id.clone());
+                }
+
                 if let Err(e) = session.session(&action).await {
+                    {
+                        let mut metrics = session.metrics.lock().await;
+                        metrics.add_error(&e);
+                    }
                     error!("{}", e.to_string());
                     let status = ActionResponse::failure(&action.action_id, e.to_string());
                     session.bridge.send_action_response(status).await;
@@ -66,14 +87,12 @@ impl TunshellClient {
         }
     }
 
-    async fn session(&self, action: &Action) -> Result<(), Error> {
-        let action_id = action.action_id.clone();
-
+    async fn session(&mut self, action: &Action) -> Result<(), Error> {
         // println!("{:?}", keys);
         let keys = serde_json::from_str(&action.payload)?;
         let mut client = Client::new(self.config(keys), HostShell::new().unwrap());
 
-        let response = ActionResponse::progress(&action_id, "ShellSpawned", 90);
+        let response = ActionResponse::progress(&action.action_id, "ShellSpawned", 90);
         self.bridge.send_action_response(response).await;
 
         let status = client.start_session().compat().await?;

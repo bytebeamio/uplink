@@ -4,8 +4,11 @@ use std::sync::Arc;
 use flume::{Receiver, RecvError};
 use rumqttc::{AsyncClient, ClientError, QoS, Request};
 use tokio::select;
+use tokio::sync::Mutex;
 
 use crate::base::bridge::StreamMetrics;
+use crate::collector::downloader::DownloaderMetrics;
+use crate::collector::tunshell::TunshellMetrics;
 use crate::Config;
 
 use super::mqtt::MqttMetrics;
@@ -23,6 +26,10 @@ pub struct Monitor {
     serializer_metrics_rx: Receiver<SerializerMetrics>,
     /// Mqtt metrics receiver
     mqtt_metrics_rx: Receiver<MqttMetrics>,
+    /// Shared memory holding tunshell metrics
+    tunshell_metrics: Arc<Mutex<TunshellMetrics>>,
+    /// Shared memory holding downloader metrics
+    downloader_metrics: Arc<Mutex<DownloaderMetrics>>,
 }
 
 impl Monitor {
@@ -32,8 +39,18 @@ impl Monitor {
         stream_metrics_rx: Receiver<StreamMetrics>,
         serializer_metrics_rx: Receiver<SerializerMetrics>,
         mqtt_metrics_rx: Receiver<MqttMetrics>,
+        tunshell_metrics: Arc<Mutex<TunshellMetrics>>,
+        downloader_metrics: Arc<Mutex<DownloaderMetrics>>,
     ) -> Monitor {
-        Monitor { config, client, stream_metrics_rx, serializer_metrics_rx, mqtt_metrics_rx }
+        Monitor {
+            config,
+            client,
+            stream_metrics_rx,
+            serializer_metrics_rx,
+            mqtt_metrics_rx,
+            tunshell_metrics,
+            downloader_metrics,
+        }
     }
 
     pub async fn start(&self) -> Result<(), Error> {

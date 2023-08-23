@@ -4,6 +4,7 @@ use std::{
     time::Instant,
 };
 
+use super::Error as TunshellError;
 use crate::base::clock;
 
 #[derive(Debug, Serialize, Clone)]
@@ -68,7 +69,7 @@ impl TunshellMetrics {
         self.shortest_session = self.shortest_session.min(time_elapsed);
     }
 
-    pub fn add_error(&mut self, error: &String) {
+    pub fn add_error(&mut self, error: &TunshellError) {
         self.errors.push(error.to_string());
     }
 

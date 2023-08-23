@@ -393,9 +393,11 @@ impl Uplink {
         });
 
         let tunshell_client = TunshellClient::new(bridge_tx.clone());
+        let tunshell_metrics = tunshell_client.metrics();
         thread::spawn(move || tunshell_client.start());
 
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
+        let downloader_metrics = file_downloader.metrics();
         thread::spawn(move || file_downloader.start());
 
         let device_shadow = DeviceShadow::new(config.device_shadow.clone(), bridge_tx.clone());
@@ -452,6 +454,8 @@ impl Uplink {
             self.stream_metrics_rx.clone(),
             self.serializer_metrics_rx.clone(),
             mqtt_metrics_rx,
+            tunshell_metrics,
+            downloader_metrics,
         );
 
         // Metrics monitor thread

@@ -52,6 +52,7 @@ use futures_util::StreamExt;
 use log::{error, info, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 use std::collections::HashMap;
@@ -69,7 +70,7 @@ use crate::base::bridge::BridgeTx;
 use crate::base::DownloaderConfig;
 use crate::{Action, ActionResponse, Config};
 
-use self::metrics::DownloaderMetrics;
+pub use self::metrics::DownloaderMetrics;
 
 mod metrics;
 
@@ -100,7 +101,7 @@ pub struct FileDownloader {
     client: Client,
     sequence: u32,
     timeouts: HashMap<String, Duration>,
-    metrics: DownloaderMetrics,
+    metrics: Arc<Mutex<DownloaderMetrics>>,
 }
 
 impl FileDownloader {
@@ -135,8 +136,12 @@ impl FileDownloader {
             bridge_tx,
             sequence: 0,
             action_id: String::default(),
-            metrics: DownloaderMetrics::new(),
+            metrics: Arc::new(Mutex::new(DownloaderMetrics::new())),
         })
+    }
+
+    pub fn metrics(&self) -> Arc<Mutex<DownloaderMetrics>> {
+        self.metrics.clone()
     }
 
     /// Spawn a thread to handle downloading files as notified by download actions and for forwarding the updated actions
@@ -188,11 +193,17 @@ impl FileDownloader {
     // Retry mechanism tries atleast 3 times before returning an error
     async fn retry_thrice(&mut self, action: Action) -> Result<(), Error> {
         for _ in 0..3 {
-            self.metrics.new_download(action.action_id.clone());
+            {
+                let mut metrics = self.metrics.lock().await;
+                metrics.new_download(action.action_id.clone());
+            }
             match self.run(action.clone()).await {
                 Ok(_) => break,
                 Err(e) => {
-                    self.metrics.add_error(&e);
+                    {
+                        let mut metrics = self.metrics.lock().await;
+                        metrics.add_error(&e);
+                    }
                     if let Error::Reqwest(e) = e {
                         error!("Download failed: {e}");
                     } else {
@@ -200,7 +211,6 @@ impl FileDownloader {
                     }
                 }
             }
-            self.metrics.prepare_next();
             tokio::time::sleep(Duration::from_secs(30)).await;
             warn!("Retrying download");
         }
@@ -311,7 +321,10 @@ impl FileDownloader {
         while let Some(item) = stream.next().await {
             let chunk = item?;
             let bytes = chunk.len();
-            self.metrics.add_bytes(bytes);
+            {
+                let mut metrics = self.metrics.lock().await;
+                metrics.add_bytes(bytes);
+            }
             downloaded += bytes;
             file.write_all(&chunk)?;
 
