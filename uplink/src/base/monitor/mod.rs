@@ -1,10 +1,12 @@
 use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 
 use flume::{Receiver, RecvError};
 use rumqttc::{AsyncClient, ClientError, QoS, Request};
 use tokio::select;
 use tokio::sync::Mutex;
+use tokio::time::interval;
 
 use crate::base::bridge::StreamMetrics;
 use crate::collector::downloader::DownloaderMetrics;
@@ -66,6 +68,12 @@ impl Monitor {
         let mqtt_metrics_topic = mqtt_metrics_config.topic;
         let mut mqtt_metrics = Vec::with_capacity(10);
 
+        let mut downloader_metrics_interval =
+            interval(Duration::from_secs(self.config.downloader_metrics.interval));
+
+        let mut tunshell_metrics_interval =
+            interval(Duration::from_secs(self.config.tunshell_metrics.interval));
+
         loop {
             select! {
                 o = self.stream_metrics_rx.recv_async() => {
@@ -94,6 +102,24 @@ impl Monitor {
                     let v = serde_json::to_string(&mqtt_metrics).unwrap();
                     mqtt_metrics.clear();
                     self.client.publish(&mqtt_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
+                }
+                _ = downloader_metrics_interval.tick() => {
+                    let payload = {
+                        let mut metrics = self.downloader_metrics.lock().await;
+                        let p = serde_json::to_string(&*metrics).unwrap();
+                        metrics.prepare_next();
+                        p
+                    };
+                    self.client.publish(&self.config.downloader_metrics.topic, QoS::AtLeastOnce, false, payload).await.unwrap();
+                }
+                _ = tunshell_metrics_interval.tick() => {
+                    let payload = {
+                        let mut metrics = self.tunshell_metrics.lock().await;
+                        let p = serde_json::to_string(&*metrics).unwrap();
+                        metrics.prepare_next();
+                        p
+                    };
+                    self.client.publish(&self.config.tunshell_metrics.topic, QoS::AtLeastOnce, false, payload).await.unwrap();
                 }
             }
         }

@@ -125,6 +125,14 @@ pub mod config {
     enabled = true
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_mqtt_metrics/jsonarray"
 
+    [downloader_metrics]
+    interval = 30
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_downloader_metrics/jsonarray"
+
+    [tunshell_metrics]
+    interval = 30
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_tunshell_metrics/jsonarray"
+
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     flush_period = 2

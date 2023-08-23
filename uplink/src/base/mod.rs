@@ -208,6 +208,30 @@ impl Default for DeviceShadowConfig {
     }
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct DownloaderMetricsConfig {
+    pub interval: u64,
+    pub topic: String,
+}
+
+impl Default for DownloaderMetricsConfig {
+    fn default() -> Self {
+        Self { interval: DEFAULT_TIMEOUT, topic: "".to_string() }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct TunshellMetricsConfig {
+    pub interval: u64,
+    pub topic: String,
+}
+
+impl Default for TunshellMetricsConfig {
+    fn default() -> Self {
+        Self { interval: DEFAULT_TIMEOUT, topic: "".to_string() }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
@@ -233,6 +257,8 @@ pub struct Config {
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
+    pub downloader_metrics: DownloaderMetricsConfig,
+    pub tunshell_metrics: TunshellMetricsConfig,
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
