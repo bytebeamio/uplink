@@ -1,5 +1,5 @@
 use clickhouse::{error::Error, Client};
-use log::error;
+use log::{error, info};
 use serde_json::Value;
 use tokio::{
     task::JoinSet,
@@ -85,7 +85,7 @@ impl TableReader {
             WHERE {where_clause} 
             AND event_time > (now() - toIntervalSecond({sync_interval}));"#
         );
-
+        info!("Query: {query}");
         Self { config, client, stream, query, bridge_tx, sequence: 0 }
     }
 
