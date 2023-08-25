@@ -81,9 +81,7 @@ impl TableReader {
         let where_clause = &config.where_clause;
         let sync_interval = config.interval;
         let query = format!(
-            r#"SELECT {columns} FROM {table} 
-            WHERE {where_clause} 
-            AND event_time > (now() - toIntervalSecond({sync_interval}));"#
+            r#"SELECT {columns} FROM {table} WHERE {where_clause} AND event_time > (now() - toIntervalSecond({sync_interval}));"#
         );
         info!("Query: {query}");
         Self { config, client, stream, query, bridge_tx, sequence: 0 }
