@@ -84,6 +84,7 @@ impl TableReader {
             "SELECT {columns} FROM {table} WHERE {where_clause} AND event_time > (now() - toIntervalSecond({sync_interval}))"
         );
         info!("Query: {query}");
+        info!("Stream_name: {stream}");
         Self { config, client, stream, query, bridge_tx, sequence: 0 }
     }
 
