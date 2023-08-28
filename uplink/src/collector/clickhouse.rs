@@ -1,6 +1,5 @@
 use clickhouse::{error::Error, Client};
 use log::{error, info};
-use serde_json::Value;
 use tokio::{
     task::JoinSet,
     time::{interval, Duration},
@@ -11,21 +10,14 @@ use crate::base::{
     clock, ClickhouseConfig, TableConfig,
 };
 
-// Row has arbitrary JSON structure
-#[derive(clickhouse::Row, serde::Deserialize)]
-struct Row {
-    #[serde(flatten)]
-    payload: Value,
-}
-
-impl From<Row> for Payload {
-    fn from(value: Row) -> Self {
+impl From<Vec<u8>> for Payload {
+    fn from(value: Vec<u8>) -> Self {
         Payload {
             stream: Default::default(),
             device_id: None,
             sequence: Default::default(),
             timestamp: Default::default(),
-            payload: value.payload,
+            payload: serde_json::from_slice(&value).unwrap(),
         }
     }
 }
@@ -102,7 +94,7 @@ impl TableReader {
 
     /// Read rows from clikchouse, construct payload and push onto relevant stream
     async fn run(&mut self) -> Result<(), Error> {
-        let mut cursor = self.client.query(&self.query).fetch::<Row>()?;
+        let mut cursor = self.client.query(&self.query).fetch::<Vec<u8>>()?;
 
         while let Some(row) = cursor.next().await? {
             let mut payload: Payload = row.into();
