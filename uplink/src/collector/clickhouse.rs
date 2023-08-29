@@ -73,7 +73,7 @@ impl TableReader {
         let where_clause = &config.where_clause;
         let sync_interval = config.interval;
         let query = format!(
-            "SELECT {columns} FROM {table} WHERE {where_clause} AND event_time > (now() - toIntervalSecond({sync_interval}))"
+            "SELECT {columns} FROM {table} WHERE {where_clause} AND event_time > (now() - toIntervalSecond({sync_interval})) FORMAT JSON"
         );
         info!("Query: {query}");
         info!("Stream_name: {stream}");
