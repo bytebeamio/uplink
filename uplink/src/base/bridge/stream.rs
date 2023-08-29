@@ -114,12 +114,12 @@ where
 
         // Anomaly detection
         if current_sequence <= self.last_sequence {
-            debug!("Sequence number anomaly! [{current_sequence}, {last_sequence}");
+            debug!("Sequence number anomaly! [{current_sequence}, {last_sequence}]; stream: {}", self.name);
             self.buffer.add_sequence_anomaly(self.last_sequence, current_sequence);
         }
 
         if current_timestamp < self.last_timestamp {
-            debug!("Timestamp anomaly!! [{current_timestamp}, {last_timestamp}]",);
+            debug!("Timestamp anomaly! [{current_timestamp}, {last_timestamp}]; stream: {}", self.name);
             self.buffer.add_timestamp_anomaly(self.last_timestamp, current_timestamp);
         }
 
