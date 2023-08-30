@@ -1,5 +1,6 @@
 use clickhouse::{error::Error, Client};
 use log::{error, info};
+use serde::{Deserialize, Serialize};
 use tokio::{
     task::JoinSet,
     time::{interval, Duration},
@@ -7,17 +8,29 @@ use tokio::{
 
 use crate::base::{
     bridge::{BridgeTx, Payload},
-    clock, ClickhouseConfig, TableConfig,
+    clock, ClickhouseConfig, QueryLogConfig,
 };
 
-impl From<Vec<u8>> for Payload {
-    fn from(value: Vec<u8>) -> Self {
+#[derive(Debug, clickhouse::Row, Serialize, Deserialize)]
+struct QueryLog {
+    event_time: u64,
+    query_duration_ms: u64,
+    read_rows: u32,
+    written_rows: u64,
+    result_rows: u64,
+    memory_usage: u64,
+    current_database: String,
+    query: String,
+}
+
+impl From<QueryLog> for Payload {
+    fn from(value: QueryLog) -> Self {
         Payload {
             stream: Default::default(),
             device_id: None,
             sequence: Default::default(),
             timestamp: Default::default(),
-            payload: serde_json::from_slice(&value).unwrap(),
+            payload: serde_json::to_value(&value).unwrap(),
         }
     }
 }
@@ -42,9 +55,8 @@ impl ClickhouseReader {
 
         let mut join_set = JoinSet::new();
 
-        for (stream, table_config) in self.config.tables {
-            let reader =
-                TableReader::new(table_config, stream, client.clone(), self.bridge_tx.clone());
+        if let Some(config) = self.config.query_log {
+            let reader = QueryLogReader::new(config, client.clone(), self.bridge_tx.clone());
             join_set.spawn(reader.start());
         }
 
@@ -56,28 +68,24 @@ impl ClickhouseReader {
     }
 }
 
-pub struct TableReader {
-    config: TableConfig,
+pub struct QueryLogReader {
+    config: QueryLogConfig,
     client: Client,
-    stream: String,
     query: String,
     bridge_tx: BridgeTx,
     sequence: u32,
 }
 
-impl TableReader {
-    fn new(config: TableConfig, stream: String, client: Client, bridge_tx: BridgeTx) -> Self {
+impl QueryLogReader {
+    fn new(config: QueryLogConfig, client: Client, bridge_tx: BridgeTx) -> Self {
         // Construct clickhouse query string
-        let columns = config.cloumns.join(",");
-        let table = &config.name;
         let where_clause = &config.where_clause;
         let sync_interval = config.interval;
         let query = format!(
-            "SELECT {columns} FROM {table} WHERE {where_clause} AND event_time > (now() - toIntervalSecond({sync_interval})) FORMAT JSON"
+            "SELECT event_time, query_duration_ms, read_rows, written_rows, result_rows, memory_usage, current_database, query FROM system.query_log WHERE {where_clause} AND event_time > (now() - toIntervalSecond({sync_interval})) FORMAT JSON"
         );
         info!("Query: {query}");
-        info!("Stream_name: {stream}");
-        Self { config, client, stream, query, bridge_tx, sequence: 0 }
+        Self { config, client, query, bridge_tx, sequence: 0 }
     }
 
     async fn start(mut self) {
@@ -94,12 +102,12 @@ impl TableReader {
 
     /// Read rows from clikchouse, construct payload and push onto relevant stream
     async fn run(&mut self) -> Result<(), Error> {
-        let mut cursor = self.client.query(&self.query).fetch::<Vec<u8>>()?;
+        let mut cursor = self.client.query(&self.query).fetch::<QueryLog>()?;
 
         while let Some(row) = cursor.next().await? {
             let mut payload: Payload = row.into();
             payload.timestamp = clock() as u64;
-            payload.stream = self.stream.to_owned();
+            payload.stream = self.config.stream.to_owned();
             self.sequence += 1;
             payload.sequence = self.sequence;
             self.bridge_tx.send_payload(payload).await;

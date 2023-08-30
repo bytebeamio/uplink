@@ -223,9 +223,8 @@ pub struct PrometheusConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct TableConfig {
-    pub name: String,
-    pub cloumns: Vec<String>,
+pub struct QueryLogConfig {
+    pub stream: String,
     pub where_clause: String,
     pub interval: u64,
 }
@@ -240,7 +239,7 @@ pub struct ClickhouseConfig {
     pub username: String,
     #[serde(default = "default_clickhouse_password")]
     pub password: String,
-    pub tables: HashMap<String, TableConfig>,
+    pub query_log: Option<QueryLogConfig>,
 }
 
 impl Default for ClickhouseConfig {
@@ -250,7 +249,7 @@ impl Default for ClickhouseConfig {
             port: default_clickhouse_port(),
             username: default_clickhouse_username(),
             password: default_clickhouse_password(),
-            tables: HashMap::default(),
+            query_log: None,
         }
     }
 }
