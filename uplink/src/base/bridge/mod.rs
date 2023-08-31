@@ -578,6 +578,8 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_on_diff_routes() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
         let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
@@ -654,6 +656,8 @@ mod tests {
 
     #[tokio::test]
     async fn recv_action_while_current_action_exists() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
@@ -698,6 +702,8 @@ mod tests {
 
     #[tokio::test]
     async fn complete_response_on_no_redirection() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
@@ -736,12 +742,14 @@ mod tests {
 
     #[tokio::test]
     async fn no_complete_response_between_redirection() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
         let mut config = default_config();
         config.action_redirections.insert("test".to_string(), "redirect".to_string());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
         let bridge_tx_clone = bridge_tx.clone();
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
@@ -752,7 +760,7 @@ mod tests {
             rt.block_on(bridge_tx.send_action_response(response));
         });
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: "redirect".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
@@ -793,14 +801,16 @@ mod tests {
 
     #[tokio::test]
     async fn accept_regular_actions_during_tunshell() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
         let config = default_config();
         let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
         let bridge_tx_clone = bridge_tx.clone();
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
-            let test_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
-            let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
+            let tunshell_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx.register_action_route(tunshell_route));
             let action = action_rx.recv().unwrap();
             assert_eq!(action.action_id, "1");
             let response = ActionResponse::progress(&action.action_id, "Launched", 0);
@@ -810,7 +820,7 @@ mod tests {
             rt.block_on(bridge_tx.send_action_response(response));
         });
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
@@ -872,11 +882,13 @@ mod tests {
 
     #[tokio::test]
     async fn accept_tunshell_during_regular_action() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
         let config = default_config();
         let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
         let bridge_tx_clone = bridge_tx.clone();
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
@@ -889,7 +901,7 @@ mod tests {
             rt.block_on(bridge_tx_clone.send_action_response(response));
         });
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
