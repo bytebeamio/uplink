@@ -273,7 +273,7 @@ use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
-pub use collector::{simulator, tcpjson::TcpJson};
+pub use collector::tcpjson::TcpJson;
 pub use storage::Storage;
 
 pub struct Uplink {
