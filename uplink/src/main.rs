@@ -118,7 +118,8 @@ fn main() -> Result<(), Error> {
     banner(&commandline, &config);
 
     let mut uplink = Uplink::new(config.clone())?;
-    let bridge = uplink.spawn()?;
+    let mut bridge = uplink.configure_bridge();
+    let built_ins = uplink.construct_builtins(&mut bridge)?;
 
     // if let Some(config) = config.simulator.clone() {
     //     let bridge = bridge.clone();
@@ -127,10 +128,23 @@ fn main() -> Result<(), Error> {
     //     });
     // }
 
+    let bridge_tx = bridge.tx();
+
+    let tcpapps: Vec<TcpJson> = config
+        .tcpapps
+        .iter()
+        .map(|(app, cfg)| {
+            let actions_rx = bridge.register_action_routes(&cfg.actions);
+            TcpJson::new(app.to_owned(), cfg.clone(), actions_rx, bridge.tx())
+        })
+        .collect();
+
+    uplink.spawn(bridge)?;
+
     if config.console.enabled {
         let port = config.console.port;
-        let bridge_handle = bridge.clone();
-        thread::spawn(move || console::start(port, reload_handle, bridge_handle));
+        let bridge_tx = bridge_tx.clone();
+        thread::spawn(move || console::start(port, reload_handle, bridge_tx));
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -141,10 +155,9 @@ fn main() -> Result<(), Error> {
         .unwrap();
 
     rt.block_on(async {
-        for (app, cfg) in config.tcpapps.iter() {
-            let tcpjson = TcpJson::new(app.to_owned(), cfg.clone(), bridge.clone()).await;
+        for app in tcpapps {
             tokio::task::spawn(async move {
-                if let Err(e) = tcpjson.start().await {
+                if let Err(e) = app.start().await {
                     error!("App failed. Error = {:?}", e);
                 }
             });
@@ -160,7 +173,7 @@ fn main() -> Result<(), Error> {
             // Handle a shutdown signal from POSIX
             while let Some(signal) = signals.next().await {
                 match signal {
-                    SIGTERM | SIGINT | SIGQUIT => bridge.trigger_shutdown().await,
+                    SIGTERM | SIGINT | SIGQUIT => bridge_tx.trigger_shutdown().await,
                     s => error!("Couldn't handle signal: {s}"),
                 }
             }
@@ -171,6 +184,8 @@ fn main() -> Result<(), Error> {
         // NOTE: wait 5s to allow serializer to write to network/disk
         sleep(Duration::from_secs(5)).await;
     });
+
+    built_ins.spawn();
 
     Ok(())
 }

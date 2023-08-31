@@ -1,12 +1,10 @@
+use flume::Receiver;
 use log::error;
 use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
-use crate::{
-    base::{bridge::BridgeTx, ActionRoute},
-    Action, ActionResponse,
-};
+use crate::{base::bridge::BridgeTx, Action, ActionResponse};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -27,12 +25,13 @@ pub struct Keys {
 
 #[derive(Debug, Clone)]
 pub struct TunshellClient {
+    actions_rx: Receiver<Action>,
     bridge: BridgeTx,
 }
 
 impl TunshellClient {
-    pub fn new(bridge: BridgeTx) -> Self {
-        Self { bridge }
+    pub fn new(actions_rx: Receiver<Action>, bridge: BridgeTx) -> Self {
+        Self { actions_rx, bridge }
     }
 
     fn config(&self, keys: Keys) -> Config {
@@ -50,10 +49,7 @@ impl TunshellClient {
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) {
-        let route = ActionRoute { name: "launch_shell".to_owned(), timeout: 10 };
-        let actions_rx = self.bridge.register_action_route(route).await;
-
-        while let Ok(action) = actions_rx.recv_async().await {
+        while let Ok(action) = self.actions_rx.recv_async().await {
             let session = self.clone();
             //TODO(RT): Findout why this is spawned. We want to send other action's with shell?
             tokio::spawn(async move {

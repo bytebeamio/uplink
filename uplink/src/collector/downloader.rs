@@ -48,6 +48,7 @@
 //! [`action_redirections`]: Config#structfield.action_redirections
 
 use bytes::BytesMut;
+use flume::Receiver;
 use futures_util::StreamExt;
 use log::{error, info, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
@@ -91,6 +92,7 @@ pub enum Error {
 /// to the connected bridge application.
 pub struct FileDownloader {
     config: DownloaderConfig,
+    actions_rx: Receiver<Action>,
     action_id: String,
     bridge_tx: BridgeTx,
     client: Client,
@@ -100,7 +102,11 @@ pub struct FileDownloader {
 
 impl FileDownloader {
     /// Creates a handler for download actions within uplink and uses HTTP to download files.
-    pub fn new(config: Arc<Config>, bridge_tx: BridgeTx) -> Result<Self, Error> {
+    pub fn new(
+        config: Arc<Config>,
+        actions_rx: Receiver<Action>,
+        bridge_tx: BridgeTx,
+    ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
         let client = match &config.authentication {
@@ -125,6 +131,7 @@ impl FileDownloader {
 
         Ok(Self {
             config: config.downloader.clone(),
+            actions_rx,
             timeouts,
             client,
             bridge_tx,
@@ -137,16 +144,10 @@ impl FileDownloader {
     /// back to bridge for further processing, e.g. OTA update installation.
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) {
-        let routes = &self.config.actions;
-        let download_rx = match self.bridge_tx.register_action_routes(routes).await {
-            Some(r) => r,
-            _ => return,
-        };
-
         info!("Downloader thread is ready to receive download actions");
         loop {
             self.sequence = 0;
-            let action = match download_rx.recv_async().await {
+            let action = match self.actions_rx.recv_async().await {
                 Ok(a) => a,
                 Err(e) => {
                     error!("Downloader thread had to stop: {e}");
@@ -383,8 +384,9 @@ mod test {
         let (shutdown_handle, _) = bounded(1);
         let bridge_tx = BridgeTx { events_tx, shutdown_handle };
 
-        // Create channels to forward and push action_status on
-        let downloader = FileDownloader::new(Arc::new(config), bridge_tx).unwrap();
+        // Create channels to forward and push actions on
+        let (download_tx, download_rx) = bounded(1);
+        let downloader = FileDownloader::new(Arc::new(config), download_rx, bridge_tx).unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start());
@@ -404,11 +406,6 @@ mod test {
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
-        };
-
-        let download_tx = match events_rx.recv().unwrap() {
-            Event::RegisterActionRoute(_, download_tx) => download_tx,
-            e => unreachable!("Unexpected event: {e:#?}"),
         };
 
         std::thread::sleep(Duration::from_millis(10));
@@ -455,12 +452,13 @@ mod test {
             path: format!("{}/download", DOWNLOAD_DIR),
         };
         let config = config(downloader_cfg.clone());
-        let (events_tx, events_rx) = flume::bounded(3);
+        let (events_tx, _) = flume::bounded(3);
         let (shutdown_handle, _) = bounded(1);
         let bridge_tx = BridgeTx { events_tx, shutdown_handle };
 
-        // Create channels to forward and push action_status on
-        let downloader = FileDownloader::new(Arc::new(config), bridge_tx).unwrap();
+        // Create channels to forward and push actions on
+        let (download_tx, download_rx) = bounded(1);
+        let downloader = FileDownloader::new(Arc::new(config), download_rx, bridge_tx).unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start());
@@ -480,11 +478,6 @@ mod test {
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
-        };
-
-        let download_tx = match events_rx.recv().unwrap() {
-            Event::RegisterActionRoute(_, download_tx) => download_tx,
-            e => unreachable!("Unexpected event: {e:#?}"),
         };
 
         std::thread::sleep(Duration::from_millis(10));
