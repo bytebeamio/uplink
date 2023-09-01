@@ -87,6 +87,7 @@ impl Point for Payload {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Event {
     /// Data sent by the app
     Data(Payload),

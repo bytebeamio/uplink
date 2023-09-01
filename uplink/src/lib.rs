@@ -444,12 +444,11 @@ impl Uplink {
             .config
             .ota_installer
             .as_ref()
-            .map(|config| {
+            .and_then(|config| {
                 bridge
                     .register_action_routes(&config.actions)
                     .map(|routes| (config.clone(), routes))
             })
-            .flatten()
             .map(|(config, actions_rx)| OTAInstaller::new(config, actions_rx, bridge_tx.clone()));
 
         #[cfg(target_os = "linux")]

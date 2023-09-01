@@ -132,7 +132,7 @@ fn main() -> Result<(), Error> {
         })
         .collect();
     let simulator_actions =
-        config.simulator.as_ref().map(|cfg| bridge.register_action_routes(&cfg.actions)).flatten();
+        config.simulator.as_ref().and_then(|cfg| bridge.register_action_routes(&cfg.actions));
 
     uplink.spawn(bridge)?;
 
