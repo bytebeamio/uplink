@@ -52,7 +52,10 @@ use base::Compression;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
+#[cfg(target_os = "linux")]
 use collector::journalctl::JournalCtl;
+#[cfg(target_os = "android")]
+use collector::logcat::Logcat;
 use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
@@ -453,14 +456,15 @@ impl Uplink {
         let logger = self.config.logging.as_ref().map(|config| {
             let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
             let actions_rx = bridge.register_action_route(route);
-            collector::journalctl::JournalCtl::new(config.clone(), actions_rx, bridge_tx.clone())
+            JournalCtl::new(config.clone(), actions_rx, bridge_tx.clone())
         });
 
         #[cfg(target_os = "android")]
-        let logger = config
-            .logging
-            .as_ref()
-            .map(|config| collector::logcat::Logcat::new(config.clone(), bridge_tx.clone()));
+        let logger = self.config.logging.as_ref().map(|config| {
+            let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
+            let actions_rx = bridge.register_action_route(route);
+            Logcat::new(config.clone(), actions_rx, bridge_tx.clone())
+        });
 
         let stat_collector = if self.config.system_stats.enabled {
             Some(StatCollector::new(self.config.clone(), bridge_tx.clone()))
@@ -521,7 +525,7 @@ pub struct BuiltIns {
     #[cfg(target_os = "linux")]
     logger: Option<JournalCtl>,
     #[cfg(target_os = "android")]
-    logger: Option<LogCat>,
+    logger: Option<Logcat>,
     stat_collector: Option<StatCollector>,
     process_handler: Option<ProcessHandler>,
 }
