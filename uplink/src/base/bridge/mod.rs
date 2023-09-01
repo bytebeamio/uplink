@@ -405,7 +405,10 @@ impl Bridge {
             let mut fwd_action = inflight_action.action.clone();
             fwd_action.name = fwd_name.to_owned();
 
-            debug!("Redirecting action {}: {} ~> {}", fwd_action.action_id, inflight_action.action.name, fwd_action.name);
+            debug!(
+                "Redirecting action {}: {} ~> {}",
+                fwd_action.action_id, inflight_action.action.name, fwd_action.name
+            );
 
             if let Err(e) = self.try_route_action(fwd_action.clone()) {
                 error!("Failed to route action to app. Error = {:?}", e);
@@ -587,6 +590,8 @@ mod tests {
         let route_2 = ActionRoute { name: "route_2".to_string(), timeout: 30 };
         let route_2_rx = bridge.register_action_route(route_2);
 
+        spawn_bridge(bridge);
+
         std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
@@ -662,6 +667,8 @@ mod tests {
 
         let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
         let action_rx = bridge.register_action_route(test_route);
+
+        spawn_bridge(bridge);
 
         std::thread::spawn(move || loop {
             let action = action_rx.recv().unwrap();
