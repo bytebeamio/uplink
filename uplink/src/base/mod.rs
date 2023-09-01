@@ -281,6 +281,7 @@ pub struct Config {
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
     pub ota_installer: Option<InstallerConfig>,
+    #[serde(default)]
     pub log_reader: HashMap<String, LogReaderConfig>,
     pub prometheus: Option<PrometheusConfig>,
     pub clickhouse: ClickhouseConfig,
