@@ -40,11 +40,8 @@ impl Prometheus {
     async fn query(&self) -> Result<(), Error> {
         let resp = self.client.request(Method::GET, &self.config.endpoint).send().await?;
         let lines: Vec<_> = resp.text().await?.lines().map(|s| s.to_owned()).collect();
-        let mut sequence = 0;
 
-        for mut payload in read_prom(lines) {
-            sequence += 1;
-            payload.sequence = sequence;
+        for payload in read_prom(lines) {
             self.tx.send_payload(payload).await;
         }
 
