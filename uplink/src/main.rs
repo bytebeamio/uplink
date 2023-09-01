@@ -149,6 +149,8 @@ fn main() -> Result<(), Error> {
         thread::spawn(move || console::start(port, reload_handle, bridge_tx));
     }
 
+    built_ins.spawn();
+
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
@@ -186,8 +188,6 @@ fn main() -> Result<(), Error> {
         // NOTE: wait 5s to allow serializer to write to network/disk
         sleep(Duration::from_secs(5)).await;
     });
-
-    built_ins.spawn();
 
     Ok(())
 }
