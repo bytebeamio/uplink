@@ -20,7 +20,11 @@ struct QueryLog {
     result_rows: u64,
     memory_usage: u64,
     current_database: String,
+    query_id: String,
     query: String,
+    user: String,
+    exception_code: i32,
+    exception: String,
 }
 
 impl From<QueryLog> for Payload {
@@ -82,7 +86,7 @@ impl QueryLogReader {
         let where_clause = &config.where_clause;
         let sync_interval = config.interval;
         let query = format!(
-            "SELECT event_time, query_duration_ms, read_rows, written_rows, result_rows, memory_usage, current_database, query FROM system.query_log WHERE {where_clause} AND event_time > (now() - toIntervalSecond({sync_interval}))"
+            "SELECT event_time, query_duration_ms, read_rows, written_rows, result_rows, memory_usage, current_database, query_id, query, user, exception_code, exception FROM system.query_log WHERE {where_clause} AND event_time > (now() - toIntervalSecond({sync_interval}))"
         );
         info!("Query: {query}");
         Self { config, client, query, bridge_tx, sequence: 0 }
