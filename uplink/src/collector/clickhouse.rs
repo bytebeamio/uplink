@@ -1,5 +1,5 @@
 use clickhouse::{error::Error, Client};
-use log::{error, info};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use tokio::{
     task::JoinSet,
@@ -109,6 +109,7 @@ impl QueryLogReader {
         let mut cursor = self.client.query(&self.query).fetch::<QueryLog>()?;
 
         while let Some(row) = cursor.next().await? {
+            debug!("Row: {row:#?}");
             let mut payload: Payload = row.into();
             payload.timestamp = clock() as u64;
             payload.stream = self.config.stream.to_owned();
