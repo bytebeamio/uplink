@@ -117,14 +117,10 @@ pub struct Stats {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct SimulatorConfig {
-    /// number of devices to be simulated
-    pub num_devices: u32,
     /// path to directory containing files with gps paths to be used in simulation
     pub gps_paths: String,
     /// actions that are to be routed to simulator
     pub actions: Vec<ActionRoute>,
-    #[serde(skip)]
-    pub actions_subscriptions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

@@ -178,7 +178,6 @@ mod tests {
 
         actions_tx
             .send(Action {
-                device_id: None,
                 action_id: "1".to_string(),
                 kind: "1".to_string(),
                 name: "test".to_string(),
@@ -211,7 +210,6 @@ mod tests {
 
         actions_tx
             .send(Action {
-                device_id: None,
                 action_id: "1".to_string(),
                 kind: "1".to_string(),
                 name: "test".to_string(),

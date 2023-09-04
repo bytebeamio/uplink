@@ -139,7 +139,7 @@ fn main() -> Result<(), Error> {
     if let Some(config) = config.simulator.clone() {
         let bridge_tx = bridge_tx.clone();
         thread::spawn(move || {
-            simulator::start(bridge_tx, &config, simulator_actions).unwrap();
+            simulator::start(config, bridge_tx, simulator_actions).unwrap();
         });
     }
 

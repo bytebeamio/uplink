@@ -138,7 +138,6 @@ impl LogEntry {
     pub fn to_payload(&self, sequence: u32) -> anyhow::Result<Payload> {
         Ok(Payload {
             stream: "logs".to_string(),
-            device_id: None,
             sequence,
             timestamp: self.log_timestamp,
             payload: serde_json::json!({

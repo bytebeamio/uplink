@@ -38,7 +38,6 @@ impl DeviceShadow {
 
         Ok(Payload {
             stream: "device_shadow".to_owned(),
-            device_id: None,
             sequence: self.sequence,
             timestamp: clock() as u64,
             payload,

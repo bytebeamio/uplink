@@ -43,8 +43,6 @@ pub struct Mqtt {
     eventloop: EventLoop,
     /// Handles to channels between threads
     native_actions_tx: Sender<Action>,
-    /// List of currently subscribed topics
-    actions_subscriptions: Vec<String>,
     /// Metrics
     metrics: MqttMetrics,
     /// Metrics tx
@@ -61,17 +59,12 @@ impl Mqtt {
         let options = mqttoptions(&config);
         let (client, mut eventloop) = AsyncClient::new(options, 10);
         eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
-        let mut actions_subscriptions = vec![config.actions_subscription.clone()];
-        if let Some(sim_cfg) = &config.simulator {
-            actions_subscriptions.extend_from_slice(&sim_cfg.actions_subscriptions);
-        }
 
         Mqtt {
             config,
             client,
             eventloop,
             native_actions_tx: actions_tx,
-            actions_subscriptions,
             metrics: MqttMetrics::new(),
             metrics_tx,
         }
@@ -88,7 +81,7 @@ impl Mqtt {
             match self.eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
                     info!("Connected to broker. Session present = {}", connack.session_present);
-                    let subscriptions = self.actions_subscriptions.clone();
+                    let subscription = self.config.actions_subscription.clone();
                     let client = self.client();
 
                     self.metrics.add_connection();
@@ -96,11 +89,9 @@ impl Mqtt {
                     // This can potentially block when client from other threads
                     // have already filled the channel due to bad network. So we spawn
                     task::spawn(async move {
-                        for subscription in subscriptions {
-                            match client.subscribe(&subscription, QoS::AtLeastOnce).await {
-                                Ok(..) => info!("Subscribe -> {:?}", subscription),
-                                Err(e) => error!("Failed to send subscription. Error = {:?}", e),
-                            }
+                        match client.subscribe(&subscription, QoS::AtLeastOnce).await {
+                            Ok(..) => info!("Subscribe -> {:?}", subscription),
+                            Err(e) => error!("Failed to send subscription. Error = {:?}", e),
                         }
                     });
                 }
@@ -146,25 +137,12 @@ impl Mqtt {
     }
 
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
-        if !self.actions_subscriptions.contains(&publish.topic) {
+        if self.config.actions_subscription != publish.topic {
             error!("Unsolicited publish on {}", publish.topic);
             return Ok(());
         }
 
-        let mut action: Action = serde_json::from_slice(&publish.payload)?;
-
-        // Collect device_id information from publish topic for simulation purpose
-        if self.config.simulator.is_some() {
-            let tokens: Vec<&str> = publish.topic.split('/').collect();
-            let mut tokens = tokens.iter();
-            while let Some(token) = tokens.next() {
-                if token == &"devices" {
-                    let device_id = tokens.next().unwrap().to_string();
-                    action.device_id = Some(device_id);
-                }
-            }
-        }
-
+        let action: Action = serde_json::from_slice(&publish.payload)?;
         info!("Action = {:?}", action);
         self.native_actions_tx.try_send(action)?;
 

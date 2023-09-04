@@ -86,7 +86,6 @@ impl From<&System> for Payload {
 
         Payload {
             stream: "uplink_system_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -156,7 +155,6 @@ impl From<&mut Network> for Payload {
 
         Payload {
             stream: "uplink_network_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -218,7 +216,6 @@ impl From<&mut Disk> for Payload {
 
         Payload {
             stream: "uplink_disk_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -276,7 +273,6 @@ impl From<&mut Processor> for Payload {
 
         Payload {
             stream: "uplink_processor_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -330,7 +326,6 @@ impl From<&mut Component> for Payload {
 
         Payload {
             stream: "uplink_component_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -409,7 +404,6 @@ impl From<&mut Process> for Payload {
 
         Payload {
             stream: "uplink_process_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({

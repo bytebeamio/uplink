@@ -68,8 +68,6 @@ pub trait Package: Send + Debug {
 pub struct Payload {
     #[serde(skip_serializing)]
     pub stream: String,
-    #[serde(skip)]
-    pub device_id: Option<String>,
     pub sequence: u32,
     pub timestamp: u64,
     #[serde(flatten)]
@@ -614,7 +612,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action_1 = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "test".to_string(),
             name: "route_1".to_string(),
@@ -636,7 +633,6 @@ mod tests {
         assert_eq!(elapsed / 1000, 10);
 
         let action_2 = Action {
-            device_id: None,
             action_id: "2".to_string(),
             kind: "test".to_string(),
             name: "route_2".to_string(),
@@ -678,7 +674,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action_1 = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "test".to_string(),
             name: "test".to_string(),
@@ -691,7 +686,6 @@ mod tests {
         assert_eq!(status.state, "Received".to_owned());
 
         let action_2 = Action {
-            device_id: None,
             action_id: "2".to_string(),
             kind: "test".to_string(),
             name: "test".to_string(),
@@ -730,7 +724,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "test".to_string(),
             name: "test".to_string(),
@@ -790,7 +783,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "test".to_string(),
             name: "test".to_string(),
@@ -855,7 +847,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "tunshell".to_string(),
             name: "launch_shell".to_string(),
@@ -866,7 +857,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action = Action {
-            device_id: None,
             action_id: "2".to_string(),
             kind: "test".to_string(),
             name: "test".to_string(),
@@ -941,7 +931,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "test".to_string(),
             name: "test".to_string(),
@@ -952,7 +941,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action = Action {
-            device_id: None,
             action_id: "2".to_string(),
             kind: "tunshell".to_string(),
             name: "launch_shell".to_string(),
