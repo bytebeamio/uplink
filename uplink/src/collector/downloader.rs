@@ -399,7 +399,6 @@ mod test {
         let mut expected_forward = download_update.clone();
         expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
         let download_action = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
@@ -475,7 +474,6 @@ mod test {
         let mut expected_forward = download_update.clone();
         expected_forward.download_path = Some(downloader_cfg.path + "/firmware_update/test.txt");
         let download_action = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),

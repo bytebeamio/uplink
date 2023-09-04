@@ -95,7 +95,7 @@ impl LogEntry {
         // Convert from microseconds to milliseconds
         let timestamp = self.log_timestamp.parse::<u64>()? / 1000;
 
-        Ok(Payload { stream: "logs".to_string(), device_id: None, sequence, timestamp, payload })
+        Ok(Payload { stream: "logs".to_string(), sequence, timestamp, payload })
     }
 }
 
