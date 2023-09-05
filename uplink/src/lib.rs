@@ -48,7 +48,6 @@ use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
-use base::Compression;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
@@ -273,7 +272,6 @@ pub struct Uplink {
     action_tx: Sender<Action>,
     data_rx: Receiver<Box<dyn Package>>,
     data_tx: Sender<Box<dyn Package>>,
-    action_status: Stream<ActionResponse>,
     stream_metrics_tx: Sender<StreamMetrics>,
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
@@ -290,21 +288,12 @@ impl Uplink {
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
         let (shutdown_tx, shutdown_rx) = bounded(1);
 
-        let action_status_topic = &config.action_status.topic;
-        let action_status = Stream::new(
-            "action_status",
-            action_status_topic,
-            1,
-            data_tx.clone(),
-            Compression::Disabled,
-        );
         Ok(Uplink {
             config,
             action_rx,
             action_tx,
             data_rx,
             data_tx,
-            action_status,
             stream_metrics_tx,
             stream_metrics_rx,
             serializer_metrics_tx,
@@ -321,7 +310,6 @@ impl Uplink {
             self.data_tx.clone(),
             self.stream_metrics_tx(),
             self.action_rx.clone(),
-            self.action_status(),
             self.shutdown_tx.clone(),
         );
 
@@ -477,10 +465,6 @@ impl Uplink {
 
     pub fn serializer_metrics_tx(&self) -> Sender<SerializerMetrics> {
         self.serializer_metrics_tx.clone()
-    }
-
-    pub fn action_status(&self) -> Stream<ActionResponse> {
-        self.action_status.clone()
     }
 
     pub async fn resolve_on_shutdown(&self) -> Result<(), RecvError> {
