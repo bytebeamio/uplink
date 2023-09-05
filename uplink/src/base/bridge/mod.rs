@@ -19,7 +19,6 @@ use super::Compression;
 use crate::base::ActionRoute;
 use crate::{Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
-use stream::Stream;
 use streams::Streams;
 
 const TUNSHELL_ACTION: &str = "launch_shell";
@@ -106,14 +105,10 @@ pub struct Bridge {
     bridge_tx: Sender<Event>,
     /// Rx to receive events from apps
     bridge_rx: Receiver<Event>,
-    /// Handle to send batched data to serialzer
-    package_tx: Sender<Box<dyn Package>>,
-    /// Handle to send stream metrics to monitor
-    metrics_tx: Sender<StreamMetrics>,
+    /// Handle to send data over streams
+    streams: Streams,
     /// Actions incoming from backend
     actions_rx: Receiver<Action>,
-    /// Action responses going to backend
-    action_status: Stream<ActionResponse>,
     /// Apps registered with the bridge
     /// NOTE: Sometimes action_routes could overlap, the latest route
     /// to be registered will be used in such a circumstance.
@@ -134,19 +129,16 @@ impl Bridge {
         package_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
-        action_status: Stream<ActionResponse>,
         shutdown_handle: Sender<()>,
     ) -> Bridge {
         let (bridge_tx, bridge_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
         let (ctrl_tx, ctrl_rx) = bounded(1);
+        let streams = Streams::new(config.clone(), package_tx, metrics_tx);
 
         Bridge {
-            action_status,
             bridge_tx,
             bridge_rx,
-            package_tx,
-            metrics_tx,
             config,
             actions_rx,
             action_routes: HashMap::with_capacity(10),
@@ -156,6 +148,7 @@ impl Bridge {
             shutdown_handle,
             ctrl_rx,
             ctrl_tx,
+            streams,
         }
     }
 
@@ -204,10 +197,7 @@ impl Bridge {
 
     pub async fn start(&mut self) -> Result<(), Error> {
         let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
-        let mut streams =
-            Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
-                .await;
-        let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
+        let mut end: Pin<Box<Sleep>> = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
         self.load_saved_action()?;
 
         loop {
@@ -257,7 +247,7 @@ impl Bridge {
                     let event = event?;
                     match event {
                         Event::Data(v) => {
-                            streams.forward(v).await;
+                            self.streams.forward(v).await;
                         }
                         Event::ActionResponse(response) => {
                             self.forward_action_response(response).await;
@@ -273,15 +263,15 @@ impl Bridge {
                     self.clear_current_action()
                 }
                 // Flush streams that timeout
-                Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
+                Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
                     debug!("Flushing stream = {}", timedout_stream);
-                    if let Err(e) = streams.flush_stream(&timedout_stream).await {
+                    if let Err(e) = self.streams.flush_stream(&timedout_stream).await {
                         error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
                     }
                 }
                 // Flush all metrics when timed out
                 _ = metrics_timeout.tick() => {
-                    if let Err(e) = streams.check_and_flush_metrics() {
+                    if let Err(e) = self.streams.check_and_flush_metrics() {
                         debug!("Failed to flush stream metrics. Error = {}", e);
                     }
                 }
@@ -290,7 +280,7 @@ impl Bridge {
                     if let Err(e) = self.save_current_action() {
                         error!("Failed to save current action: {e}");
                     }
-                    streams.flush_all().await;
+                    self.streams.flush_all().await;
                     // NOTE: there might be events still waiting for recv on bridge_rx
                     self.shutdown_handle.send(()).unwrap();
 
@@ -369,9 +359,7 @@ impl Bridge {
         }
 
         info!("Action response = {:?}", response);
-        if let Err(e) = self.action_status.fill(response.clone()).await {
-            error!("Failed to fill. Error = {:?}", e);
-        }
+        self.streams.forward(response.as_payload()).await;
 
         if response.is_completed() || response.is_failed() {
             self.clear_current_action();
@@ -387,9 +375,7 @@ impl Bridge {
                     // NOTE: send success reponse for actions that don't have redirections configured
                     warn!("Action redirection for {} not configured", inflight_action.action.name);
                     let response = ActionResponse::success(&inflight_action.id);
-                    if let Err(e) = self.action_status.fill(response).await {
-                        error!("Failed to send status. Error = {:?}", e);
-                    }
+                    self.streams.forward(response.as_payload()).await;
 
                     self.clear_current_action();
                     return;
@@ -420,9 +406,7 @@ impl Bridge {
 
     async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
         info!("Action response = {:?}", response);
-        if let Err(e) = self.action_status.fill(response.clone()).await {
-            error!("Failed to fill. Error = {:?}", e);
-        }
+        self.streams.forward(response.as_payload()).await;
 
         if response.is_completed() || response.is_failed() {
             self.parallel_actions.remove(&response.action_id);
@@ -430,11 +414,9 @@ impl Bridge {
     }
 
     async fn forward_action_error(&mut self, action: Action, error: Error) {
-        let status = ActionResponse::failure(&action.action_id, error.to_string());
+        let response = ActionResponse::failure(&action.action_id, error.to_string());
 
-        if let Err(e) = self.action_status.fill(status).await {
-            error!("Failed to send status. Error = {:?}", e);
-        }
+        self.streams.forward(response.as_payload()).await;
     }
 }
 
@@ -554,11 +536,8 @@ mod tests {
         let (package_tx, package_rx) = bounded(10);
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
-        let action_status = Stream::dynamic("", "", "", 1, package_tx.clone());
         let (shutdown_handle, _) = bounded(1);
-
-        let bridge =
-            Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status, shutdown_handle);
+        let bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, shutdown_handle);
 
         (bridge, actions_tx, package_rx)
     }
