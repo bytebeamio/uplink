@@ -109,7 +109,7 @@ impl QueryLogReader {
         let mut cursor = self.client.query(&self.query).fetch::<QueryLog>()?;
 
         while let Some(row) = cursor.next().await? {
-            debug!("Row: {row:#?}");
+            debug!("Row: {row:?}");
             let mut payload: Payload = row.into();
             payload.timestamp = clock() as u64;
             payload.stream = self.config.stream.to_owned();
