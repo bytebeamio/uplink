@@ -4,5 +4,6 @@ action_redirections = { "update_firmware" = "install_update", "send_file" = "loa
 
 persistence_path = "/tmp/uplink"
 
-[tcpapps.1]
-port = 5555
+[tcpapps.configurator]
+port = 5050
+actions = [{ name = "update_config" }, { name = "update_firmware" }, { name = "install_update" }, { name = "send_file" }, { name = "load_file" }]

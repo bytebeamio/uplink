@@ -182,6 +182,7 @@ where
         Ok(status)
     }
 
+    #[cfg(test)]
     /// Push data into buffer and trigger sync channel send on max_buf_size.
     /// Returns [`StreamStatus`].
     pub fn push(&mut self, data: T) -> Result<StreamStatus, Error> {
@@ -198,9 +199,9 @@ where
         Ok(status)
     }
 
-    pub fn metrics(&self) -> StreamMetrics {
-        self.metrics.clone()
-    }
+    // pub fn metrics(&self) -> StreamMetrics {
+    //     self.metrics.clone()
+    // }
 }
 
 /// Buffer is an abstraction of a collection that serializer receives.

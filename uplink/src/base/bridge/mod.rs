@@ -19,7 +19,6 @@ use super::Compression;
 use crate::base::ActionRoute;
 use crate::{Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
-use stream::Stream;
 use streams::Streams;
 
 const TUNSHELL_ACTION: &str = "launch_shell";
@@ -68,8 +67,6 @@ pub trait Package: Send + Debug {
 pub struct Payload {
     #[serde(skip_serializing)]
     pub stream: String,
-    #[serde(skip)]
-    pub device_id: Option<String>,
     pub sequence: u32,
     pub timestamp: u64,
     #[serde(flatten)]
@@ -109,14 +106,10 @@ pub struct Bridge {
     bridge_tx: Sender<Event>,
     /// Rx to receive events from apps
     bridge_rx: Receiver<Event>,
-    /// Handle to send batched data to serialzer
-    package_tx: Sender<Box<dyn Package>>,
-    /// Handle to send stream metrics to monitor
-    metrics_tx: Sender<StreamMetrics>,
+    /// Handle to send data over streams
+    streams: Streams,
     /// Actions incoming from backend
     actions_rx: Receiver<Action>,
-    /// Action responses going to backend
-    action_status: Stream<ActionResponse>,
     /// Apps registered with the bridge
     /// NOTE: Sometimes action_routes could overlap, the latest route
     /// to be registered will be used in such a circumstance.
@@ -137,19 +130,16 @@ impl Bridge {
         package_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
-        action_status: Stream<ActionResponse>,
         shutdown_handle: Sender<()>,
     ) -> Bridge {
         let (bridge_tx, bridge_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
         let (ctrl_tx, ctrl_rx) = bounded(1);
+        let streams = Streams::new(config.clone(), package_tx, metrics_tx);
 
         Bridge {
-            action_status,
             bridge_tx,
             bridge_rx,
-            package_tx,
-            metrics_tx,
             config,
             actions_rx,
             action_routes: HashMap::with_capacity(10),
@@ -159,6 +149,7 @@ impl Bridge {
             shutdown_handle,
             ctrl_rx,
             ctrl_tx,
+            streams,
         }
     }
 
@@ -167,15 +158,12 @@ impl Bridge {
     }
 
     fn clear_current_action(&mut self) {
-        self.current_action = None;
+        self.current_action.take();
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
         let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
-        let mut streams =
-            Streams::new(self.config.clone(), self.package_tx.clone(), self.metrics_tx.clone())
-                .await;
-        let mut end = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
+        let mut end: Pin<Box<Sleep>> = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
         self.load_saved_action()?;
 
         loop {
@@ -217,6 +205,9 @@ impl Bridge {
 
                     error!("Failed to route action to app. Error = {:?}", error);
                     self.forward_action_error(action, error).await;
+
+                    // Remove action because it couldn't be routed
+                    self.clear_current_action()
                 }
                 event = self.bridge_rx.recv_async() => {
                     let event = event?;
@@ -225,7 +216,7 @@ impl Bridge {
                             self.action_routes.insert(name, tx);
                         }
                         Event::Data(v) => {
-                            streams.forward(v).await;
+                            self.streams.forward(v).await;
                         }
                         Event::ActionResponse(response) => {
                             self.forward_action_response(response).await;
@@ -236,25 +227,33 @@ impl Bridge {
                     let action = self.current_action.take().unwrap();
                     error!("Timeout waiting for action response. Action ID = {}", action.id);
                     self.forward_action_error(action.action, Error::ActionTimeout).await;
+
+                    // Remove action because it timedout
+                    self.clear_current_action()
                 }
                 // Flush streams that timeout
-                Some(timedout_stream) = streams.stream_timeouts.next(), if streams.stream_timeouts.has_pending() => {
+                Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
                     debug!("Flushing stream = {}", timedout_stream);
-                    if let Err(e) = streams.flush_stream(&timedout_stream).await {
+                    if let Err(e) = self.streams.flush_stream(&timedout_stream).await {
                         error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
                     }
                 }
                 // Flush all metrics when timed out
                 _ = metrics_timeout.tick() => {
-                    if let Err(e) = streams.check_and_flush_metrics() {
+                    if let Err(e) = self.streams.check_and_flush_metrics() {
                         debug!("Failed to flush stream metrics. Error = {}", e);
                     }
                 }
                 // Handle a shutdown signal
                 _ = self.ctrl_rx.recv_async() => {
-                    self.save_current_action()?;
-
+                    if let Err(e) = self.save_current_action() {
+                        error!("Failed to save current action: {e}");
+                    }
+                    self.streams.flush_all().await;
+                    // NOTE: there might be events still waiting for recv on bridge_rx
                     self.shutdown_handle.send(()).unwrap();
+
+                    return Ok(())
                 }
             }
         }
@@ -329,9 +328,7 @@ impl Bridge {
         }
 
         info!("Action response = {:?}", response);
-        if let Err(e) = self.action_status.fill(response.clone()).await {
-            error!("Failed to fill. Error = {:?}", e);
-        }
+        self.streams.forward(response.as_payload()).await;
 
         if response.is_completed() || response.is_failed() {
             self.clear_current_action();
@@ -347,9 +344,7 @@ impl Bridge {
                     // NOTE: send success reponse for actions that don't have redirections configured
                     warn!("Action redirection for {} not configured", inflight_action.action.name);
                     let response = ActionResponse::success(&inflight_action.id);
-                    if let Err(e) = self.action_status.fill(response).await {
-                        error!("Failed to send status. Error = {:?}", e);
-                    }
+                    self.streams.forward(response.as_payload()).await;
 
                     self.clear_current_action();
                     return;
@@ -366,15 +361,16 @@ impl Bridge {
             if let Err(e) = self.try_route_action(fwd_action.clone()) {
                 error!("Failed to route action to app. Error = {:?}", e);
                 self.forward_action_error(fwd_action, e).await;
+
+                // Remove action because it couldn't be forwarded
+                self.clear_current_action()
             }
         }
     }
 
     async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
         info!("Action response = {:?}", response);
-        if let Err(e) = self.action_status.fill(response.clone()).await {
-            error!("Failed to fill. Error = {:?}", e);
-        }
+        self.streams.forward(response.as_payload()).await;
 
         if response.is_completed() || response.is_failed() {
             self.parallel_actions.remove(&response.action_id);
@@ -382,17 +378,9 @@ impl Bridge {
     }
 
     async fn forward_action_error(&mut self, action: Action, error: Error) {
-        let status = ActionResponse::failure(&action.action_id, error.to_string());
+        let response = ActionResponse::failure(&action.action_id, error.to_string());
 
-        if let Err(e) = self.action_status.fill(status).await {
-            error!("Failed to send status. Error = {:?}", e);
-        }
-
-        // Clear current action only if the error being forwarded was triggered by it
-        match self.current_action.as_ref() {
-            Some(c) if c.id == action.action_id => self.clear_current_action(),
-            _ => {}
-        }
+        self.streams.forward(response.as_payload()).await;
     }
 }
 
@@ -442,7 +430,7 @@ impl CurrentAction {
 
 #[derive(Debug)]
 pub struct ActionRouter {
-    actions_tx: Sender<Action>,
+    pub(crate) actions_tx: Sender<Action>,
     duration: Duration,
 }
 
@@ -530,7 +518,7 @@ mod tests {
         Action, ActionResponse, Config,
     };
 
-    use super::{stream::Stream, Bridge, BridgeTx, Package};
+    use super::*;
 
     fn default_config() -> Config {
         Config {
@@ -547,11 +535,9 @@ mod tests {
         let (package_tx, package_rx) = bounded(10);
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
-        let action_status = Stream::dynamic("", "", "", 1, package_tx.clone());
         let (shutdown_handle, _) = bounded(1);
 
-        let mut bridge =
-            Bridge::new(config, package_tx, metrics_tx, actions_rx, action_status, shutdown_handle);
+        let mut bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, shutdown_handle);
         let bridge_tx = bridge.tx();
 
         std::thread::spawn(move || {
@@ -570,6 +556,8 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_on_diff_routes() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
         let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
@@ -600,7 +588,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action_1 = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "test".to_string(),
             name: "route_1".to_string(),
@@ -622,7 +609,6 @@ mod tests {
         assert_eq!(elapsed / 1000, 10);
 
         let action_2 = Action {
-            device_id: None,
             action_id: "2".to_string(),
             kind: "test".to_string(),
             name: "route_2".to_string(),
@@ -646,6 +632,8 @@ mod tests {
 
     #[tokio::test]
     async fn recv_action_while_current_action_exists() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
@@ -660,7 +648,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action_1 = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "test".to_string(),
             name: "test".to_string(),
@@ -673,7 +660,6 @@ mod tests {
         assert_eq!(status.state, "Received".to_owned());
 
         let action_2 = Action {
-            device_id: None,
             action_id: "2".to_string(),
             kind: "test".to_string(),
             name: "test".to_string(),
@@ -690,6 +676,8 @@ mod tests {
 
     #[tokio::test]
     async fn complete_response_on_no_redirection() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
         let config = Arc::new(default_config());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(config);
 
@@ -707,7 +695,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "test".to_string(),
             name: "test".to_string(),
@@ -728,12 +715,14 @@ mod tests {
 
     #[tokio::test]
     async fn no_complete_response_between_redirection() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
         let mut config = default_config();
         config.action_redirections.insert("test".to_string(), "redirect".to_string());
         let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
         let bridge_tx_clone = bridge_tx.clone();
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
@@ -744,7 +733,7 @@ mod tests {
             rt.block_on(bridge_tx.send_action_response(response));
         });
 
-        std::thread::spawn(move || loop {
+        std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
             let test_route = ActionRoute { name: "redirect".to_string(), timeout: 30 };
             let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
@@ -760,7 +749,6 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
 
         let action = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "test".to_string(),
             name: "test".to_string(),
@@ -780,6 +768,164 @@ mod tests {
         assert_eq!(status.state, "Redirected");
 
         let status = recv_response(&package_rx);
+        assert!(status.is_completed());
+    }
+
+    #[tokio::test]
+    async fn accept_regular_actions_during_tunshell() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
+        let config = default_config();
+        let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
+        let bridge_tx_clone = bridge_tx.clone();
+
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            let tunshell_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx.register_action_route(tunshell_route));
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "1");
+            let response = ActionResponse::progress(&action.action_id, "Launched", 0);
+            rt.block_on(bridge_tx.send_action_response(response));
+            std::thread::sleep(Duration::from_secs(3));
+            let response = ActionResponse::success(&action.action_id);
+            rt.block_on(bridge_tx.send_action_response(response));
+        });
+
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "2");
+            let response = ActionResponse::progress(&action.action_id, "Running", 0);
+            rt.block_on(bridge_tx_clone.send_action_response(response));
+            std::thread::sleep(Duration::from_secs(1));
+            let response = ActionResponse::success(&action.action_id);
+            rt.block_on(bridge_tx_clone.send_action_response(response));
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            action_id: "1".to_string(),
+            kind: "tunshell".to_string(),
+            name: "launch_shell".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            action_id: "2".to_string(),
+            kind: "test".to_string(),
+            name: "test".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Received");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Launched");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "2");
+        assert_eq!(state, "Received");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "2");
+        assert_eq!(state, "Running");
+
+        let status = recv_response(&package_rx);
+        assert_eq!(status.action_id, "2");
+        assert!(status.is_completed());
+
+        let status = recv_response(&package_rx);
+        assert_eq!(status.action_id, "1");
+        assert!(status.is_completed());
+    }
+
+    #[tokio::test]
+    async fn accept_tunshell_during_regular_action() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
+        let config = default_config();
+        let (bridge_tx, actions_tx, package_rx) = start_bridge(Arc::new(config));
+        let bridge_tx_clone = bridge_tx.clone();
+
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx_clone.register_action_route(test_route));
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "1");
+            let response = ActionResponse::progress(&action.action_id, "Running", 0);
+            rt.block_on(bridge_tx_clone.send_action_response(response));
+            std::thread::sleep(Duration::from_secs(3));
+            let response = ActionResponse::success(&action.action_id);
+            rt.block_on(bridge_tx_clone.send_action_response(response));
+        });
+
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            let test_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
+            let action_rx = rt.block_on(bridge_tx.register_action_route(test_route));
+            let action = action_rx.recv().unwrap();
+            assert_eq!(action.action_id, "2");
+            let response = ActionResponse::progress(&action.action_id, "Launched", 0);
+            rt.block_on(bridge_tx.send_action_response(response));
+            std::thread::sleep(Duration::from_secs(1));
+            let response = ActionResponse::success(&action.action_id);
+            rt.block_on(bridge_tx.send_action_response(response));
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            action_id: "1".to_string(),
+            kind: "test".to_string(),
+            name: "test".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            action_id: "2".to_string(),
+            kind: "tunshell".to_string(),
+            name: "launch_shell".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Received");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Running");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "2");
+        assert_eq!(state, "Received");
+
+        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        assert_eq!(action_id, "2");
+        assert_eq!(state, "Launched");
+
+        let status = recv_response(&package_rx);
+        assert_eq!(status.action_id, "2");
+        assert!(status.is_completed());
+
+        let status = recv_response(&package_rx);
+        assert_eq!(status.action_id, "1");
         assert!(status.is_completed());
     }
 }

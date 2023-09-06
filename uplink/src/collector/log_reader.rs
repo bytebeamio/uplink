@@ -27,30 +27,30 @@ pub fn parse_timestamp(date: &mut OffsetDateTime, s: &str, template: &Regex) -> 
     let matches = template.captures(s)?;
     let to_int = |m: Match<'_>| m.as_str().parse().ok();
 
-    let mut year = matches.name("year").map(to_int).flatten().unwrap_or(2000);
+    let mut year = matches.name("year").and_then(to_int).unwrap_or(2000);
     if year < 2000 {
         year += 2000
     }
     *date = date.replace_year(year).ok()?;
 
-    let month = matches.name("month").map(to_int).flatten().unwrap_or(0);
+    let month = matches.name("month").and_then(to_int).unwrap_or(0);
     let month = Month::try_from(month as u8).ok()?;
     *date = date.replace_month(month).ok()?;
 
-    let day = matches.name("day").map(to_int).flatten().unwrap_or(0);
+    let day = matches.name("day").and_then(to_int).unwrap_or(0);
     *date = date.replace_day(day as u8).ok()?;
 
-    let hour = matches.name("hour").map(to_int).flatten().unwrap_or(0);
+    let hour = matches.name("hour").and_then(to_int).unwrap_or(0);
     *date = date.replace_hour(hour as u8).ok()?;
 
-    let minute = matches.name("minute").map(to_int).flatten().unwrap_or(0);
+    let minute = matches.name("minute").and_then(to_int).unwrap_or(0);
     *date = date.replace_minute(minute as u8).ok()?;
 
-    let second = matches.name("second").map(to_int).flatten().unwrap_or(0);
+    let second = matches.name("second").and_then(to_int).unwrap_or(0);
     *date = date.replace_second(second as u8).ok()?;
 
     let millisecond =
-        matches.name("subsecond").map(|m| m.as_str()[0..3].parse().ok()).flatten().unwrap_or(0);
+        matches.name("subsecond").and_then(|m| m.as_str()[0..3].parse().ok()).unwrap_or(0);
     *date = date.replace_millisecond(millisecond).ok()?;
 
     Some(())
@@ -91,13 +91,7 @@ impl LogEntry {
     }
 
     fn payload(self, stream: String, sequence: u32) -> Payload {
-        Payload {
-            stream,
-            device_id: None,
-            sequence,
-            timestamp: self.timestamp,
-            payload: json!(self),
-        }
+        Payload { stream, sequence, timestamp: self.timestamp, payload: json!(self) }
     }
 }
 
@@ -155,7 +149,7 @@ impl LogFileReader {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) -> Result<(), Error> {
         let mut cmd =
-            Command::new("tail").args(&["-F", &self.config.path]).stdout(Stdio::piped()).spawn()?;
+            Command::new("tail").args(["-F", &self.config.path]).stdout(Stdio::piped()).spawn()?;
         let file = cmd.stdout.take().expect("Expected stdout");
         let lines = BufReader::new(file).lines();
         let mut parser =

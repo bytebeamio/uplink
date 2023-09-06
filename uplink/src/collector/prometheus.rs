@@ -90,7 +90,6 @@ fn frame_payload<'a>(mut line: impl Iterator<Item = &'a str>) -> Option<Payload>
 
     let mut payload = Payload {
         stream,
-        device_id: None,
         sequence: 0,
         timestamp: clock() as u64,
         payload: payload.into(),

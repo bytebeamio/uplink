@@ -48,15 +48,15 @@ use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
-use base::Compression;
 use collector::clickhouse::ClickhouseReader;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
 use collector::log_reader::LogFileReader;
 use collector::process::ProcessHandler;
+use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
-use collector::tunshell::TunshellSession;
+use collector::tunshell::TunshellClient;
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
@@ -106,9 +106,6 @@ pub mod config {
     keep_alive = 30
     network_timeout = 30
 
-    # Create empty streams map
-    [streams]
-
     # Downloader config
     [downloader]
     actions = []
@@ -131,12 +128,11 @@ pub mod config {
 
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
-    buf_size = 1
-    timeout = 10
+    flush_period = 2
 
     [streams.device_shadow]
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
-    buf_size = 1
+    flush_period = 5
 
     [streams.logs]
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
@@ -222,19 +218,12 @@ pub mod config {
             stream_config.buf_size = buf_size;
         }
 
+        config.streams.insert("action_status".to_owned(), config.action_status.to_owned());
+
         let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/actions";
         let mut device_action_topic = action_topic_template.to_string();
         replace_topic_placeholders(&mut device_action_topic, tenant_id, device_id);
         config.actions_subscription = device_action_topic;
-
-        // Add topics to be subscribed to for simulation purposes, if in simulator mode
-        if let Some(sim_cfg) = &mut config.simulator {
-            for n in 1..=sim_cfg.num_devices {
-                let mut topic = action_topic_template.to_string();
-                replace_topic_placeholders(&mut topic, tenant_id, &n.to_string());
-                sim_cfg.actions_subscriptions.push(topic);
-            }
-        }
 
         Ok(config)
     }
@@ -288,7 +277,6 @@ pub struct Uplink {
     action_tx: Sender<Action>,
     data_rx: Receiver<Box<dyn Package>>,
     data_tx: Sender<Box<dyn Package>>,
-    action_status: Stream<ActionResponse>,
     stream_metrics_tx: Sender<StreamMetrics>,
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
@@ -305,21 +293,12 @@ impl Uplink {
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
         let (shutdown_tx, shutdown_rx) = bounded(1);
 
-        let action_status_topic = &config.action_status.topic;
-        let action_status = Stream::new(
-            "action_status",
-            action_status_topic,
-            1,
-            data_tx.clone(),
-            Compression::Disabled,
-        );
         Ok(Uplink {
             config,
             action_rx,
             action_tx,
             data_rx,
             data_tx,
-            action_status,
             stream_metrics_tx,
             stream_metrics_rx,
             serializer_metrics_tx,
@@ -336,7 +315,6 @@ impl Uplink {
             self.data_tx.clone(),
             self.stream_metrics_tx(),
             self.action_rx.clone(),
-            self.action_status(),
             self.shutdown_tx.clone(),
         );
 
@@ -398,8 +376,8 @@ impl Uplink {
             })
         });
 
-        let tunshell_session = TunshellSession::new(config.clone(), false, bridge_tx.clone());
-        thread::spawn(move || tunshell_session.start());
+        let tunshell_client = TunshellClient::new(bridge_tx.clone());
+        thread::spawn(move || tunshell_client.start());
 
         let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
         thread::spawn(move || file_downloader.start());
@@ -439,6 +417,23 @@ impl Uplink {
             let stdout_collector = LogFileReader::new(config.clone(), bridge_tx.clone());
             thread::spawn(move || stdout_collector.start());
         }
+
+        let script_runner = ScriptRunner::new(bridge_tx.clone());
+        let routes: Vec<ActionRoute> = config.script_runner.clone();
+        thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .thread_name("script_runner")
+                .enable_io()
+                .enable_time()
+                .build()
+                .unwrap();
+
+            rt.block_on(async move {
+                if let Err(e) = script_runner.start(routes).await {
+                    error!("Monitor stopped!! Error = {:?}", e);
+                }
+            })
+        });
 
         let monitor = Monitor::new(
             self.config.clone(),
@@ -489,10 +484,6 @@ impl Uplink {
 
     pub fn serializer_metrics_tx(&self) -> Sender<SerializerMetrics> {
         self.serializer_metrics_tx.clone()
-    }
-
-    pub fn action_status(&self) -> Stream<ActionResponse> {
-        self.action_status.clone()
     }
 
     pub async fn resolve_on_shutdown(&self) -> Result<(), RecvError> {

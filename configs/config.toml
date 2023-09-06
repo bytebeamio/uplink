@@ -5,7 +5,11 @@ processes = [{ name = "echo", timeout = 10 }]
 
 # Map of action names for re-routing on partial completion. An action is considered
 # partially completed when progress is 100, but status is neither "Failed" nor "Completed".
-action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file" }
+action_redirections = { "firmware_update" = "install_update", "send_file" = "load_file", "send_script" = "run_script" }
+
+# Script runner allows users to trigger an action that will run an already downloaded
+# file as described by the download_path field of the JSON payload of a download action.
+script_runner = [{ name = "run_script" }]
 
 # Location on disk for persisted streams to write backlogs into, also used to write
 persistence_path = "/tmp/uplink/"
@@ -32,11 +36,11 @@ network_timeout = 30
 # - actions: A list of actions that uplink can forward to the app,
 #   with configurable timeouts
 [tcpapps.1]
-port = 5555
+port = 5050
 actions = [{ name = "install_update" }, { name = "load_file" }]
 
 [tcpapps.2]
-port = 5556
+port = 6060
 actions = []
 
 # Metrics configurations are available for serializer and streams. By default 
@@ -77,7 +81,7 @@ blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 # it as non-persistent. streams are internally constructed as a map of Name -> Config
 [streams.device_shadow]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
-buf_size = 1
+flush_period = 5
 
 # Example using compression
 [streams.imu]
@@ -119,7 +123,7 @@ persistence = { max_file_count = 3 }
 # This also means that we require a topic to be configured or uplink will error out.
 [action_status]
 topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
-buf_size = 1
+flush_period = 2
 
 # Configurations for uplink's built-in file downloader, including the actions that can trigger
 # a download, the location in file system where uplink will download and store files from the
@@ -130,7 +134,7 @@ buf_size = 1
 # - actions: List of actions names that can trigger the downloader, with configurable timeouts
 # - path: Location in fs where the files are downloaded into
 [downloader]
-actions = [{ name = "update_firmware" }, { name = "send_file" }]
+actions = [{ name = "update_firmware" }, { name = "send_file" }, { name = "send_script" }]
 path = "/var/tmp/ota-file"
 
 # Configurations associated with the system stats module of uplink, if enabled

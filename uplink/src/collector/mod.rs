@@ -9,6 +9,7 @@ pub mod log_reader;
 pub mod logcat;
 pub mod process;
 pub mod prometheus;
+pub mod script_runner;
 pub mod simulator;
 pub mod systemstats;
 pub mod tcpjson;

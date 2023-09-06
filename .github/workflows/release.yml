@@ -26,7 +26,7 @@ jobs:
             target: aarch64-apple-darwin
           - build: linux-arm-gnu
             os: ubuntu-latest
-            rust: stable
+            rust: 1.69.0
             target: armv7-unknown-linux-gnueabihf
           - build: linux-aarch-musl
             os: ubuntu-latest
@@ -34,7 +34,7 @@ jobs:
             target: aarch64-unknown-linux-musl
           - build: linux-aarch-gnu
             os: ubuntu-latest
-            rust: stable
+            rust: 1.69.0
             target: aarch64-unknown-linux-gnu
           - build: windows
             os: ubuntu-latest
@@ -92,51 +92,16 @@ jobs:
             rustembedded/cross:aarch64-unknown-linux-gnu \
             aarch64-linux-gnu-strip \
             /target/aarch64-unknown-linux-gnu/release/uplink
+
+      - name: Rename ${{ matrix.target }} binary
+        if: matrix.build != 'windows'
+        run: mv "target/${{ matrix.target }}/release/uplink" "uplink-${{ matrix.target }}"
       
-      - name: Get release
-        id: get_release
-        uses: bruceadams/get-release@v1.3.2
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
-      - name: Upload release archive
-        uses: actions/upload-release-asset@v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_path: ./target/${{ matrix.target }}/release/uplink
-          asset_name: uplink-${{matrix.target}}
-          asset_content_type: application/octet-stream
-
-  build-release-android:
-    name: Build release for ${{ matrix.target }}
-    runs-on: ubuntu-latest
-    container:
-      image: devduttshenoi/android-builder
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64-linux-android, armv7-linux-androideabi, aarch64-linux-android, i686-linux-android]
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Build with cargo-ndk
-        run: ANDROID_NDK_HOME="/root/android/ndk/25.1.8937393" cargo ndk --target ${{ matrix.target }} --platform 23 build --release --bin uplink
+      - name: Rename ${{ matrix.target }} binary
+        if: matrix.build == 'windows'
+        run: mv "target/${{ matrix.target }}/release/uplink.exe" "uplink-${{ matrix.target }}.exe"
       
-      - name: Get release
-        id: get_release
-        uses: bruceadams/get-release@v1.3.2
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
       - name: Upload release archive
-        uses: actions/upload-release-asset@v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
-          upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_path: ./target/${{ matrix.target }}/release/uplink
-          asset_name: uplink-${{ matrix.target }}
-          asset_content_type: application/octet-stream
-
+          files: uplink*

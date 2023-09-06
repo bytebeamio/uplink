@@ -1,13 +1,13 @@
-use std::env;
+use std::env::{current_dir, var};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use crate::collector::journalctl::JournalCtlConfig;
-#[cfg(any(target_os = "android"))]
+#[cfg(target_os = "android")]
 use crate::collector::logcat::LogcatConfig;
 
 use self::bridge::stream::MAX_BUFFER_SIZE;
@@ -25,12 +25,27 @@ fn default_timeout() -> u64 {
     DEFAULT_TIMEOUT
 }
 
+#[inline]
+fn max_buf_size() -> usize {
+    MAX_BUFFER_SIZE
+}
+
 fn default_file_size() -> usize {
     10485760 // 10MB
 }
 
 fn default_persistence_path() -> PathBuf {
-    PathBuf::from("/var/lib/uplink")
+    let mut path = current_dir().expect("Couldn't figure out current directory");
+    path.push(".persistence");
+    path
+}
+
+// Automatically assigns port 5050 for default main app, if left unconfigured
+fn default_tcpapps() -> HashMap<String, AppConfig> {
+    let mut apps = HashMap::new();
+    apps.insert("main".to_string(), AppConfig { port: 5050, actions: vec![] });
+
+    apps
 }
 
 fn default_clickhouse_host() -> String {
@@ -42,11 +57,11 @@ fn default_clickhouse_port() -> u16 {
 }
 
 fn default_clickhouse_username() -> String {
-    env::var("CLICKHOUSE_USERNAME").expect("The env variable CLICKHOUSE_USERNAME is not set")
+    var("CLICKHOUSE_USERNAME").expect("The env variable CLICKHOUSE_USERNAME is not set")
 }
 
 fn default_clickhouse_password() -> String {
-    env::var("CLICKHOUSE_PASSWORD").expect("The env variable CLICKHOUSE_PASSWORD is not set")
+    var("CLICKHOUSE_PASSWORD").expect("The env variable CLICKHOUSE_PASSWORD is not set")
 }
 
 pub fn clock() -> u128 {
@@ -63,6 +78,7 @@ pub enum Compression {
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamConfig {
     pub topic: String,
+    #[serde(default = "max_buf_size")]
     pub buf_size: usize,
     #[serde(default = "default_timeout")]
     /// Duration(in seconds) that bridge collector waits from
@@ -117,14 +133,10 @@ pub struct Stats {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct SimulatorConfig {
-    /// number of devices to be simulated
-    pub num_devices: u32,
     /// path to directory containing files with gps paths to be used in simulation
     pub gps_paths: String,
     /// actions that are to be routed to simulator
     pub actions: Vec<ActionRoute>,
-    #[serde(skip)]
-    pub actions_subscriptions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -263,11 +275,13 @@ pub struct Config {
     #[serde(default)]
     pub console: ConsoleConfig,
     pub authentication: Option<Authentication>,
-    #[serde(default)]
+    #[serde(default = "default_tcpapps")]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
     #[serde(default)]
     pub processes: Vec<ActionRoute>,
+    #[serde(default)]
+    pub script_runner: Vec<ActionRoute>,
     #[serde(skip)]
     pub actions_subscription: String,
     pub streams: HashMap<String, StreamConfig>,
@@ -291,8 +305,8 @@ pub struct Config {
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
-    #[cfg(any(target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     pub logging: Option<JournalCtlConfig>,
-    #[cfg(any(target_os = "android"))]
+    #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
 }

@@ -20,12 +20,6 @@ use crate::{
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] std::io::Error),
-    #[error("Pattern error {0}")]
-    Pattern(#[from] glob::PatternError),
-    #[error("Glob error {0}")]
-    Glob(#[from] glob::GlobError),
-    #[error("Parse float error {0}")]
-    ParseFloat(#[from] std::num::ParseFloatError),
 }
 
 type Pid = u32;
@@ -92,7 +86,6 @@ impl From<&System> for Payload {
 
         Payload {
             stream: "uplink_system_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -162,7 +155,6 @@ impl From<&mut Network> for Payload {
 
         Payload {
             stream: "uplink_network_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -224,7 +216,6 @@ impl From<&mut Disk> for Payload {
 
         Payload {
             stream: "uplink_disk_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -282,7 +273,6 @@ impl From<&mut Processor> for Payload {
 
         Payload {
             stream: "uplink_processor_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -336,7 +326,6 @@ impl From<&mut Component> for Payload {
 
         Payload {
             stream: "uplink_component_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -360,14 +349,6 @@ impl ComponentStats {
         comp.update(comp_data, timestamp, self.sequence);
 
         comp.into()
-    }
-
-    fn push_custom(&mut self, mut comp_data: Component, timestamp: u64) -> Payload {
-        self.sequence += 1;
-        comp_data.timestamp = timestamp;
-        comp_data.sequence = self.sequence;
-
-        (&mut comp_data).into()
     }
 }
 
@@ -423,7 +404,6 @@ impl From<&mut Process> for Payload {
 
         Payload {
             stream: "uplink_process_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -535,25 +515,49 @@ impl StatCollector {
     }
 
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
+    /// Update system information values and increment sequence numbers, while sending to specific data streams.
     pub fn start(mut self) {
         loop {
             std::thread::sleep(Duration::from_secs(self.config.system_stats.update_period));
 
-            if let Err(e) = self.update() {
-                error!("Faced error while refreshing system statistics: {}", e);
-                return;
-            };
+            if let Err(e) = self.update_memory_stats() {
+                error!("Error refreshing system memory statistics: {}", e);
+            }
+
+            if let Err(e) = self.update_disk_stats() {
+                error!("Error refreshing disk statistics: {}", e);
+            }
+
+            if let Err(e) = self.update_network_stats() {
+                error!("Error refreshing network statistics: {}", e);
+            }
+
+            if let Err(e) = self.update_cpu_stats() {
+                error!("Error refreshing CPU statistics: {}", e);
+            }
+
+            if let Err(e) = self.update_component_stats() {
+                error!("Error refreshing component statistics: {}", e);
+            }
+
+            if let Err(e) = self.update_process_stats() {
+                error!("Error refreshing process statistics: {}", e);
+            }
         }
     }
 
-    /// Update system information values and increment sequence numbers, while sending to specific data streams.
-    fn update(&mut self) -> Result<(), Error> {
+    // Refresh memory stats
+    fn update_memory_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_memory();
         let timestamp = clock() as u64;
         let payload = self.system.push(&self.sys, timestamp);
         self.bridge_tx.send_payload_sync(payload);
 
-        // Refresh disk info
+        Ok(())
+    }
+
+    // Refresh disk stats
+    fn update_disk_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_disks();
         let timestamp = clock() as u64;
         for disk_data in self.sys.disks() {
@@ -561,7 +565,11 @@ impl StatCollector {
             self.bridge_tx.send_payload_sync(payload);
         }
 
-        // Refresh network byte rate info
+        Ok(())
+    }
+
+    // Refresh network byte rate stats
+    fn update_network_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_networks();
         let timestamp = clock() as u64;
         for (net_name, net_data) in self.sys.networks() {
@@ -569,7 +577,11 @@ impl StatCollector {
             self.bridge_tx.send_payload_sync(payload);
         }
 
-        // Refresh processor info
+        Ok(())
+    }
+
+    // Refresh processor stats
+    fn update_cpu_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_cpu();
         let timestamp = clock() as u64;
         for proc_data in self.sys.cpus().iter() {
@@ -577,29 +589,26 @@ impl StatCollector {
             self.bridge_tx.send_payload_sync(payload);
         }
 
-        // Refresh component info
+        Ok(())
+    }
+
+    // Refresh component stats
+    fn update_component_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_components();
         let timestamp = clock() as u64;
         for comp_data in self.sys.components().iter() {
             let payload = self.components.push(comp_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
         }
-        let files = glob::glob("/sys/devices/virtual/thermal/thermal_zone*/temp")?;
-        for thermal_zone in files {
-            let path = thermal_zone?;
-            let mut label = path.as_os_str().to_str().unwrap_or("temp_component").to_string();
-            label.retain(|c| c.is_numeric());
-            let label = "thermal_zone".to_owned() + &label;
-            let temperature = std::fs::read_to_string(path)?.trim().parse::<f32>()?;
-            let comp_data = Component { label, temperature, ..Default::default() };
-            let payload = self.components.push_custom(comp_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
-        }
 
-        // Refresh processes info
-        // NOTE: This can be further optimized by storing pids of interested processes
-        // at init and only collecting process information for them instead of iterating
-        // over all running processes as is being done now.
+        Ok(())
+    }
+
+    // Refresh processes info
+    // NOTE: This can be further optimized by storing pids of interested processes
+    // at init and only collecting process information for them instead of iterating
+    // over all running processes as is being done now.
+    fn update_process_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_processes();
         let timestamp = clock() as u64;
         for (&id, p) in self.sys.processes() {

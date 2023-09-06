@@ -32,10 +32,9 @@ impl From<QueryLog> for Payload {
     fn from(value: QueryLog) -> Self {
         Payload {
             stream: Default::default(),
-            device_id: None,
             sequence: Default::default(),
             timestamp: Default::default(),
-            payload: serde_json::to_value(&value).unwrap(),
+            payload: serde_json::to_value(value).unwrap(),
         }
     }
 }
