@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use flume::Sender;
 use log::{error, info, trace};
-use tokio::time::{interval, Interval};
 
 use super::stream::{self, StreamStatus, MAX_BUFFER_SIZE};
 use super::StreamMetrics;
@@ -19,11 +17,10 @@ pub struct Streams {
     map: HashMap<String, Stream<Payload>>,
     pub stream_timeouts: DelayMap<String>,
     pub metrics_timeouts: DelayMap<String>,
-    pub metrics_timeout: Interval,
 }
 
 impl Streams {
-    pub async fn new(
+    pub fn new(
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
@@ -34,7 +31,6 @@ impl Streams {
             map.insert(name.to_owned(), stream);
         }
 
-        let metrics_timeout = interval(Duration::from_secs(config.stream_metrics.timeout));
         Self {
             config,
             data_tx,
@@ -42,7 +38,6 @@ impl Streams {
             map,
             stream_timeouts: DelayMap::new(),
             metrics_timeouts: DelayMap::new(),
-            metrics_timeout,
         }
     }
 
