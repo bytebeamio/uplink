@@ -119,7 +119,7 @@ fn main() -> Result<(), Error> {
 
     let mut uplink = Uplink::new(config.clone())?;
     let mut bridge = uplink.configure_bridge();
-    let built_ins = uplink.construct_builtins(&mut bridge)?;
+    uplink.spawn_builtins(&mut bridge)?;
 
     let bridge_tx = bridge.tx();
 
@@ -146,8 +146,6 @@ fn main() -> Result<(), Error> {
         let bridge_tx = bridge_tx.clone();
         thread::spawn(move || console::start(port, reload_handle, bridge_tx));
     }
-
-    built_ins.spawn();
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()

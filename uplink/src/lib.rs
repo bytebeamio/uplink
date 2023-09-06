@@ -403,73 +403,79 @@ impl Uplink {
         Ok(())
     }
 
-    pub fn construct_builtins(&mut self, bridge: &mut Bridge) -> Result<BuiltIns, Error> {
+    pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
         let bridge_tx = bridge.tx();
 
         let route = ActionRoute { name: "launch_shell".to_owned(), timeout: 10 };
         let actions_rx = bridge.register_action_route(route);
         let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
+        thread::spawn(move || tunshell_client.start());
 
-        let file_downloader = match bridge.register_action_routes(&self.config.downloader.actions) {
-            Some(actions_rx) => {
-                let f = FileDownloader::new(self.config.clone(), actions_rx, bridge_tx.clone())?;
-                Some(f)
-            }
-            _ => None,
-        };
+        if let Some(actions_rx) = bridge.register_action_routes(&self.config.downloader.actions) {
+            let file_downloader =
+                FileDownloader::new(self.config.clone(), actions_rx, bridge_tx.clone())?;
+            thread::spawn(move || file_downloader.start());
+        }
 
         let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
         thread::spawn(move || device_shadow.start());
 
-        let ota_installer = self
-            .config
-            .ota_installer
-            .as_ref()
-            .and_then(|config| {
-                bridge
-                    .register_action_routes(&config.actions)
-                    .map(|routes| (config.clone(), routes))
-            })
-            .map(|(config, actions_rx)| OTAInstaller::new(config, actions_rx, bridge_tx.clone()));
+        if let Some(config) = self.config.ota_installer.clone() {
+            if let Some(actions_rx) = bridge.register_action_routes(&config.actions) {
+                let ota_installer = OTAInstaller::new(config, actions_rx, bridge_tx.clone());
+                thread::spawn(move || ota_installer.start());
+            }
+        }
 
         #[cfg(target_os = "linux")]
-        let logger = self.config.logging.as_ref().map(|config| {
+        if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
             let actions_rx = bridge.register_action_route(route);
-            JournalCtl::new(config.clone(), actions_rx, bridge_tx.clone())
-        });
+            let logger = JournalCtl::new(config.clone(), actions_rx, bridge_tx.clone());
+            thread::spawn(move || {
+                if let Err(e) = logger.start() {
+                    error!("Logger stopped!! Error = {:?}", e);
+                }
+            });
+        }
 
         #[cfg(target_os = "android")]
-        let logger = self.config.logging.as_ref().map(|config| {
+        if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
             let actions_rx = bridge.register_action_route(route);
-            Logcat::new(config.clone(), actions_rx, bridge_tx.clone())
-        });
+            let logger = Logcat::new(config.clone(), actions_rx, bridge_tx.clone());
+            thread::spawn(move || {
+                if let Err(e) = logger.start() {
+                    error!("Logger stopped!! Error = {:?}", e);
+                }
+            });
+        }
 
-        let stat_collector = if self.config.system_stats.enabled {
-            Some(StatCollector::new(self.config.clone(), bridge_tx.clone()))
-        } else {
-            None
+        if self.config.system_stats.enabled {
+            let stat_collector = StatCollector::new(self.config.clone(), bridge_tx.clone());
+            thread::spawn(move || stat_collector.start());
         };
 
-        let process_handler = bridge
-            .register_action_routes(&self.config.processes)
-            .map(|actions_rx| ProcessHandler::new(actions_rx, bridge_tx.clone()));
-
-        let script_runner =
-            bridge.register_action_routes(&self.config.script_runner).map(|actions_rx| {
-                ScriptRunner::new(self.config.script_runner.clone(), actions_rx, bridge_tx.clone())
+        if let Some(actions_rx) = bridge.register_action_routes(&self.config.processes) {
+            let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
+            thread::spawn(move || {
+                if let Err(e) = process_handler.start() {
+                    error!("Process handler stopped!! Error = {:?}", e);
+                }
             });
+        }
 
-        Ok(BuiltIns {
-            tunshell_client,
-            file_downloader,
-            ota_installer,
-            script_runner,
-            logger,
-            stat_collector,
-            process_handler,
-        })
+        if let Some(actions_rx) = bridge.register_action_routes(&self.config.script_runner) {
+            let script_runner =
+                ScriptRunner::new(self.config.script_runner.clone(), actions_rx, bridge_tx.clone());
+            thread::spawn(move || {
+                if let Err(e) = script_runner.start() {
+                    error!("Script runner stopped!! Error = {:?}", e);
+                }
+            });
+        }
+
+        Ok(())
     }
 
     pub fn bridge_action_rx(&self) -> Receiver<Action> {
@@ -490,55 +496,5 @@ impl Uplink {
 
     pub async fn resolve_on_shutdown(&self) -> Result<(), RecvError> {
         self.shutdown_rx.recv_async().await
-    }
-}
-
-pub struct BuiltIns {
-    tunshell_client: TunshellClient,
-    file_downloader: Option<FileDownloader>,
-    ota_installer: Option<OTAInstaller>,
-    script_runner: Option<ScriptRunner>,
-    #[cfg(target_os = "linux")]
-    logger: Option<JournalCtl>,
-    #[cfg(target_os = "android")]
-    logger: Option<Logcat>,
-    stat_collector: Option<StatCollector>,
-    process_handler: Option<ProcessHandler>,
-}
-
-impl BuiltIns {
-    pub fn spawn(self) {
-        thread::spawn(move || self.tunshell_client.start());
-
-        if let Some(file_downloader) = self.file_downloader {
-            thread::spawn(move || file_downloader.start());
-        }
-        if let Some(ota_installer) = self.ota_installer {
-            thread::spawn(move || ota_installer.start());
-        }
-        if let Some(logger) = self.logger {
-            thread::spawn(move || {
-                if let Err(e) = logger.start() {
-                    error!("Logger stopped!! Error = {:?}", e);
-                }
-            });
-        }
-        if let Some(stat_collector) = self.stat_collector {
-            thread::spawn(move || stat_collector.start());
-        }
-        if let Some(process_handler) = self.process_handler {
-            thread::spawn(move || {
-                if let Err(e) = process_handler.start() {
-                    error!("Process handler stopped!! Error = {:?}", e);
-                }
-            });
-        }
-        if let Some(script_runner) = self.script_runner {
-            thread::spawn(move || {
-                if let Err(e) = script_runner.start() {
-                    error!("Script runner stopped!! Error = {:?}", e);
-                }
-            });
-        }
     }
 }
