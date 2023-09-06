@@ -543,7 +543,6 @@ mod tests {
         let (metrics_tx, _) = bounded(10);
         let (actions_tx, actions_rx) = bounded(10);
         let (shutdown_handle, _) = bounded(1);
-
         let bridge = Bridge::new(config, package_tx, metrics_tx, actions_rx, shutdown_handle);
 
         (bridge, actions_tx, package_rx)
