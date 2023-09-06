@@ -123,14 +123,12 @@ fn main() -> Result<(), Error> {
 
     let bridge_tx = bridge.tx();
 
-    let tcpapps: Vec<TcpJson> = config
-        .tcpapps
-        .iter()
-        .map(|(app, cfg)| {
-            let actions_rx = bridge.register_action_routes(&cfg.actions);
-            TcpJson::new(app.to_owned(), cfg.clone(), actions_rx, bridge.tx())
-        })
-        .collect();
+    let mut tcpapps = vec![];
+    for (app, cfg) in config.tcpapps.clone() {
+        let actions_rx = bridge.register_action_routes(&cfg.actions);
+        tcpapps.push(TcpJson::new(app, cfg, actions_rx, bridge.tx()));
+    }
+
     let simulator_actions =
         config.simulator.as_ref().and_then(|cfg| bridge.register_action_routes(&cfg.actions));
 
