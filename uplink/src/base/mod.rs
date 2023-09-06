@@ -298,7 +298,7 @@ pub struct Config {
     #[serde(default)]
     pub log_reader: HashMap<String, LogReaderConfig>,
     pub prometheus: Option<PrometheusConfig>,
-    pub clickhouse: ClickhouseConfig,
+    pub clickhouse: Option<ClickhouseConfig>,
     #[serde(default)]
     pub device_shadow: DeviceShadowConfig,
     #[serde(default)]

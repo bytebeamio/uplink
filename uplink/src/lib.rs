@@ -447,10 +447,10 @@ impl Uplink {
             let prometheus = Prometheus::new(config, bridge_tx.clone());
             thread::spawn(|| prometheus.start());
         }
-
-        let clickhouse_reader =
-            ClickhouseReader::new(self.config.clickhouse.clone(), bridge_tx.clone());
-        thread::spawn(|| clickhouse_reader.start());
+        if let Some(config) = self.config.clickhouse.clone() {
+            let clickhouse_reader = ClickhouseReader::new(config, bridge_tx.clone());
+            thread::spawn(|| clickhouse_reader.start());
+        }
 
         // Metrics monitor thread
         thread::spawn(|| {
