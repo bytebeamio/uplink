@@ -517,28 +517,27 @@ impl BuiltIns {
             thread::spawn(move || ota_installer.start());
         }
         if let Some(logger) = self.logger {
-            thread::spawn(move || logger.start());
+            thread::spawn(move || {
+                if let Err(e) = logger.start() {
+                    error!("Logger stopped!! Error = {:?}", e);
+                }
+            });
         }
         if let Some(stat_collector) = self.stat_collector {
             thread::spawn(move || stat_collector.start());
         }
         if let Some(process_handler) = self.process_handler {
-            thread::spawn(move || process_handler.start());
+            thread::spawn(move || {
+                if let Err(e) = process_handler.start() {
+                    error!("Process handler stopped!! Error = {:?}", e);
+                }
+            });
         }
         if let Some(script_runner) = self.script_runner {
             thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .thread_name("script_runner")
-                    .enable_io()
-                    .enable_time()
-                    .build()
-                    .unwrap();
-
-                rt.block_on(async move {
-                    if let Err(e) = script_runner.start().await {
-                        error!("Monitor stopped!! Error = {:?}", e);
-                    }
-                })
+                if let Err(e) = script_runner.start() {
+                    error!("Script runner stopped!! Error = {:?}", e);
+                }
             });
         }
     }

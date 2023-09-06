@@ -100,6 +100,7 @@ impl ScriptRunner {
         Ok(())
     }
 
+    #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) -> Result<(), Error> {
         info!("Script runner is ready");
 
@@ -159,7 +160,6 @@ mod tests {
     use crate::{base::bridge::Event, Action};
 
     use flume::bounded;
-    use tokio::runtime::Runtime;
 
     #[test]
     fn empty_payload() {
@@ -170,11 +170,7 @@ mod tests {
         let script_runner =
             ScriptRunner::new(routes, actions_rx, BridgeTx { events_tx, shutdown_handle });
 
-        thread::spawn(move || {
-            Runtime::new().unwrap().block_on(async {
-                script_runner.start().await.unwrap();
-            })
-        });
+        thread::spawn(move || script_runner.start().unwrap());
 
         actions_tx
             .send(Action {
@@ -202,11 +198,7 @@ mod tests {
         let script_runner =
             ScriptRunner::new(routes, actions_rx, BridgeTx { events_tx, shutdown_handle });
 
-        thread::spawn(move || {
-            Runtime::new().unwrap().block_on(async {
-                script_runner.start().await.unwrap();
-            })
-        });
+        thread::spawn(move || script_runner.start().unwrap());
 
         actions_tx
             .send(Action {

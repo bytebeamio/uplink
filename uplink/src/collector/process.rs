@@ -86,6 +86,7 @@ impl ProcessHandler {
         Ok(())
     }
 
+    #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) -> Result<(), Error> {
         loop {
             let action = self.actions_rx.recv_async().await?;
