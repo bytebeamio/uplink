@@ -514,19 +514,25 @@ mod tests {
     use tokio::{runtime::Runtime, select};
 
     use crate::{
-        base::{ActionRoute, StreamMetricsConfig},
+        base::{ActionRoute, StreamConfig, StreamMetricsConfig},
         Action, ActionResponse, Config,
     };
 
     use super::*;
 
     fn default_config() -> Config {
+        let mut streams = HashMap::new();
+        streams.insert(
+            "action_status".to_owned(),
+            StreamConfig { flush_period: 2, ..Default::default() },
+        );
         Config {
             stream_metrics: StreamMetricsConfig {
                 enabled: false,
                 timeout: 10,
                 ..Default::default()
             },
+            streams,
             ..Default::default()
         }
     }
@@ -548,10 +554,20 @@ mod tests {
         (bridge_tx, actions_tx, package_rx)
     }
 
-    fn recv_response(package_rx: &Receiver<Box<dyn Package>>) -> ActionResponse {
-        let status = package_rx.recv().unwrap().serialize().unwrap();
-        let status: Vec<ActionResponse> = serde_json::from_slice(&status).unwrap();
-        status[0].clone()
+    struct Responses {
+        rx: Receiver<Box<dyn Package>>,
+        responses: Vec<ActionResponse>,
+    }
+
+    impl Responses {
+        fn next(&mut self) -> ActionResponse {
+            if self.responses.is_empty() {
+                let status = self.rx.recv().unwrap().serialize().unwrap();
+                self.responses = serde_json::from_slice(&status).unwrap();
+            }
+
+            self.responses.remove(0)
+        }
     }
 
     #[tokio::test]
@@ -595,11 +611,13 @@ mod tests {
         };
         actions_tx.send(action_1).unwrap();
 
-        let status = recv_response(&package_rx);
+        let mut responses = Responses { rx: package_rx, responses: vec![] };
+
+        let status = responses.next();
         assert_eq!(status.state, "Received".to_owned());
         let start = status.timestamp;
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         // verify response is timeout failure
         assert!(status.is_failed());
         assert_eq!(status.action_id, "1".to_owned());
@@ -616,11 +634,11 @@ mod tests {
         };
         actions_tx.send(action_2).unwrap();
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         assert_eq!(status.state, "Received".to_owned());
         let start = status.timestamp;
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         // verify response is timeout failure
         assert!(status.is_failed());
         assert_eq!(status.action_id, "2".to_owned());
@@ -655,7 +673,9 @@ mod tests {
         };
         actions_tx.send(action_1).unwrap();
 
-        let status = recv_response(&package_rx);
+        let mut responses = Responses { rx: package_rx, responses: vec![] };
+
+        let status = responses.next();
         assert_eq!(status.action_id, "1".to_owned());
         assert_eq!(status.state, "Received".to_owned());
 
@@ -667,7 +687,7 @@ mod tests {
         };
         actions_tx.send(action_2).unwrap();
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         // verify response is uplink occupied failure
         assert!(status.is_failed());
         assert_eq!(status.action_id, "2".to_owned());
@@ -702,14 +722,16 @@ mod tests {
         };
         actions_tx.send(action).unwrap();
 
-        let status = recv_response(&package_rx);
+        let mut responses = Responses { rx: package_rx, responses: vec![] };
+
+        let status = responses.next();
         assert_eq!(status.state, "Received".to_owned());
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         assert!(status.is_done());
         assert_eq!(status.state, "Tested");
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         assert!(status.is_completed());
     }
 
@@ -756,18 +778,20 @@ mod tests {
         };
         actions_tx.send(action).unwrap();
 
-        let status = recv_response(&package_rx);
+        let mut responses = Responses { rx: package_rx, responses: vec![] };
+
+        let status = responses.next();
         assert_eq!(status.state, "Received".to_owned());
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         assert!(status.is_done());
         assert_eq!(status.state, "Tested");
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         assert!(!status.is_completed());
         assert_eq!(status.state, "Redirected");
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         assert!(status.is_completed());
     }
 
@@ -825,27 +849,29 @@ mod tests {
         };
         actions_tx.send(action).unwrap();
 
-        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        let mut responses = Responses { rx: package_rx, responses: vec![] };
+
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "1");
         assert_eq!(state, "Received");
 
-        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "1");
         assert_eq!(state, "Launched");
 
-        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "2");
         assert_eq!(state, "Received");
 
-        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "2");
         assert_eq!(state, "Running");
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         assert_eq!(status.action_id, "2");
         assert!(status.is_completed());
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         assert_eq!(status.action_id, "1");
         assert!(status.is_completed());
     }
@@ -904,27 +930,29 @@ mod tests {
         };
         actions_tx.send(action).unwrap();
 
-        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        let mut responses = Responses { rx: package_rx, responses: vec![] };
+
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "1");
         assert_eq!(state, "Received");
 
-        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "1");
         assert_eq!(state, "Running");
 
-        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "2");
         assert_eq!(state, "Received");
 
-        let ActionResponse { action_id, state, .. } = recv_response(&package_rx);
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "2");
         assert_eq!(state, "Launched");
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         assert_eq!(status.action_id, "2");
         assert!(status.is_completed());
 
-        let status = recv_response(&package_rx);
+        let status = responses.next();
         assert_eq!(status.action_id, "1");
         assert!(status.is_completed());
     }
