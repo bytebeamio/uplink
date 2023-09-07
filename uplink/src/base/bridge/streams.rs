@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use flume::Sender;
 use log::{error, info, trace};
-use tokio::time::{interval, Interval};
 
 use super::stream::{self, StreamStatus, MAX_BUFFER_SIZE};
 use super::StreamMetrics;
@@ -19,11 +17,10 @@ pub struct Streams {
     map: HashMap<String, Stream<Payload>>,
     pub stream_timeouts: DelayMap<String>,
     pub metrics_timeouts: DelayMap<String>,
-    pub metrics_timeout: Interval,
 }
 
 impl Streams {
-    pub async fn new(
+    pub fn new(
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
@@ -34,7 +31,6 @@ impl Streams {
             map.insert(name.to_owned(), stream);
         }
 
-        let metrics_timeout = interval(Duration::from_secs(config.stream_metrics.timeout));
         Self {
             config,
             data_tx,
@@ -42,34 +38,29 @@ impl Streams {
             map,
             stream_timeouts: DelayMap::new(),
             metrics_timeouts: DelayMap::new(),
-            metrics_timeout,
         }
     }
 
     pub async fn forward(&mut self, data: Payload) {
-        let stream_name = &data.stream;
-        let (stream_id, device_id) = match &data.device_id {
-            Some(device_id) => (stream_name.to_owned() + "/" + device_id, device_id.to_owned()),
-            _ => (stream_name.to_owned(), self.config.device_id.to_owned()),
-        };
+        let stream_name = data.stream.to_owned();
 
-        let stream = match self.map.get_mut(&stream_id) {
+        let stream = match self.map.get_mut(&stream_name) {
             Some(partition) => partition,
             None => {
                 if self.config.simulator.is_none() && self.map.keys().len() > 20 {
-                    error!("Failed to create {:?} stream. More than max 20 streams", stream_id);
+                    error!("Failed to create {:?} stream. More than max 20 streams", stream_name);
                     return;
                 }
 
                 let stream = Stream::dynamic(
-                    stream_name,
+                    &stream_name,
                     &self.config.project_id,
-                    &device_id,
+                    &self.config.device_id,
                     MAX_BUFFER_SIZE,
                     self.data_tx.clone(),
                 );
 
-                self.map.entry(stream_id.to_owned()).or_insert(stream)
+                self.map.entry(stream_name.to_owned()).or_insert(stream)
             }
         };
 
@@ -87,10 +78,10 @@ impl Streams {
         // Warn in case stream flushed stream was not in the queue.
         if max_stream_size > 1 {
             match state {
-                StreamStatus::Flushed => self.stream_timeouts.remove(&stream_id),
+                StreamStatus::Flushed => self.stream_timeouts.remove(&stream_name),
                 StreamStatus::Init(flush_period) => {
-                    trace!("Initialized stream buffer for {stream_id}");
-                    self.stream_timeouts.insert(&stream_id, flush_period);
+                    trace!("Initialized stream buffer for {stream_name}");
+                    self.stream_timeouts.insert(&stream_name, flush_period);
                 }
                 StreamStatus::Partial(_l) => {}
             }

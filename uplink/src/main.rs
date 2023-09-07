@@ -119,19 +119,33 @@ fn main() -> Result<(), Error> {
     banner(&commandline, &config);
 
     let mut uplink = Uplink::new(config.clone())?;
-    let bridge = uplink.spawn()?;
+    let mut bridge = uplink.configure_bridge();
+    uplink.spawn_builtins(&mut bridge)?;
+
+    let bridge_tx = bridge.tx();
+
+    let mut tcpapps = vec![];
+    for (app, cfg) in config.tcpapps.clone() {
+        let actions_rx = bridge.register_action_routes(&cfg.actions);
+        tcpapps.push(TcpJson::new(app, cfg, actions_rx, bridge.tx()));
+    }
+
+    let simulator_actions =
+        config.simulator.as_ref().and_then(|cfg| bridge.register_action_routes(&cfg.actions));
+
+    uplink.spawn(bridge)?;
 
     if let Some(config) = config.simulator.clone() {
-        let bridge = bridge.clone();
+        let bridge_tx = bridge_tx.clone();
         thread::spawn(move || {
-            simulator::start(bridge, &config).unwrap();
+            simulator::start(config, bridge_tx, simulator_actions).unwrap();
         });
     }
 
     if config.console.enabled {
         let port = config.console.port;
-        let bridge_handle = bridge.clone();
-        thread::spawn(move || console::start(port, reload_handle, bridge_handle));
+        let bridge_tx = bridge_tx.clone();
+        thread::spawn(move || console::start(port, reload_handle, bridge_tx));
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -142,10 +156,9 @@ fn main() -> Result<(), Error> {
         .unwrap();
 
     rt.block_on(async {
-        for (app, cfg) in config.tcpapps.iter() {
-            let tcpjson = TcpJson::new(app.to_owned(), cfg.clone(), bridge.clone()).await;
+        for app in tcpapps {
             tokio::task::spawn(async move {
-                if let Err(e) = tcpjson.start().await {
+                if let Err(e) = app.start().await {
                     error!("App failed. Error = {:?}", e);
                 }
             });
@@ -161,7 +174,7 @@ fn main() -> Result<(), Error> {
             // Handle a shutdown signal from POSIX
             while let Some(signal) = signals.next().await {
                 match signal {
-                    SIGTERM | SIGINT | SIGQUIT => bridge.trigger_shutdown().await,
+                    SIGTERM | SIGINT | SIGQUIT => bridge_tx.trigger_shutdown().await,
                     s => error!("Couldn't handle signal: {s}"),
                 }
             }

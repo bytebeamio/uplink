@@ -1,49 +1,27 @@
+use crate::base::bridge::{BridgeTx, Payload};
+use crate::base::{clock, SimulatorConfig};
+use crate::Action;
 use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
-use flume::{bounded, Sender};
-use futures_util::sink::SinkExt;
-use futures_util::StreamExt;
-use log::{error, info, LevelFilter};
+use flume::{bounded, Receiver, Sender};
+use log::{error, info};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use simplelog::{
-    ColorChoice, CombinedLogger, ConfigBuilder, LevelPadding, TermLogger, TerminalMode,
-};
-use structopt::StructOpt;
+use serde::Serialize;
+use serde_json::json;
 use thiserror::Error;
-use tokio::net::TcpStream;
 use tokio::time::interval;
 use tokio::{select, spawn};
-use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
-use uplink::Action;
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use std::{fs, io, sync::Arc};
 
 mod data;
-
-#[derive(StructOpt, Debug)]
-#[structopt(name = "simulator", about = "simulates a demo device")]
-pub struct CommandLine {
-    /// uplink port
-    #[structopt(short = "p", help = "uplink port")]
-    pub port: u16,
-    /// path of GPS coordinates
-    #[structopt(short = "g", help = "gps path file directory")]
-    pub paths: String,
-    /// log level (v: info, vv: debug, vvv: trace)
-    #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
-    pub verbose: u8,
-}
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] io::Error),
-    #[error("Stream done")]
-    StreamDone,
-    #[error("Lines codec error {0}")]
-    Codec(#[from] LinesCodecError),
+    #[error("Recv error {0}")]
+    Recv(#[from] flume::RecvError),
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
 }
@@ -73,7 +51,12 @@ impl ActionResponse {
             };
             sequence += 1;
             if let Err(e) = tx
-                .send_async(Payload::new("action_status".to_string(), sequence, json!(response)))
+                .send_async(Payload {
+                    stream: "action_status".to_string(),
+                    sequence,
+                    payload: json!(response),
+                    timestamp: clock() as u64,
+                })
                 .await
             {
                 error!("{e}");
@@ -91,32 +74,17 @@ impl ActionResponse {
         };
         sequence += 1;
         if let Err(e) = tx
-            .send_async(Payload::new("action_status".to_string(), sequence, json!(response)))
+            .send_async(Payload {
+                stream: "action_status".to_string(),
+                sequence,
+                payload: json!(response),
+                timestamp: clock() as u64,
+            })
             .await
         {
             error!("{e}");
         }
         info!("Successfully sent all action responses");
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Payload {
-    pub stream: String,
-    pub sequence: u32,
-    pub timestamp: u64,
-    #[serde(flatten)]
-    pub payload: Value,
-}
-
-impl Payload {
-    fn new(stream: String, sequence: u32, payload: Value) -> Self {
-        Self {
-            stream,
-            sequence,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
-            payload,
-        }
     }
 }
 
@@ -149,24 +117,21 @@ pub fn spawn_data_simulators(device: DeviceData, tx: Sender<Payload>) {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Error> {
-    let commandline = init();
-
-    let addr = format!("localhost:{}", commandline.port);
-    let path = read_gps_path(&commandline.paths);
+pub async fn start(
+    config: SimulatorConfig,
+    bridge_tx: BridgeTx,
+    actions_rx: Option<Receiver<Action>>,
+) -> Result<(), Error> {
+    let path = read_gps_path(&config.gps_paths);
     let device = new_device_data(path);
-
-    let stream = TcpStream::connect(addr).await?;
-    let (mut data_tx, mut actions_rx) = Framed::new(stream, LinesCodec::new()).split();
 
     let (tx, rx) = bounded(10);
     spawn_data_simulators(device, tx.clone());
 
     loop {
         select! {
-            line = actions_rx.next() => {
-                let line = line.ok_or(Error::StreamDone)??;
-                let action = serde_json::from_str(&line)?;
+            action = actions_rx.as_ref().unwrap().recv_async(), if actions_rx.is_some() => {
+                let action = action?;
                 spawn(ActionResponse::simulate(action,  tx.clone()));
             }
             p = rx.recv_async() => {
@@ -178,32 +143,8 @@ async fn main() -> Result<(), Error> {
                     }
                 };
 
-
-                let text = serde_json::to_string(&payload)?;
-                data_tx.send(text).await?;
+                bridge_tx.send_payload(payload).await;
             }
         }
     }
-}
-
-fn init() -> CommandLine {
-    let commandline: CommandLine = StructOpt::from_args();
-    let level = match commandline.verbose {
-        0 => LevelFilter::Warn,
-        1 => LevelFilter::Info,
-        2 => LevelFilter::Debug,
-        _ => LevelFilter::Trace,
-    };
-
-    let mut config = ConfigBuilder::new();
-    config
-        .set_location_level(LevelFilter::Off)
-        .set_target_level(LevelFilter::Error)
-        .set_thread_level(LevelFilter::Error)
-        .set_level_padding(LevelPadding::Right);
-
-    let loggers = TermLogger::new(level, config.build(), TerminalMode::Mixed, ColorChoice::Auto);
-    CombinedLogger::init(vec![loggers]).unwrap();
-
-    commandline
 }

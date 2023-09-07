@@ -1,4 +1,4 @@
-use flume::{RecvError, SendError};
+use flume::{Receiver, RecvError, SendError};
 use log::{debug, error, info};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -6,8 +6,7 @@ use tokio::process::{Child, Command};
 use tokio::{pin, select, time};
 
 use crate::base::bridge::BridgeTx;
-use crate::base::ActionRoute;
-use crate::{ActionResponse, Package};
+use crate::{Action, ActionResponse, Package};
 
 use std::io;
 use std::process::Stdio;
@@ -34,13 +33,15 @@ pub enum Error {
 /// is in progress.
 /// It sends result and errors to the broker over collector_tx
 pub struct ProcessHandler {
-    // to receive actions and send responses back to bridge
+    // to receive actions
+    actions_rx: Receiver<Action>,
+    // to send responses back to bridge
     bridge_tx: BridgeTx,
 }
 
 impl ProcessHandler {
-    pub fn new(bridge_tx: BridgeTx) -> Self {
-        Self { bridge_tx }
+    pub fn new(actions_rx: Receiver<Action>, bridge_tx: BridgeTx) -> Self {
+        Self { actions_rx, bridge_tx }
     }
 
     /// Run a process of specified command
@@ -85,14 +86,10 @@ impl ProcessHandler {
         Ok(())
     }
 
-    pub async fn start(mut self, processes: Vec<ActionRoute>) -> Result<(), Error> {
-        let action_rx = match self.bridge_tx.register_action_routes(processes).await {
-            Some(r) => r,
-            _ => return Ok(()),
-        };
-
+    #[tokio::main(flavor = "current_thread")]
+    pub async fn start(mut self) -> Result<(), Error> {
         loop {
-            let action = action_rx.recv_async().await?;
+            let action = self.actions_rx.recv_async().await?;
             let command = String::from("tools/") + &action.name;
 
             // Spawn the action and capture its stdout

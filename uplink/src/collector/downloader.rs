@@ -48,7 +48,7 @@
 //! [`action_redirections`]: Config#structfield.action_redirections
 
 use bytes::BytesMut;
-use flume::RecvError;
+use flume::Receiver;
 use futures_util::StreamExt;
 use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
@@ -79,8 +79,6 @@ pub enum Error {
     Reqwest(#[from] reqwest::Error),
     #[error("File io Error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Error receiving action: {0}")]
-    Recv(#[from] RecvError),
     #[error("Empty file name")]
     EmptyFileName,
     #[error("Missing file path")]
@@ -97,6 +95,7 @@ pub enum Error {
 /// to the connected bridge application.
 pub struct FileDownloader {
     config: DownloaderConfig,
+    actions_rx: Receiver<Action>,
     action_id: String,
     bridge_tx: BridgeTx,
     client: Client,
@@ -106,7 +105,11 @@ pub struct FileDownloader {
 
 impl FileDownloader {
     /// Creates a handler for download actions within uplink and uses HTTP to download files.
-    pub fn new(config: Arc<Config>, bridge_tx: BridgeTx) -> Result<Self, Error> {
+    pub fn new(
+        config: Arc<Config>,
+        actions_rx: Receiver<Action>,
+        bridge_tx: BridgeTx,
+    ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
         let client = match &config.authentication {
@@ -131,6 +134,7 @@ impl FileDownloader {
 
         Ok(Self {
             config: config.downloader.clone(),
+            actions_rx,
             timeouts,
             client,
             bridge_tx,
@@ -142,15 +146,17 @@ impl FileDownloader {
     /// Spawn a thread to handle downloading files as notified by download actions and for forwarding the updated actions
     /// back to bridge for further processing, e.g. OTA update installation.
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(mut self) -> Result<(), Error> {
-        let routes = &self.config.actions;
-        let download_rx = match self.bridge_tx.register_action_routes(routes).await {
-            Some(r) => r,
-            _ => return Ok(()),
-        };
+    pub async fn start(mut self) {
+        info!("Downloader thread is ready to receive download actions");
         loop {
             self.sequence = 0;
-            let action = download_rx.recv_async().await?;
+            let action = match self.actions_rx.recv_async().await {
+                Ok(a) => a,
+                Err(e) => {
+                    error!("Downloader thread had to stop: {e}");
+                    break;
+                }
+            };
             self.action_id = action.action_id.clone();
 
             let duration = match self.timeouts.get(&action.name) {
@@ -179,20 +185,22 @@ impl FileDownloader {
 
     // Retry mechanism tries atleast 3 times before returning an error
     async fn retry_thrice(&mut self, action: Action) -> Result<(), Error> {
-        let mut res = Ok(());
         for _ in 0..3 {
             match self.run(action.clone()).await {
-                Ok(_) => return Ok(()),
+                Ok(_) => break,
                 Err(e) => {
-                    error!("Download failed: {e}");
-                    res = Err(e);
+                    if let Error::Reqwest(e) = e {
+                        error!("Download failed: {e}");
+                    } else {
+                        return Err(e);
+                    }
                 }
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
             warn!("Retrying download");
         }
 
-        res
+        Ok(())
     }
 
     // Accepts a download `Action` and performs necessary data extraction to actually download the file
@@ -287,18 +295,17 @@ impl FileDownloader {
     ) -> Result<(File, PathBuf), Error> {
         let mut file_path = download_path.to_owned();
         file_path.push(file_name);
-        let file_path = file_path.as_path();
         // NOTE: if file_path is occupied by a directory due to previous working of uplink, remove it
-        if let Ok(f) = metadata(file_path) {
+        if let Ok(f) = metadata(&file_path) {
             if f.is_dir() {
-                remove_dir_all(file_path)?;
+                remove_dir_all(&file_path)?;
             }
         }
-        let file = File::create(file_path)?;
+        let file = File::create(&file_path)?;
         #[cfg(unix)]
         file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666))?;
 
-        Ok((file, file_path.into()))
+        Ok((file, file_path))
     }
 
     /// Downloads from server and stores into file
@@ -412,11 +419,12 @@ mod test {
         let (shutdown_handle, _) = bounded(1);
         let bridge_tx = BridgeTx { events_tx, shutdown_handle };
 
-        // Create channels to forward and push action_status on
-        let downloader = FileDownloader::new(Arc::new(config), bridge_tx).unwrap();
+        // Create channels to forward and push actions on
+        let (download_tx, download_rx) = bounded(1);
+        let downloader = FileDownloader::new(Arc::new(config), download_rx, bridge_tx).unwrap();
 
         // Start FileDownloader in separate thread
-        std::thread::spawn(|| downloader.start().unwrap());
+        std::thread::spawn(|| downloader.start());
 
         // Create a firmware update action
         let download_update = DownloadFile {
@@ -431,16 +439,10 @@ mod test {
         path.push("test.txt");
         expected_forward.download_path = Some(path);
         let download_action = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
-        };
-
-        let download_tx = match events_rx.recv().unwrap() {
-            Event::RegisterActionRoute(_, download_tx) => download_tx,
-            e => unreachable!("Unexpected event: {e:#?}"),
         };
 
         std::thread::sleep(Duration::from_millis(10));
@@ -489,15 +491,16 @@ mod test {
             path,
         };
         let config = config(downloader_cfg.clone());
-        let (events_tx, events_rx) = flume::bounded(3);
+        let (events_tx, _) = flume::bounded(3);
         let (shutdown_handle, _) = bounded(1);
         let bridge_tx = BridgeTx { events_tx, shutdown_handle };
 
-        // Create channels to forward and push action_status on
-        let downloader = FileDownloader::new(Arc::new(config), bridge_tx).unwrap();
+        // Create channels to forward and push actions on
+        let (download_tx, download_rx) = bounded(1);
+        let downloader = FileDownloader::new(Arc::new(config), download_rx, bridge_tx).unwrap();
 
         // Start FileDownloader in separate thread
-        std::thread::spawn(|| downloader.start().unwrap());
+        std::thread::spawn(|| downloader.start());
 
         // Create a firmware update action
         let download_update = DownloadFile {
@@ -512,16 +515,10 @@ mod test {
         path.push("test.txt");
         expected_forward.download_path = Some(path);
         let download_action = Action {
-            device_id: None,
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
-        };
-
-        let download_tx = match events_rx.recv().unwrap() {
-            Event::RegisterActionRoute(_, download_tx) => download_tx,
-            e => unreachable!("Unexpected event: {e:#?}"),
         };
 
         std::thread::sleep(Duration::from_millis(10));
