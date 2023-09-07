@@ -40,6 +40,12 @@ fn default_persistence_path() -> PathBuf {
     path
 }
 
+fn default_download_path() -> PathBuf {
+    let mut path = current_dir().expect("Couldn't figure out current directory");
+    path.push(".downloads");
+    path
+}
+
 // Automatically assigns port 5050 for default main app, if left unconfigured
 fn default_tcpapps() -> HashMap<String, AppConfig> {
     let mut apps = HashMap::new();
@@ -125,6 +131,7 @@ pub struct SimulatorConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DownloaderConfig {
+    #[serde(default = "default_download_path")]
     pub path: PathBuf,
     #[serde(default)]
     pub actions: Vec<ActionRoute>,
@@ -132,7 +139,7 @@ pub struct DownloaderConfig {
 
 impl Default for DownloaderConfig {
     fn default() -> Self {
-        Self { path: PathBuf::from("/var/tmp/ota-file"), actions: vec![] }
+        Self { path: default_download_path(), actions: vec![] }
     }
 }
 
