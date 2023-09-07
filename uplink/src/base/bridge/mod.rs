@@ -154,13 +154,8 @@ impl Bridge {
 
     pub fn register_action_route(&mut self, route: ActionRoute) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(1);
-        let ActionRoute { name, timeout } = route;
-        let duration = Duration::from_secs(timeout);
-        let action_router = ActionRouter { actions_tx, duration };
+        self.insert_route(route, actions_tx.clone());
 
-        if self.action_routes.insert(name.clone(), action_router).is_some() {
-            panic!("Action Route clash: {name}");
-        }
         actions_rx
     }
 
@@ -174,17 +169,23 @@ impl Bridge {
         }
 
         let (actions_tx, actions_rx) = bounded(1);
-
         for route in routes {
-            let ActionRoute { name, timeout } = route;
-            let duration = Duration::from_secs(timeout);
-            let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
-            if self.action_routes.insert(name.clone(), action_router).is_some() {
-                panic!("Action Route clash: {name}");
-            }
+            self.insert_route(route, actions_tx.clone());
         }
 
         Some(actions_rx)
+    }
+
+    fn insert_route(
+        &mut self,
+        ActionRoute { name, timeout }: ActionRoute,
+        actions_tx: Sender<Action>,
+    ) {
+        let duration = Duration::from_secs(timeout);
+        let action_router = ActionRouter { actions_tx, duration };
+        if self.action_routes.insert(name.clone(), action_router).is_some() {
+            panic!("Action Route clash: {name}");
+        }
     }
 
     pub fn tx(&mut self) -> BridgeTx {
