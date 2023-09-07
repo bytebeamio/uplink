@@ -315,13 +315,13 @@ impl FileDownloader {
         mut file: File,
         content_length: usize,
     ) -> Result<(), Error> {
-        let start = Instant::now();
         let mut downloaded = 0;
         let mut next = 1;
         let mut stream = resp.bytes_stream();
+        let start = Instant::now();
         let size = human_bytes(content_length as f64);
 
-        debug!("Download started: size = {size}",);
+        debug!("Download started: size = {size}");
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {

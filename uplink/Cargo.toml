@@ -33,7 +33,7 @@ regex = "1.7.1"
 tracing = { version="0.1", features=["log"] }
 tracing-subscriber = { version="=0.3.14", features=["env-filter"] }
 
-# collectors
+# built-in collectors
 # tunshell
 tokio-compat-02 = "0.2.0"
 tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch" }
@@ -41,19 +41,18 @@ tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch =
 fake = { version = "2.5.0", features = ["derive"] }
 rand = "0.8"
 # downloader
-futures-util = "0.3"
-reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
 fs2 = "0.4"
+futures-util = "0.3"
+human_bytes = "0.4"
+reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
 # systemstats
 sysinfo = "0.26"
 # logcat
 lazy_static = "1.4.0"
 # installer
 tar = "0.4"
-
 # device_shadow
 surge-ping = "0.8"
-human_bytes = "0.4"
 
 [target.'cfg(target_os = "android")'.dependencies]
 time = "0.3"
