@@ -50,7 +50,8 @@
 use bytes::BytesMut;
 use flume::Receiver;
 use futures_util::StreamExt;
-use log::{error, info, warn};
+use human_bytes::human_bytes;
+use log::{debug, error, info, trace, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
 use tokio::time::timeout;
@@ -58,7 +59,7 @@ use tokio::time::timeout;
 use std::collections::HashMap;
 use std::fs::{metadata, remove_dir_all, File};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 #[cfg(unix)]
 use std::{
     fs::{create_dir, set_permissions, Permissions},
@@ -295,6 +296,10 @@ impl FileDownloader {
         let mut downloaded = 0;
         let mut next = 1;
         let mut stream = resp.bytes_stream();
+        let start = Instant::now();
+        let size = human_bytes(content_length as f64);
+
+        debug!("Download started: size = {size}");
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
@@ -304,10 +309,18 @@ impl FileDownloader {
 
             // Calculate percentage on the basis of content_length
             let percentage = 99 * downloaded / content_length;
+            trace!(
+                "Downloading: size = {size}, percentage = {percentage}, elapsed = {}s",
+                start.elapsed().as_secs()
+            );
             // NOTE: ensure lesser frequency of action responses, once every percentage points
             if percentage >= next {
                 next += 1;
 
+                debug!(
+                    "Downloading: size = {size}, percentage = {percentage}, elapsed = {}s",
+                    start.elapsed().as_secs()
+                );
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
                 let status =
