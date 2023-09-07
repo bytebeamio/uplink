@@ -1,3 +1,4 @@
+use flume::Receiver;
 use serde::{Deserialize, Serialize};
 
 use std::io::{BufRead, BufReader};
@@ -6,7 +7,8 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::{base::clock, ActionResponse, ActionRoute, BridgeTx, Payload};
+use crate::base::{bridge::BridgeTx, clock};
+use crate::{Action, ActionResponse, Payload};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -97,8 +99,8 @@ pub struct LogEntry {
 }
 
 lazy_static::lazy_static! {
-    pub static ref LOGCAT_RE: regex::Regex = regex::Regex::new(r#"^(\S+ \S+) (\w)/([^(\s]*).+?:\s*(.*)$"#).unwrap();
-    pub static ref LOGCAT_TIME_RE: regex::Regex = regex::Regex::new(r#"^(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\.(\d+)$"#).unwrap();
+    pub static ref LOGCAT_RE: regex::Regex = regex::Regex::new(r"^(\S+ \S+) (\w)/([^(\s]*).+?:\s*(.*)$").unwrap();
+    pub static ref LOGCAT_TIME_RE: regex::Regex = regex::Regex::new(r"^(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\.(\d+)$").unwrap();
 }
 
 pub fn parse_logcat_time(s: &str) -> Option<u64> {
@@ -150,7 +152,9 @@ impl LogEntry {
 }
 
 pub struct Logcat {
+    config: LogcatConfig,
     kill_switch: Arc<Mutex<bool>>,
+    actions_rx: Receiver<Action>,
     bridge: BridgeTx,
 }
 
@@ -162,25 +166,20 @@ impl Drop for Logcat {
 }
 
 impl Logcat {
-    pub fn new(bridge: BridgeTx) -> Self {
+    pub fn new(config: LogcatConfig, actions_rx: Receiver<Action>, bridge: BridgeTx) -> Self {
         let kill_switch = Arc::new(Mutex::new(true));
 
-        Self { kill_switch, bridge }
+        Self { config, kill_switch, actions_rx, bridge }
     }
 
     /// On an android system, starts a logcat instance that reports to the logs stream for a given device+project id,
     /// that logcat instance is killed when this object is dropped. On any other system, it's a noop.
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(mut self, config: LogcatConfig) -> Result<(), Error> {
-        self.spawn_logger(config).await;
-
-        let log_rx = self
-            .bridge
-            .register_action_route(ActionRoute { name: "logcat_config".to_string(), timeout: 10 })
-            .await;
+    pub async fn start(mut self) -> Result<(), Error> {
+        self.spawn_logger(self.config.clone()).await;
 
         loop {
-            let action = log_rx.recv()?;
+            let action = self.actions_rx.recv()?;
             let mut config = serde_json::from_str::<LogcatConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
 

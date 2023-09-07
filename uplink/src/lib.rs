@@ -51,6 +51,10 @@ use base::monitor::Monitor;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
+#[cfg(target_os = "linux")]
+use collector::journalctl::JournalCtl;
+#[cfg(target_os = "android")]
+use collector::logcat::Logcat;
 use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
@@ -261,7 +265,7 @@ pub mod config {
 }
 
 pub use base::actions::{Action, ActionResponse};
-use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, StreamMetrics};
+use base::bridge::{Bridge, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
@@ -305,33 +309,18 @@ impl Uplink {
         })
     }
 
-    pub fn spawn(&mut self) -> Result<BridgeTx, Error> {
-        let config = self.config.clone();
-        let mut bridge = Bridge::new(
+    pub fn configure_bridge(&mut self) -> Bridge {
+        Bridge::new(
             self.config.clone(),
             self.data_tx.clone(),
             self.stream_metrics_tx(),
             self.action_rx.clone(),
             self.shutdown_tx.clone(),
-        );
+        )
+    }
 
-        let bridge_tx = bridge.tx();
+    pub fn spawn(&mut self, mut bridge: Bridge) -> Result<(), Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
-
-        // Bridge thread to batch data and redicet actions
-        thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("bridge")
-                .enable_time()
-                .build()
-                .unwrap();
-
-            rt.block_on(async move {
-                if let Err(e) = bridge.start().await {
-                    error!("Bridge stopped!! Error = {:?}", e);
-                }
-            })
-        });
 
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
         let mqtt_client = mqtt.client();
@@ -373,60 +362,6 @@ impl Uplink {
             })
         });
 
-        let tunshell_client = TunshellClient::new(bridge_tx.clone());
-        thread::spawn(move || tunshell_client.start());
-
-        let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
-        thread::spawn(move || file_downloader.start());
-
-        let device_shadow = DeviceShadow::new(config.device_shadow.clone(), bridge_tx.clone());
-        thread::spawn(move || device_shadow.start());
-
-        if let Some(config) = &config.ota_installer {
-            let ota_installer = OTAInstaller::new(config.clone(), bridge_tx.clone());
-            thread::spawn(move || ota_installer.start());
-        }
-
-        #[cfg(target_os = "linux")]
-        if let Some(config) = &config.logging {
-            let logger = collector::journalctl::JournalCtl::new(bridge_tx.clone());
-            let config = config.clone();
-            thread::spawn(move || logger.start(config));
-        }
-
-        #[cfg(target_os = "android")]
-        if let Some(config) = &config.logging {
-            let logger = collector::logcat::Logcat::new(bridge_tx.clone());
-            let config = config.clone();
-            thread::spawn(move || logger.start(config));
-        }
-
-        if config.system_stats.enabled {
-            let stat_collector = StatCollector::new(config.clone(), bridge_tx.clone());
-            thread::spawn(move || stat_collector.start());
-        }
-
-        let process_handler = ProcessHandler::new(bridge_tx.clone());
-        let processes = config.processes.clone();
-        thread::spawn(move || process_handler.start(processes));
-
-        let script_runner = ScriptRunner::new(bridge_tx.clone());
-        let routes: Vec<ActionRoute> = config.script_runner.clone();
-        thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("script_runner")
-                .enable_io()
-                .enable_time()
-                .build()
-                .unwrap();
-
-            rt.block_on(async move {
-                if let Err(e) = script_runner.start(routes).await {
-                    error!("Monitor stopped!! Error = {:?}", e);
-                }
-            })
-        });
-
         let monitor = Monitor::new(
             self.config.clone(),
             mqtt_client,
@@ -450,7 +385,97 @@ impl Uplink {
             })
         });
 
-        Ok(bridge_tx)
+        // Bridge thread to batch data and redicet actions
+        thread::spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .thread_name("bridge")
+                .enable_time()
+                .build()
+                .unwrap();
+
+            rt.block_on(async move {
+                if let Err(e) = bridge.start().await {
+                    error!("Bridge stopped!! Error = {:?}", e);
+                }
+            })
+        });
+
+        Ok(())
+    }
+
+    pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
+        let bridge_tx = bridge.tx();
+
+        let route = ActionRoute { name: "launch_shell".to_owned(), timeout: 10 };
+        let actions_rx = bridge.register_action_route(route);
+        let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
+        thread::spawn(move || tunshell_client.start());
+
+        if let Some(actions_rx) = bridge.register_action_routes(&self.config.downloader.actions) {
+            let file_downloader =
+                FileDownloader::new(self.config.clone(), actions_rx, bridge_tx.clone())?;
+            thread::spawn(move || file_downloader.start());
+        }
+
+        let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
+        thread::spawn(move || device_shadow.start());
+
+        if let Some(config) = self.config.ota_installer.clone() {
+            if let Some(actions_rx) = bridge.register_action_routes(&config.actions) {
+                let ota_installer = OTAInstaller::new(config, actions_rx, bridge_tx.clone());
+                thread::spawn(move || ota_installer.start());
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        if let Some(config) = self.config.logging.clone() {
+            let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
+            let actions_rx = bridge.register_action_route(route);
+            let logger = JournalCtl::new(config.clone(), actions_rx, bridge_tx.clone());
+            thread::spawn(move || {
+                if let Err(e) = logger.start() {
+                    error!("Logger stopped!! Error = {:?}", e);
+                }
+            });
+        }
+
+        #[cfg(target_os = "android")]
+        if let Some(config) = self.config.logging.clone() {
+            let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
+            let actions_rx = bridge.register_action_route(route);
+            let logger = Logcat::new(config.clone(), actions_rx, bridge_tx.clone());
+            thread::spawn(move || {
+                if let Err(e) = logger.start() {
+                    error!("Logger stopped!! Error = {:?}", e);
+                }
+            });
+        }
+
+        if self.config.system_stats.enabled {
+            let stat_collector = StatCollector::new(self.config.clone(), bridge_tx.clone());
+            thread::spawn(move || stat_collector.start());
+        };
+
+        if let Some(actions_rx) = bridge.register_action_routes(&self.config.processes) {
+            let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
+            thread::spawn(move || {
+                if let Err(e) = process_handler.start() {
+                    error!("Process handler stopped!! Error = {:?}", e);
+                }
+            });
+        }
+
+        if let Some(actions_rx) = bridge.register_action_routes(&self.config.script_runner) {
+            let script_runner =
+                ScriptRunner::new(self.config.script_runner.clone(), actions_rx, bridge_tx.clone());
+            thread::spawn(move || {
+                if let Err(e) = script_runner.start() {
+                    error!("Script runner stopped!! Error = {:?}", e);
+                }
+            });
+        }
+
+        Ok(())
     }
 
     pub fn bridge_action_rx(&self) -> Receiver<Action> {

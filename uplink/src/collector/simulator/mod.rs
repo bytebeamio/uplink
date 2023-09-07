@@ -2,7 +2,7 @@ use crate::base::bridge::{BridgeTx, Payload};
 use crate::base::{clock, SimulatorConfig};
 use crate::Action;
 use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
-use flume::{bounded, Sender};
+use flume::{bounded, Receiver, Sender};
 use log::{error, info};
 use rand::Rng;
 use serde::Serialize;
@@ -117,11 +117,13 @@ pub fn spawn_data_simulators(device: DeviceData, tx: Sender<Payload>) {
 }
 
 #[tokio::main(flavor = "current_thread")]
-pub async fn start(config: SimulatorConfig, bridge_tx: BridgeTx) -> Result<(), Error> {
+pub async fn start(
+    config: SimulatorConfig,
+    bridge_tx: BridgeTx,
+    actions_rx: Option<Receiver<Action>>,
+) -> Result<(), Error> {
     let path = read_gps_path(&config.gps_paths);
     let device = new_device_data(path);
-
-    let actions_rx = bridge_tx.register_action_routes(&config.actions).await;
 
     let (tx, rx) = bounded(10);
     spawn_data_simulators(device, tx.clone());

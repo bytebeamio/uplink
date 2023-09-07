@@ -1,4 +1,4 @@
-use flume::{RecvError, SendError};
+use flume::{Receiver, RecvError, SendError};
 use log::{debug, error, info, warn};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -8,7 +8,7 @@ use tokio::time::timeout;
 
 use super::downloader::DownloadFile;
 use crate::base::{bridge::BridgeTx, ActionRoute};
-use crate::{ActionResponse, Package};
+use crate::{Action, ActionResponse, Package};
 
 use std::collections::HashMap;
 use std::io;
@@ -35,15 +35,23 @@ pub enum Error {
 /// Multiple scripts can't be run in parallel. It can also send progress, result and errors to the platform by using
 /// the JSON formatted output over STDOUT.
 pub struct ScriptRunner {
-    // to receive actions and send responses back to bridge
+    // to receive actions
+    actions_rx: Receiver<Action>,
+    // to send responses back to bridge
     bridge_tx: BridgeTx,
     timeouts: HashMap<String, Duration>,
     sequence: u32,
 }
 
 impl ScriptRunner {
-    pub fn new(bridge_tx: BridgeTx) -> Self {
-        Self { bridge_tx, timeouts: HashMap::new(), sequence: 0 }
+    pub fn new(
+        routes: Vec<ActionRoute>,
+        actions_rx: Receiver<Action>,
+        bridge_tx: BridgeTx,
+    ) -> Self {
+        let timeouts =
+            routes.iter().map(|s| (s.name.to_owned(), Duration::from_secs(s.timeout))).collect();
+        Self { actions_rx, bridge_tx, timeouts, sequence: 0 }
     }
 
     /// Spawn a child process to run the script with sh
@@ -92,19 +100,12 @@ impl ScriptRunner {
         Ok(())
     }
 
-    pub async fn start(mut self, routes: Vec<ActionRoute>) -> Result<(), Error> {
-        self.timeouts =
-            routes.iter().map(|s| (s.name.to_owned(), Duration::from_secs(s.timeout))).collect();
-
-        let action_rx = match self.bridge_tx.register_action_routes(routes).await {
-            Some(r) => r,
-            _ => return Ok(()),
-        };
-
+    #[tokio::main(flavor = "current_thread")]
+    pub async fn start(mut self) -> Result<(), Error> {
         info!("Script runner is ready");
 
         loop {
-            let action = action_rx.recv_async().await?;
+            let action = self.actions_rx.recv_async().await?;
             let command = match serde_json::from_str::<DownloadFile>(&action.payload) {
                 Ok(DownloadFile { download_path: Some(download_path), .. }) => download_path,
                 Ok(_) => {
@@ -156,32 +157,21 @@ mod tests {
     use std::thread;
 
     use super::*;
-    use crate::{
-        base::bridge::{ActionRouter, Event},
-        Action,
-    };
+    use crate::{base::bridge::Event, Action};
 
     use flume::bounded;
-    use tokio::runtime::Runtime;
 
     #[test]
     fn empty_payload() {
         let (events_tx, events_rx) = bounded(1);
         let (shutdown_handle, _) = bounded(1);
-        let script_runner = ScriptRunner::new(BridgeTx { events_tx, shutdown_handle });
+        let (actions_tx, actions_rx) = bounded(1);
         let routes = vec![ActionRoute { name: "test".to_string(), timeout: 100 }];
+        let script_runner =
+            ScriptRunner::new(routes, actions_rx, BridgeTx { events_tx, shutdown_handle });
 
-        thread::spawn(move || {
-            Runtime::new().unwrap().block_on(async {
-                script_runner.start(routes).await.unwrap();
-            })
-        });
+        thread::spawn(move || script_runner.start().unwrap());
 
-        let Event::RegisterActionRoute(_, ActionRouter { actions_tx, .. }) =
-            events_rx.recv().unwrap()
-        else {
-            unreachable!()
-        };
         actions_tx
             .send(Action {
                 action_id: "1".to_string(),
@@ -203,20 +193,13 @@ mod tests {
     fn missing_path() {
         let (events_tx, events_rx) = bounded(1);
         let (shutdown_handle, _) = bounded(1);
-        let script_runner = ScriptRunner::new(BridgeTx { events_tx, shutdown_handle });
+        let (actions_tx, actions_rx) = bounded(1);
         let routes = vec![ActionRoute { name: "test".to_string(), timeout: 100 }];
+        let script_runner =
+            ScriptRunner::new(routes, actions_rx, BridgeTx { events_tx, shutdown_handle });
 
-        thread::spawn(move || {
-            Runtime::new().unwrap().block_on(async {
-                script_runner.start(routes).await.unwrap();
-            })
-        });
+        thread::spawn(move || script_runner.start().unwrap());
 
-        let Event::RegisterActionRoute(_, ActionRouter { actions_tx, .. }) =
-            events_rx.recv().unwrap()
-        else {
-            unreachable!()
-        };
         actions_tx
             .send(Action {
                 action_id: "1".to_string(),
