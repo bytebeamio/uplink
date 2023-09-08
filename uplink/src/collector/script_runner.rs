@@ -165,15 +165,20 @@ mod tests {
 
     use flume::bounded;
 
-    #[test]
-    fn empty_payload() {
+    fn create_bridge() -> (BridgeTx, Receiver<ActionResponse>) {
         let (data_tx, _) = flume::bounded(2);
         let (status_tx, status_rx) = flume::bounded(2);
         let (shutdown_handle, _) = bounded(1);
-        let bridge_tx = BridgeTx {
-            data: DataBridgeTx { data_tx },
-            actions: ActionsBridgeTx { status_tx, shutdown_handle },
-        };
+        let data = DataBridgeTx { data_tx, shutdown_handle };
+        let (shutdown_handle, _) = bounded(1);
+        let actions = ActionsBridgeTx { status_tx, shutdown_handle };
+
+        (BridgeTx { data, actions }, status_rx)
+    }
+
+    #[test]
+    fn empty_payload() {
+        let (bridge_tx, status_rx) = create_bridge();
 
         let (actions_tx, actions_rx) = bounded(1);
         let routes = vec![ActionRoute { name: "test".to_string(), timeout: 100 }];
@@ -196,13 +201,7 @@ mod tests {
 
     #[test]
     fn missing_path() {
-        let (data_tx, _) = flume::bounded(2);
-        let (status_tx, status_rx) = flume::bounded(2);
-        let (shutdown_handle, _) = bounded(1);
-        let bridge_tx = BridgeTx {
-            data: DataBridgeTx { data_tx },
-            actions: ActionsBridgeTx { status_tx, shutdown_handle },
-        };
+        let (bridge_tx, status_rx) = create_bridge();
 
         let (actions_tx, actions_rx) = bounded(1);
         let routes = vec![ActionRoute { name: "test".to_string(), timeout: 100 }];

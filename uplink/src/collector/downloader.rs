@@ -405,6 +405,17 @@ mod test {
         }
     }
 
+    fn create_bridge() -> (BridgeTx, Receiver<ActionResponse>) {
+        let (data_tx, _) = flume::bounded(2);
+        let (status_tx, status_rx) = flume::bounded(2);
+        let (shutdown_handle, _) = bounded(1);
+        let data = DataBridgeTx { data_tx, shutdown_handle };
+        let (shutdown_handle, _) = bounded(1);
+        let actions = ActionsBridgeTx { status_tx, shutdown_handle };
+
+        (BridgeTx { data, actions }, status_rx)
+    }
+
     #[test]
     // Test file downloading capabilities of FileDownloader by downloading the uplink logo from GitHub
     fn download_file() {
@@ -418,13 +429,7 @@ mod test {
             path,
         };
         let config = config(downloader_cfg.clone());
-        let (data_tx, _) = flume::bounded(2);
-        let (status_tx, status_rx) = flume::bounded(2);
-        let (shutdown_handle, _) = bounded(1);
-        let bridge_tx = BridgeTx {
-            data: DataBridgeTx { data_tx },
-            actions: ActionsBridgeTx { status_tx, shutdown_handle },
-        };
+        let (bridge_tx, status_rx) = create_bridge();
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
@@ -492,13 +497,7 @@ mod test {
             path,
         };
         let config = config(downloader_cfg.clone());
-        let (data_tx, _) = flume::bounded(2);
-        let (status_tx, _) = flume::bounded(2);
-        let (shutdown_handle, _) = bounded(1);
-        let bridge_tx = BridgeTx {
-            data: DataBridgeTx { data_tx },
-            actions: ActionsBridgeTx { status_tx, shutdown_handle },
-        };
+        let (bridge_tx, _) = create_bridge();
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
