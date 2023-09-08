@@ -598,6 +598,7 @@ mod tests {
         actions_tx.send(action_2).unwrap();
 
         let payload = data_rx.recv().unwrap();
+        let status = ActionResponse::from_payload(&payload).unwrap();
         // verify response is uplink occupied failure
         assert!(status.is_failed());
         assert_eq!(status.action_id, "2".to_owned());
