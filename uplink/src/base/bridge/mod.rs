@@ -41,6 +41,8 @@ pub enum Error {
     Busy,
 }
 
+struct RedirectionError(Action);
+
 pub trait Point: Send + Debug {
     fn sequence(&self) -> u32;
     fn timestamp(&self) -> u64;
@@ -369,39 +371,45 @@ impl Bridge {
         // Forward actions included in the config to the appropriate forward route, when
         // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
         if response.is_done() {
-            let fwd_name = match self.action_redirections.get(&inflight_action.action.name) {
-                Some(n) => n,
-                None => {
-                    // NOTE: send success reponse for actions that don't have redirections configured
-                    warn!("Action redirection for {} not configured", inflight_action.action.name);
-                    let response = ActionResponse::success(&inflight_action.id);
-                    self.streams.forward(response.as_payload()).await;
+            let mut action = inflight_action.action.clone();
 
-                    self.clear_current_action();
-                    return;
-                }
-            };
-
-            if let Some(action) = response.done_response {
-                inflight_action.action = action;
+            if let Some(a) = response.done_response {
+                action = a;
             }
 
-            let mut fwd_action = inflight_action.action.clone();
-            fwd_action.name = fwd_name.to_owned();
+            if let Err(RedirectionError(action)) = self.redirect_action(action).await {
+                // NOTE: send success reponse for actions that don't have redirections configured
+                warn!("Action redirection is not configured for: {:?}", action);
+                let response = ActionResponse::success(&action.action_id);
+                self.streams.forward(response.as_payload()).await;
+
+                self.clear_current_action();
+            }
+        }
+    }
+
+    async fn redirect_action(&mut self, mut action: Action) -> Result<(), RedirectionError> {
+        let fwd_name = self
+            .action_redirections
+            .get(&action.name)
+            .ok_or_else(|| RedirectionError(action.clone()))?;
 
         debug!(
             "Redirecting action: {} ~> {}; action_id = {}",
-            infligh_action.action.name, fwd_action.name, fwd_action.action_id,
+            action.name, fwd_name, action.action_id,
         );
 
-            if let Err(e) = self.try_route_action(fwd_action.clone()) {
-                error!("Failed to route action to app. Error = {:?}", e);
-                self.forward_action_error(fwd_action, e).await;
+        action.name = fwd_name.to_owned();
 
-                // Remove action because it couldn't be forwarded
-                self.clear_current_action()
-            }
+        if let Err(e) = self.try_route_action(action.clone()) {
+            error!("Failed to route action to app. Error = {:?}", e);
+            self.forward_action_error(action, e).await;
+
+            // Remove action because it couldn't be forwarded
+            self.clear_current_action()
         }
+
+        Ok(())
     }
 
     async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
