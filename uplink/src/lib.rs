@@ -314,7 +314,7 @@ impl Uplink {
         )
     }
 
-    pub fn spawn(&mut self, mut bridge: Bridge) -> Result<(), Error> {
+    pub fn spawn(&mut self, bridge: Bridge) -> Result<(), Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
 
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
@@ -380,17 +380,34 @@ impl Uplink {
             })
         });
 
-        // Bridge thread to batch data and redicet actions
+        let Bridge { data: mut data_lane, actions: mut actions_lane } = bridge;
+
+        // Bridge thread to direct actions
         thread::spawn(|| {
             let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("bridge")
+                .thread_name("bridge_actions_lane")
                 .enable_time()
                 .build()
                 .unwrap();
 
             rt.block_on(async move {
-                if let Err(e) = bridge.start().await {
-                    error!("Bridge stopped!! Error = {:?}", e);
+                if let Err(e) = actions_lane.start().await {
+                    error!("Actions lane stopped!! Error = {:?}", e);
+                }
+            })
+        });
+
+        // Bridge thread to batch and forward data
+        thread::spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .thread_name("bridge_data_lane")
+                .enable_time()
+                .build()
+                .unwrap();
+
+            rt.block_on(async move {
+                if let Err(e) = data_lane.start().await {
+                    error!("Data lane stopped!! Error = {:?}", e);
                 }
             })
         });

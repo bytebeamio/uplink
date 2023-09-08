@@ -88,15 +88,15 @@ impl Streams {
         }
     }
 
-    /// Flush all streams, use on bridge shutdown
-    pub async fn flush_all(&mut self) {
-        for (stream_name, stream) in self.map.iter_mut() {
-            match stream.flush().await {
-                Err(e) => error!("Couldn't flush stream = {stream_name}; Error = {e}"),
-                _ => info!("Flushed stream = {stream_name}"),
-            }
-        }
-    }
+    // /// Flush all streams, use on bridge shutdown
+    // pub async fn flush_all(&mut self) {
+    //     for (stream_name, stream) in self.map.iter_mut() {
+    //         match stream.flush().await {
+    //             Err(e) => error!("Couldn't flush stream = {stream_name}; Error = {e}"),
+    //             _ => info!("Flushed stream = {stream_name}"),
+    //         }
+    //     }
+    // }
 
     // Flush stream/partitions that timeout
     pub async fn flush_stream(&mut self, stream: &str) -> Result<(), stream::Error> {
