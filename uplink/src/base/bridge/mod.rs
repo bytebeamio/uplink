@@ -321,22 +321,21 @@ impl Bridge {
 
     /// Handle received actions
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
-        match self.action_routes.get(&action.name) {
-            Some(route) => {
-                let duration =
-                    route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
-                // current action left unchanged in case of forwarded action bein
-                if action.name == TUNSHELL_ACTION {
-                    self.parallel_actions.insert(action.action_id);
-                    return Ok(());
-                }
+        let route = self
+            .action_routes
+            .get(&action.name)
+            .ok_or_else(|| Error::NoRoute(action.name.clone()))?;
 
-                self.current_action = Some(CurrentAction::new(action, duration));
-
-                Ok(())
-            }
-            None => Err(Error::NoRoute(action.name)),
+        let duration = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
+        // current action left unchanged in case of forwarded action bein
+        if action.name == TUNSHELL_ACTION {
+            self.parallel_actions.insert(action.action_id);
+            return Ok(());
         }
+
+        self.current_action = Some(CurrentAction::new(action, duration));
+
+        Ok(())
     }
 
     async fn forward_action_response(&mut self, response: ActionResponse) {
