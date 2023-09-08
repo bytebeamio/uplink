@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
 
 use super::data_lane::DataBridgeTx;
+use super::ActionBridgeShutdown;
 use crate::base::ActionRoute;
 use crate::{Action, ActionResponse, Config};
 
@@ -35,11 +36,6 @@ pub enum Error {
 
 struct RedirectionError(Action);
 
-/// Commands that can be used to remotely control bridge
-pub(crate) enum BridgeCtrl {
-    Shutdown,
-}
-
 pub struct ActionsBridge {
     /// All configuration
     config: Arc<Config>,
@@ -60,8 +56,8 @@ pub struct ActionsBridge {
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
     parallel_actions: HashSet<String>,
-    ctrl_rx: Receiver<BridgeCtrl>,
-    ctrl_tx: Sender<BridgeCtrl>,
+    ctrl_rx: Receiver<ActionBridgeShutdown>,
+    ctrl_tx: Sender<ActionBridgeShutdown>,
     shutdown_handle: Sender<()>,
 }
 
@@ -414,7 +410,7 @@ impl ActionRouter {
 pub struct ActionsBridgeTx {
     // Handle for apps to send action status to bridge
     pub(crate) status_tx: Sender<ActionResponse>,
-    pub(crate) shutdown_handle: Sender<BridgeCtrl>,
+    pub(crate) shutdown_handle: Sender<ActionBridgeShutdown>,
 }
 
 impl ActionsBridgeTx {
@@ -423,7 +419,7 @@ impl ActionsBridgeTx {
     }
 
     pub async fn trigger_shutdown(&self) {
-        self.shutdown_handle.send_async(BridgeCtrl::Shutdown).await.unwrap()
+        self.shutdown_handle.send_async(ActionBridgeShutdown).await.unwrap()
     }
 }
 
@@ -460,7 +456,8 @@ mod tests {
 
     fn create_bridge(config: Arc<Config>) -> (ActionsBridge, Sender<Action>, Receiver<Payload>) {
         let (data_tx, data_rx) = bounded(10);
-        let data_tx = DataBridgeTx { data_tx };
+        let (shutdown_handle, _) = bounded(1);
+        let data_tx = DataBridgeTx { data_tx, shutdown_handle };
         let (actions_tx, actions_rx) = bounded(10);
         let (shutdown_handle, _) = bounded(1);
         let bridge = ActionsBridge::new(config, data_tx, actions_rx, shutdown_handle);

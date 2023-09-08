@@ -1,6 +1,7 @@
 use flume::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::join;
 
 use std::{fmt::Debug, sync::Arc};
 
@@ -63,6 +64,12 @@ impl Point for Payload {
     }
 }
 
+/// Commands that can be used to remotely trigger action_lane shutdown
+pub(crate) struct ActionBridgeShutdown;
+
+/// Commands that can be used to remotely trigger data_lane shutdown
+pub(crate) struct DataBridgeShutdown;
+
 pub struct Bridge {
     pub(crate) data: DataBridge,
     pub(crate) actions: ActionsBridge,
@@ -117,6 +124,6 @@ impl BridgeTx {
     }
 
     pub async fn trigger_shutdown(&self) {
-        self.actions.trigger_shutdown().await
+        join!(self.actions.trigger_shutdown(), self.data.trigger_shutdown());
     }
 }

@@ -6,7 +6,7 @@ use tokio::{select, time::interval};
 
 use crate::Config;
 
-use super::{streams::Streams, Package, Payload, StreamMetrics};
+use super::{streams::Streams, DataBridgeShutdown, Package, Payload, StreamMetrics};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -23,6 +23,8 @@ pub struct DataBridge {
     data_rx: Receiver<Payload>,
     /// Handle to send data over streams
     streams: Streams,
+    ctrl_rx: Receiver<DataBridgeShutdown>,
+    ctrl_tx: Sender<DataBridgeShutdown>,
 }
 
 impl DataBridge {
@@ -33,12 +35,13 @@ impl DataBridge {
     ) -> Self {
         let (data_tx, data_rx) = bounded(10);
         let streams = Streams::new(config.clone(), package_tx, metrics_tx);
+        let (ctrl_tx, ctrl_rx) = bounded(1);
 
-        Self { data_tx, data_rx, config, streams }
+        Self { data_tx, data_rx, config, streams, ctrl_rx, ctrl_tx }
     }
 
     pub fn tx(&self) -> DataBridgeTx {
-        DataBridgeTx { data_tx: self.data_tx.clone() }
+        DataBridgeTx { data_tx: self.data_tx.clone(), shutdown_handle: self.ctrl_tx.clone() }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -63,6 +66,12 @@ impl DataBridge {
                         debug!("Failed to flush stream metrics. Error = {}", e);
                     }
                 }
+                // Handle a shutdown signal
+                _ = self.ctrl_rx.recv_async() => {
+                    self.streams.flush_all().await;
+
+                    return Ok(())
+                }
             }
         }
     }
@@ -72,6 +81,7 @@ impl DataBridge {
 pub struct DataBridgeTx {
     // Handle for apps to send action status to bridge
     pub(crate) data_tx: Sender<Payload>,
+    pub(crate) shutdown_handle: Sender<DataBridgeShutdown>,
 }
 
 impl DataBridgeTx {
@@ -81,5 +91,9 @@ impl DataBridgeTx {
 
     pub fn send_payload_sync(&self, payload: Payload) {
         self.data_tx.send(payload).unwrap()
+    }
+
+    pub async fn trigger_shutdown(&self) {
+        self.shutdown_handle.send_async(DataBridgeShutdown).await.unwrap()
     }
 }
