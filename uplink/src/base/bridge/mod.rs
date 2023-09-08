@@ -13,7 +13,7 @@ mod streams;
 
 use crate::{Action, ActionResponse, ActionRoute, Config};
 
-use self::{
+pub use self::{
     actions_lane::{ActionsBridge, ActionsBridgeTx},
     data_lane::{DataBridge, DataBridgeTx},
 };
@@ -99,8 +99,8 @@ impl Bridge {
 
 #[derive(Debug, Clone)]
 pub struct BridgeTx {
-    data: DataBridgeTx,
-    actions: ActionsBridgeTx,
+    pub data: DataBridgeTx,
+    pub actions: ActionsBridgeTx,
 }
 
 impl BridgeTx {

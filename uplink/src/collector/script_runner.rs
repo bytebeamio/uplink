@@ -158,19 +158,26 @@ mod tests {
     use std::thread;
 
     use super::*;
-    use crate::{base::bridge::Event, Action};
+    use crate::{
+        base::bridge::{ActionsBridgeTx, DataBridgeTx},
+        Action,
+    };
 
     use flume::bounded;
 
     #[test]
     fn empty_payload() {
-        let (events_tx, events_rx) = bounded(1);
+        let (data_tx, _) = flume::bounded(2);
+        let (status_tx, status_rx) = flume::bounded(2);
         let (shutdown_handle, _) = bounded(1);
+        let bridge_tx = BridgeTx {
+            data: DataBridgeTx { data_tx },
+            actions: ActionsBridgeTx { status_tx, shutdown_handle },
+        };
+
         let (actions_tx, actions_rx) = bounded(1);
         let routes = vec![ActionRoute { name: "test".to_string(), timeout: 100 }];
-        let script_runner =
-            ScriptRunner::new(routes, actions_rx, BridgeTx { events_tx, shutdown_handle });
-
+        let script_runner = ScriptRunner::new(routes, actions_rx, bridge_tx);
         thread::spawn(move || script_runner.start().unwrap());
 
         actions_tx
@@ -182,22 +189,24 @@ mod tests {
             })
             .unwrap();
 
-        let Event::ActionResponse(ActionResponse { state, errors, .. }) = events_rx.recv().unwrap()
-        else {
-            unreachable!()
-        };
+        let ActionResponse { state, errors, .. } = status_rx.recv().unwrap();
         assert_eq!(state, "Failed");
         assert_eq!(errors, ["Failed to deserialize action payload: \"EOF while parsing a value at line 1 column 0\"; payload: \"\""]);
     }
 
     #[test]
     fn missing_path() {
-        let (events_tx, events_rx) = bounded(1);
+        let (data_tx, _) = flume::bounded(2);
+        let (status_tx, status_rx) = flume::bounded(2);
         let (shutdown_handle, _) = bounded(1);
+        let bridge_tx = BridgeTx {
+            data: DataBridgeTx { data_tx },
+            actions: ActionsBridgeTx { status_tx, shutdown_handle },
+        };
+
         let (actions_tx, actions_rx) = bounded(1);
         let routes = vec![ActionRoute { name: "test".to_string(), timeout: 100 }];
-        let script_runner =
-            ScriptRunner::new(routes, actions_rx, BridgeTx { events_tx, shutdown_handle });
+        let script_runner = ScriptRunner::new(routes, actions_rx, bridge_tx);
 
         thread::spawn(move || script_runner.start().unwrap());
 
@@ -211,10 +220,7 @@ mod tests {
             })
             .unwrap();
 
-        let Event::ActionResponse(ActionResponse { state, errors, .. }) = events_rx.recv().unwrap()
-        else {
-            unreachable!()
-        };
+        let ActionResponse { state, errors, .. } = status_rx.recv().unwrap();
         assert_eq!(state, "Failed");
         assert_eq!(errors, ["Action payload doesn't contain path for script execution; payload: \"{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}\""]);
     }

@@ -386,7 +386,10 @@ mod test {
     use std::{collections::HashMap, time::Duration};
 
     use super::*;
-    use crate::base::{bridge::Event, ActionRoute, DownloaderConfig, MqttConfig};
+    use crate::base::{
+        bridge::{ActionsBridgeTx, DataBridgeTx},
+        ActionRoute, DownloaderConfig, MqttConfig,
+    };
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 
@@ -415,9 +418,13 @@ mod test {
             path,
         };
         let config = config(downloader_cfg.clone());
-        let (events_tx, events_rx) = flume::bounded(2);
+        let (data_tx, _) = flume::bounded(2);
+        let (status_tx, status_rx) = flume::bounded(2);
         let (shutdown_handle, _) = bounded(1);
-        let bridge_tx = BridgeTx { events_tx, shutdown_handle };
+        let bridge_tx = BridgeTx {
+            data: DataBridgeTx { data_tx },
+            actions: ActionsBridgeTx { status_tx, shutdown_handle },
+        };
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
@@ -451,19 +458,13 @@ mod test {
         download_tx.try_send(download_action).unwrap();
 
         // Collect action_status and ensure it is as expected
-        let status = match events_rx.recv().unwrap() {
-            Event::ActionResponse(status) => status,
-            e => unreachable!("Unexpected event: {e:#?}"),
-        };
+        let status = status_rx.recv().unwrap();
         assert_eq!(status.state, "Downloading");
         let mut progress = 0;
 
         // Collect and ensure forwarded action contains expected info
         loop {
-            let status = match events_rx.recv().unwrap() {
-                Event::ActionResponse(status) => status,
-                e => unreachable!("Unexpected event: {e:#?}"),
-            };
+            let status = status_rx.recv().unwrap();
 
             assert!(progress <= status.progress);
             progress = status.progress;
@@ -491,9 +492,13 @@ mod test {
             path,
         };
         let config = config(downloader_cfg.clone());
-        let (events_tx, _) = flume::bounded(3);
+        let (data_tx, _) = flume::bounded(2);
+        let (status_tx, _) = flume::bounded(2);
         let (shutdown_handle, _) = bounded(1);
-        let bridge_tx = BridgeTx { events_tx, shutdown_handle };
+        let bridge_tx = BridgeTx {
+            data: DataBridgeTx { data_tx },
+            actions: ActionsBridgeTx { status_tx, shutdown_handle },
+        };
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
