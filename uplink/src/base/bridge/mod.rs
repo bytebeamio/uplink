@@ -389,10 +389,10 @@ impl Bridge {
             let mut fwd_action = inflight_action.action.clone();
             fwd_action.name = fwd_name.to_owned();
 
-            debug!(
-                "Redirecting action {}: {} ~> {}",
-                fwd_action.action_id, inflight_action.action.name, fwd_action.name
-            );
+        debug!(
+            "Redirecting action: {} ~> {}; action_id = {}",
+            infligh_action.action.name, fwd_action.name, fwd_action.action_id,
+        );
 
             if let Err(e) = self.try_route_action(fwd_action.clone()) {
                 error!("Failed to route action to app. Error = {:?}", e);
