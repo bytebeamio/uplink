@@ -329,7 +329,7 @@ impl Bridge {
             .ok_or_else(|| Error::NoRoute(action.name.clone()))?;
 
         let duration = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
-        // current action left unchanged in case of forwarded action bein
+        // current action left unchanged in case of new tunshell action
         if action.name == TUNSHELL_ACTION {
             self.parallel_actions.insert(action.action_id);
             return Ok(());
