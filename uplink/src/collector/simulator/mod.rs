@@ -113,7 +113,7 @@ pub fn spawn_data_simulators(device: DeviceData, tx: Sender<Payload>) {
     spawn(Imu::simulate(tx.clone()));
     spawn(Motor::simulate(tx.clone()));
     spawn(PeripheralState::simulate(tx.clone()));
-    spawn(DeviceShadow::simulate(tx.clone()));
+    spawn(DeviceShadow::simulate(tx));
 }
 
 #[tokio::main(flavor = "current_thread")]

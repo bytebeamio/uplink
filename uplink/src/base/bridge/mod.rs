@@ -156,7 +156,7 @@ impl Bridge {
 
     pub fn register_action_route(&mut self, route: ActionRoute) -> Receiver<Action> {
         let (actions_tx, actions_rx) = bounded(1);
-        self.insert_route(route, actions_tx.clone());
+        self.insert_route(route, actions_tx);
 
         actions_rx
     }
