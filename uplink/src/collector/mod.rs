@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 pub mod device_shadow;
 pub mod downloader;
 pub mod installer;
@@ -11,3 +13,12 @@ pub mod simulator;
 pub mod systemstats;
 pub mod tcpjson;
 pub mod tunshell;
+
+#[derive(Debug, Serialize)]
+pub struct ActionsLog {
+    timestamp: u64,
+    sequence: u32,
+    action_id: String,
+    stage: String,
+    message: String,
+}

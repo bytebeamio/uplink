@@ -48,7 +48,7 @@
 //! [`action_redirections`]: Config#structfield.action_redirections
 
 use bytes::BytesMut;
-use flume::Receiver;
+use flume::{Receiver, Sender};
 use futures_util::StreamExt;
 use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
@@ -70,6 +70,8 @@ use std::{io::Write, path::PathBuf};
 use crate::base::bridge::BridgeTx;
 use crate::base::DownloaderConfig;
 use crate::{Action, ActionResponse, Config};
+
+use super::ActionsLog;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -101,6 +103,7 @@ pub struct FileDownloader {
     client: Client,
     sequence: u32,
     timeouts: HashMap<String, Duration>,
+    actions_log_tx: Sender<ActionsLog>,
 }
 
 impl FileDownloader {
@@ -109,6 +112,7 @@ impl FileDownloader {
         config: Arc<Config>,
         actions_rx: Receiver<Action>,
         bridge_tx: BridgeTx,
+        actions_log_tx: Sender<ActionsLog>,
     ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
@@ -140,6 +144,7 @@ impl FileDownloader {
             bridge_tx,
             sequence: 0,
             action_id: String::default(),
+            actions_log_tx,
         })
     }
 

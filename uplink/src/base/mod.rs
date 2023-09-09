@@ -172,6 +172,11 @@ pub struct MqttMetricsConfig {
     pub topic: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Default)]
+pub struct ActionsLogConfig {
+    pub topic: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AppConfig {
     pub port: u16,
@@ -242,6 +247,7 @@ pub struct Config {
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
+    pub actions_log: ActionsLogConfig,
     #[serde(default)]
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,

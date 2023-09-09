@@ -5,6 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Error;
+use flume::bounded;
 use log::info;
 use structopt::StructOpt;
 use tokio::time::sleep;
@@ -118,9 +119,11 @@ fn main() -> Result<(), Error> {
 
     banner(&commandline, &config);
 
+    let (actions_log_tx, actions_log_rx) = bounded(10);
+
     let mut uplink = Uplink::new(config.clone())?;
     let mut bridge = uplink.configure_bridge();
-    uplink.spawn_builtins(&mut bridge)?;
+    uplink.spawn_builtins(&mut bridge, actions_log_tx.clone())?;
 
     let bridge_tx = bridge.tx();
 
@@ -133,7 +136,7 @@ fn main() -> Result<(), Error> {
     let simulator_actions =
         config.simulator.as_ref().and_then(|cfg| bridge.register_action_routes(&cfg.actions));
 
-    uplink.spawn(bridge)?;
+    uplink.spawn(bridge, actions_log_rx)?;
 
     if let Some(config) = config.simulator.clone() {
         let bridge_tx = bridge_tx.clone();

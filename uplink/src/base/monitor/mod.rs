@@ -6,6 +6,7 @@ use rumqttc::{AsyncClient, ClientError, QoS, Request};
 use tokio::select;
 
 use crate::base::bridge::StreamMetrics;
+use crate::collector::ActionsLog;
 use crate::Config;
 
 use super::mqtt::MqttMetrics;
@@ -23,6 +24,8 @@ pub struct Monitor {
     serializer_metrics_rx: Receiver<SerializerMetrics>,
     /// Mqtt metrics receiver
     mqtt_metrics_rx: Receiver<MqttMetrics>,
+    /// app metrics receiver
+    actions_log_rx: Receiver<ActionsLog>,
 }
 
 impl Monitor {
@@ -32,8 +35,16 @@ impl Monitor {
         stream_metrics_rx: Receiver<StreamMetrics>,
         serializer_metrics_rx: Receiver<SerializerMetrics>,
         mqtt_metrics_rx: Receiver<MqttMetrics>,
+        actions_log_rx: Receiver<ActionsLog>,
     ) -> Monitor {
-        Monitor { config, client, stream_metrics_rx, serializer_metrics_rx, mqtt_metrics_rx }
+        Monitor {
+            config,
+            client,
+            stream_metrics_rx,
+            serializer_metrics_rx,
+            mqtt_metrics_rx,
+            actions_log_rx,
+        }
     }
 
     pub async fn start(&self) -> Result<(), Error> {
@@ -48,6 +59,10 @@ impl Monitor {
         let mqtt_metrics_config = self.config.mqtt_metrics.clone();
         let mqtt_metrics_topic = mqtt_metrics_config.topic;
         let mut mqtt_metrics = Vec::with_capacity(10);
+
+        let actions_log_config = self.config.actions_log.clone();
+        let actions_log_topic = actions_log_config.topic;
+        let mut actions_log = Vec::with_capacity(1);
 
         loop {
             select! {
@@ -77,6 +92,13 @@ impl Monitor {
                     let v = serde_json::to_string(&mqtt_metrics).unwrap();
                     mqtt_metrics.clear();
                     self.client.publish(&mqtt_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
+                }
+                o = self.actions_log_rx.recv_async() => {
+                    let o = o?;
+                    actions_log.push(o);
+                    let v = serde_json::to_string(&actions_log).unwrap();
+                    actions_log.clear();
+                    self.client.publish(&actions_log_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                 }
             }
         }

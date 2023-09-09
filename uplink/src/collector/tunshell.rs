@@ -1,10 +1,12 @@
-use flume::Receiver;
+use flume::{Receiver, Sender};
 use log::error;
 use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
 use crate::{base::bridge::BridgeTx, Action, ActionResponse};
+
+use super::ActionsLog;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -27,11 +29,16 @@ pub struct Keys {
 pub struct TunshellClient {
     actions_rx: Receiver<Action>,
     bridge: BridgeTx,
+    actions_log_tx: Sender<ActionsLog>,
 }
 
 impl TunshellClient {
-    pub fn new(actions_rx: Receiver<Action>, bridge: BridgeTx) -> Self {
-        Self { actions_rx, bridge }
+    pub fn new(
+        actions_rx: Receiver<Action>,
+        bridge: BridgeTx,
+        actions_log_tx: Sender<ActionsLog>,
+    ) -> Self {
+        Self { actions_rx, bridge, actions_log_tx }
     }
 
     fn config(&self, keys: Keys) -> Config {
