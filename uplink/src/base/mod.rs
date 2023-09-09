@@ -19,6 +19,7 @@ pub mod mqtt;
 pub mod serializer;
 
 pub const DEFAULT_TIMEOUT: u64 = 60;
+const MAX_STREAM_COUNT: usize = 20;
 
 #[inline]
 fn default_timeout() -> u64 {
@@ -28,6 +29,11 @@ fn default_timeout() -> u64 {
 #[inline]
 fn max_buf_size() -> usize {
     MAX_BUFFER_SIZE
+}
+
+#[inline]
+fn max_stream_count() -> usize {
+    MAX_STREAM_COUNT
 }
 
 fn default_file_size() -> usize {
@@ -219,6 +225,8 @@ impl Default for DeviceShadowConfig {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
+    #[serde(default = "max_stream_count")]
+    pub max_stream_count: usize,
     pub project_id: String,
     pub device_id: String,
     pub broker: String,
