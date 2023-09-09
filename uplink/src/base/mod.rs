@@ -175,6 +175,7 @@ pub struct MqttMetricsConfig {
 #[derive(Clone, Debug, Deserialize, Default)]
 pub struct ActionsLogConfig {
     pub topic: String,
+    pub interval: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use serde::Serialize;
 
 use crate::base::clock;
@@ -17,7 +19,7 @@ pub mod tcpjson;
 pub mod tunshell;
 
 #[derive(Debug, Serialize, Default, Clone)]
-pub struct ActionsLog {
+pub struct ActionsLogEntry {
     timestamp: u64,
     sequence: u32,
     action_id: String,
@@ -25,27 +27,40 @@ pub struct ActionsLog {
     message: String,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct ActionsLog {
+    pub current_entry: ActionsLogEntry,
+    log: Arc<Mutex<Vec<ActionsLogEntry>>>,
+}
+
 impl ActionsLog {
     fn accept_action(&mut self, action_id: impl Into<String>, stage: impl Into<String>) {
-        self.sequence = 0;
-        self.action_id = action_id.into();
-        self.stage = stage.into();
-        self.message.clear();
+        self.current_entry.sequence = 0;
+        self.current_entry.action_id = action_id.into();
+        self.current_entry.stage = stage.into();
+        self.current_entry.message.clear();
     }
 
     fn update_stage(&mut self, stage: impl Into<String>) {
-        self.stage = stage.into();
-        self.message.clear();
+        self.current_entry.stage = stage.into();
+        self.current_entry.message.clear();
     }
 
     fn update_message(&mut self, msg: impl Into<String>) {
-        self.message = msg.into()
+        self.current_entry.message = msg.into()
     }
 
-    fn capture(&mut self) -> Self {
-        self.sequence += 1;
-        self.timestamp = clock() as u64;
+    fn push_entry(&mut self) {
+        self.current_entry.sequence += 1;
+        self.current_entry.timestamp = clock() as u64;
 
-        self.clone()
+        let entry = self.current_entry.clone();
+        let mut log = self.log.lock().unwrap();
+        log.push(entry);
+    }
+
+    pub fn flush(&mut self) -> Vec<ActionsLogEntry> {
+        let mut log = self.log.lock().unwrap();
+        log.drain(..).collect()
     }
 }

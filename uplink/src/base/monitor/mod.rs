@@ -1,9 +1,13 @@
 use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 
 use flume::{Receiver, RecvError};
 use rumqttc::{AsyncClient, ClientError, QoS, Request};
 use tokio::select;
+use tokio::time::interval;
+use tokio_stream::wrappers::IntervalStream;
+use tokio_stream::StreamExt;
 
 use crate::base::bridge::StreamMetrics;
 use crate::collector::ActionsLog;
@@ -24,8 +28,8 @@ pub struct Monitor {
     serializer_metrics_rx: Receiver<SerializerMetrics>,
     /// Mqtt metrics receiver
     mqtt_metrics_rx: Receiver<MqttMetrics>,
-    /// app metrics receiver
-    actions_log_rx: Receiver<ActionsLog>,
+    /// app metrics shared memory
+    actions_log: ActionsLog,
 }
 
 impl Monitor {
@@ -35,7 +39,7 @@ impl Monitor {
         stream_metrics_rx: Receiver<StreamMetrics>,
         serializer_metrics_rx: Receiver<SerializerMetrics>,
         mqtt_metrics_rx: Receiver<MqttMetrics>,
-        actions_log_rx: Receiver<ActionsLog>,
+        actions_log: ActionsLog,
     ) -> Monitor {
         Monitor {
             config,
@@ -43,11 +47,11 @@ impl Monitor {
             stream_metrics_rx,
             serializer_metrics_rx,
             mqtt_metrics_rx,
-            actions_log_rx,
+            actions_log,
         }
     }
 
-    pub async fn start(&self) -> Result<(), Error> {
+    pub async fn start(mut self) -> Result<(), Error> {
         let stream_metrics_config = self.config.stream_metrics.clone();
         let stream_metrics_topic = stream_metrics_config.topic;
         let mut stream_metrics = Vec::with_capacity(10);
@@ -62,7 +66,8 @@ impl Monitor {
 
         let actions_log_config = self.config.actions_log.clone();
         let actions_log_topic = actions_log_config.topic;
-        let mut actions_log = Vec::with_capacity(1);
+        let mut actions_log_interval =
+            IntervalStream::new(interval(Duration::from_secs(actions_log_config.interval)));
 
         loop {
             select! {
@@ -93,11 +98,12 @@ impl Monitor {
                     mqtt_metrics.clear();
                     self.client.publish(&mqtt_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                 }
-                o = self.actions_log_rx.recv_async() => {
-                    let o = o?;
-                    actions_log.push(o);
+                _ = actions_log_interval.next() => {
+                    let actions_log = self.actions_log.flush();
+                    if actions_log.is_empty() {
+                        continue
+                    }
                     let v = serde_json::to_string(&actions_log).unwrap();
-                    actions_log.clear();
                     self.client.publish(&actions_log_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                 }
             }

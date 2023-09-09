@@ -1,4 +1,4 @@
-use flume::{Receiver, Sender};
+use flume::Receiver;
 use log::error;
 use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
@@ -30,16 +30,11 @@ pub struct TunshellClient {
     actions_rx: Receiver<Action>,
     bridge: BridgeTx,
     actions_log: ActionsLog,
-    actions_log_tx: Sender<ActionsLog>,
 }
 
 impl TunshellClient {
-    pub fn new(
-        actions_rx: Receiver<Action>,
-        bridge: BridgeTx,
-        actions_log_tx: Sender<ActionsLog>,
-    ) -> Self {
-        Self { actions_rx, bridge, actions_log_tx, actions_log: ActionsLog::default() }
+    pub fn new(actions_rx: Receiver<Action>, bridge: BridgeTx, actions_log: ActionsLog) -> Self {
+        Self { actions_rx, bridge, actions_log }
     }
 
     fn config(&self, keys: Keys) -> Config {
@@ -66,18 +61,12 @@ impl TunshellClient {
                     let msg = e.to_string();
                     error!("{msg}");
                     session.actions_log.update_message(&msg);
-                    session.flush_actions_log();
+                    session.actions_log.push_entry();
 
                     let status = ActionResponse::failure(&action.action_id, msg);
                     session.bridge.send_action_response(status).await;
                 }
             });
-        }
-    }
-
-    fn flush_actions_log(&mut self) {
-        if let Err(e) = self.actions_log_tx.try_send(self.actions_log.capture()) {
-            error!("Couldn't flush tunshell actions log: {e}");
         }
     }
 
@@ -91,7 +80,7 @@ impl TunshellClient {
         let stage = "ShellSpawned";
         let response = ActionResponse::progress(&action_id, stage, 90);
         self.actions_log.accept_action(&action_id, stage);
-        self.flush_actions_log();
+        self.actions_log.push_entry();
 
         self.bridge.send_action_response(response).await;
 
@@ -103,7 +92,7 @@ impl TunshellClient {
             let msg = "Tunshell session ended successfully";
             log::info!("{msg}");
             self.actions_log.update_message(msg);
-            self.flush_actions_log();
+            self.actions_log.push_entry();
             Ok(())
         }
     }

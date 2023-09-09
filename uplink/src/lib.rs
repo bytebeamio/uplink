@@ -125,6 +125,7 @@ pub mod config {
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_mqtt_metrics/jsonarray"
 
     [actions_log]
+    interval = 10
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_actions_log/jsonarray"
 
     [action_status]
@@ -318,11 +319,7 @@ impl Uplink {
         )
     }
 
-    pub fn spawn(
-        &mut self,
-        mut bridge: Bridge,
-        actions_log_rx: Receiver<ActionsLog>,
-    ) -> Result<(), Error> {
+    pub fn spawn(&mut self, mut bridge: Bridge, actions_log: ActionsLog) -> Result<(), Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
 
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
@@ -371,7 +368,7 @@ impl Uplink {
             self.stream_metrics_rx.clone(),
             self.serializer_metrics_rx.clone(),
             mqtt_metrics_rx,
-            actions_log_rx,
+            actions_log,
         );
 
         // Metrics monitor thread
@@ -410,14 +407,14 @@ impl Uplink {
     pub fn spawn_builtins(
         &mut self,
         bridge: &mut Bridge,
-        actions_log_tx: Sender<ActionsLog>,
+        actions_log: ActionsLog,
     ) -> Result<(), Error> {
         let bridge_tx = bridge.tx();
 
         let route = ActionRoute { name: "launch_shell".to_owned(), timeout: 10 };
         let actions_rx = bridge.register_action_route(route);
         let tunshell_client =
-            TunshellClient::new(actions_rx, bridge_tx.clone(), actions_log_tx.clone());
+            TunshellClient::new(actions_rx, bridge_tx.clone(), actions_log.clone());
         thread::spawn(move || tunshell_client.start());
 
         if let Some(actions_rx) = bridge.register_action_routes(&self.config.downloader.actions) {
@@ -425,7 +422,7 @@ impl Uplink {
                 self.config.clone(),
                 actions_rx,
                 bridge_tx.clone(),
-                actions_log_tx,
+                actions_log,
             )?;
             thread::spawn(move || file_downloader.start());
         }

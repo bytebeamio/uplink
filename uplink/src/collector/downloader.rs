@@ -48,7 +48,7 @@
 //! [`action_redirections`]: Config#structfield.action_redirections
 
 use bytes::BytesMut;
-use flume::{Receiver, Sender};
+use flume::Receiver;
 use futures_util::StreamExt;
 use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
@@ -104,7 +104,6 @@ pub struct FileDownloader {
     sequence: u32,
     timeouts: HashMap<String, Duration>,
     actions_log: ActionsLog,
-    actions_log_tx: Sender<ActionsLog>,
 }
 
 impl FileDownloader {
@@ -113,7 +112,7 @@ impl FileDownloader {
         config: Arc<Config>,
         actions_rx: Receiver<Action>,
         bridge_tx: BridgeTx,
-        actions_log_tx: Sender<ActionsLog>,
+        actions_log: ActionsLog,
     ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
@@ -145,15 +144,8 @@ impl FileDownloader {
             bridge_tx,
             sequence: 0,
             action_id: String::default(),
-            actions_log_tx,
-            actions_log: ActionsLog::default(),
+            actions_log,
         })
-    }
-
-    fn flush_actions_log(&mut self) {
-        if let Err(e) = self.actions_log_tx.try_send(self.actions_log.capture()) {
-            error!("Couldn't flush downloader actions log: {e}");
-        }
     }
 
     /// Spawn a thread to handle downloading files as notified by download actions and for forwarding the updated actions
@@ -260,7 +252,7 @@ impl FileDownloader {
         let msg = format!("Downloading from {} into {}", url, file_path.display());
         info!("{msg}");
         self.actions_log.update_message(msg);
-        self.flush_actions_log();
+        self.actions_log.push_entry();
         self.download(resp, file, update.content_length).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
@@ -271,7 +263,7 @@ impl FileDownloader {
         let status = ActionResponse::done(&self.action_id, stage, Some(action));
         let status = status.set_sequence(self.sequence());
         self.actions_log.update_stage(stage);
-        self.flush_actions_log();
+        self.actions_log.push_entry();
         self.bridge_tx.send_action_response(status).await;
 
         Ok(())
@@ -345,7 +337,7 @@ impl FileDownloader {
         let msg = format!("Download started: size = {size}");
         debug!("{msg}");
         self.actions_log.update_message(msg);
-        self.flush_actions_log();
+        self.actions_log.push_entry();
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
@@ -362,7 +354,7 @@ impl FileDownloader {
             );
             trace!("{msg}");
             self.actions_log.update_message(msg);
-            self.flush_actions_log();
+            self.actions_log.push_entry();
             // NOTE: ensure lesser frequency of action responses, once every percentage points
             if percentage >= next {
                 next += 1;
@@ -373,7 +365,7 @@ impl FileDownloader {
                 );
                 debug!("{msg}");
                 self.actions_log.update_message(msg);
-                self.flush_actions_log();
+                self.actions_log.push_entry();
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
                 let status =
