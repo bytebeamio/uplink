@@ -168,7 +168,7 @@ impl FileDownloader {
             };
 
             // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
-            match timeout(duration, self.retry_thrice(action)).await {
+            match timeout(duration, self.run(action)).await {
                 Ok(Err(e)) => self.forward_error(e).await,
                 Err(_) => error!("Last download has timedout"),
                 _ => {}
@@ -181,26 +181,6 @@ impl FileDownloader {
         let status =
             ActionResponse::failure(&self.action_id, err.to_string()).set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
-    }
-
-    // Retry mechanism tries atleast 3 times before returning an error
-    async fn retry_thrice(&mut self, action: Action) -> Result<(), Error> {
-        for _ in 0..3 {
-            match self.run(action.clone()).await {
-                Ok(_) => break,
-                Err(e) => {
-                    if let Error::Reqwest(e) = e {
-                        error!("Download failed: {e}");
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            warn!("Retrying download");
-        }
-
-        Ok(())
     }
 
     // Accepts a download `Action` and performs necessary data extraction to actually download the file
@@ -241,9 +221,8 @@ impl FileDownloader {
 
         // Create handler to perform download from URL
         // TODO: Error out for 1XX/3XX responses
-        let resp = self.client.get(&url).send().await?.error_for_status()?;
         info!("Downloading from {} into {}", url, file_path.display());
-        self.download(resp, file, update.content_length).await?;
+        self.retry_thrice(&url, file, update.content_length).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.download_path = Some(file_path.clone());
@@ -308,11 +287,42 @@ impl FileDownloader {
         Ok((file, file_path))
     }
 
+    // Retry mechanism tries atleast 3 times before returning a download error
+    async fn retry_thrice(
+        &mut self,
+        url: &str,
+        mut file: File,
+        content_length: usize,
+    ) -> Result<(), Error> {
+        let mut req = self.client.get(url).send();
+        for _ in 0..3 {
+            let resp = req.await?.error_for_status()?;
+            match self.download(resp, &mut file, content_length).await {
+                Ok(_) => break,
+                Err(e) => {
+                    if let Error::Reqwest(e) = e {
+                        error!("Download failed: {e}");
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(30)).await;
+
+            let file_size = file.metadata()?.len();
+            let range = format!("bytes={file_size}-{content_length}");
+            warn!("Retrying download; Continuing to download file from: {range}");
+            req = self.client.get(url).header("Range", range).send();
+        }
+
+        Ok(())
+    }
+
     /// Downloads from server and stores into file
     async fn download(
         &mut self,
         resp: Response,
-        mut file: File,
+        file: &mut File,
         content_length: usize,
     ) -> Result<(), Error> {
         let mut downloaded = 0;
