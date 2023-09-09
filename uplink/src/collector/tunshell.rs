@@ -29,6 +29,7 @@ pub struct Keys {
 pub struct TunshellClient {
     actions_rx: Receiver<Action>,
     bridge: BridgeTx,
+    actions_log: ActionsLog,
     actions_log_tx: Sender<ActionsLog>,
 }
 
@@ -38,7 +39,7 @@ impl TunshellClient {
         bridge: BridgeTx,
         actions_log_tx: Sender<ActionsLog>,
     ) -> Self {
-        Self { actions_rx, bridge, actions_log_tx }
+        Self { actions_rx, bridge, actions_log_tx, actions_log: ActionsLog::default() }
     }
 
     fn config(&self, keys: Keys) -> Config {
@@ -57,33 +58,52 @@ impl TunshellClient {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) {
         while let Ok(action) = self.actions_rx.recv_async().await {
-            let session = self.clone();
+            let mut session = self.clone();
             //TODO(RT): Findout why this is spawned. We want to send other action's with shell?
             tokio::spawn(async move {
                 if let Err(e) = session.session(&action).await {
-                    error!("{}", e.to_string());
-                    let status = ActionResponse::failure(&action.action_id, e.to_string());
+                    session.actions_log.update_stage("Failed");
+                    let msg = e.to_string();
+                    error!("{msg}");
+                    session.actions_log.update_message(&msg);
+                    session.flush_actions_log();
+
+                    let status = ActionResponse::failure(&action.action_id, msg);
                     session.bridge.send_action_response(status).await;
                 }
             });
         }
     }
 
-    async fn session(&self, action: &Action) -> Result<(), Error> {
+    fn flush_actions_log(&mut self) {
+        if let Err(e) = self.actions_log_tx.try_send(self.actions_log.capture()) {
+            error!("Couldn't flush tunshell actions log: {e}");
+        }
+    }
+
+    async fn session(&mut self, action: &Action) -> Result<(), Error> {
         let action_id = action.action_id.clone();
 
         // println!("{:?}", keys);
         let keys = serde_json::from_str(&action.payload)?;
         let mut client = Client::new(self.config(keys), HostShell::new().unwrap());
 
-        let response = ActionResponse::progress(&action_id, "ShellSpawned", 90);
+        let stage = "ShellSpawned";
+        let response = ActionResponse::progress(&action_id, stage, 90);
+        self.actions_log.accept_action(&action_id, stage);
+        self.flush_actions_log();
+
         self.bridge.send_action_response(response).await;
 
         let status = client.start_session().compat().await?;
         if status != 0 {
             Err(Error::UnexpectedStatus(status))
         } else {
-            log::info!("Tunshell session ended successfully");
+            self.actions_log.update_stage("Completed");
+            let msg = "Tunshell session ended successfully";
+            log::info!("{msg}");
+            self.actions_log.update_message(msg);
+            self.flush_actions_log();
             Ok(())
         }
     }

@@ -103,6 +103,7 @@ pub struct FileDownloader {
     client: Client,
     sequence: u32,
     timeouts: HashMap<String, Duration>,
+    actions_log: ActionsLog,
     actions_log_tx: Sender<ActionsLog>,
 }
 
@@ -145,7 +146,14 @@ impl FileDownloader {
             sequence: 0,
             action_id: String::default(),
             actions_log_tx,
+            actions_log: ActionsLog::default(),
         })
+    }
+
+    fn flush_actions_log(&mut self) {
+        if let Err(e) = self.actions_log_tx.try_send(self.actions_log.capture()) {
+            error!("Couldn't flush downloader actions log: {e}");
+        }
     }
 
     /// Spawn a thread to handle downloading files as notified by download actions and for forwarding the updated actions
@@ -211,7 +219,9 @@ impl FileDownloader {
     // Accepts a download `Action` and performs necessary data extraction to actually download the file
     async fn run(&mut self, mut action: Action) -> Result<(), Error> {
         // Update action status for process initiated
-        let status = ActionResponse::progress(&self.action_id, "Downloading", 0);
+        let stage = "Downloading";
+        self.actions_log.accept_action(&self.action_id, stage);
+        let status = ActionResponse::progress(&self.action_id, stage, 0);
         let status = status.set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
 
@@ -247,15 +257,21 @@ impl FileDownloader {
         // Create handler to perform download from URL
         // TODO: Error out for 1XX/3XX responses
         let resp = self.client.get(&url).send().await?.error_for_status()?;
-        info!("Downloading from {} into {}", url, file_path.display());
+        let msg = format!("Downloading from {} into {}", url, file_path.display());
+        info!("{msg}");
+        self.actions_log.update_message(msg);
+        self.flush_actions_log();
         self.download(resp, file, update.content_length).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.download_path = Some(file_path.clone());
         action.payload = serde_json::to_string(&update)?;
 
-        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
+        let stage = "Downloaded";
+        let status = ActionResponse::done(&self.action_id, stage, Some(action));
         let status = status.set_sequence(self.sequence());
+        self.actions_log.update_stage(stage);
+        self.flush_actions_log();
         self.bridge_tx.send_action_response(status).await;
 
         Ok(())
@@ -326,7 +342,10 @@ impl FileDownloader {
         let start = Instant::now();
         let size = human_bytes(content_length as f64);
 
-        debug!("Download started: size = {size}");
+        let msg = format!("Download started: size = {size}");
+        debug!("{msg}");
+        self.actions_log.update_message(msg);
+        self.flush_actions_log();
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
@@ -337,18 +356,24 @@ impl FileDownloader {
             // Calculate percentage on the basis of content_length
             let percentage = 99 * downloaded / content_length;
 
-            trace!(
+            let msg = format!(
                 "Downloading: size = {size}, percentage = {percentage}, elapsed = {}s",
                 start.elapsed().as_secs()
             );
+            trace!("{msg}");
+            self.actions_log.update_message(msg);
+            self.flush_actions_log();
             // NOTE: ensure lesser frequency of action responses, once every percentage points
             if percentage >= next {
                 next += 1;
 
-                debug!(
+                let msg = format!(
                     "Downloading: size = {size}, percentage = {percentage}, elapsed = {}s",
                     start.elapsed().as_secs()
                 );
+                debug!("{msg}");
+                self.actions_log.update_message(msg);
+                self.flush_actions_log();
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
                 let status =
