@@ -215,8 +215,6 @@ pub mod config {
             stream_config.buf_size = buf_size;
         }
 
-        config.streams.insert("action_status".to_owned(), config.action_status.to_owned());
-
         let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/actions";
         let mut device_action_topic = action_topic_template.to_string();
         replace_topic_placeholders(&mut device_action_topic, tenant_id, device_id);

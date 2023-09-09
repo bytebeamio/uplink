@@ -6,6 +6,7 @@ use log::{error, info, trace};
 
 use super::stream::{self, StreamStatus, MAX_BUFFER_SIZE};
 use super::StreamMetrics;
+use crate::base::StreamConfig;
 use crate::{Config, Package, Payload, Stream};
 
 use super::delaymap::DelayMap;
@@ -16,7 +17,6 @@ pub struct Streams {
     metrics_tx: Sender<StreamMetrics>,
     map: HashMap<String, Stream<Payload>>,
     pub stream_timeouts: DelayMap<String>,
-    pub metrics_timeouts: DelayMap<String>,
 }
 
 impl Streams {
@@ -25,19 +25,13 @@ impl Streams {
         data_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
-        let mut map = HashMap::new();
-        for (name, stream) in &config.streams {
-            let stream = Stream::with_config(name, stream, data_tx.clone());
-            map.insert(name.to_owned(), stream);
-        }
+        Self { config, data_tx, metrics_tx, map: HashMap::new(), stream_timeouts: DelayMap::new() }
+    }
 
-        Self {
-            config,
-            data_tx,
-            metrics_tx,
-            map,
-            stream_timeouts: DelayMap::new(),
-            metrics_timeouts: DelayMap::new(),
+    pub fn config_streams(&mut self, streams_config: HashMap<String, StreamConfig>) {
+        for (name, stream) in streams_config {
+            let stream = Stream::with_config(&name, &stream, self.data_tx.clone());
+            self.map.insert(name.to_owned(), stream);
         }
     }
 

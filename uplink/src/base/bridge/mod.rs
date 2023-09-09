@@ -83,8 +83,8 @@ impl Bridge {
         actions_rx: Receiver<Action>,
         shutdown_handle: Sender<()>,
     ) -> Self {
-        let data = DataBridge::new(config.clone(), package_tx, metrics_tx);
-        let actions = ActionsBridge::new(config, data.tx(), actions_rx, shutdown_handle);
+        let data = DataBridge::new(config.clone(), package_tx.clone(), metrics_tx.clone());
+        let actions = ActionsBridge::new(config, package_tx, actions_rx, shutdown_handle, metrics_tx);
         Self { data, actions }
     }
 

@@ -2,15 +2,15 @@ use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use tokio::select;
-use tokio::time::{self, Instant, Sleep};
+use tokio::time::{self, interval, Instant, Sleep};
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
 
-use super::data_lane::DataBridgeTx;
-use super::ActionBridgeShutdown;
+use super::streams::Streams;
+use super::{ActionBridgeShutdown, Package, StreamMetrics};
 use crate::base::ActionRoute;
 use crate::{Action, ActionResponse, Config};
 
@@ -45,8 +45,8 @@ pub struct ActionsBridge {
     status_rx: Receiver<ActionResponse>,
     /// Actions incoming from backend
     actions_rx: Receiver<Action>,
-    /// Handle to DataBridge
-    data_tx: DataBridgeTx,
+    /// Contains stream to send ActionResponses on
+    streams: Streams,
     /// Apps registered with the bridge
     /// NOTE: Sometimes action_routes could overlap, the latest route
     /// to be registered will be used in such a circumstance.
@@ -64,20 +64,26 @@ pub struct ActionsBridge {
 impl ActionsBridge {
     pub fn new(
         config: Arc<Config>,
-        data_tx: DataBridgeTx,
+        package_tx: Sender<Box<dyn Package>>,
         actions_rx: Receiver<Action>,
         shutdown_handle: Sender<()>,
+        metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
         let (status_tx, status_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
         let (ctrl_tx, ctrl_rx) = bounded(1);
+
+        let mut streams_config = HashMap::new();
+        streams_config.insert("action_status".to_owned(), config.action_status.clone());
+        let mut streams = Streams::new(config.clone(), package_tx, metrics_tx);
+        streams.config_streams(streams_config);
 
         Self {
             status_tx,
             status_rx,
             config,
             actions_rx,
-            data_tx,
+            streams,
             action_routes: HashMap::with_capacity(10),
             action_redirections,
             current_action: None,
@@ -133,6 +139,7 @@ impl ActionsBridge {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
+        let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
         let mut end: Pin<Box<Sleep>> = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
         self.load_saved_action()?;
 
@@ -153,6 +160,19 @@ impl ActionsBridge {
 
                     // Remove action because it timedout
                     self.clear_current_action()
+                }
+                // Flush streams that timeout
+                Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
+                    debug!("Flushing stream = {}", timedout_stream);
+                    if let Err(e) = self.streams.flush_stream(&timedout_stream).await {
+                        error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
+                    }
+                }
+                // Flush all metrics when timed out
+                _ = metrics_timeout.tick() => {
+                    if let Err(e) = self.streams.check_and_flush_metrics() {
+                        debug!("Failed to flush stream metrics. Error = {}", e);
+                    }
                 }
                 // Handle a shutdown signal
                 _ = self.ctrl_rx.recv_async() => {
@@ -280,7 +300,7 @@ impl ActionsBridge {
         }
 
         info!("Action response = {:?}", response);
-        self.data_tx.send_payload(response.as_payload()).await;
+        self.streams.forward(response.as_payload()).await;
 
         if response.is_completed() || response.is_failed() {
             self.clear_current_action();
@@ -300,7 +320,7 @@ impl ActionsBridge {
                 // NOTE: send success reponse for actions that don't have redirections configured
                 warn!("Action redirection is not configured for: {:?}", action);
                 let response = ActionResponse::success(&action.action_id);
-                self.data_tx.send_payload(response.as_payload()).await;
+                self.streams.forward(response.as_payload()).await;
 
                 self.clear_current_action();
             }
@@ -333,7 +353,7 @@ impl ActionsBridge {
 
     async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
         info!("Action response = {:?}", response);
-        self.data_tx.send_payload(response.as_payload()).await;
+        self.streams.forward(response.as_payload()).await;
 
         if response.is_completed() || response.is_failed() {
             self.parallel_actions.remove(&response.action_id);
@@ -343,7 +363,7 @@ impl ActionsBridge {
     async fn forward_action_error(&mut self, action: Action, error: Error) {
         let response = ActionResponse::failure(&action.action_id, error.to_string());
 
-        self.data_tx.send_payload(response.as_payload()).await;
+        self.streams.forward(response.as_payload()).await;
     }
 }
 
@@ -431,7 +451,7 @@ mod tests {
     use tokio::{runtime::Runtime, select};
 
     use crate::{
-        base::{bridge::Payload, ActionRoute, StreamConfig, StreamMetricsConfig},
+        base::{ActionRoute, StreamConfig, StreamMetricsConfig},
         Action, ActionResponse, Config,
     };
 
@@ -454,13 +474,14 @@ mod tests {
         }
     }
 
-    fn create_bridge(config: Arc<Config>) -> (ActionsBridge, Sender<Action>, Receiver<Payload>) {
+    fn create_bridge(
+        config: Arc<Config>,
+    ) -> (ActionsBridge, Sender<Action>, Receiver<Box<dyn Package>>) {
         let (data_tx, data_rx) = bounded(10);
-        let (shutdown_handle, _) = bounded(1);
-        let data_tx = DataBridgeTx { data_tx, shutdown_handle };
         let (actions_tx, actions_rx) = bounded(10);
         let (shutdown_handle, _) = bounded(1);
-        let bridge = ActionsBridge::new(config, data_tx, actions_rx, shutdown_handle);
+        let (metrics_tx, _) = bounded(1);
+        let bridge = ActionsBridge::new(config, data_tx, actions_rx, shutdown_handle, metrics_tx);
 
         (bridge, actions_tx, data_rx)
     }
@@ -470,6 +491,22 @@ mod tests {
             let rt = Runtime::new().unwrap();
             rt.block_on(async { bridge.start().await.unwrap() });
         });
+    }
+
+    struct Responses {
+        rx: Receiver<Box<dyn Package>>,
+        responses: Vec<ActionResponse>,
+    }
+
+    impl Responses {
+        fn next(&mut self) -> ActionResponse {
+            if self.responses.is_empty() {
+                let status = self.rx.recv().unwrap().serialize().unwrap();
+                self.responses = serde_json::from_slice(&status).unwrap();
+            }
+
+            self.responses.remove(0)
+        }
     }
 
     #[tokio::test]
@@ -515,13 +552,13 @@ mod tests {
         };
         actions_tx.send(action_1).unwrap();
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let mut responses = Responses { rx: data_rx, responses: vec![] };
+
+        let status = responses.next();
         assert_eq!(status.state, "Received".to_owned());
         let start = status.timestamp;
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         // verify response is timeout failure
         assert!(status.is_failed());
         assert_eq!(status.action_id, "1".to_owned());
@@ -538,13 +575,11 @@ mod tests {
         };
         actions_tx.send(action_2).unwrap();
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         assert_eq!(status.state, "Received".to_owned());
         let start = status.timestamp;
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         // verify response is timeout failure
         assert!(status.is_failed());
         assert_eq!(status.action_id, "2".to_owned());
@@ -581,8 +616,9 @@ mod tests {
         };
         actions_tx.send(action_1).unwrap();
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let mut responses = Responses { rx: data_rx, responses: vec![] };
+
+        let status = responses.next();
         assert_eq!(status.action_id, "1".to_owned());
         assert_eq!(status.state, "Received".to_owned());
 
@@ -594,8 +630,7 @@ mod tests {
         };
         actions_tx.send(action_2).unwrap();
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         // verify response is uplink occupied failure
         assert!(status.is_failed());
         assert_eq!(status.action_id, "2".to_owned());
@@ -633,17 +668,16 @@ mod tests {
         };
         actions_tx.send(action).unwrap();
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let mut responses = Responses { rx: data_rx, responses: vec![] };
+
+        let status = responses.next();
         assert_eq!(status.state, "Received".to_owned());
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         assert!(status.is_done());
         assert_eq!(status.state, "Tested");
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         assert!(status.is_completed());
     }
 
@@ -695,22 +729,20 @@ mod tests {
         };
         actions_tx.send(action).unwrap();
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let mut responses = Responses { rx: data_rx, responses: vec![] };
+
+        let status = responses.next();
         assert_eq!(status.state, "Received".to_owned());
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         assert!(status.is_done());
         assert_eq!(status.state, "Tested");
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         assert!(!status.is_completed());
         assert_eq!(status.state, "Redirected");
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         assert!(status.is_completed());
     }
 
@@ -773,37 +805,29 @@ mod tests {
         };
         actions_tx.send(action).unwrap();
 
-        let payload = data_rx.recv().unwrap();
-        let ActionResponse { action_id, state, .. } =
-            ActionResponse::from_payload(&payload).unwrap();
+        let mut responses = Responses { rx: data_rx, responses: vec![] };
+
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "1");
         assert_eq!(state, "Received");
 
-        let payload = data_rx.recv().unwrap();
-        let ActionResponse { action_id, state, .. } =
-            ActionResponse::from_payload(&payload).unwrap();
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "1");
         assert_eq!(state, "Launched");
 
-        let payload = data_rx.recv().unwrap();
-        let ActionResponse { action_id, state, .. } =
-            ActionResponse::from_payload(&payload).unwrap();
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "2");
         assert_eq!(state, "Received");
 
-        let payload = data_rx.recv().unwrap();
-        let ActionResponse { action_id, state, .. } =
-            ActionResponse::from_payload(&payload).unwrap();
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "2");
         assert_eq!(state, "Running");
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         assert_eq!(status.action_id, "2");
         assert!(status.is_completed());
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         assert_eq!(status.action_id, "1");
         assert!(status.is_completed());
     }
@@ -867,37 +891,29 @@ mod tests {
         };
         actions_tx.send(action).unwrap();
 
-        let payload = data_rx.recv().unwrap();
-        let ActionResponse { action_id, state, .. } =
-            ActionResponse::from_payload(&payload).unwrap();
+        let mut responses = Responses { rx: data_rx, responses: vec![] };
+
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "1");
         assert_eq!(state, "Received");
 
-        let payload = data_rx.recv().unwrap();
-        let ActionResponse { action_id, state, .. } =
-            ActionResponse::from_payload(&payload).unwrap();
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "1");
         assert_eq!(state, "Running");
 
-        let payload = data_rx.recv().unwrap();
-        let ActionResponse { action_id, state, .. } =
-            ActionResponse::from_payload(&payload).unwrap();
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "2");
         assert_eq!(state, "Received");
 
-        let payload = data_rx.recv().unwrap();
-        let ActionResponse { action_id, state, .. } =
-            ActionResponse::from_payload(&payload).unwrap();
+        let ActionResponse { action_id, state, .. } = responses.next();
         assert_eq!(action_id, "2");
         assert_eq!(state, "Launched");
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         assert_eq!(status.action_id, "2");
         assert!(status.is_completed());
 
-        let payload = data_rx.recv().unwrap();
-        let status = ActionResponse::from_payload(&payload).unwrap();
+        let status = responses.next();
         assert_eq!(status.action_id, "1");
         assert!(status.is_completed());
     }

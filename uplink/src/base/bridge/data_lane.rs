@@ -34,8 +34,10 @@ impl DataBridge {
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
         let (data_tx, data_rx) = bounded(10);
-        let streams = Streams::new(config.clone(), package_tx, metrics_tx);
         let (ctrl_tx, ctrl_rx) = bounded(1);
+
+        let mut streams = Streams::new(config.clone(), package_tx, metrics_tx);
+        streams.config_streams(config.streams.clone());
 
         Self { data_tx, data_rx, config, streams, ctrl_rx, ctrl_tx }
     }
