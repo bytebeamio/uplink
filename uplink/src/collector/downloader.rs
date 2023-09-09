@@ -423,10 +423,12 @@ mod test {
         let (events_tx, events_rx) = flume::bounded(2);
         let (shutdown_handle, _) = bounded(1);
         let bridge_tx = BridgeTx { events_tx, shutdown_handle };
+        let (metrics_tx, _) = bounded(1);
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
-        let downloader = FileDownloader::new(Arc::new(config), download_rx, bridge_tx).unwrap();
+        let downloader =
+            FileDownloader::new(Arc::new(config), download_rx, bridge_tx, metrics_tx).unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start());
@@ -499,10 +501,12 @@ mod test {
         let (events_tx, _) = flume::bounded(3);
         let (shutdown_handle, _) = bounded(1);
         let bridge_tx = BridgeTx { events_tx, shutdown_handle };
+        let (metrics_tx, _) = bounded(1);
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
-        let downloader = FileDownloader::new(Arc::new(config), download_rx, bridge_tx).unwrap();
+        let downloader =
+            FileDownloader::new(Arc::new(config), download_rx, bridge_tx, metrics_tx).unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start());
