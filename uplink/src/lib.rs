@@ -441,7 +441,7 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
             let actions_rx = bridge.register_action_route(route);
-            let logger = JournalCtl::new(config.clone(), actions_rx, bridge_tx.clone());
+            let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
             thread::spawn(move || {
                 if let Err(e) = logger.start() {
                     error!("Logger stopped!! Error = {:?}", e);
@@ -453,7 +453,7 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
             let actions_rx = bridge.register_action_route(route);
-            let logger = Logcat::new(config.clone(), actions_rx, bridge_tx.clone());
+            let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
             thread::spawn(move || {
                 if let Err(e) = logger.start() {
                     error!("Logger stopped!! Error = {:?}", e);
@@ -477,7 +477,7 @@ impl Uplink {
 
         if let Some(actions_rx) = bridge.register_action_routes(&self.config.script_runner) {
             let script_runner =
-                ScriptRunner::new(self.config.script_runner.clone(), actions_rx, bridge_tx.clone());
+                ScriptRunner::new(self.config.script_runner.clone(), actions_rx, bridge_tx);
             thread::spawn(move || {
                 if let Err(e) = script_runner.start() {
                     error!("Script runner stopped!! Error = {:?}", e);
