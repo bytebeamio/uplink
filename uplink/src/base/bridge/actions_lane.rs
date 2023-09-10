@@ -458,18 +458,13 @@ mod tests {
     use super::*;
 
     fn default_config() -> Config {
-        let mut streams = HashMap::new();
-        streams.insert(
-            "action_status".to_owned(),
-            StreamConfig { flush_period: 2, ..Default::default() },
-        );
         Config {
             stream_metrics: StreamMetricsConfig {
                 enabled: false,
                 timeout: 10,
                 ..Default::default()
             },
-            streams,
+            action_status: StreamConfig { flush_period: 2, ..Default::default() },
             ..Default::default()
         }
     }
