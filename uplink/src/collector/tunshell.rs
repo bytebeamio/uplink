@@ -6,7 +6,7 @@ use tunshell_client::{Client, ClientMode, Config, HostShell};
 
 use crate::{base::bridge::BridgeTx, Action, ActionResponse};
 
-use super::ActionsLog;
+use super::ActionsLogWriter;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -29,11 +29,15 @@ pub struct Keys {
 pub struct TunshellClient {
     actions_rx: Receiver<Action>,
     bridge: BridgeTx,
-    actions_log: ActionsLog,
+    actions_log: ActionsLogWriter,
 }
 
 impl TunshellClient {
-    pub fn new(actions_rx: Receiver<Action>, bridge: BridgeTx, actions_log: ActionsLog) -> Self {
+    pub fn new(
+        actions_rx: Receiver<Action>,
+        bridge: BridgeTx,
+        actions_log: ActionsLogWriter,
+    ) -> Self {
         Self { actions_rx, bridge, actions_log }
     }
 
@@ -61,7 +65,7 @@ impl TunshellClient {
                     let msg = e.to_string();
                     error!("{msg}");
                     session.actions_log.update_message(&msg);
-                    session.actions_log.push_entry();
+                    session.actions_log.commit_entry();
 
                     let status = ActionResponse::failure(&action.action_id, msg);
                     session.bridge.send_action_response(status).await;
@@ -80,7 +84,7 @@ impl TunshellClient {
         let stage = "ShellSpawned";
         let response = ActionResponse::progress(&action_id, stage, 90);
         self.actions_log.accept_action(&action_id, stage);
-        self.actions_log.push_entry();
+        self.actions_log.commit_entry();
 
         self.bridge.send_action_response(response).await;
 
@@ -92,7 +96,7 @@ impl TunshellClient {
             let msg = "Tunshell session ended successfully";
             log::info!("{msg}");
             self.actions_log.update_message(msg);
-            self.actions_log.push_entry();
+            self.actions_log.commit_entry();
             Ok(())
         }
     }

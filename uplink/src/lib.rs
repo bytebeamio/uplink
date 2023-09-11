@@ -59,7 +59,8 @@ use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
-use collector::ActionsLog;
+pub use collector::ActionsLog;
+use collector::{ActionsLogReader, ActionsLogWriter};
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
@@ -320,7 +321,11 @@ impl Uplink {
         )
     }
 
-    pub fn spawn(&mut self, mut bridge: Bridge, actions_log: ActionsLog) -> Result<(), Error> {
+    pub fn spawn(
+        &mut self,
+        mut bridge: Bridge,
+        actions_log: ActionsLogReader,
+    ) -> Result<(), Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
 
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
@@ -408,7 +413,7 @@ impl Uplink {
     pub fn spawn_builtins(
         &mut self,
         bridge: &mut Bridge,
-        actions_log: ActionsLog,
+        actions_log: ActionsLogWriter,
     ) -> Result<(), Error> {
         let bridge_tx = bridge.tx();
 

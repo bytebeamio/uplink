@@ -10,7 +10,7 @@ use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::StreamExt;
 
 use crate::base::bridge::StreamMetrics;
-use crate::collector::ActionsLog;
+use crate::collector::ActionsLogReader;
 use crate::Config;
 
 use super::mqtt::MqttMetrics;
@@ -29,7 +29,7 @@ pub struct Monitor {
     /// Mqtt metrics receiver
     mqtt_metrics_rx: Receiver<MqttMetrics>,
     /// app metrics shared memory
-    actions_log: ActionsLog,
+    actions_log: ActionsLogReader,
 }
 
 impl Monitor {
@@ -39,7 +39,7 @@ impl Monitor {
         stream_metrics_rx: Receiver<StreamMetrics>,
         serializer_metrics_rx: Receiver<SerializerMetrics>,
         mqtt_metrics_rx: Receiver<MqttMetrics>,
-        actions_log: ActionsLog,
+        actions_log: ActionsLogReader,
     ) -> Monitor {
         Monitor {
             config,

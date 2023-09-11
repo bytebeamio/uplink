@@ -71,7 +71,7 @@ use crate::base::bridge::BridgeTx;
 use crate::base::DownloaderConfig;
 use crate::{Action, ActionResponse, Config};
 
-use super::ActionsLog;
+use super::ActionsLogWriter;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -103,7 +103,7 @@ pub struct FileDownloader {
     client: Client,
     sequence: u32,
     timeouts: HashMap<String, Duration>,
-    actions_log: ActionsLog,
+    actions_log: ActionsLogWriter,
 }
 
 impl FileDownloader {
@@ -112,7 +112,7 @@ impl FileDownloader {
         config: Arc<Config>,
         actions_rx: Receiver<Action>,
         bridge_tx: BridgeTx,
-        actions_log: ActionsLog,
+        actions_log: ActionsLogWriter,
     ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
@@ -252,7 +252,7 @@ impl FileDownloader {
         let msg = format!("Downloading from {} into {}", url, file_path.display());
         info!("{msg}");
         self.actions_log.update_message(msg);
-        self.actions_log.push_entry();
+        self.actions_log.commit_entry();
         self.download(resp, file, update.content_length).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
@@ -263,7 +263,7 @@ impl FileDownloader {
         let status = ActionResponse::done(&self.action_id, stage, Some(action));
         let status = status.set_sequence(self.sequence());
         self.actions_log.update_stage(stage);
-        self.actions_log.push_entry();
+        self.actions_log.commit_entry();
         self.bridge_tx.send_action_response(status).await;
 
         Ok(())
@@ -337,7 +337,7 @@ impl FileDownloader {
         let msg = format!("Download started: size = {size}");
         debug!("{msg}");
         self.actions_log.update_message(msg);
-        self.actions_log.push_entry();
+        self.actions_log.commit_entry();
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
@@ -354,7 +354,7 @@ impl FileDownloader {
             );
             trace!("{msg}");
             self.actions_log.update_message(msg);
-            self.actions_log.push_entry();
+            self.actions_log.commit_entry();
             // NOTE: ensure lesser frequency of action responses, once every percentage points
             if percentage >= next {
                 next += 1;
@@ -365,7 +365,7 @@ impl FileDownloader {
                 );
                 debug!("{msg}");
                 self.actions_log.update_message(msg);
-                self.actions_log.push_entry();
+                self.actions_log.commit_entry();
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
                 let status =
@@ -408,7 +408,10 @@ mod test {
     use std::{collections::HashMap, time::Duration};
 
     use super::*;
-    use crate::base::{bridge::Event, ActionRoute, DownloaderConfig, MqttConfig};
+    use crate::{
+        base::{bridge::Event, ActionRoute, DownloaderConfig, MqttConfig},
+        collector::ActionsLog,
+    };
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 
@@ -440,7 +443,7 @@ mod test {
         let (events_tx, events_rx) = flume::bounded(2);
         let (shutdown_handle, _) = bounded(1);
         let bridge_tx = BridgeTx { events_tx, shutdown_handle };
-        let actions_log = ActionsLog::default();
+        let (actions_log, _) = ActionsLog::new();
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
@@ -518,7 +521,7 @@ mod test {
         let (events_tx, _) = flume::bounded(3);
         let (shutdown_handle, _) = bounded(1);
         let bridge_tx = BridgeTx { events_tx, shutdown_handle };
-        let actions_log = ActionsLog::default();
+        let (actions_log, _) = ActionsLog::new();
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
