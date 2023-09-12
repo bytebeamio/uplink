@@ -1,0 +1,3 @@
+#!/bin/bash
+
+echo "{ \"sequence\": 0, \"timestamp\": $(date +%s%N | cut -b1-13),\"action_id\": \"\", \"state\": \"Locked\", \"progress\": 100, \"errors\": [] }"
