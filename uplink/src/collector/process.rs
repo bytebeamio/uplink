@@ -3,11 +3,13 @@ use log::{debug, error, info};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::{pin, select, time};
+use tokio::select;
+use tokio::time::timeout;
 
 use crate::base::bridge::BridgeTx;
-use crate::{Action, ActionResponse, Package};
+use crate::{Action, ActionResponse, ActionRoute, Package};
 
+use std::collections::HashMap;
 use std::io;
 use std::process::Stdio;
 use std::time::Duration;
@@ -37,11 +39,22 @@ pub struct ProcessHandler {
     actions_rx: Receiver<Action>,
     // to send responses back to bridge
     bridge_tx: BridgeTx,
+    // to timeout actions as per action route configuration
+    timeouts: HashMap<String, Duration>,
 }
 
 impl ProcessHandler {
-    pub fn new(actions_rx: Receiver<Action>, bridge_tx: BridgeTx) -> Self {
-        Self { actions_rx, bridge_tx }
+    pub fn new(
+        actions_rx: Receiver<Action>,
+        bridge_tx: BridgeTx,
+        action_routes: &[ActionRoute],
+    ) -> Self {
+        let timeouts = action_routes
+            .iter()
+            .map(|ActionRoute { name, timeout }| (name.to_owned(), Duration::from_secs(*timeout)))
+            .collect();
+
+        Self { actions_rx, bridge_tx, timeouts }
     }
 
     /// Run a process of specified command
@@ -64,9 +77,6 @@ impl ProcessHandler {
         let stdout = child.stdout.take().ok_or(Error::NoStdout)?;
         let mut stdout = BufReader::new(stdout).lines();
 
-        let timeout = time::sleep(Duration::from_secs(10));
-        pin!(timeout);
-
         loop {
             select! {
                  Ok(Some(line)) = stdout.next_line() => {
@@ -79,11 +89,8 @@ impl ProcessHandler {
                     self.bridge_tx.send_action_response(status).await;
                  }
                  status = child.wait() => info!("Action done!! Status = {:?}", status),
-                 _ = &mut timeout => break
             }
         }
-
-        Ok(())
     }
 
     #[tokio::main(flavor = "current_thread")]
@@ -91,10 +98,13 @@ impl ProcessHandler {
         loop {
             let action = self.actions_rx.recv_async().await?;
             let command = String::from("tools/") + &action.name;
+            let duration = self.timeouts.get(&action.name).unwrap().to_owned();
 
-            // Spawn the action and capture its stdout
+            // Spawn the action and capture its stdout, ignore timeouts
             let child = self.run(action.action_id, command, action.payload).await?;
-            self.spawn_and_capture_stdout(child).await?;
+            if let Ok(o) = timeout(duration, self.spawn_and_capture_stdout(child)).await {
+                o?;
+            }
         }
     }
 }

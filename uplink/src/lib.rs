@@ -452,7 +452,8 @@ impl Uplink {
         };
 
         if let Some(actions_rx) = bridge.register_action_routes(&self.config.processes) {
-            let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
+            let process_handler =
+                ProcessHandler::new(actions_rx, bridge_tx.clone(), &self.config.processes);
             thread::spawn(move || {
                 if let Err(e) = process_handler.start() {
                     error!("Process handler stopped!! Error = {:?}", e);
