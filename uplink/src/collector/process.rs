@@ -58,14 +58,9 @@ impl ProcessHandler {
     }
 
     /// Run a process of specified command
-    pub async fn run(
-        &mut self,
-        id: String,
-        command: String,
-        payload: String,
-    ) -> Result<Child, Error> {
+    pub async fn run(&mut self, command: String, payload: String) -> Result<Child, Error> {
         let mut cmd = Command::new(command);
-        cmd.arg(id).arg(payload).kill_on_drop(true).stdout(Stdio::piped());
+        cmd.arg(payload).kill_on_drop(true).stdout(Stdio::piped());
 
         let child = cmd.spawn()?;
 
@@ -73,20 +68,25 @@ impl ProcessHandler {
     }
 
     /// Capture stdout of the running process in a spawned task
-    pub async fn spawn_and_capture_stdout(&mut self, mut child: Child) -> Result<(), Error> {
+    pub async fn spawn_and_capture_stdout(
+        &mut self,
+        id: String,
+        mut child: Child,
+    ) -> Result<(), Error> {
         let stdout = child.stdout.take().ok_or(Error::NoStdout)?;
         let mut stdout = BufReader::new(stdout).lines();
 
         loop {
             select! {
                  Ok(Some(line)) = stdout.next_line() => {
-                    let status: ActionResponse = match serde_json::from_str(&line) {
+                    let mut response: ActionResponse = match serde_json::from_str(&line) {
                         Ok(status) => status,
-                        Err(e) => ActionResponse::failure("dummy", e.to_string()),
+                        Err(e) => ActionResponse::failure(&id, e.to_string()),
                     };
 
-                    debug!("Action status: {:?}", status);
-                    self.bridge_tx.send_action_response(status).await;
+                    response.action_id = id.to_owned();
+                    debug!("Action status: {:?}", response);
+                    self.bridge_tx.send_action_response(response).await;
                  }
                  status = child.wait() => {
                     info!("Action done!! Status = {:?}", status);
@@ -106,9 +106,11 @@ impl ProcessHandler {
             let duration = self.timeouts.get(&action.name).unwrap().to_owned();
 
             // Spawn the action and capture its stdout, ignore timeouts
-            let child = self.run(action.action_id, command, action.payload).await?;
-            if let Ok(o) = timeout(duration, self.spawn_and_capture_stdout(child)).await {
-                o?;
+            let child = self.run(command, action.payload).await?;
+            if let Ok(o) =
+                timeout(duration, self.spawn_and_capture_stdout(action.action_id, child)).await
+            {
+                o?
             }
         }
     }
