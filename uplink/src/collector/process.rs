@@ -89,7 +89,22 @@ impl ProcessHandler {
                     self.bridge_tx.send_action_response(response).await;
                  }
                  status = child.wait() => {
-                    info!("Action done!! Status = {:?}", status);
+                    let response = match status {
+                        Ok(s) => if s.success() {
+                            info!("Action done!!");
+                            ActionResponse::success(&id)
+                        } else {
+                            let e = format!("Action failed!! Status = {s}");
+                            error!("{e}");
+                            ActionResponse::failure(&id, e)
+                        }
+                        Err(e) => {
+                            error!("{e}");
+                            ActionResponse::failure(&id, e.to_string())
+                        }
+                    };
+
+                    self.bridge_tx.send_action_response(response).await;
                     break;
                 },
             }
