@@ -317,7 +317,7 @@ impl FileDownloader {
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
 
-            let range = download.retry_range()?;
+            let range = download.retry_range();
             warn!("Retrying download; Continuing to download file from: {range}");
             req = self.client.get(url).header("Range", range).send();
         }
@@ -409,11 +409,8 @@ impl DownloadedFile {
         }
     }
 
-    fn retry_range(&self) -> Result<String, Error> {
-        let file_size = self.file.metadata()?.len();
-        let range = format!("bytes={file_size}-{}", self.content_length);
-
-        Ok(range)
+    fn retry_range(&self) -> String {
+        format!("bytes={}-{}", self.bytes_written, self.content_length)
     }
 }
 
