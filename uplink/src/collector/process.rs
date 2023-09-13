@@ -58,12 +58,7 @@ impl ProcessHandler {
     }
 
     /// Run a process of specified command
-    pub async fn run(
-        &mut self,
-        id: String,
-        command: String,
-        payload: String,
-    ) -> Result<Child, Error> {
+    pub async fn run(&mut self, id: &str, command: &str, payload: &str) -> Result<Child, Error> {
         let mut cmd = Command::new(command);
         cmd.arg(id).arg(payload).kill_on_drop(true).stdout(Stdio::piped());
 
@@ -101,9 +96,11 @@ impl ProcessHandler {
             let duration = self.timeouts.get(&action.name).unwrap().to_owned();
 
             // Spawn the action and capture its stdout, ignore timeouts
-            let child = self.run(action.action_id, command, action.payload).await?;
+            let child = self.run(&action.action_id, &command, &action.payload).await?;
             if let Ok(o) = timeout(duration, self.spawn_and_capture_stdout(child)).await {
                 o?;
+            } else {
+                error!("Process timedout: {command}; action_id = {}", action.action_id);
             }
         }
     }
