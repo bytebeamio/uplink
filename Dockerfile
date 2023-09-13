@@ -12,10 +12,6 @@ RUN mkdir -p /etc/bytebeam /usr/share/bytebeam
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 
-CMD ["/usr/bin/runsvdir", "/etc/runit"]
-COPY runit/ /etc/runit
-RUN rm -rf /etc/runit/runsvdir
-
 WORKDIR "/usr/share/bytebeam/uplink"
 
 #####################################################################################
@@ -27,7 +23,10 @@ RUN chmod +x /tmp/rustup
 RUN /tmp/rustup -y
 RUN source $HOME/.cargo/env
 
-COPY . /usr/share/bytebeam/uplink
+COPY uplink/ /usr/share/bytebeam/uplink/uplink
+COPY storage/ /usr/share/bytebeam/uplink/storage
+COPY Cargo.* /usr/share/bytebeam/uplink/
+COPY .git/ /usr/share/bytebeam/uplink/.git
 
 RUN mkdir -p /usr/share/bytebeam/uplink/bin
 RUN $HOME/.cargo/bin/cargo build --release
@@ -39,5 +38,10 @@ FROM base AS simulator
 
 RUN mkdir -p /usr/share/bytebeam/uplink
 COPY --from=builder /usr/share/bytebeam/uplink/bin /usr/bin
-COPY --from=builder /usr/share/bytebeam/uplink/paths /usr/share/bytebeam/uplink/paths
-COPY --from=builder /usr/share/bytebeam/uplink/simulator.sh /usr/share/bytebeam/uplink
+
+CMD ["/usr/bin/runsvdir", "/etc/runit"]
+COPY runit/ /etc/runit
+RUN rm -rf /etc/runit/runsvdir
+
+COPY paths/ /usr/share/bytebeam/uplink/paths
+COPY simulator.sh /usr/share/bytebeam/uplink/
