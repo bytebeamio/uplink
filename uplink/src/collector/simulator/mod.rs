@@ -1,12 +1,10 @@
 use crate::base::bridge::{BridgeTx, Payload};
-use crate::base::{clock, SimulatorConfig};
-use crate::Action;
+use crate::base::SimulatorConfig;
+use crate::{Action, ActionResponse};
 use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
 use flume::{bounded, Receiver, Sender};
 use log::{error, info};
 use rand::Rng;
-use serde::Serialize;
-use serde_json::json;
 use thiserror::Error;
 use tokio::time::interval;
 use tokio::{select, spawn};
@@ -15,6 +13,11 @@ use std::time::Duration;
 use std::{fs, io, sync::Arc};
 
 mod data;
+
+pub enum Event {
+    Data(Payload),
+    ActionResponse(ActionResponse),
+}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -26,16 +29,8 @@ pub enum Error {
     Json(#[from] serde_json::error::Error),
 }
 
-#[derive(Serialize)]
-pub struct ActionResponse {
-    action_id: String,
-    state: String,
-    progress: u8,
-    errors: Vec<String>,
-}
-
 impl ActionResponse {
-    pub async fn simulate(action: Action, tx: Sender<Payload>) {
+    pub async fn simulate(action: Action, tx: Sender<Event>) {
         let action_id = action.action_id;
         info!("Generating action events for action: {action_id}");
         let mut sequence = 0;
@@ -43,22 +38,11 @@ impl ActionResponse {
 
         // Action response, 10% completion per second
         for i in 1..10 {
-            let response = ActionResponse {
-                action_id: action_id.clone(),
-                progress: i * 10 + rand::thread_rng().gen_range(0..10),
-                state: String::from("in_progress"),
-                errors: vec![],
-            };
+            let progress = i * 10 + rand::thread_rng().gen_range(0..10);
             sequence += 1;
-            if let Err(e) = tx
-                .send_async(Payload {
-                    stream: "action_status".to_string(),
-                    sequence,
-                    payload: json!(response),
-                    timestamp: clock() as u64,
-                })
-                .await
-            {
+            let response = ActionResponse::progress(&action_id, "in_progress", progress)
+                .set_sequence(sequence);
+            if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
                 error!("{e}");
                 break;
             }
@@ -66,22 +50,10 @@ impl ActionResponse {
             interval.tick().await;
         }
 
-        let response = ActionResponse {
-            action_id,
-            progress: 100,
-            state: String::from("Completed"),
-            errors: vec![],
-        };
         sequence += 1;
-        if let Err(e) = tx
-            .send_async(Payload {
-                stream: "action_status".to_string(),
-                sequence,
-                payload: json!(response),
-                timestamp: clock() as u64,
-            })
-            .await
-        {
+        let response =
+            ActionResponse::progress(&action_id, "Completed", 100).set_sequence(sequence);
+        if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
             error!("{e}");
         }
         info!("Successfully sent all action responses");
@@ -107,7 +79,7 @@ pub fn new_device_data(path: Arc<Vec<Gps>>) -> DeviceData {
     DeviceData { path, path_offset: path_index }
 }
 
-pub fn spawn_data_simulators(device: DeviceData, tx: Sender<Payload>) {
+pub fn spawn_data_simulators(device: DeviceData, tx: Sender<Event>) {
     spawn(Gps::simulate(tx.clone(), device));
     spawn(Bms::simulate(tx.clone()));
     spawn(Imu::simulate(tx.clone()));
@@ -134,16 +106,15 @@ pub async fn start(
                 let action = action?;
                 spawn(ActionResponse::simulate(action,  tx.clone()));
             }
-            p = rx.recv_async() => {
-                let payload = match p {
-                    Ok(p) => p,
+            event = rx.recv_async() => {
+                match event {
+                    Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
+                    Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
                     Err(_) => {
                         error!("All generators have stopped!");
                         return Ok(())
                     }
                 };
-
-                bridge_tx.send_payload(payload).await;
             }
         }
     }

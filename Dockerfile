@@ -30,10 +30,6 @@ RUN source $HOME/.cargo/env
 COPY . /usr/share/bytebeam/uplink
 
 RUN mkdir -p /usr/share/bytebeam/uplink/bin
-WORKDIR /usr/share/bytebeam/uplink/tools/simulator
-RUN $HOME/.cargo/bin/cargo build --release
-RUN cp target/release/simulator /usr/share/bytebeam/uplink/bin/
-WORKDIR /usr/share/bytebeam/uplink
 RUN $HOME/.cargo/bin/cargo build --release
 RUN cp target/release/uplink /usr/share/bytebeam/uplink/bin/
 
