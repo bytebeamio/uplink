@@ -410,7 +410,7 @@ mod test {
     use super::*;
     use crate::{
         base::{bridge::Event, ActionRoute, DownloaderConfig, MqttConfig},
-        collector::ActionsLog,
+        collector::create_actions_log,
     };
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
@@ -443,7 +443,7 @@ mod test {
         let (events_tx, events_rx) = flume::bounded(2);
         let (shutdown_handle, _) = bounded(1);
         let bridge_tx = BridgeTx { events_tx, shutdown_handle };
-        let (actions_log, _) = ActionsLog::new();
+        let (actions_log, _) = create_actions_log();
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
@@ -521,7 +521,7 @@ mod test {
         let (events_tx, _) = flume::bounded(3);
         let (shutdown_handle, _) = bounded(1);
         let bridge_tx = BridgeTx { events_tx, shutdown_handle };
-        let (actions_log, _) = ActionsLog::new();
+        let (actions_log, _) = create_actions_log();
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);

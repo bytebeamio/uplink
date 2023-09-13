@@ -79,14 +79,10 @@ impl ActionsLogReader {
     }
 }
 
-pub struct ActionsLog;
+pub fn create_actions_log() -> (ActionsLogWriter, ActionsLogReader) {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let writer = ActionsLogWriter { current_entry: Default::default(), log: log.clone() };
+    let reader = ActionsLogReader { log };
 
-impl ActionsLog {
-    pub fn new() -> (ActionsLogWriter, ActionsLogReader) {
-        let log = Arc::new(Mutex::new(Vec::new()));
-        let writer = ActionsLogWriter { current_entry: Default::default(), log: log.clone() };
-        let reader = ActionsLogReader { log };
-
-        (writer, reader)
-    }
+    (writer, reader)
 }

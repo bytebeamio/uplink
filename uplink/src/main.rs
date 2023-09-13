@@ -17,7 +17,7 @@ pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
 use uplink::base::AppConfig;
-use uplink::collector::ActionsLog;
+use uplink::collector::create_actions_log;
 use uplink::config::{get_configs, initialize, CommandLine};
 use uplink::{simulator, Config, TcpJson, Uplink};
 
@@ -119,7 +119,7 @@ fn main() -> Result<(), Error> {
 
     banner(&commandline, &config);
 
-    let (actions_log_writer, actions_log_reader) = ActionsLog::new();
+    let (actions_log_writer, actions_log_reader) = create_actions_log();
 
     let mut uplink = Uplink::new(config.clone())?;
     let mut bridge = uplink.configure_bridge();

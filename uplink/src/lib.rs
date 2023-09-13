@@ -48,6 +48,7 @@ use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
+pub use collector::create_actions_log;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
@@ -59,7 +60,6 @@ use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
-pub use collector::ActionsLog;
 use collector::{ActionsLogReader, ActionsLogWriter};
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
