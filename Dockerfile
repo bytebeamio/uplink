@@ -20,7 +20,7 @@ WORKDIR "/usr/share/bytebeam/uplink"
 
 #####################################################################################
 
-FROM base as staging
+FROM base as builder
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > /tmp/rustup
 RUN chmod +x /tmp/rustup
@@ -35,9 +35,9 @@ RUN cp target/release/uplink /usr/share/bytebeam/uplink/bin/
 
 ###################################################################################################
 
-FROM base AS production
+FROM base AS simulator
 
 RUN mkdir -p /usr/share/bytebeam/uplink
-COPY --from=staging /usr/share/bytebeam/uplink/bin /usr/bin
-COPY --from=staging /usr/share/bytebeam/uplink/paths /usr/share/bytebeam/uplink/paths
-COPY --from=staging /usr/share/bytebeam/uplink/simulator.sh /usr/share/bytebeam/uplink
+COPY --from=builder /usr/share/bytebeam/uplink/bin /usr/bin
+COPY --from=builder /usr/share/bytebeam/uplink/paths /usr/share/bytebeam/uplink/paths
+COPY --from=builder /usr/share/bytebeam/uplink/simulator.sh /usr/share/bytebeam/uplink
