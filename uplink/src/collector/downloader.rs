@@ -382,7 +382,7 @@ struct DownloadedFile {
 impl DownloadedFile {
     fn write_bytes(&mut self, buf: &[u8]) -> Result<Option<u8>, Error> {
         self.bytes_downloaded += buf.len();
-        self.file.write_all(&buf)?;
+        self.file.write_all(buf)?;
         self.bytes_written = self.bytes_downloaded;
         let size = human_bytes(self.content_length as f64);
 
