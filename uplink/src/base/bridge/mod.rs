@@ -12,15 +12,14 @@ mod metrics;
 pub(crate) mod stream;
 mod streams;
 
-use crate::{Action, ActionResponse, ActionRoute, Config};
+pub use actions_lane::ActionsBridgeTx;
+use actions_lane::{ActionsBridge, Error};
+use data_lane::DataBridge;
+pub use data_lane::DataBridgeTx;
 
-use self::actions_lane::Error;
-pub use self::{
-    actions_lane::{ActionsBridge, ActionsBridgeTx},
-    data_lane::{DataBridge, DataBridgeTx},
-};
-
-use super::Compression;
+use super::StreamConfig;
+use crate::base::ActionRoute;
+use crate::{Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 
 pub trait Point: Send + Debug {
@@ -29,8 +28,8 @@ pub trait Point: Send + Debug {
 }
 
 pub trait Package: Send + Debug {
-    fn topic(&self) -> Arc<String>;
-    fn stream(&self) -> Arc<String>;
+    fn stream_config(&self) -> Arc<StreamConfig>;
+    fn stream_name(&self) -> Arc<String>;
     // TODO: Implement a generic Return type that can wrap
     // around custom serialization error types.
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
@@ -40,7 +39,6 @@ pub trait Package: Send + Debug {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn compression(&self) -> Compression;
 }
 
 // TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
