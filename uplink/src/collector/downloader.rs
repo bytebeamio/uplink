@@ -227,7 +227,7 @@ impl FileDownloader {
             file_path.display(),
             human_bytes(update.content_length as f64)
         );
-        let download = DownloadedFile {
+        let retry_handle = RetryDownloadHandle {
             file,
             bytes_written: 0,
             bytes_downloaded: 0,
@@ -235,7 +235,7 @@ impl FileDownloader {
             content_length: update.content_length,
             start_instant: Instant::now(),
         };
-        self.retry_thrice(&url, download).await?;
+        self.retry_thrice(&url, retry_handle).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.download_path = Some(file_path.clone());
@@ -301,18 +301,22 @@ impl FileDownloader {
     }
 
     // Retry mechanism tries atleast 3 times before returning a download error
-    async fn retry_thrice(&mut self, url: &str, mut download: DownloadedFile) -> Result<(), Error> {
+    async fn retry_thrice(
+        &mut self,
+        url: &str,
+        mut retry_handle: RetryDownloadHandle,
+    ) -> Result<(), Error> {
         let mut req = self.client.get(url).send();
         for _ in 0..3 {
             let resp = req.await?.error_for_status()?;
-            match self.download(resp, &mut download).await {
+            match self.download(resp, &mut retry_handle).await {
                 Ok(_) => break,
                 Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
                 Err(e) => return Err(e),
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
 
-            let range = download.retry_range();
+            let range = retry_handle.retry_range();
             warn!("Retrying download; Continuing to download file from: {range}");
             req = self.client.get(url).header("Range", range).send();
         }
@@ -324,14 +328,14 @@ impl FileDownloader {
     async fn download(
         &mut self,
         resp: Response,
-        downloaded: &mut DownloadedFile,
+        retry_handle: &mut RetryDownloadHandle,
     ) -> Result<(), Error> {
         let mut stream = resp.bytes_stream();
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
             let chunk = item?;
-            if let Some(percentage) = downloaded.write_bytes(&chunk)? {
+            if let Some(percentage) = retry_handle.write_bytes(&chunk)? {
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
                 let status = ActionResponse::progress(&self.action_id, "Downloading", percentage);
@@ -365,7 +369,9 @@ pub struct DownloadFile {
     pub download_path: Option<PathBuf>,
 }
 
-struct DownloadedFile {
+// A temporary structure to help us retry downloads
+// that failed after partial completion.
+struct RetryDownloadHandle {
     file: File,
     bytes_written: usize,
     bytes_downloaded: usize,
@@ -374,7 +380,7 @@ struct DownloadedFile {
     start_instant: Instant,
 }
 
-impl DownloadedFile {
+impl RetryDownloadHandle {
     fn write_bytes(&mut self, buf: &[u8]) -> Result<Option<u8>, Error> {
         self.bytes_downloaded += buf.len();
         self.file.write_all(buf)?;
