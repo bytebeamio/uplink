@@ -34,6 +34,11 @@ fn default_file_size() -> usize {
     10485760 // 10MB
 }
 
+#[inline]
+fn default_retry_count() -> u8 {
+    3
+}
+
 fn default_persistence_path() -> PathBuf {
     let mut path = current_dir().expect("Couldn't figure out current directory");
     path.push(".persistence");
@@ -135,11 +140,13 @@ pub struct DownloaderConfig {
     pub path: PathBuf,
     #[serde(default)]
     pub actions: Vec<ActionRoute>,
+    #[serde(default = "default_retry_count")]
+    pub retries: u8,
 }
 
 impl Default for DownloaderConfig {
     fn default() -> Self {
-        Self { path: default_download_path(), actions: vec![] }
+        Self { path: default_download_path(), actions: vec![], retries: default_retry_count() }
     }
 }
 

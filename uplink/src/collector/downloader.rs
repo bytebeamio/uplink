@@ -185,7 +185,7 @@ impl FileDownloader {
 
     // Retry mechanism tries atleast 3 times before returning an error
     async fn retry_thrice(&mut self, action: Action) -> Result<(), Error> {
-        for _ in 0..3 {
+        for _ in 0..self.config.retries {
             match self.run(action.clone()).await {
                 Ok(_) => break,
                 Err(e) => {
@@ -413,6 +413,7 @@ mod test {
         let downloader_cfg = DownloaderConfig {
             actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
             path,
+            retries: 3,
         };
         let config = config(downloader_cfg.clone());
         let (events_tx, events_rx) = flume::bounded(2);
@@ -489,6 +490,7 @@ mod test {
         let downloader_cfg = DownloaderConfig {
             actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
             path,
+            retries: 3,
         };
         let config = config(downloader_cfg.clone());
         let (events_tx, _) = flume::bounded(3);
