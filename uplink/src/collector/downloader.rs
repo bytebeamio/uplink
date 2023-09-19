@@ -183,6 +183,30 @@ impl FileDownloader {
         self.bridge_tx.send_action_response(status).await;
     }
 
+    // Retry mechanism tries atleast 3 times before returning a download error
+    async fn retry_thrice(
+        &mut self,
+        url: &str,
+        mut retry_handle: RetryDownloadHandle,
+    ) -> Result<(), Error> {
+        let mut req = self.client.get(url).send();
+        for _ in 0..3 {
+            let resp = req.await?.error_for_status()?;
+            match self.download(resp, &mut retry_handle).await {
+                Ok(_) => break,
+                Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
+                Err(e) => return Err(e),
+            }
+            tokio::time::sleep(Duration::from_secs(30)).await;
+
+            let range = retry_handle.retry_range();
+            warn!("Retrying download; Continuing to download file from: {range}");
+            req = self.client.get(url).header("Range", range).send();
+        }
+
+        Ok(())
+    }
+
     // Accepts a download `Action` and performs necessary data extraction to actually download the file
     async fn run(&mut self, mut action: Action) -> Result<(), Error> {
         // Update action status for process initiated
@@ -298,30 +322,6 @@ impl FileDownloader {
         file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666))?;
 
         Ok((file, file_path))
-    }
-
-    // Retry mechanism tries atleast 3 times before returning a download error
-    async fn retry_thrice(
-        &mut self,
-        url: &str,
-        mut retry_handle: RetryDownloadHandle,
-    ) -> Result<(), Error> {
-        let mut req = self.client.get(url).send();
-        for _ in 0..3 {
-            let resp = req.await?.error_for_status()?;
-            match self.download(resp, &mut retry_handle).await {
-                Ok(_) => break,
-                Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
-                Err(e) => return Err(e),
-            }
-            tokio::time::sleep(Duration::from_secs(30)).await;
-
-            let range = retry_handle.retry_range();
-            warn!("Retrying download; Continuing to download file from: {range}");
-            req = self.client.get(url).header("Range", range).send();
-        }
-
-        Ok(())
     }
 
     /// Downloads from server and stores into file
