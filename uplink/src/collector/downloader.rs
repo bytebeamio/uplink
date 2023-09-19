@@ -307,13 +307,8 @@ impl FileDownloader {
             let resp = req.await?.error_for_status()?;
             match self.download(resp, &mut download).await {
                 Ok(_) => break,
-                Err(e) => {
-                    if let Error::Reqwest(e) = e {
-                        error!("Download failed: {e}");
-                    } else {
-                        return Err(e);
-                    }
-                }
+                Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
+                Err(e) => return Err(e),
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
 
