@@ -41,6 +41,7 @@ tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch =
 fake = { version = "2.5.0", features = ["derive"] }
 rand = "0.8"
 # downloader
+exponential-backoff = "1.2"
 fs2 = "0.4"
 futures-util = "0.3"
 human_bytes = "0.4"

@@ -48,6 +48,7 @@
 //! [`action_redirections`]: Config#structfield.action_redirections
 
 use bytes::BytesMut;
+use exponential_backoff::Backoff;
 use flume::Receiver;
 use futures_util::StreamExt;
 use human_bytes::human_bytes;
@@ -185,7 +186,8 @@ impl FileDownloader {
 
     // Retry mechanism tries atleast 3 times before returning an error
     async fn retry_thrice(&mut self, action: Action) -> Result<(), Error> {
-        for _ in 0..3 {
+        let backoff = Backoff::new(2, Duration::from_secs(1), Duration::from_secs(30));
+        for backoff_duration in &backoff {
             match self.run(action.clone()).await {
                 Ok(_) => break,
                 Err(e) => {
@@ -196,7 +198,7 @@ impl FileDownloader {
                     }
                 }
             }
-            tokio::time::sleep(Duration::from_secs(30)).await;
+            tokio::time::sleep(backoff_duration).await;
             warn!("Retrying download");
         }
 
