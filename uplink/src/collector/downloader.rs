@@ -101,6 +101,7 @@ pub struct FileDownloader {
     client: Client,
     sequence: u32,
     timeouts: HashMap<String, Duration>,
+    state: DownloadState,
 }
 
 impl FileDownloader {
@@ -132,6 +133,10 @@ impl FileDownloader {
             .map(|s| (s.name.to_owned(), Duration::from_secs(s.timeout)))
             .collect();
 
+        let mut path = config.downloader.path.clone();
+        path.push("init");
+        let temp_file = File::create(&path)?;
+
         Ok(Self {
             config: config.downloader.clone(),
             actions_rx,
@@ -140,6 +145,7 @@ impl FileDownloader {
             bridge_tx,
             sequence: 0,
             action_id: String::default(),
+            state: DownloadState::new(temp_file, 0),
         })
     }
 
@@ -184,18 +190,18 @@ impl FileDownloader {
     }
 
     // Retry mechanism tries atleast 3 times before returning a download error
-    async fn retry_thrice(&mut self, url: &str, mut download: DownloadState) -> Result<(), Error> {
+    async fn retry_thrice(&mut self, url: &str) -> Result<(), Error> {
         let mut req = self.client.get(url).send();
         for _ in 0..3 {
             let resp = req.await?.error_for_status()?;
-            match self.download(resp, &mut download).await {
+            match self.download(resp).await {
                 Ok(_) => break,
                 Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
                 Err(e) => return Err(e),
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
 
-            let range = download.retry_range();
+            let range = self.state.retry_range();
             warn!("Retrying download; Continuing to download file from: {range}");
             req = self.client.get(url).header("Range", range).send();
         }
@@ -247,15 +253,8 @@ impl FileDownloader {
             file_path.display(),
             human_bytes(update.content_length as f64)
         );
-        let download = DownloadState {
-            file,
-            bytes_written: 0,
-            bytes_downloaded: 0,
-            percentage_downloaded: 0,
-            content_length: update.content_length,
-            start_instant: Instant::now(),
-        };
-        self.retry_thrice(&url, download).await?;
+        self.state = DownloadState::new(file, update.content_length);
+        self.retry_thrice(&url).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.download_path = Some(file_path.clone());
@@ -321,17 +320,13 @@ impl FileDownloader {
     }
 
     /// Downloads from server and stores into file
-    async fn download(
-        &mut self,
-        resp: Response,
-        download: &mut DownloadState,
-    ) -> Result<(), Error> {
+    async fn download(&mut self, resp: Response) -> Result<(), Error> {
         let mut stream = resp.bytes_stream();
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
             let chunk = item?;
-            if let Some(percentage) = download.write_bytes(&chunk)? {
+            if let Some(percentage) = self.state.write_bytes(&chunk)? {
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
                 let status = ActionResponse::progress(&self.action_id, "Downloading", percentage);
@@ -377,6 +372,17 @@ struct DownloadState {
 }
 
 impl DownloadState {
+    fn new(file: File, content_length: usize) -> Self {
+        Self {
+            file,
+            bytes_written: 0,
+            bytes_downloaded: 0,
+            percentage_downloaded: 0,
+            content_length,
+            start_instant: Instant::now(),
+        }
+    }
+
     fn write_bytes(&mut self, buf: &[u8]) -> Result<Option<u8>, Error> {
         self.bytes_downloaded += buf.len();
         self.file.write_all(buf)?;
