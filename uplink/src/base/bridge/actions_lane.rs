@@ -95,10 +95,8 @@ impl ActionsBridge {
     }
 
     pub fn register_action_route(&mut self, route: ActionRoute) -> Receiver<Action> {
-        let (actions_tx, actions_rx) = bounded(1);
-        self.insert_route(route, actions_tx.clone());
-
-        actions_rx
+        // Unwrap won't panic as we are definitely passing a route
+        self.register_action_routes([route]).unwrap()
     }
 
     pub fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item = R>>(
@@ -111,23 +109,15 @@ impl ActionsBridge {
         }
 
         let (actions_tx, actions_rx) = bounded(1);
-        for route in routes {
-            self.insert_route(route, actions_tx.clone());
+        for ActionRoute { name, timeout } in routes {
+            let duration = Duration::from_secs(timeout);
+            let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
+            if self.action_routes.insert(name.clone(), action_router).is_some() {
+                panic!("Action Route clash: {name}");
+            }
         }
 
         Some(actions_rx)
-    }
-
-    fn insert_route(
-        &mut self,
-        ActionRoute { name, timeout }: ActionRoute,
-        actions_tx: Sender<Action>,
-    ) {
-        let duration = Duration::from_secs(timeout);
-        let action_router = ActionRouter { actions_tx, duration };
-        if self.action_routes.insert(name.clone(), action_router).is_some() {
-            panic!("Action Route clash: {name}");
-        }
     }
 
     pub fn tx(&self) -> ActionsBridgeTx {
