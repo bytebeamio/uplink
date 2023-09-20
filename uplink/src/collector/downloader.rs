@@ -101,6 +101,7 @@ pub struct FileDownloader {
     client: Client,
     sequence: u32,
     timeouts: HashMap<String, Duration>,
+    state: Option<DownloadState>,
 }
 
 impl FileDownloader {
@@ -140,6 +141,7 @@ impl FileDownloader {
             bridge_tx,
             sequence: 0,
             action_id: String::default(),
+            state: None,
         })
     }
 
@@ -184,18 +186,18 @@ impl FileDownloader {
     }
 
     // Retry mechanism tries atleast 3 times before returning a download error
-    async fn retry_thrice(&mut self, url: &str, mut download: DownloadState) -> Result<(), Error> {
+    async fn retry_thrice(&mut self, url: &str) -> Result<(), Error> {
         let mut req = self.client.get(url).send();
         for _ in 0..3 {
             let resp = req.await?.error_for_status()?;
-            match self.download(resp, &mut download).await {
+            match self.download(resp).await {
                 Ok(_) => break,
                 Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
                 Err(e) => return Err(e),
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
 
-            let range = download.retry_range();
+            let range = self.state.as_mut().unwrap().retry_range();
             warn!("Retrying download; Continuing to download file from: {range}");
             req = self.client.get(url).header("Range", range).send();
         }
@@ -247,15 +249,15 @@ impl FileDownloader {
             file_path.display(),
             human_bytes(update.content_length as f64)
         );
-        let download = DownloadState {
+        self.state = Some(DownloadState {
             file,
             bytes_written: 0,
             bytes_downloaded: 0,
             percentage_downloaded: 0,
             content_length: update.content_length,
             start_instant: Instant::now(),
-        };
-        self.retry_thrice(&url, download).await?;
+        });
+        self.retry_thrice(&url).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.download_path = Some(file_path.clone());
@@ -321,17 +323,13 @@ impl FileDownloader {
     }
 
     /// Downloads from server and stores into file
-    async fn download(
-        &mut self,
-        resp: Response,
-        download: &mut DownloadState,
-    ) -> Result<(), Error> {
+    async fn download(&mut self, resp: Response) -> Result<(), Error> {
         let mut stream = resp.bytes_stream();
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
             let chunk = item?;
-            if let Some(percentage) = download.write_bytes(&chunk)? {
+            if let Some(percentage) = self.state.as_mut().unwrap().write_bytes(&chunk)? {
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
                 let status = ActionResponse::progress(&self.action_id, "Downloading", percentage);
