@@ -173,7 +173,7 @@ impl FileDownloader {
             };
 
             // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
-            match timeout(duration, self.retry_thrice(action)).await {
+            match timeout(duration, self.run(action)).await {
                 Ok(Err(e)) => self.forward_error(e).await,
                 Err(_) => error!("Last download has timedout"),
                 _ => {}
@@ -188,21 +188,21 @@ impl FileDownloader {
         self.bridge_tx.send_action_response(status).await;
     }
 
-    // Retry mechanism tries atleast 3 times before returning an error
-    async fn retry_thrice(&mut self, action: Action) -> Result<(), Error> {
+    // Retry mechanism tries atleast 3 times before returning a download error
+    async fn retry_thrice(&mut self, url: &str, mut download: DownloadState) -> Result<(), Error> {
+        let mut req = self.client.get(url).send();
         for _ in 0..3 {
-            match self.run(action.clone()).await {
+            let resp = req.await?.error_for_status()?;
+            match self.download(resp, &mut download).await {
                 Ok(_) => break,
-                Err(e) => {
-                    if let Error::Reqwest(e) = e {
-                        error!("Download failed: {e}");
-                    } else {
-                        return Err(e);
-                    }
-                }
+                Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
+                Err(e) => return Err(e),
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
-            warn!("Retrying download");
+
+            let range = download.retry_range();
+            warn!("Retrying download; Continuing to download file from: {range}");
+            req = self.client.get(url).header("Range", range).send();
         }
 
         Ok(())
@@ -246,14 +246,28 @@ impl FileDownloader {
         // Create file to actually download into
         let (file, file_path) = self.create_file(&download_path, &update.file_name)?;
 
-        // Create handler to perform download from URL
-        // TODO: Error out for 1XX/3XX responses
-        let resp = self.client.get(&url).send().await?.error_for_status()?;
-        let msg = format!("Downloading from {} into {}", url, file_path.display());
+        let msg = format!(
+            "Downloading from {} into {}; size = {}",
+            url,
+            file_path.display(),
+            human_bytes(update.content_length as f64)
+        );
         info!("{msg}");
+
         self.actions_log.update_message(msg);
         self.actions_log.commit_entry();
-        self.download(resp, file, update.content_length).await?;
+
+        // Retry downloading upto 3 times in case of connectivity issues
+        // TODO: Error out for 1XX/3XX responses
+        let download = DownloadState {
+            file,
+            bytes_written: 0,
+            bytes_downloaded: 0,
+            percentage_downloaded: 0,
+            content_length: update.content_length,
+            start_instant: Instant::now(),
+        };
+        self.retry_thrice(&url, download).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.download_path = Some(file_path.clone());
@@ -325,51 +339,26 @@ impl FileDownloader {
     async fn download(
         &mut self,
         resp: Response,
-        mut file: File,
-        content_length: usize,
+        download: &mut DownloadState,
     ) -> Result<(), Error> {
-        let mut downloaded = 0;
-        let mut next = 1;
         let mut stream = resp.bytes_stream();
-        let start = Instant::now();
-        let size = human_bytes(content_length as f64);
-
-        let msg = format!("Download started: size = {size}");
-        debug!("{msg}");
-        self.actions_log.update_message(msg);
-        self.actions_log.commit_entry();
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
             let chunk = item?;
-            downloaded += chunk.len();
-            file.write_all(&chunk)?;
-
-            // Calculate percentage on the basis of content_length
-            let percentage = 99 * downloaded / content_length;
-
-            let msg = format!(
-                "Downloading: size = {size}, percentage = {percentage}, elapsed = {}s",
-                start.elapsed().as_secs()
-            );
-            trace!("{msg}");
-            self.actions_log.update_message(msg);
-            self.actions_log.commit_entry();
-            // NOTE: ensure lesser frequency of action responses, once every percentage points
-            if percentage >= next {
-                next += 1;
-
+            if let Some(percentage) = download.write_bytes(&chunk)? {
                 let msg = format!(
-                    "Downloading: size = {size}, percentage = {percentage}, elapsed = {}s",
-                    start.elapsed().as_secs()
+                    "Downloading: size = {}, percentage = {percentage}, elapsed = {}s",
+                    human_bytes(download.content_length as f64),
+                    download.start_instant.elapsed().as_secs()
                 );
                 debug!("{msg}");
                 self.actions_log.update_message(msg);
                 self.actions_log.commit_entry();
+
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
-                let status =
-                    ActionResponse::progress(&self.action_id, "Downloading", percentage as u8);
+                let status = ActionResponse::progress(&self.action_id, "Downloading", percentage);
                 let status = status.set_sequence(self.sequence());
                 self.bridge_tx.send_action_response(status).await;
             }
@@ -400,6 +389,52 @@ pub struct DownloadFile {
     pub download_path: Option<PathBuf>,
 }
 
+// A temporary structure to help us retry downloads
+// that failed after partial completion.
+struct DownloadState {
+    file: File,
+    bytes_written: usize,
+    bytes_downloaded: usize,
+    percentage_downloaded: u8,
+    content_length: usize,
+    start_instant: Instant,
+}
+
+impl DownloadState {
+    fn write_bytes(&mut self, buf: &[u8]) -> Result<Option<u8>, Error> {
+        self.bytes_downloaded += buf.len();
+        self.file.write_all(buf)?;
+        self.bytes_written = self.bytes_downloaded;
+        let size = human_bytes(self.content_length as f64);
+
+        // Calculate percentage on the basis of content_length
+        let percentage = (99 * self.bytes_downloaded / self.content_length) as u8;
+
+        // NOTE: ensure lesser frequency of action responses, once every percentage points
+        if percentage > self.percentage_downloaded {
+            self.percentage_downloaded = percentage;
+            debug!(
+                "Downloading: size = {size}, percentage = {percentage}, elapsed = {}s",
+                self.start_instant.elapsed().as_secs()
+            );
+
+            Ok(Some(percentage))
+        } else {
+            trace!(
+                "Downloading: size = {size}, percentage = {}, elapsed = {}s",
+                self.percentage_downloaded,
+                self.start_instant.elapsed().as_secs()
+            );
+
+            Ok(None)
+        }
+    }
+
+    fn retry_range(&self) -> String {
+        format!("bytes={}-{}", self.bytes_written, self.content_length)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use flume::{bounded, TrySendError};
@@ -408,10 +443,11 @@ mod test {
     use std::{collections::HashMap, time::Duration};
 
     use super::*;
-    use crate::{
-        base::{bridge::Event, ActionRoute, DownloaderConfig, MqttConfig},
-        collector::create_actions_log,
+    use crate::base::{
+        bridge::{ActionsBridgeTx, DataBridgeTx},
+        ActionRoute, DownloaderConfig, MqttConfig,
     };
+    use crate::collector::create_actions_log;
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 
@@ -427,6 +463,17 @@ mod test {
         }
     }
 
+    fn create_bridge() -> (BridgeTx, Receiver<ActionResponse>) {
+        let (data_tx, _) = flume::bounded(2);
+        let (status_tx, status_rx) = flume::bounded(2);
+        let (shutdown_handle, _) = bounded(1);
+        let data = DataBridgeTx { data_tx, shutdown_handle };
+        let (shutdown_handle, _) = bounded(1);
+        let actions = ActionsBridgeTx { status_tx, shutdown_handle };
+
+        (BridgeTx { data, actions }, status_rx)
+    }
+
     #[test]
     // Test file downloading capabilities of FileDownloader by downloading the uplink logo from GitHub
     fn download_file() {
@@ -440,9 +487,7 @@ mod test {
             path,
         };
         let config = config(downloader_cfg.clone());
-        let (events_tx, events_rx) = flume::bounded(2);
-        let (shutdown_handle, _) = bounded(1);
-        let bridge_tx = BridgeTx { events_tx, shutdown_handle };
+        let (bridge_tx, status_rx) = create_bridge();
         let (actions_log, _) = create_actions_log();
 
         // Create channels to forward and push actions on
@@ -478,19 +523,13 @@ mod test {
         download_tx.try_send(download_action).unwrap();
 
         // Collect action_status and ensure it is as expected
-        let status = match events_rx.recv().unwrap() {
-            Event::ActionResponse(status) => status,
-            e => unreachable!("Unexpected event: {e:#?}"),
-        };
+        let status = status_rx.recv().unwrap();
         assert_eq!(status.state, "Downloading");
         let mut progress = 0;
 
         // Collect and ensure forwarded action contains expected info
         loop {
-            let status = match events_rx.recv().unwrap() {
-                Event::ActionResponse(status) => status,
-                e => unreachable!("Unexpected event: {e:#?}"),
-            };
+            let status = status_rx.recv().unwrap();
 
             assert!(progress <= status.progress);
             progress = status.progress;
@@ -518,9 +557,7 @@ mod test {
             path,
         };
         let config = config(downloader_cfg.clone());
-        let (events_tx, _) = flume::bounded(3);
-        let (shutdown_handle, _) = bounded(1);
-        let bridge_tx = BridgeTx { events_tx, shutdown_handle };
+        let (bridge_tx, _) = create_bridge();
         let (actions_log, _) = create_actions_log();
 
         // Create channels to forward and push actions on

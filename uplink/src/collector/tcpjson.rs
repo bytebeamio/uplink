@@ -28,8 +28,6 @@ pub enum Error {
     Codec(#[from] LinesCodecError),
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
-    #[error("Couldn't fill stream")]
-    Stream(#[from] crate::base::bridge::Error),
 }
 
 #[derive(Debug, Clone)]

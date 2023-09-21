@@ -71,7 +71,7 @@ where
     }
 
     pub fn with_config(
-        name: &String,
+        name: &str,
         config: &StreamConfig,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {

@@ -2,6 +2,7 @@
 serial = { git = "https://github.com/bytebeamio/serial-rs", branch = "android_fix" }
 
 [workspace]
+resolver = "2"
 members = [
     "uplink",
     "storage"
