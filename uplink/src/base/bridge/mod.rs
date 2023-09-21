@@ -14,6 +14,7 @@ mod streams;
 
 use crate::{Action, ActionResponse, ActionRoute, Config};
 
+use self::actions_lane::Error;
 pub use self::{
     actions_lane::{ActionsBridge, ActionsBridgeTx},
     data_lane::{DataBridge, DataBridgeTx},
@@ -84,7 +85,8 @@ impl Bridge {
         shutdown_handle: Sender<()>,
     ) -> Self {
         let data = DataBridge::new(config.clone(), package_tx.clone(), metrics_tx.clone());
-        let actions = ActionsBridge::new(config, package_tx, actions_rx, shutdown_handle, metrics_tx);
+        let actions =
+            ActionsBridge::new(config, package_tx, actions_rx, shutdown_handle, metrics_tx);
         Self { data, actions }
     }
 
@@ -92,15 +94,20 @@ impl Bridge {
         BridgeTx { data: self.data.tx(), actions: self.actions.tx() }
     }
 
-    pub fn register_action_route(&mut self, route: ActionRoute) -> Receiver<Action> {
-        self.actions.register_action_route(route)
+    pub fn register_action_route(
+        &mut self,
+        route: ActionRoute,
+        actions_tx: Sender<Action>,
+    ) -> Result<(), Error> {
+        self.actions.register_action_route(route, actions_tx)
     }
 
     pub fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item = R>>(
         &mut self,
         routes: V,
-    ) -> Option<Receiver<Action>> {
-        self.actions.register_action_routes(routes)
+        actions_tx: Sender<Action>,
+    ) -> Result<(), Error> {
+        self.actions.register_action_routes(routes, actions_tx)
     }
 }
 

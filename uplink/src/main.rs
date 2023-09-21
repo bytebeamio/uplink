@@ -5,6 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Error;
+use flume::bounded;
 use log::info;
 use structopt::StructOpt;
 use tokio::time::sleep;
@@ -126,12 +127,25 @@ fn main() -> Result<(), Error> {
 
     let mut tcpapps = vec![];
     for (app, cfg) in config.tcpapps.clone() {
-        let actions_rx = bridge.register_action_routes(&cfg.actions);
-        tcpapps.push(TcpJson::new(app, cfg, actions_rx, bridge.tx()));
+        let mut route_rx = None;
+        if !cfg.actions.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&cfg.actions, actions_tx)?;
+            route_rx = Some(actions_rx)
+        }
+        tcpapps.push(TcpJson::new(app, cfg, route_rx, bridge.tx()));
     }
 
-    let simulator_actions =
-        config.simulator.as_ref().and_then(|cfg| bridge.register_action_routes(&cfg.actions));
+    let simulator_actions = config.simulator.as_ref().and_then(|cfg| {
+        let mut route_rx = None;
+        if !cfg.actions.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&cfg.actions, actions_tx).unwrap();
+            route_rx = Some(actions_rx)
+        }
+
+        route_rx
+    });
 
     uplink.spawn(bridge)?;
 

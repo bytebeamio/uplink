@@ -32,6 +32,8 @@ pub enum Error {
     ActionTimeout,
     #[error("Another action is currently being processed")]
     Busy,
+    #[error("Action Route clash: \"{0}\"")]
+    ActionRouteClash(String),
 }
 
 struct RedirectionError(Action);
@@ -94,30 +96,30 @@ impl ActionsBridge {
         }
     }
 
-    pub fn register_action_route(&mut self, route: ActionRoute) -> Receiver<Action> {
-        // Unwrap won't panic as we are definitely passing a route
-        self.register_action_routes([route]).unwrap()
+    pub fn register_action_route(
+        &mut self,
+        ActionRoute { name, timeout }: ActionRoute,
+        actions_tx: Sender<Action>,
+    ) -> Result<(), Error> {
+        let duration = Duration::from_secs(timeout);
+        let action_router = ActionRouter { actions_tx, duration };
+        if self.action_routes.insert(name.clone(), action_router).is_some() {
+            return Err(Error::ActionRouteClash(name));
+        }
+
+        Ok(())
     }
 
     pub fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item = R>>(
         &mut self,
         routes: V,
-    ) -> Option<Receiver<Action>> {
-        let routes: Vec<ActionRoute> = routes.into_iter().map(|n| n.into()).collect();
-        if routes.is_empty() {
-            return None;
+        actions_tx: Sender<Action>,
+    ) -> Result<(), Error> {
+        for route in routes {
+            self.register_action_route(route.into(), actions_tx.clone())?;
         }
 
-        let (actions_tx, actions_rx) = bounded(1);
-        for ActionRoute { name, timeout } in routes {
-            let duration = Duration::from_secs(timeout);
-            let action_router = ActionRouter { actions_tx: actions_tx.clone(), duration };
-            if self.action_routes.insert(name.clone(), action_router).is_some() {
-                panic!("Action Route clash: {name}");
-            }
-        }
-
-        Some(actions_rx)
+        Ok(())
     }
 
     pub fn tx(&self) -> ActionsBridgeTx {
@@ -501,10 +503,13 @@ mod tests {
         let config = Arc::new(default_config());
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
         let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
-        let route_1_rx = bridge.register_action_route(route_1);
 
+        let (route_tx, route_1_rx) = bounded(1);
+        bridge.register_action_route(route_1, route_tx).unwrap();
+
+        let (route_tx, route_2_rx) = bounded(1);
         let route_2 = ActionRoute { name: "route_2".to_string(), timeout: 30 };
-        let route_2_rx = bridge.register_action_route(route_2);
+        bridge.register_action_route(route_2, route_tx).unwrap();
 
         spawn_bridge(bridge);
 
@@ -582,7 +587,9 @@ mod tests {
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
 
         let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
-        let action_rx = bridge.register_action_route(test_route);
+
+        let (route_tx, action_rx) = bounded(1);
+        bridge.register_action_route(test_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
 
@@ -630,7 +637,9 @@ mod tests {
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
 
         let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
-        let action_rx = bridge.register_action_route(test_route);
+
+        let (route_tx, action_rx) = bounded(1);
+        bridge.register_action_route(test_route, route_tx).unwrap();
         let bridge_tx = bridge.tx();
 
         spawn_bridge(bridge);
@@ -676,11 +685,13 @@ mod tests {
         let bridge_tx_1 = bridge.tx();
         let bridge_tx_2 = bridge.tx();
 
+        let (route_tx, action_rx_1) = bounded(1);
         let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
-        let action_rx_1 = bridge.register_action_route(test_route);
+        bridge.register_action_route(test_route, route_tx).unwrap();
 
+        let (route_tx, action_rx_2) = bounded(1);
         let redirect_route = ActionRoute { name: "redirect".to_string(), timeout: 30 };
-        let action_rx_2 = bridge.register_action_route(redirect_route);
+        bridge.register_action_route(redirect_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
 
@@ -740,11 +751,13 @@ mod tests {
         let bridge_tx_1 = bridge.tx();
         let bridge_tx_2 = bridge.tx();
 
+        let (route_tx, action_rx_1) = bounded(1);
         let tunshell_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
-        let action_rx_1 = bridge.register_action_route(tunshell_route);
+        bridge.register_action_route(tunshell_route, route_tx).unwrap();
 
+        let (route_tx, action_rx_2) = bounded(1);
         let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
-        let action_rx_2 = bridge.register_action_route(test_route);
+        bridge.register_action_route(test_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
 
@@ -826,11 +839,13 @@ mod tests {
         let bridge_tx_1 = bridge.tx();
         let bridge_tx_2 = bridge.tx();
 
+        let (route_tx, action_rx_1) = bounded(1);
         let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
-        let action_rx_1 = bridge.register_action_route(test_route);
+        bridge.register_action_route(test_route, route_tx).unwrap();
 
+        let (route_tx, action_rx_2) = bounded(1);
         let tunshell_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
-        let action_rx = bridge.register_action_route(tunshell_route);
+        bridge.register_action_route(tunshell_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
 
@@ -847,7 +862,7 @@ mod tests {
 
         std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
-            let action = action_rx.recv().unwrap();
+            let action = action_rx_2.recv().unwrap();
             assert_eq!(action.action_id, "2");
             let response = ActionResponse::progress(&action.action_id, "Launched", 0);
             rt.block_on(bridge_tx_2.send_action_response(response));
