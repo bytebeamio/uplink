@@ -475,8 +475,9 @@ impl Uplink {
 
         if !self.config.processes.is_empty() {
             let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&self.config.processes, actions_tx)?;
-            let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
+            bridge.register_action_routes(&self.config.processes, actions_tx)?;         
+            let process_handler =
+                ProcessHandler::new(actions_rx, bridge_tx.clone(), &self.config.processes);
             thread::spawn(move || {
                 if let Err(e) = process_handler.start() {
                     error!("Process handler stopped!! Error = {:?}", e);
