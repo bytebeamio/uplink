@@ -215,8 +215,6 @@ pub mod config {
             stream_config.buf_size = buf_size;
         }
 
-        config.streams.insert("action_status".to_owned(), config.action_status.to_owned());
-
         let action_topic_template = "/tenants/{tenant_id}/devices/{device_id}/actions";
         let mut device_action_topic = action_topic_template.to_string();
         replace_topic_placeholders(&mut device_action_topic, tenant_id, device_id);
@@ -314,7 +312,7 @@ impl Uplink {
         )
     }
 
-    pub fn spawn(&mut self, mut bridge: Bridge) -> Result<(), Error> {
+    pub fn spawn(&mut self, bridge: Bridge) -> Result<(), Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
 
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
@@ -380,17 +378,34 @@ impl Uplink {
             })
         });
 
-        // Bridge thread to batch data and redicet actions
+        let Bridge { data: mut data_lane, actions: mut actions_lane } = bridge;
+
+        // Bridge thread to direct actions
         thread::spawn(|| {
             let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("bridge")
+                .thread_name("bridge_actions_lane")
                 .enable_time()
                 .build()
                 .unwrap();
 
             rt.block_on(async move {
-                if let Err(e) = bridge.start().await {
-                    error!("Bridge stopped!! Error = {:?}", e);
+                if let Err(e) = actions_lane.start().await {
+                    error!("Actions lane stopped!! Error = {:?}", e);
+                }
+            })
+        });
+
+        // Bridge thread to batch and forward data
+        thread::spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .thread_name("bridge_data_lane")
+                .enable_time()
+                .build()
+                .unwrap();
+
+            rt.block_on(async move {
+                if let Err(e) = data_lane.start().await {
+                    error!("Data lane stopped!! Error = {:?}", e);
                 }
             })
         });
@@ -402,11 +417,14 @@ impl Uplink {
         let bridge_tx = bridge.tx();
 
         let route = ActionRoute { name: "launch_shell".to_owned(), timeout: 10 };
-        let actions_rx = bridge.register_action_route(route);
+        let (actions_tx, actions_rx) = bounded(1);
+        bridge.register_action_route(route, actions_tx)?;
         let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
         thread::spawn(move || tunshell_client.start());
 
-        if let Some(actions_rx) = bridge.register_action_routes(&self.config.downloader.actions) {
+        if !self.config.downloader.actions.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&self.config.downloader.actions, actions_tx)?;
             let file_downloader =
                 FileDownloader::new(self.config.clone(), actions_rx, bridge_tx.clone())?;
             thread::spawn(move || file_downloader.start());
@@ -416,7 +434,9 @@ impl Uplink {
         thread::spawn(move || device_shadow.start());
 
         if let Some(config) = self.config.ota_installer.clone() {
-            if let Some(actions_rx) = bridge.register_action_routes(&config.actions) {
+            if !config.actions.is_empty() {
+                let (actions_tx, actions_rx) = bounded(1);
+                bridge.register_action_routes(&config.actions, actions_tx)?;
                 let ota_installer = OTAInstaller::new(config, actions_rx, bridge_tx.clone());
                 thread::spawn(move || ota_installer.start());
             }
@@ -425,7 +445,8 @@ impl Uplink {
         #[cfg(target_os = "linux")]
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
-            let actions_rx = bridge.register_action_route(route);
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_route(route, actions_tx)?;
             let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
             thread::spawn(move || {
                 if let Err(e) = logger.start() {
@@ -437,7 +458,8 @@ impl Uplink {
         #[cfg(target_os = "android")]
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
-            let actions_rx = bridge.register_action_route(route);
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_route(route, actions_tx)?;
             let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
             thread::spawn(move || {
                 if let Err(e) = logger.start() {
@@ -451,7 +473,9 @@ impl Uplink {
             thread::spawn(move || stat_collector.start());
         };
 
-        if let Some(actions_rx) = bridge.register_action_routes(&self.config.processes) {
+        if !self.config.processes.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&self.config.processes, actions_tx)?;         
             let process_handler =
                 ProcessHandler::new(actions_rx, bridge_tx.clone(), &self.config.processes);
             thread::spawn(move || {
@@ -461,7 +485,9 @@ impl Uplink {
             });
         }
 
-        if let Some(actions_rx) = bridge.register_action_routes(&self.config.script_runner) {
+        if !self.config.script_runner.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&self.config.script_runner, actions_tx)?;
             let script_runner =
                 ScriptRunner::new(self.config.script_runner.clone(), actions_rx, bridge_tx);
             thread::spawn(move || {
