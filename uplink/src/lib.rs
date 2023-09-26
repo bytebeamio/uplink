@@ -125,6 +125,7 @@ pub mod config {
 
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
+    buf_size = 1
     flush_period = 2
 
     [streams.device_shadow]
