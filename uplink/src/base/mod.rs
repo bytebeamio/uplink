@@ -133,7 +133,6 @@ pub struct SimulatorConfig {
 pub struct DownloaderConfig {
     #[serde(default = "default_download_path")]
     pub path: PathBuf,
-    #[serde(default)]
     pub actions: Vec<ActionRoute>,
 }
 
