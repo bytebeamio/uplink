@@ -1,4 +1,4 @@
-name: "bytebeam-gcp - Argonaut"
+name: "Bytebeam-GCP - Argonaut"
 
 run-name: "${{inputs.arg_task_title}}"
 
