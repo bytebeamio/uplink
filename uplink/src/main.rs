@@ -88,11 +88,13 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    max_inflight_messages: {}", config.mqtt.max_inflight);
     println!("    keep_alive_timeout: {}", config.mqtt.keep_alive);
 
-    println!(
-        "    downloader:\n\tpath: {}\n\tactions: {:?}",
-        config.downloader.path.display(),
-        config.downloader.actions
-    );
+    if !config.downloader.actions.is_empty() {
+        println!(
+            "    downloader:\n\tpath: \"{}\"\n\tactions: {:?}",
+            config.downloader.path.display(),
+            config.downloader.actions
+        );
+    }
     if !config.ota_installer.actions.is_empty() {
         println!(
             "    installer:\n\tpath: {}\n\tactions: {:?}",
