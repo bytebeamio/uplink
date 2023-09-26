@@ -433,13 +433,12 @@ impl Uplink {
         let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
         thread::spawn(move || device_shadow.start());
 
-        if let Some(config) = self.config.ota_installer.clone() {
-            if !config.actions.is_empty() {
-                let (actions_tx, actions_rx) = bounded(1);
-                bridge.register_action_routes(&config.actions, actions_tx)?;
-                let ota_installer = OTAInstaller::new(config, actions_rx, bridge_tx.clone());
-                thread::spawn(move || ota_installer.start());
-            }
+        if !self.config.ota_installer.actions.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&self.config.ota_installer.actions, actions_tx)?;
+            let ota_installer =
+                OTAInstaller::new(self.config.ota_installer.clone(), actions_rx, bridge_tx.clone());
+            thread::spawn(move || ota_installer.start());
         }
 
         #[cfg(target_os = "linux")]
@@ -475,7 +474,7 @@ impl Uplink {
 
         if !self.config.processes.is_empty() {
             let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&self.config.processes, actions_tx)?;         
+            bridge.register_action_routes(&self.config.processes, actions_tx)?;
             let process_handler =
                 ProcessHandler::new(actions_rx, bridge_tx.clone(), &self.config.processes);
             thread::spawn(move || {
