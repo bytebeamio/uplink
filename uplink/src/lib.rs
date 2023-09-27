@@ -48,7 +48,7 @@ use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
-use collector::clickhouse::ClickhouseReader;
+// use collector::clickhouse::ClickhouseReader;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
@@ -139,7 +139,7 @@ pub mod config {
     buf_size = 32
 
     [system_stats]
-    enabled = true
+    enabled = false
     process_names = ["uplink"]
     update_period = 30
 "#;
@@ -447,10 +447,11 @@ impl Uplink {
             let prometheus = Prometheus::new(config, bridge_tx.clone());
             thread::spawn(|| prometheus.start());
         }
-        if let Some(config) = self.config.clickhouse.clone() {
-            let clickhouse_reader = ClickhouseReader::new(config, bridge_tx.clone());
-            thread::spawn(|| clickhouse_reader.start());
-        }
+
+        // if let Some(config) = self.config.clickhouse.clone() {
+        //     let clickhouse_reader = ClickhouseReader::new(config, bridge_tx.clone());
+        //     thread::spawn(|| clickhouse_reader.start());
+        // }
 
         // Metrics monitor thread
         thread::spawn(|| {

@@ -1,4 +1,4 @@
-pub mod clickhouse;
+// pub mod clickhouse;
 pub mod device_shadow;
 pub mod downloader;
 pub mod installer;

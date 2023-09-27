@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: uplink-agent
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: uplink-agent
+  template:
+    metadata:
+      labels:
+        app: uplink-agent
+    spec:
+      containers:
+      - name: uplink-agent
+        image: localhost:32000/uplink:latest
+        imagePullPolicy: "Always"
+        resources:
+          limits:
+            memory: "200M"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /usr/share/bytebeam/uplink/auth
+      volumes:
+      - name: config-volume
+        configMap:
+          name: uplinkauth
+
+
