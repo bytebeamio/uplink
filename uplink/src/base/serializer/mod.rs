@@ -131,6 +131,8 @@ impl MqttClient for AsyncClient {
 
 struct StorageHandler {
     map: HashMap<String, Storage>,
+    // Stream being read from
+    read_stream: Option<String>,
 }
 
 impl StorageHandler {
@@ -155,7 +157,7 @@ impl StorageHandler {
             map.insert(stream_config.topic.clone(), storage);
         }
 
-        Ok(Self { map })
+        Ok(Self { map, read_stream: None })
     }
 
     fn select(&mut self, topic: &str) -> &mut Storage {
@@ -163,15 +165,31 @@ impl StorageHandler {
     }
 
     fn next(&mut self, metrics: &mut SerializerMetrics) -> Option<&mut Storage> {
-        let storages = self.map.values_mut();
+        let storages = self.map.iter_mut();
 
-        for storage in storages {
-            match storage.reload_on_eof() {
-                // Done reading all the pending files
-                Ok(true) => continue,
-                Ok(false) => return Some(storage),
+        for (stream_name, storage) in storages {
+            match (storage.reload_on_eof(), &mut self.read_stream) {
+                // Done reading all pending files for a persisted stream
+                (Ok(true), Some(curr_stream)) => {
+                    if curr_stream == stream_name {
+                        self.read_stream.take();
+                        debug!("Completed reading from: {stream_name}");
+                    }
+
+                    continue;
+                }
+                // Persisted stream is empty
+                (Ok(true), _) => continue,
+                // Reading from a newly loaded non-empty persisted stream
+                (Ok(false), None) => {
+                    debug!("Reading from: {stream_name}");
+                    self.read_stream = Some(stream_name.to_owned());
+                    return Some(storage);
+                }
+                // Continuing to read from persisted stream loaded earlier
+                (Ok(false), _) => return Some(storage),
                 // Reload again on encountering a corrupted file
-                Err(e) => {
+                (Err(e), _) => {
                     metrics.increment_errors();
                     metrics.increment_lost_segments();
                     error!("Failed to reload from storage. Error = {e}");
