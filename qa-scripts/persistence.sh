@@ -25,7 +25,7 @@ EOF
 )" > devices/persistence.toml
 docker cp devices/persistence.toml simulator:/usr/share/bytebeam/uplink/devices/persistence.toml
 
-docker exec -it simulator uplink -a /usr/share/bytebeam/uplink/devices/device_$DEVICE_ID.json -c /usr/share/bytebeam/uplink/devices/persistence.toml -vv -m uplink::base::serializer
+docker exec -it simulator uplink -a /usr/share/bytebeam/uplink/devices/device_$DEVICE_ID.json -c /usr/share/bytebeam/uplink/devices/persistence.toml -vv -m uplink::base::serializer -m storage
 
 # Slow down mqtts
 # toxiproxy-cli toxic add -n slow -t latency -a latency=100 --downstream mqtts
