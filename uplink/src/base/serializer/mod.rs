@@ -139,7 +139,8 @@ impl StorageHandler {
     fn new(config: Arc<Config>) -> Result<Self, Error> {
         let mut map = HashMap::with_capacity(2 * config.streams.len());
         for (stream_name, stream_config) in config.streams.iter() {
-            let mut storage = Storage::new(stream_config.persistence.max_file_size);
+            let mut storage =
+                Storage::new(&stream_config.topic, stream_config.persistence.max_file_size);
             if stream_config.persistence.max_file_count > 0 {
                 let mut path = config.persistence_path.clone();
                 path.push(stream_name);
@@ -161,7 +162,7 @@ impl StorageHandler {
     }
 
     fn select(&mut self, topic: &str) -> &mut Storage {
-        self.map.entry(topic.to_owned()).or_insert_with(|| Storage::new(default_file_size()))
+        self.map.entry(topic.to_owned()).or_insert_with(|| Storage::new(topic, default_file_size()))
     }
 
     fn next(&mut self, metrics: &mut SerializerMetrics) -> Option<&mut Storage> {

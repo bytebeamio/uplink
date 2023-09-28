@@ -19,6 +19,7 @@ pub enum Error {
 }
 
 pub struct Storage {
+    name: String,
     /// maximum allowed file size
     max_file_size: usize,
     /// current open file
@@ -30,8 +31,9 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn new(max_file_size: usize) -> Storage {
+    pub fn new(name: impl Into<String>, max_file_size: usize) -> Storage {
         Storage {
+            name: name.into(),
             max_file_size,
             current_write_file: BytesMut::with_capacity(max_file_size * 2),
             current_read_file: BytesMut::with_capacity(max_file_size * 2),
@@ -87,7 +89,7 @@ impl Storage {
             Some(persistence) => {
                 let hash = hash(&self.current_write_file[..]);
                 let mut next_file = persistence.open_next_write_file()?;
-                info!("Flushing data to disk!! {:?}", next_file.path);
+                info!("Flushing data to disk for stoarge: {}; path = {:?}", self.name, next_file.path);
 
                 next_file.file.write_all(&hash.to_be_bytes())?;
                 next_file.file.write_all(&self.current_write_file[..])?;
