@@ -1,5 +1,5 @@
 use bytes::{Buf, BufMut, BytesMut};
-use log::{self, error, info, warn};
+use log::{self, debug, error, info, warn};
 use seahash::hash;
 
 use std::collections::VecDeque;
@@ -122,7 +122,8 @@ impl Storage {
             let read_is_destructive = !persistence.non_destructive_read;
             let read_file_id = persistence.current_read_file_id.take();
             if let Some(id) = read_is_destructive.then(|| read_file_id).flatten() {
-                persistence.remove(id)?;
+                let deleted_file = persistence.remove(id)?;
+                debug!("Completed reading a persistence file, deleting it; storage = {}, path = {deleted_file:?}", self.name);
             }
 
             // Swap read buffer with write buffer to read data in inmemory write
@@ -231,11 +232,11 @@ impl Persistence {
     }
 
     /// Removes a file with provided id
-    fn remove(&self, id: u64) -> Result<(), Error> {
+    fn remove(&self, id: u64) -> Result<PathBuf, Error> {
         let path = self.path(id)?;
-        fs::remove_file(path)?;
+        fs::remove_file(&path)?;
 
-        Ok(())
+        Ok(path)
     }
 
     /// Move corrupt file to special directory
@@ -284,11 +285,10 @@ impl Persistence {
             _ => self.backlog_files.pop_front().unwrap(),
         };
 
-        warn!("file limit reached. deleting backup@{}", id);
-
         next.deleted = Some(id);
         if !self.non_destructive_read {
-            self.remove(id)?;
+            let deleted_file = self.remove(id)?;
+            warn!("file limit reached. deleting backup@{}; path = {deleted_file:?}", id);
         }
 
         Ok(next)
