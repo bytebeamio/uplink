@@ -128,7 +128,7 @@ impl Storage {
             // Remove read file on completion in destructive-read mode
             let read_is_destructive = !persistence.non_destructive_read;
             let read_file_id = persistence.current_read_file_id.take();
-            if let Some(id) = read_is_destructive.then(|| read_file_id).flatten() {
+            if let Some(id) = read_is_destructive.then_some(read_file_id).flatten() {
                 let deleted_file = persistence.remove(id)?;
                 debug!("Completed reading a persistence file, deleting it; storage = {}, path = {deleted_file:?}", self.name);
             }
