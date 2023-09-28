@@ -382,7 +382,7 @@ mod test {
     fn flush_creates_new_file_after_size_limit() {
         // 1036 is the size of a publish message with topic = "hello", qos = 1, payload = 1024 bytes
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
 
         // 2 files on disk and a partially filled in memory buffer
@@ -399,7 +399,7 @@ mod test {
     #[test]
     fn old_file_is_deleted_after_limit() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
 
         // 11 files created. 10 on disk
@@ -419,7 +419,7 @@ mod test {
     #[test]
     fn reload_loads_correct_file_into_memory() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
 
         // 10 files on disk
@@ -437,7 +437,7 @@ mod test {
     #[test]
     fn reload_loads_partially_written_write_buffer_correctly() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
 
         // 10 files on disk and partially filled current write buffer
@@ -456,7 +456,7 @@ mod test {
     #[test]
     fn ensure_file_remove_on_read_completion_only() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
         // 10 files on disk and partially filled current write buffer, 10 publishes per file
         write_n_publishes(&mut storage, 105);
@@ -490,7 +490,7 @@ mod test {
     #[test]
     fn ensure_files_including_read_removed_post_flush_on_overflow() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
         // 10 files on disk and partially filled current write buffer, 10 publishes per file
         write_n_publishes(&mut storage, 105);

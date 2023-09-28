@@ -846,7 +846,7 @@ mod test {
         let config = Arc::new(default_config());
 
         let (serializer, _, _) = defaults(config);
-        let mut storage = Storage::new(1024);
+        let mut storage = Storage::new("hello/world", 1024);
 
         let mut publish = Publish::new(
             "hello/world",
@@ -950,7 +950,7 @@ mod test {
             .storage_handler
             .map
             .entry("hello/world".to_string())
-            .or_insert(Storage::new(1024));
+            .or_insert(Storage::new("hello/world", 1024));
 
         let mut collector = MockCollector::new(data_tx);
         // Run a collector practically once
@@ -1002,7 +1002,7 @@ mod test {
             .storage_handler
             .map
             .entry("hello/world".to_string())
-            .or_insert(Storage::new(1024));
+            .or_insert(Storage::new("hello/world", 1024));
 
         let mut collector = MockCollector::new(data_tx);
         // Run a collector
