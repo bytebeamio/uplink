@@ -104,6 +104,10 @@ impl Storage {
                 // TODO(RT): Make sure that disk files starts with id 1 to represent in memory file
                 // with id 0
                 self.current_write_file.clear();
+                warn!(
+                    "Persistence disabled for storage: {}. Deleted in-memory buffer on overflow",
+                    self.name
+                );
                 Ok(Some(0))
             }
         }
