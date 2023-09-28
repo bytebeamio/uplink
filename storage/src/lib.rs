@@ -89,7 +89,10 @@ impl Storage {
             Some(persistence) => {
                 let hash = hash(&self.current_write_file[..]);
                 let mut next_file = persistence.open_next_write_file()?;
-                info!("Flushing data to disk for stoarge: {}; path = {:?}", self.name, next_file.path);
+                info!(
+                    "Flushing data to disk for stoarge: {}; path = {:?}",
+                    self.name, next_file.path
+                );
 
                 next_file.file.write_all(&hash.to_be_bytes())?;
                 next_file.file.write_all(&self.current_write_file[..])?;
