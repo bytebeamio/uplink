@@ -118,8 +118,10 @@ impl Storage {
         }
 
         if let Some(persistence) = &mut self.persistence {
-            // Remove read file on completion
-            if let Some(id) = persistence.current_read_file_id.take() {
+            // Remove read file on completion in destructive-read mode
+            let read_is_destructive = !persistence.non_destructive_read;
+            let read_file_id = persistence.current_read_file_id.take();
+            if let Some(id) = read_is_destructive.then(|| read_file_id).flatten() {
                 persistence.remove(id)?;
             }
 
@@ -230,10 +232,6 @@ impl Persistence {
 
     /// Removes a file with provided id
     fn remove(&self, id: u64) -> Result<(), Error> {
-        if self.non_destructive_read {
-            return Ok(());
-        }
-
         let path = self.path(id)?;
         fs::remove_file(path)?;
 
@@ -289,7 +287,9 @@ impl Persistence {
         warn!("file limit reached. deleting backup@{}", id);
 
         next.deleted = Some(id);
-        self.remove(id)?;
+        if !self.non_destructive_read {
+            self.remove(id)?;
+        }
 
         Ok(next)
     }
