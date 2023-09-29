@@ -156,15 +156,21 @@ fn main() -> Result<(), Error> {
 
     if let Some(config) = config.simulator.clone() {
         let bridge_tx = bridge_tx.clone();
-        thread::spawn(move || {
-            simulator::start(config, bridge_tx, simulator_actions).unwrap();
-        });
+        thread::Builder::new()
+            .name("Simulator".to_string())
+            .spawn(move || {
+                simulator::start(config, bridge_tx, simulator_actions).unwrap();
+            })
+            .unwrap();
     }
 
     if config.console.enabled {
         let port = config.console.port;
         let bridge_tx = bridge_tx.clone();
-        thread::spawn(move || console::start(port, reload_handle, bridge_tx));
+        thread::Builder::new()
+            .name("Uplink Console".to_string())
+            .spawn(move || console::start(port, reload_handle, bridge_tx))
+            .unwrap();
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()

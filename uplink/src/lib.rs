@@ -328,33 +328,35 @@ impl Uplink {
 
         // Serializer thread to handle network conditions state machine
         // and send data to mqtt thread
-        thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("serializer")
-                .enable_time()
-                .build()
-                .unwrap();
+        thread::Builder::new()
+            .name("Serializer".to_string())
+            .spawn(|| {
+                let rt =
+                    tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
-            rt.block_on(async {
-                if let Err(e) = serializer.start().await {
-                    error!("Serializer stopped!! Error = {:?}", e);
-                }
+                rt.block_on(async {
+                    if let Err(e) = serializer.start().await {
+                        error!("Serializer stopped!! Error = {:?}", e);
+                    }
+                })
             })
-        });
+            .unwrap();
 
         // Mqtt thread to receive actions and send data
-        thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("mqttio")
-                .enable_time()
-                .enable_io()
-                .build()
-                .unwrap();
+        thread::Builder::new()
+            .name("Mqttio".to_string())
+            .spawn(|| {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_time()
+                    .enable_io()
+                    .build()
+                    .unwrap();
 
-            rt.block_on(async {
-                mqtt.start().await;
+                rt.block_on(async {
+                    mqtt.start().await;
+                })
             })
-        });
+            .unwrap();
 
         let monitor = Monitor::new(
             self.config.clone(),
@@ -365,51 +367,51 @@ impl Uplink {
         );
 
         // Metrics monitor thread
-        thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("monitor")
-                .enable_time()
-                .build()
-                .unwrap();
+        thread::Builder::new()
+            .name("Monitor".to_string())
+            .spawn(|| {
+                let rt =
+                    tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
-            rt.block_on(async move {
-                if let Err(e) = monitor.start().await {
-                    error!("Monitor stopped!! Error = {:?}", e);
-                }
+                rt.block_on(async move {
+                    if let Err(e) = monitor.start().await {
+                        error!("Monitor stopped!! Error = {:?}", e);
+                    }
+                })
             })
-        });
+            .unwrap();
 
         let Bridge { data: mut data_lane, actions: mut actions_lane } = bridge;
 
         // Bridge thread to direct actions
-        thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("bridge_actions_lane")
-                .enable_time()
-                .build()
-                .unwrap();
+        thread::Builder::new()
+            .name("Bridge actions_lane".to_string())
+            .spawn(|| {
+                let rt =
+                    tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
-            rt.block_on(async move {
-                if let Err(e) = actions_lane.start().await {
-                    error!("Actions lane stopped!! Error = {:?}", e);
-                }
+                rt.block_on(async move {
+                    if let Err(e) = actions_lane.start().await {
+                        error!("Actions lane stopped!! Error = {:?}", e);
+                    }
+                })
             })
-        });
+            .unwrap();
 
         // Bridge thread to batch and forward data
-        thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("bridge_data_lane")
-                .enable_time()
-                .build()
-                .unwrap();
+        thread::Builder::new()
+            .name("Bridge data_lane".to_string())
+            .spawn(|| {
+                let rt =
+                    tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
-            rt.block_on(async move {
-                if let Err(e) = data_lane.start().await {
-                    error!("Data lane stopped!! Error = {:?}", e);
-                }
+                rt.block_on(async move {
+                    if let Err(e) = data_lane.start().await {
+                        error!("Data lane stopped!! Error = {:?}", e);
+                    }
+                })
             })
-        });
+            .unwrap();
 
         Ok(())
     }
@@ -421,25 +423,37 @@ impl Uplink {
         let (actions_tx, actions_rx) = bounded(1);
         bridge.register_action_route(route, actions_tx)?;
         let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
-        thread::spawn(move || tunshell_client.start());
+        thread::Builder::new()
+            .name("Tunshell Client".to_string())
+            .spawn(move || tunshell_client.start())
+            .unwrap();
 
         if !self.config.downloader.actions.is_empty() {
             let (actions_tx, actions_rx) = bounded(1);
             bridge.register_action_routes(&self.config.downloader.actions, actions_tx)?;
             let file_downloader =
                 FileDownloader::new(self.config.clone(), actions_rx, bridge_tx.clone())?;
-            thread::spawn(move || file_downloader.start());
+            thread::Builder::new()
+                .name("File Downloader".to_string())
+                .spawn(move || file_downloader.start())
+                .unwrap();
         }
 
         let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
-        thread::spawn(move || device_shadow.start());
+        thread::Builder::new()
+            .name("Device Shadow Generator".to_string())
+            .spawn(move || device_shadow.start())
+            .unwrap();
 
         if !self.config.ota_installer.actions.is_empty() {
             let (actions_tx, actions_rx) = bounded(1);
             bridge.register_action_routes(&self.config.ota_installer.actions, actions_tx)?;
             let ota_installer =
                 OTAInstaller::new(self.config.ota_installer.clone(), actions_rx, bridge_tx.clone());
-            thread::spawn(move || ota_installer.start());
+            thread::Builder::new()
+                .name("OTA Installer".to_string())
+                .spawn(move || ota_installer.start())
+                .unwrap();
         }
 
         #[cfg(target_os = "linux")]
@@ -448,11 +462,14 @@ impl Uplink {
             let (actions_tx, actions_rx) = bounded(1);
             bridge.register_action_route(route, actions_tx)?;
             let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
-            thread::spawn(move || {
-                if let Err(e) = logger.start() {
-                    error!("Logger stopped!! Error = {:?}", e);
-                }
-            });
+            thread::Builder::new()
+                .name("Logger".to_string())
+                .spawn(move || {
+                    if let Err(e) = logger.start() {
+                        error!("Logger stopped!! Error = {:?}", e);
+                    }
+                })
+                .unwrap();
         }
 
         #[cfg(target_os = "android")]
@@ -461,16 +478,22 @@ impl Uplink {
             let (actions_tx, actions_rx) = bounded(1);
             bridge.register_action_route(route, actions_tx)?;
             let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
-            thread::spawn(move || {
-                if let Err(e) = logger.start() {
-                    error!("Logger stopped!! Error = {:?}", e);
-                }
-            });
+            thread::Builder::new()
+                .name("Logger".to_string())
+                .spawn(move || {
+                    if let Err(e) = logger.start() {
+                        error!("Logger stopped!! Error = {:?}", e);
+                    }
+                })
+                .unwrap();
         }
 
         if self.config.system_stats.enabled {
             let stat_collector = StatCollector::new(self.config.clone(), bridge_tx.clone());
-            thread::spawn(move || stat_collector.start());
+            thread::Builder::new()
+                .name("Stat Collector".to_string())
+                .spawn(move || stat_collector.start())
+                .unwrap();
         };
 
         if !self.config.processes.is_empty() {
@@ -478,11 +501,14 @@ impl Uplink {
             bridge.register_action_routes(&self.config.processes, actions_tx)?;
             let process_handler =
                 ProcessHandler::new(actions_rx, bridge_tx.clone(), &self.config.processes);
-            thread::spawn(move || {
-                if let Err(e) = process_handler.start() {
-                    error!("Process handler stopped!! Error = {:?}", e);
-                }
-            });
+            thread::Builder::new()
+                .name("Process Handler".to_string())
+                .spawn(move || {
+                    if let Err(e) = process_handler.start() {
+                        error!("Process handler stopped!! Error = {:?}", e);
+                    }
+                })
+                .unwrap();
         }
 
         if !self.config.script_runner.is_empty() {
@@ -490,11 +516,14 @@ impl Uplink {
             bridge.register_action_routes(&self.config.script_runner, actions_tx)?;
             let script_runner =
                 ScriptRunner::new(self.config.script_runner.clone(), actions_rx, bridge_tx);
-            thread::spawn(move || {
-                if let Err(e) = script_runner.start() {
-                    error!("Script runner stopped!! Error = {:?}", e);
-                }
-            });
+            thread::Builder::new()
+                .name("Script Runner".to_string())
+                .spawn(move || {
+                    if let Err(e) = script_runner.start() {
+                        error!("Script runner stopped!! Error = {:?}", e);
+                    }
+                })
+                .unwrap();
         }
 
         Ok(())
