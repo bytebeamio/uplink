@@ -4,6 +4,7 @@ pub mod downloader;
 pub mod installer;
 #[cfg(target_os = "linux")]
 pub mod journalctl;
+pub mod k8s;
 pub mod log_reader;
 #[cfg(target_os = "android")]
 pub mod logcat;

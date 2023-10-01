@@ -52,6 +52,7 @@ use base::monitor::Monitor;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
+use collector::k8s::K8S;
 use collector::log_reader::LogFileReader;
 use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
@@ -464,6 +465,23 @@ impl Uplink {
             rt.block_on(async move {
                 if let Err(e) = monitor.start().await {
                     error!("Monitor stopped!! Error = {:?}", e);
+                }
+            })
+        });
+
+        // Shutdown thread
+        thread::spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .thread_name("k8s")
+                .enable_time()
+                .enable_io()
+                .build()
+                .unwrap();
+
+            let k8s = K8S::new();
+            rt.block_on(async move {
+                if let Err(e) = k8s.start().await {
+                    error!("K8S stopped!! Error = {:?}", e);
                 }
             })
         });
