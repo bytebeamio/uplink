@@ -1,7 +1,6 @@
 mod console;
 
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use anyhow::Error;
@@ -19,7 +18,7 @@ pub type ReloadHandle =
 
 use uplink::base::AppConfig;
 use uplink::config::{get_configs, initialize, CommandLine};
-use uplink::{simulator, Config, TcpJson, Uplink};
+use uplink::{simulator, spawn_named_thread, Config, TcpJson, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
     let level = match commandline.verbose {
@@ -156,21 +155,17 @@ fn main() -> Result<(), Error> {
 
     if let Some(config) = config.simulator.clone() {
         let bridge_tx = bridge_tx.clone();
-        thread::Builder::new()
-            .name("Simulator".to_string())
-            .spawn(move || {
-                simulator::start(config, bridge_tx, simulator_actions).unwrap();
-            })
-            .unwrap();
+        spawn_named_thread("Simulator", || {
+            simulator::start(config, bridge_tx, simulator_actions).unwrap();
+        });
     }
 
     if config.console.enabled {
         let port = config.console.port;
         let bridge_tx = bridge_tx.clone();
-        thread::Builder::new()
-            .name("Uplink Console".to_string())
-            .spawn(move || console::start(port, reload_handle, bridge_tx))
-            .unwrap();
+        spawn_named_thread("Uplink Console", move || {
+            console::start(port, reload_handle, bridge_tx)
+        });
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()
