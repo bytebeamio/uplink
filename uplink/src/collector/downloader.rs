@@ -54,9 +54,8 @@ use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
-use tokio::time::timeout;
+use tokio::time::timeout_at;
 
-use std::collections::HashMap;
 use std::fs::{metadata, remove_dir_all, File};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -100,7 +99,6 @@ pub struct FileDownloader {
     bridge_tx: BridgeTx,
     client: Client,
     sequence: u32,
-    timeouts: HashMap<String, Duration>,
 }
 
 impl FileDownloader {
@@ -125,17 +123,9 @@ impl FileDownloader {
         }
         .build()?;
 
-        let timeouts = config
-            .downloader
-            .actions
-            .iter()
-            .map(|s| (s.name.to_owned(), Duration::from_secs(s.timeout)))
-            .collect();
-
         Ok(Self {
             config: config.downloader.clone(),
             actions_rx,
-            timeouts,
             client,
             bridge_tx,
             sequence: 0,
@@ -158,17 +148,17 @@ impl FileDownloader {
                 }
             };
             self.action_id = action.action_id.clone();
-
-            let duration = match self.timeouts.get(&action.name) {
-                Some(t) => *t,
+            let deadline = match &action.deadline {
+                Some(d) => *d,
                 _ => {
-                    error!("Action: {} unconfigured", action.name);
+                    error!("Unconfigured deadline: {}", action.name);
                     continue;
                 }
             };
 
             // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
-            match timeout(duration, self.run(action)).await {
+
+            match timeout_at(deadline, self.run(action)).await {
                 Ok(Err(e)) => self.forward_error(e).await,
                 Err(_) => error!("Last download has timedout"),
                 _ => {}
@@ -488,6 +478,7 @@ mod test {
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
+            deadline: None,
         };
 
         std::thread::sleep(Duration::from_millis(10));
@@ -556,6 +547,7 @@ mod test {
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
+            deadline: None,
         };
 
         std::thread::sleep(Duration::from_millis(10));

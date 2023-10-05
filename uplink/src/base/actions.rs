@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::time::Instant;
 
 use crate::{Payload, Point};
 
@@ -19,6 +20,9 @@ pub struct Action {
     pub name: String,
     // action payload. json. can be args/payload. depends on the invoked command
     pub payload: String,
+    // Instant at which action must be timedout
+    #[serde(skip)]
+    pub deadline: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
