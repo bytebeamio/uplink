@@ -416,6 +416,7 @@ pub struct ActionRouter {
 
 impl ActionRouter {
     #[allow(clippy::result_large_err)]
+    /// Forwards action to the appropriate application and returns the instance in time at which it should be timedout if incomplete
     pub fn try_send(&self, mut action: Action) -> Result<Instant, TrySendError<Action>> {
         let deadline = Instant::now() + self.duration;
         action.deadline = Some(deadline);
