@@ -119,17 +119,11 @@ impl ScriptRunner {
                     continue;
                 }
             };
-            let deadline = match &action.deadline {
-                Some(d) => *d,
-                _ => {
-                    error!("Unconfigured deadline: {}", action.name);
-                    continue;
-                }
-            };
             // Spawn the action and capture its stdout
             let child = self.run(command).await?;
             if let Ok(o) =
-                timeout_at(deadline, self.spawn_and_capture_stdout(child, &action.action_id)).await
+                timeout_at(action.deadline, self.spawn_and_capture_stdout(child, &action.action_id))
+                    .await
             {
                 o?
             }
@@ -155,6 +149,7 @@ mod tests {
     };
 
     use flume::bounded;
+    use tokio::time::Instant;
 
     fn create_bridge() -> (BridgeTx, Receiver<ActionResponse>) {
         let (data_tx, _) = flume::bounded(2);
@@ -181,7 +176,7 @@ mod tests {
                 kind: "1".to_string(),
                 name: "test".to_string(),
                 payload: "".to_string(),
-                deadline: None,
+                deadline: Instant::now(),
             })
             .unwrap();
 
@@ -206,7 +201,7 @@ mod tests {
                 name: "test".to_string(),
                 payload: "{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}"
                     .to_string(),
-                deadline: None,
+                deadline: Instant::now(),
             })
             .unwrap();
 

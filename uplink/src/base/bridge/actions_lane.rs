@@ -419,7 +419,7 @@ impl ActionRouter {
     /// Forwards action to the appropriate application and returns the instance in time at which it should be timedout if incomplete
     pub fn try_send(&self, mut action: Action) -> Result<Instant, TrySendError<Action>> {
         let deadline = Instant::now() + self.duration;
-        action.deadline = Some(deadline);
+        action.deadline = deadline;
         self.actions_tx.try_send(action)?;
 
         Ok(deadline)
@@ -547,7 +547,7 @@ mod tests {
             kind: "test".to_string(),
             name: "route_1".to_string(),
             payload: "test".to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
         actions_tx.send(action_1).unwrap();
 
@@ -571,7 +571,7 @@ mod tests {
             kind: "test".to_string(),
             name: "route_2".to_string(),
             payload: "test".to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
         actions_tx.send(action_2).unwrap();
 
@@ -615,7 +615,7 @@ mod tests {
             kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
         actions_tx.send(action_1).unwrap();
 
@@ -630,7 +630,7 @@ mod tests {
             kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
         actions_tx.send(action_2).unwrap();
 
@@ -671,7 +671,7 @@ mod tests {
             kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
         actions_tx.send(action).unwrap();
 
@@ -735,7 +735,7 @@ mod tests {
             kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
         actions_tx.send(action).unwrap();
 
@@ -804,7 +804,7 @@ mod tests {
             kind: "tunshell".to_string(),
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
         actions_tx.send(action).unwrap();
 
@@ -815,7 +815,7 @@ mod tests {
             kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
         actions_tx.send(action).unwrap();
 
@@ -894,7 +894,7 @@ mod tests {
             kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
         actions_tx.send(action).unwrap();
 
@@ -905,7 +905,7 @@ mod tests {
             kind: "tunshell".to_string(),
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
         actions_tx.send(action).unwrap();
 

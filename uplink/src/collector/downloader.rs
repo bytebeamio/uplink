@@ -54,11 +54,11 @@ use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
 use serde::{Deserialize, Serialize};
-use tokio::time::timeout_at;
+use tokio::time::{timeout_at, Instant};
 
 use std::fs::{metadata, remove_dir_all, File};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 #[cfg(unix)]
 use std::{
     fs::{create_dir, set_permissions, Permissions},
@@ -148,17 +148,10 @@ impl FileDownloader {
                 }
             };
             self.action_id = action.action_id.clone();
-            let deadline = match &action.deadline {
-                Some(d) => *d,
-                _ => {
-                    error!("Unconfigured deadline: {}", action.name);
-                    continue;
-                }
-            };
 
             // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
 
-            match timeout_at(deadline, self.run(action)).await {
+            match timeout_at(action.deadline, self.run(action)).await {
                 Ok(Err(e)) => self.forward_error(e).await,
                 Err(_) => error!("Last download has timedout"),
                 _ => {}
@@ -478,7 +471,7 @@ mod test {
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
 
         std::thread::sleep(Duration::from_millis(10));
@@ -547,7 +540,7 @@ mod test {
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
-            deadline: None,
+            deadline: Instant::now(),
         };
 
         std::thread::sleep(Duration::from_millis(10));
