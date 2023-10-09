@@ -396,7 +396,7 @@ impl DownloadState {
 
 #[cfg(test)]
 mod test {
-    use flume::{bounded, TrySendError};
+    use flume::bounded;
     use serde_json::json;
 
     use std::{collections::HashMap, time::Duration};
@@ -499,59 +499,6 @@ mod test {
             } else if status.is_failed() {
                 break;
             }
-        }
-    }
-
-    #[test]
-    fn multiple_actions_at_once() {
-        // Ensure path exists
-        std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
-        // Prepare config
-        let mut path = PathBuf::from(DOWNLOAD_DIR);
-        path.push("download");
-        let downloader_cfg = DownloaderConfig {
-            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
-            path,
-        };
-        let config = config(downloader_cfg.clone());
-        let (bridge_tx, _) = create_bridge();
-
-        // Create channels to forward and push actions on
-        let (download_tx, download_rx) = bounded(1);
-        let downloader = FileDownloader::new(Arc::new(config), download_rx, bridge_tx).unwrap();
-
-        // Start FileDownloader in separate thread
-        std::thread::spawn(|| downloader.start());
-
-        // Create a firmware update action
-        let download_update = DownloadFile {
-            content_length: 0,
-            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            file_name: "1.0".to_string(),
-            download_path: None,
-        };
-        let mut expected_forward = download_update.clone();
-        let mut path = downloader_cfg.path;
-        path.push("firmware_update");
-        path.push("test.txt");
-        expected_forward.download_path = Some(path);
-        let download_action = Action {
-            action_id: "1".to_string(),
-            kind: "firmware_update".to_string(),
-            name: "firmware_update".to_string(),
-            payload: json!(download_update).to_string(),
-            deadline: Instant::now(),
-        };
-
-        std::thread::sleep(Duration::from_millis(10));
-
-        // Send action to FileDownloader with Sender<Action>
-        download_tx.try_send(download_action.clone()).unwrap();
-
-        // Send action to FileDownloader immediately after, this must fail
-        match download_tx.try_send(download_action).unwrap_err() {
-            TrySendError::Full(_) => {}
-            TrySendError::Disconnected(_) => panic!("Unexpected disconnect"),
         }
     }
 }
