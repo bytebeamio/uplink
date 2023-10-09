@@ -133,7 +133,6 @@ pub struct SimulatorConfig {
 pub struct DownloaderConfig {
     #[serde(default = "default_download_path")]
     pub path: PathBuf,
-    #[serde(default)]
     pub actions: Vec<ActionRoute>,
 }
 
@@ -146,7 +145,6 @@ impl Default for DownloaderConfig {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct InstallerConfig {
     pub path: String,
-    #[serde(default)]
     pub actions: Vec<ActionRoute>,
     pub uplink_port: u16,
 }
@@ -253,7 +251,8 @@ pub struct Config {
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
-    pub ota_installer: Option<InstallerConfig>,
+    #[serde(default)]
+    pub ota_installer: InstallerConfig,
     #[serde(default)]
     pub device_shadow: DeviceShadowConfig,
     #[serde(default)]

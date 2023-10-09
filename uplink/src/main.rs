@@ -1,7 +1,6 @@
 mod console;
 
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use anyhow::Error;
@@ -20,7 +19,7 @@ pub type ReloadHandle =
 use uplink::base::AppConfig;
 use uplink::collector::create_actions_log;
 use uplink::config::{get_configs, initialize, CommandLine};
-use uplink::{simulator, Config, TcpJson, Uplink};
+use uplink::{simulator, spawn_named_thread, Config, TcpJson, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
     let level = match commandline.verbose {
@@ -89,13 +88,18 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    max_inflight_messages: {}", config.mqtt.max_inflight);
     println!("    keep_alive_timeout: {}", config.mqtt.keep_alive);
 
-    println!(
-        "    downloader:\n\tpath: {}\n\tactions: {:?}",
-        config.downloader.path.display(),
-        config.downloader.actions
-    );
-    if let Some(installer) = &config.ota_installer {
-        println!("    installer:\n\tpath: {}\n\tactions: {:?}", installer.path, installer.actions);
+    if !config.downloader.actions.is_empty() {
+        println!(
+            "    downloader:\n\tpath: \"{}\"\n\tactions: {:?}",
+            config.downloader.path.display(),
+            config.downloader.actions
+        );
+    }
+    if !config.ota_installer.actions.is_empty() {
+        println!(
+            "    installer:\n\tpath: {}\n\tactions: {:?}",
+            config.ota_installer.path, config.ota_installer.actions
+        );
     }
     if config.system_stats.enabled {
         println!("    processes: {:?}", config.system_stats.process_names);
@@ -154,7 +158,7 @@ fn main() -> Result<(), Error> {
 
     if let Some(config) = config.simulator.clone() {
         let bridge_tx = bridge_tx.clone();
-        thread::spawn(move || {
+        spawn_named_thread("Simulator", || {
             simulator::start(config, bridge_tx, simulator_actions).unwrap();
         });
     }
@@ -162,7 +166,9 @@ fn main() -> Result<(), Error> {
     if config.console.enabled {
         let port = config.console.port;
         let bridge_tx = bridge_tx.clone();
-        thread::spawn(move || console::start(port, reload_handle, bridge_tx));
+        spawn_named_thread("Uplink Console", move || {
+            console::start(port, reload_handle, bridge_tx)
+        });
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()

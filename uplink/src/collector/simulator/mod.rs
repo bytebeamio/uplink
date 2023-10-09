@@ -101,20 +101,31 @@ pub async fn start(
     spawn_data_simulators(device, tx.clone());
 
     loop {
-        select! {
-            action = actions_rx.as_ref().unwrap().recv_async(), if actions_rx.is_some() => {
-                let action = action?;
-                spawn(ActionResponse::simulate(action,  tx.clone()));
+        if let Some(actions_rx) = actions_rx.as_ref() {
+            select! {
+                action = actions_rx.recv_async() => {
+                    let action = action?;
+                    spawn(ActionResponse::simulate(action,  tx.clone()));
+                }
+                event = rx.recv_async() => {
+                    match event {
+                        Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
+                        Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
+                        Err(_) => {
+                            error!("All generators have stopped!");
+                            return Ok(())
+                        }
+                    };
+                }
             }
-            event = rx.recv_async() => {
-                match event {
-                    Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
-                    Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
-                    Err(_) => {
-                        error!("All generators have stopped!");
-                        return Ok(())
-                    }
-                };
+        } else {
+            match rx.recv_async().await {
+                Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
+                Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
+                Err(_) => {
+                    error!("All generators have stopped!");
+                    return Ok(());
+                }
             }
         }
     }

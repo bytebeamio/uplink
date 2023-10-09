@@ -76,7 +76,12 @@ impl ActionsBridge {
         let (ctrl_tx, ctrl_rx) = bounded(1);
 
         let mut streams_config = HashMap::new();
-        streams_config.insert("action_status".to_owned(), config.action_status.clone());
+        let mut action_status = config.action_status.clone();
+        if action_status.buf_size > 1 {
+            warn!("Buffer size of `action_status` stream restricted to 1")
+        }
+        action_status.buf_size = 1;
+        streams_config.insert("action_status".to_owned(), action_status);
         let mut streams = Streams::new(config.clone(), package_tx, metrics_tx);
         streams.config_streams(streams_config);
 

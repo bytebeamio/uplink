@@ -1,5 +1,5 @@
 use bytes::{Buf, BufMut, BytesMut};
-use log::{self, error, info, warn};
+use log::{self, debug, error, info, warn};
 use seahash::hash;
 
 use std::collections::VecDeque;
@@ -19,6 +19,7 @@ pub enum Error {
 }
 
 pub struct Storage {
+    name: String,
     /// maximum allowed file size
     max_file_size: usize,
     /// current open file
@@ -30,8 +31,9 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn new(max_file_size: usize) -> Storage {
+    pub fn new(name: impl Into<String>, max_file_size: usize) -> Storage {
         Storage {
+            name: name.into(),
             max_file_size,
             current_write_file: BytesMut::with_capacity(max_file_size * 2),
             current_read_file: BytesMut::with_capacity(max_file_size * 2),
@@ -87,7 +89,10 @@ impl Storage {
             Some(persistence) => {
                 let hash = hash(&self.current_write_file[..]);
                 let mut next_file = persistence.open_next_write_file()?;
-                info!("Flushing data to disk!! {:?}", next_file.path);
+                info!(
+                    "Flushing data to disk for stoarge: {}; path = {:?}",
+                    self.name, next_file.path
+                );
 
                 next_file.file.write_all(&hash.to_be_bytes())?;
                 next_file.file.write_all(&self.current_write_file[..])?;
@@ -99,6 +104,10 @@ impl Storage {
                 // TODO(RT): Make sure that disk files starts with id 1 to represent in memory file
                 // with id 0
                 self.current_write_file.clear();
+                warn!(
+                    "Persistence disabled for storage: {}. Deleted in-memory buffer on overflow",
+                    self.name
+                );
                 Ok(Some(0))
             }
         }
@@ -116,9 +125,12 @@ impl Storage {
         }
 
         if let Some(persistence) = &mut self.persistence {
-            // Remove read file on completion
-            if let Some(id) = persistence.current_read_file_id.take() {
-                persistence.remove(id)?;
+            // Remove read file on completion in destructive-read mode
+            let read_is_destructive = !persistence.non_destructive_read;
+            let read_file_id = persistence.current_read_file_id.take();
+            if let Some(id) = read_is_destructive.then_some(read_file_id).flatten() {
+                let deleted_file = persistence.remove(id)?;
+                debug!("Completed reading a persistence file, deleting it; storage = {}, path = {deleted_file:?}", self.name);
             }
 
             // Swap read buffer with write buffer to read data in inmemory write
@@ -227,15 +239,11 @@ impl Persistence {
     }
 
     /// Removes a file with provided id
-    fn remove(&self, id: u64) -> Result<(), Error> {
-        if self.non_destructive_read {
-            return Ok(());
-        }
-
+    fn remove(&self, id: u64) -> Result<PathBuf, Error> {
         let path = self.path(id)?;
-        fs::remove_file(path)?;
+        fs::remove_file(&path)?;
 
-        Ok(())
+        Ok(path)
     }
 
     /// Move corrupt file to special directory
@@ -284,10 +292,11 @@ impl Persistence {
             _ => self.backlog_files.pop_front().unwrap(),
         };
 
-        warn!("file limit reached. deleting backup@{}", id);
-
         next.deleted = Some(id);
-        self.remove(id)?;
+        if !self.non_destructive_read {
+            let deleted_file = self.remove(id)?;
+            warn!("file limit reached. deleting backup@{}; path = {deleted_file:?}", id);
+        }
 
         Ok(next)
     }
@@ -373,7 +382,7 @@ mod test {
     fn flush_creates_new_file_after_size_limit() {
         // 1036 is the size of a publish message with topic = "hello", qos = 1, payload = 1024 bytes
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
 
         // 2 files on disk and a partially filled in memory buffer
@@ -390,7 +399,7 @@ mod test {
     #[test]
     fn old_file_is_deleted_after_limit() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
 
         // 11 files created. 10 on disk
@@ -410,7 +419,7 @@ mod test {
     #[test]
     fn reload_loads_correct_file_into_memory() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
 
         // 10 files on disk
@@ -428,7 +437,7 @@ mod test {
     #[test]
     fn reload_loads_partially_written_write_buffer_correctly() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
 
         // 10 files on disk and partially filled current write buffer
@@ -447,7 +456,7 @@ mod test {
     #[test]
     fn ensure_file_remove_on_read_completion_only() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
         // 10 files on disk and partially filled current write buffer, 10 publishes per file
         write_n_publishes(&mut storage, 105);
@@ -481,7 +490,7 @@ mod test {
     #[test]
     fn ensure_files_including_read_removed_post_flush_on_overflow() {
         let backup = init_backup_folders();
-        let mut storage = Storage::new(10 * 1036);
+        let mut storage = Storage::new("test", 10 * 1036);
         storage.set_persistence(backup.path(), 10).unwrap();
         // 10 files on disk and partially filled current write buffer, 10 publishes per file
         write_n_publishes(&mut storage, 105);
