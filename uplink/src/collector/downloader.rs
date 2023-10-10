@@ -49,10 +49,10 @@
 
 use bytes::BytesMut;
 use flume::Receiver;
-use futures_util::StreamExt;
+use futures_util::{Future, StreamExt};
 use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
-use reqwest::{Certificate, Client, ClientBuilder, Identity, Response};
+use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identity, Response};
 use serde::{Deserialize, Serialize};
 use tokio::time::timeout;
 
@@ -76,7 +76,7 @@ pub enum Error {
     #[error("Serde error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Error from reqwest: {0}")]
-    Reqwest(#[from] reqwest::Error),
+    Reqwest(#[from] ReqwestError),
     #[error("File io Error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Empty file name")]
@@ -187,8 +187,7 @@ impl FileDownloader {
     async fn retry_thrice(&mut self, url: &str, mut download: DownloadState) -> Result<(), Error> {
         let mut req = self.client.get(url).send();
         loop {
-            let resp = req.await?.error_for_status()?;
-            match self.download(resp, &mut download).await {
+            match self.download(req, &mut download).await {
                 Ok(_) => break,
                 Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
                 Err(e) => return Err(e),
@@ -323,10 +322,10 @@ impl FileDownloader {
     /// Downloads from server and stores into file
     async fn download(
         &mut self,
-        resp: Response,
+        req: impl Future<Output = Result<Response, ReqwestError>>,
         download: &mut DownloadState,
     ) -> Result<(), Error> {
-        let mut stream = resp.bytes_stream();
+        let mut stream = req.await?.error_for_status()?.bytes_stream();
 
         // Download and store to disk by streaming as chunks
         while let Some(item) = stream.next().await {
