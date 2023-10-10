@@ -186,13 +186,13 @@ impl FileDownloader {
     // Retry mechanism tries atleast 3 times before returning a download error
     async fn retry_thrice(&mut self, url: &str, mut download: DownloadState) -> Result<(), Error> {
         let mut req = self.client.get(url).send();
-        for _ in 0..3 {
+        loop {
             match self.download(req, &mut download).await {
                 Ok(_) => break,
                 Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
                 Err(e) => return Err(e),
             }
-            tokio::time::sleep(Duration::from_secs(30)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
 
             let range = download.retry_range();
             warn!("Retrying download; Continuing to download file from: {range}");
