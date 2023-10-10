@@ -471,7 +471,7 @@ mod test {
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
-            deadline: Instant::now(),
+            deadline: Instant::now() + Duration::from_secs(60),
         };
 
         std::thread::sleep(Duration::from_millis(10));
