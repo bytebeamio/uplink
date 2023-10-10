@@ -40,6 +40,12 @@ docker run --name simulator \
 
 docker exec -it simulator sv stop /etc/runit/uplink
 docker exec -it simulator /usr/share/bytebeam/uplink/simulator.sh download_auth_config $DEVICE_ID
+
+printf "$(cat << EOF
+[downloader]
+actions = [{ name = "update_firmware" }, { name = "send_file" }, { name = "send_script" }]
+EOF
+)" > devices/downloader.toml
 docker cp devices/downloader.toml simulator:/usr/share/bytebeam/uplink/devices/downloader.toml
 
 docker exec -it simulator uplink -a /usr/share/bytebeam/uplink/devices/device_$DEVICE_ID.json -c /usr/share/bytebeam/uplink/devices/downloader.toml -vv -m uplink::base::bridge -m uplink::collector::downloader
