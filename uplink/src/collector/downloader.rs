@@ -193,7 +193,7 @@ impl FileDownloader {
                 Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
                 Err(e) => return Err(e),
             }
-            tokio::time::sleep(Duration::from_secs(30)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
 
             let range = download.retry_range();
             warn!("Retrying download; Continuing to download file from: {range}");
