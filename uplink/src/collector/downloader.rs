@@ -186,7 +186,7 @@ impl FileDownloader {
     // Retry mechanism tries atleast 3 times before returning a download error
     async fn retry_thrice(&mut self, url: &str, mut download: DownloadState) -> Result<(), Error> {
         let mut req = self.client.get(url).send();
-        for _ in 0..3 {
+        loop {
             let resp = req.await?.error_for_status()?;
             match self.download(resp, &mut download).await {
                 Ok(_) => break,
