@@ -183,8 +183,12 @@ impl FileDownloader {
         self.bridge_tx.send_action_response(status).await;
     }
 
-    // Retry mechanism tries atleast 3 times before returning a download error
-    async fn retry_thrice(&mut self, url: &str, mut download: DownloadState) -> Result<(), Error> {
+    // A download must be retried with Range header when HTTP/reqwest errors are faced
+    async fn continuous_retry(
+        &mut self,
+        url: &str,
+        mut download: DownloadState,
+    ) -> Result<(), Error> {
         let mut req = self.client.get(url).send();
         loop {
             match self.download(req, &mut download).await {
@@ -254,7 +258,7 @@ impl FileDownloader {
             content_length: update.content_length,
             start_instant: Instant::now(),
         };
-        self.retry_thrice(&url, download).await?;
+        self.continuous_retry(&url, download).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.download_path = Some(file_path.clone());
