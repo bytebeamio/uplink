@@ -71,6 +71,8 @@ use crate::base::bridge::BridgeTx;
 use crate::base::DownloaderConfig;
 use crate::{Action, ActionResponse, Config};
 
+use super::ActionsLogWriter;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Serde error: {0}")]
@@ -101,6 +103,7 @@ pub struct FileDownloader {
     client: Client,
     sequence: u32,
     timeouts: HashMap<String, Duration>,
+    actions_log: ActionsLogWriter,
 }
 
 impl FileDownloader {
@@ -109,6 +112,7 @@ impl FileDownloader {
         config: Arc<Config>,
         actions_rx: Receiver<Action>,
         bridge_tx: BridgeTx,
+        actions_log: ActionsLogWriter,
     ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
@@ -140,6 +144,7 @@ impl FileDownloader {
             bridge_tx,
             sequence: 0,
             action_id: String::default(),
+            actions_log,
         })
     }
 
@@ -209,7 +214,9 @@ impl FileDownloader {
     // Accepts a download `Action` and performs necessary data extraction to actually download the file
     async fn run(&mut self, mut action: Action) -> Result<(), Error> {
         // Update action status for process initiated
-        let status = ActionResponse::progress(&self.action_id, "Downloading", 0);
+        let stage = "Downloading";
+        self.actions_log.accept_action(&self.action_id, stage);
+        let status = ActionResponse::progress(&self.action_id, stage, 0);
         let status = status.set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
 
@@ -242,14 +249,19 @@ impl FileDownloader {
         // Create file to actually download into
         let (file, file_path) = self.create_file(&download_path, &update.file_name)?;
 
-        // Retry downloading upto 3 times in case of connectivity issues
-        // TODO: Error out for 1XX/3XX responses
-        info!(
+        let msg = format!(
             "Downloading from {} into {}; size = {}",
             url,
             file_path.display(),
             human_bytes(update.content_length as f64)
         );
+        info!("{msg}");
+
+        self.actions_log.update_message(msg);
+        self.actions_log.commit_entry();
+
+        // Retry downloading upto 3 times in case of connectivity issues
+        // TODO: Error out for 1XX/3XX responses
         let download = DownloadState {
             file,
             bytes_written: 0,
@@ -264,8 +276,11 @@ impl FileDownloader {
         update.download_path = Some(file_path.clone());
         action.payload = serde_json::to_string(&update)?;
 
-        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
+        let stage = "Downloaded";
+        let status = ActionResponse::done(&self.action_id, stage, Some(action));
         let status = status.set_sequence(self.sequence());
+        self.actions_log.update_stage(stage);
+        self.actions_log.commit_entry();
         self.bridge_tx.send_action_response(status).await;
 
         Ok(())
@@ -335,6 +350,15 @@ impl FileDownloader {
         while let Some(item) = stream.next().await {
             let chunk = item?;
             if let Some(percentage) = download.write_bytes(&chunk)? {
+                let msg = format!(
+                    "Downloading: size = {}, percentage = {percentage}, elapsed = {}s",
+                    human_bytes(download.content_length as f64),
+                    download.start_instant.elapsed().as_secs()
+                );
+                debug!("{msg}");
+                self.actions_log.update_message(msg);
+                self.actions_log.commit_entry();
+
                 //TODO: Simplify progress by reusing action_id and state
                 //TODO: let response = self.response.progress(percentage);??
                 let status = ActionResponse::progress(&self.action_id, "Downloading", percentage);
@@ -427,6 +451,7 @@ mod test {
         bridge::{ActionsBridgeTx, DataBridgeTx},
         ActionRoute, DownloaderConfig, MqttConfig,
     };
+    use crate::collector::create_actions_log;
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 
@@ -467,10 +492,12 @@ mod test {
         };
         let config = config(downloader_cfg.clone());
         let (bridge_tx, status_rx) = create_bridge();
+        let (actions_log, _) = create_actions_log();
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
-        let downloader = FileDownloader::new(Arc::new(config), download_rx, bridge_tx).unwrap();
+        let downloader =
+            FileDownloader::new(Arc::new(config), download_rx, bridge_tx, actions_log).unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start());
@@ -535,10 +562,12 @@ mod test {
         };
         let config = config(downloader_cfg.clone());
         let (bridge_tx, _) = create_bridge();
+        let (actions_log, _) = create_actions_log();
 
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
-        let downloader = FileDownloader::new(Arc::new(config), download_rx, bridge_tx).unwrap();
+        let downloader =
+            FileDownloader::new(Arc::new(config), download_rx, bridge_tx, actions_log).unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start());

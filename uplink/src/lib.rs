@@ -48,6 +48,7 @@ use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
+pub use collector::create_actions_log;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
@@ -59,6 +60,7 @@ use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
+use collector::{ActionsLogReader, ActionsLogWriter};
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
@@ -123,6 +125,10 @@ pub mod config {
     enabled = true
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_mqtt_metrics/jsonarray"
 
+    [actions_log]
+    interval = 10
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_actions_log/jsonarray"
+
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     buf_size = 1
@@ -173,6 +179,7 @@ pub mod config {
         replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.serializer_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.mqtt_metrics.topic, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.actions_log.topic, tenant_id, device_id);
 
         // for config in [&mut config.serializer_metrics, &mut config.stream_metrics] {
         //     if let Some(topic) = &config.topic {
@@ -321,7 +328,7 @@ impl Uplink {
         )
     }
 
-    pub fn spawn(&mut self, bridge: Bridge) -> Result<(), Error> {
+    pub fn spawn(&mut self, bridge: Bridge, actions_log: ActionsLogReader) -> Result<(), Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
 
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
@@ -365,6 +372,7 @@ impl Uplink {
             self.stream_metrics_rx.clone(),
             self.serializer_metrics_rx.clone(),
             mqtt_metrics_rx,
+            actions_log,
         );
 
         // Metrics monitor thread
@@ -405,20 +413,29 @@ impl Uplink {
         Ok(())
     }
 
-    pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
+    pub fn spawn_builtins(
+        &mut self,
+        bridge: &mut Bridge,
+        actions_log: ActionsLogWriter,
+    ) -> Result<(), Error> {
         let bridge_tx = bridge.tx();
 
         let route = ActionRoute { name: "launch_shell".to_owned(), timeout: 10 };
         let (actions_tx, actions_rx) = bounded(1);
         bridge.register_action_route(route, actions_tx)?;
-        let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
+        let tunshell_client =
+            TunshellClient::new(actions_rx, bridge_tx.clone(), actions_log.clone());
         spawn_named_thread("Tunshell Client", move || tunshell_client.start());
 
         if !self.config.downloader.actions.is_empty() {
             let (actions_tx, actions_rx) = bounded(1);
             bridge.register_action_routes(&self.config.downloader.actions, actions_tx)?;
-            let file_downloader =
-                FileDownloader::new(self.config.clone(), actions_rx, bridge_tx.clone())?;
+            let file_downloader = FileDownloader::new(
+                self.config.clone(),
+                actions_rx,
+                bridge_tx.clone(),
+                actions_log,
+            )?;
             spawn_named_thread("File Downloader", || file_downloader.start());
         }
 
