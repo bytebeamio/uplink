@@ -383,7 +383,8 @@ impl DownloadState {
         let size = human_bytes(self.content_length as f64);
 
         // Calculate percentage on the basis of content_length
-        let percentage = (99 * self.bytes_downloaded / self.content_length) as u8;
+        let factor = self.bytes_downloaded as f32 / self.content_length as f32;
+        let percentage = (99.99 * factor) as u8;
 
         // NOTE: ensure lesser frequency of action responses, once every percentage points
         if percentage > self.percentage_downloaded {
