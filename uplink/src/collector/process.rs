@@ -4,15 +4,13 @@ use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::select;
-use tokio::time::timeout;
+use tokio::time::timeout_at;
 
 use crate::base::bridge::BridgeTx;
-use crate::{Action, ActionResponse, ActionRoute, Package};
+use crate::{Action, ActionResponse, Package};
 
-use std::collections::HashMap;
 use std::io;
 use std::process::Stdio;
-use std::time::Duration;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -39,22 +37,11 @@ pub struct ProcessHandler {
     actions_rx: Receiver<Action>,
     // to send responses back to bridge
     bridge_tx: BridgeTx,
-    // to timeout actions as per action route configuration
-    timeouts: HashMap<String, Duration>,
 }
 
 impl ProcessHandler {
-    pub fn new(
-        actions_rx: Receiver<Action>,
-        bridge_tx: BridgeTx,
-        action_routes: &[ActionRoute],
-    ) -> Self {
-        let timeouts = action_routes
-            .iter()
-            .map(|ActionRoute { name, timeout }| (name.to_owned(), Duration::from_secs(*timeout)))
-            .collect();
-
-        Self { actions_rx, bridge_tx, timeouts }
+    pub fn new(actions_rx: Receiver<Action>, bridge_tx: BridgeTx) -> Self {
+        Self { actions_rx, bridge_tx }
     }
 
     /// Run a process of specified command
@@ -96,11 +83,17 @@ impl ProcessHandler {
         loop {
             let action = self.actions_rx.recv_async().await?;
             let command = String::from("tools/") + &action.name;
-            let duration = self.timeouts.get(&action.name).unwrap().to_owned();
+            let deadline = match &action.deadline {
+                Some(d) => *d,
+                _ => {
+                    error!("Unconfigured deadline: {}", action.name);
+                    continue;
+                }
+            };
 
             // Spawn the action and capture its stdout, ignore timeouts
             let child = self.run(&action.action_id, &command, &action.payload).await?;
-            if let Ok(o) = timeout(duration, self.spawn_and_capture_stdout(child)).await {
+            if let Ok(o) = timeout_at(deadline, self.spawn_and_capture_stdout(child)).await {
                 o?;
             } else {
                 error!("Process timedout: {command}; action_id = {}", action.action_id);

@@ -4,17 +4,15 @@ use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::select;
-use tokio::time::timeout;
+use tokio::time::timeout_at;
 
 use super::downloader::DownloadFile;
-use crate::base::{bridge::BridgeTx, ActionRoute};
+use crate::base::bridge::BridgeTx;
 use crate::{Action, ActionResponse, Package};
 
-use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::time::Duration;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -40,19 +38,12 @@ pub struct ScriptRunner {
     actions_rx: Receiver<Action>,
     // to send responses back to bridge
     bridge_tx: BridgeTx,
-    timeouts: HashMap<String, Duration>,
     sequence: u32,
 }
 
 impl ScriptRunner {
-    pub fn new(
-        routes: Vec<ActionRoute>,
-        actions_rx: Receiver<Action>,
-        bridge_tx: BridgeTx,
-    ) -> Self {
-        let timeouts =
-            routes.iter().map(|s| (s.name.to_owned(), Duration::from_secs(s.timeout))).collect();
-        Self { actions_rx, bridge_tx, timeouts, sequence: 0 }
+    pub fn new(actions_rx: Receiver<Action>, bridge_tx: BridgeTx) -> Self {
+        Self { actions_rx, bridge_tx, sequence: 0 }
     }
 
     /// Spawn a child process to run the script with sh
@@ -128,17 +119,17 @@ impl ScriptRunner {
                     continue;
                 }
             };
-            let duration = match self.timeouts.get(&action.name) {
+            let deadline = match &action.deadline {
                 Some(d) => *d,
                 _ => {
-                    error!("Unconfigured action: {}", action.name);
+                    error!("Unconfigured deadline: {}", action.name);
                     continue;
                 }
             };
             // Spawn the action and capture its stdout
             let child = self.run(command).await?;
             if let Ok(o) =
-                timeout(duration, self.spawn_and_capture_stdout(child, &action.action_id)).await
+                timeout_at(deadline, self.spawn_and_capture_stdout(child, &action.action_id)).await
             {
                 o?
             }
@@ -181,8 +172,7 @@ mod tests {
         let (bridge_tx, status_rx) = create_bridge();
 
         let (actions_tx, actions_rx) = bounded(1);
-        let routes = vec![ActionRoute { name: "test".to_string(), timeout: 100 }];
-        let script_runner = ScriptRunner::new(routes, actions_rx, bridge_tx);
+        let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
         thread::spawn(move || script_runner.start().unwrap());
 
         actions_tx
@@ -191,6 +181,7 @@ mod tests {
                 kind: "1".to_string(),
                 name: "test".to_string(),
                 payload: "".to_string(),
+                deadline: None,
             })
             .unwrap();
 
@@ -204,8 +195,7 @@ mod tests {
         let (bridge_tx, status_rx) = create_bridge();
 
         let (actions_tx, actions_rx) = bounded(1);
-        let routes = vec![ActionRoute { name: "test".to_string(), timeout: 100 }];
-        let script_runner = ScriptRunner::new(routes, actions_rx, bridge_tx);
+        let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
 
         thread::spawn(move || script_runner.start().unwrap());
 
@@ -216,6 +206,7 @@ mod tests {
                 name: "test".to_string(),
                 payload: "{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}"
                     .to_string(),
+                deadline: None,
             })
             .unwrap();
 

@@ -467,8 +467,7 @@ impl Uplink {
         if !self.config.processes.is_empty() {
             let (actions_tx, actions_rx) = bounded(1);
             bridge.register_action_routes(&self.config.processes, actions_tx)?;
-            let process_handler =
-                ProcessHandler::new(actions_rx, bridge_tx.clone(), &self.config.processes);
+            let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
             spawn_named_thread("Process Handler", || {
                 if let Err(e) = process_handler.start() {
                     error!("Process handler stopped!! Error = {:?}", e);
@@ -479,8 +478,7 @@ impl Uplink {
         if !self.config.script_runner.is_empty() {
             let (actions_tx, actions_rx) = bounded(1);
             bridge.register_action_routes(&self.config.script_runner, actions_tx)?;
-            let script_runner =
-                ScriptRunner::new(self.config.script_runner.clone(), actions_rx, bridge_tx);
+            let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
             spawn_named_thread("Script Runner", || {
                 if let Err(e) = script_runner.start() {
                     error!("Script runner stopped!! Error = {:?}", e);
