@@ -816,7 +816,13 @@ mod test {
     impl MockCollector {
         fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
             MockCollector {
-                stream: Stream::new("hello", Default::default(), 1, data_tx, Compression::Disabled),
+                stream: Stream::new(
+                    "hello",
+                    StreamConfig { topic: "hello/world".to_string(), ..Default::default() },
+                    1,
+                    data_tx,
+                    Compression::Disabled,
+                ),
             }
         }
 
@@ -944,7 +950,10 @@ mod test {
 
         match tokio::runtime::Runtime::new()
             .unwrap()
-            .block_on(serializer.slow(publish, Arc::new(Default::default())))
+            .block_on(serializer.slow(
+                publish,
+                Arc::new(StreamConfig { topic: "hello/world".to_string(), ..Default::default() }),
+            ))
             .unwrap()
         {
             Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }, _) => {
@@ -1030,7 +1039,10 @@ mod test {
         let mut storage = serializer
             .storage_handler
             .map
-            .entry(Arc::new(Default::default()))
+            .entry(Arc::new(StreamConfig {
+                topic: "hello/world".to_string(),
+                ..Default::default()
+            }))
             .or_insert(Storage::new("hello/world", 1024));
 
         let mut collector = MockCollector::new(data_tx);
