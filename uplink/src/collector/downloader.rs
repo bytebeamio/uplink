@@ -148,10 +148,17 @@ impl FileDownloader {
                 }
             };
             self.action_id = action.action_id.clone();
+            let deadline = match &action.deadline {
+                Some(d) => *d,
+                _ => {
+                    error!("Unconfigured deadline: {}", action.name);
+                    continue;
+                }
+            };
 
             // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
 
-            match timeout_at(action.deadline, self.run(action)).await {
+            match timeout_at(deadline, self.run(action)).await {
                 Ok(Err(e)) => self.forward_error(e).await,
                 Err(_) => error!("Last download has timedout"),
                 _ => {}
@@ -471,7 +478,7 @@ mod test {
             kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
-            deadline: Instant::now() + Duration::from_secs(60),
+            deadline: Some(Instant::now() + Duration::from_secs(60)),
         };
 
         std::thread::sleep(Duration::from_millis(10));

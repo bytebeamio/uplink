@@ -6,10 +6,6 @@ use crate::{Payload, Point};
 
 use super::clock;
 
-fn now() -> Instant {
-    Instant::now()
-}
-
 /// On the Bytebeam platform, an Action is how beamd and through it,
 /// the end-user, can communicate the tasks they want to perform on
 /// said device, in this case, uplink.
@@ -25,8 +21,8 @@ pub struct Action {
     // action payload. json. can be args/payload. depends on the invoked command
     pub payload: String,
     // Instant at which action must be timedout
-    #[serde(skip, default = "now")]
-    pub deadline: Instant,
+    #[serde(skip)]
+    pub deadline: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -83,10 +83,17 @@ impl ProcessHandler {
         loop {
             let action = self.actions_rx.recv_async().await?;
             let command = String::from("tools/") + &action.name;
+            let deadline = match &action.deadline {
+                Some(d) => *d,
+                _ => {
+                    error!("Unconfigured deadline: {}", action.name);
+                    continue;
+                }
+            };
 
             // Spawn the action and capture its stdout, ignore timeouts
             let child = self.run(&action.action_id, &command, &action.payload).await?;
-            if let Ok(o) = timeout_at(action.deadline, self.spawn_and_capture_stdout(child)).await {
+            if let Ok(o) = timeout_at(deadline, self.spawn_and_capture_stdout(child)).await {
                 o?;
             } else {
                 error!("Process timedout: {command}; action_id = {}", action.action_id);
