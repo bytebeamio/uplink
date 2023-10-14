@@ -4,7 +4,7 @@ use std::sync::Arc;
 use flume::Sender;
 use log::{error, info, trace};
 
-use super::stream::{self, StreamStatus, MAX_BUFFER_SIZE};
+use super::stream::{self, StreamStatus};
 use super::StreamMetrics;
 use crate::base::StreamConfig;
 use crate::{Config, Package, Payload, Stream};
@@ -30,7 +30,7 @@ impl Streams {
 
     pub fn config_streams(&mut self, streams_config: HashMap<String, StreamConfig>) {
         for (name, stream) in streams_config {
-            let stream = Stream::with_config(&name, &stream, self.data_tx.clone());
+            let stream = Stream::new(&name, stream, self.data_tx.clone());
             self.map.insert(name.to_owned(), stream);
         }
     }
@@ -50,7 +50,6 @@ impl Streams {
                     &stream_name,
                     &self.config.project_id,
                     &self.config.device_id,
-                    MAX_BUFFER_SIZE,
                     self.data_tx.clone(),
                 );
 
@@ -58,7 +57,7 @@ impl Streams {
             }
         };
 
-        let max_stream_size = stream.max_buffer_size;
+        let max_stream_size = stream.config.buf_size;
         let state = match stream.fill(data).await {
             Ok(s) => s,
             Err(e) => {

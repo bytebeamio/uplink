@@ -4,7 +4,7 @@ use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::Serialize;
 
-use crate::base::{StreamConfig, DEFAULT_TIMEOUT};
+use crate::base::StreamConfig;
 
 use super::{Package, Point, StreamMetrics};
 
@@ -27,9 +27,7 @@ pub const MAX_BUFFER_SIZE: usize = 100;
 #[derive(Debug)]
 pub struct Stream<T> {
     pub name: Arc<String>,
-    pub max_buffer_size: usize,
-    pub flush_period: Duration,
-    config: Arc<StreamConfig>,
+    pub config: Arc<StreamConfig>,
     last_sequence: u32,
     last_timestamp: u64,
     buffer: Buffer<T>,
@@ -45,43 +43,20 @@ where
     pub fn new(
         stream_name: impl Into<String>,
         stream_config: StreamConfig,
-        max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
         let name = Arc::new(stream_name.into());
         let config = Arc::new(stream_config);
         let buffer = Buffer::new(name.clone(), config.clone());
-        let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
-        let metrics = StreamMetrics::new(&name, max_buffer_size);
+        let metrics = StreamMetrics::new(&name, config.buf_size);
 
-        Stream {
-            name,
-            max_buffer_size,
-            flush_period,
-            config,
-            last_sequence: 0,
-            last_timestamp: 0,
-            buffer,
-            tx,
-            metrics,
-        }
-    }
-
-    pub fn with_config(
-        name: &str,
-        config: &StreamConfig,
-        tx: Sender<Box<dyn Package>>,
-    ) -> Stream<T> {
-        let mut stream = Stream::new(name, config.clone(), config.buf_size, tx);
-        stream.flush_period = Duration::from_secs(config.flush_period);
-        stream
+        Stream { name, config, last_sequence: 0, last_timestamp: 0, buffer, tx, metrics }
     }
 
     pub fn dynamic(
         stream_name: impl Into<String>,
         project_id: impl Into<String>,
         device_id: impl Into<String>,
-        max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
         let stream_name = stream_name.into();
@@ -97,7 +72,7 @@ where
             + "/jsonarray";
         let config = StreamConfig { topic, ..Default::default() };
 
-        Stream::new(stream_name, config, max_buffer_size, tx)
+        Stream::new(stream_name, config, tx)
     }
 
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
@@ -125,7 +100,7 @@ where
         self.last_timestamp = current_timestamp;
 
         // if max_buffer_size is breached, flush
-        let buf = if self.buffer.buffer.len() >= self.max_buffer_size {
+        let buf = if self.buffer.buffer.len() >= self.config.buf_size {
             self.metrics.add_batch();
             Some(self.take_buffer())
         } else {
@@ -173,7 +148,7 @@ where
         }
 
         let status = match self.len() {
-            1 => StreamStatus::Init(self.flush_period),
+            1 => StreamStatus::Init(Duration::from_secs(self.config.flush_period)),
             len => StreamStatus::Partial(len),
         };
 
@@ -190,7 +165,7 @@ where
         }
 
         let status = match self.len() {
-            1 => StreamStatus::Init(self.flush_period),
+            1 => StreamStatus::Init(Duration::from_secs(self.config.flush_period)),
             len => StreamStatus::Partial(len),
         };
 
@@ -218,9 +193,9 @@ pub struct Buffer<T> {
 impl<T> Buffer<T> {
     pub fn new(stream_name: Arc<String>, stream_config: Arc<StreamConfig>) -> Buffer<T> {
         Buffer {
+            buffer: Vec::with_capacity(stream_config.buf_size),
             stream_name,
             stream_config,
-            buffer: vec![],
             anomalies: String::with_capacity(100),
             anomaly_count: 0,
         }
@@ -293,13 +268,11 @@ impl<T> Clone for Stream<T> {
     fn clone(&self) -> Self {
         Stream {
             name: self.name.clone(),
-            flush_period: self.flush_period,
-            max_buffer_size: self.max_buffer_size,
             config: self.config.clone(),
             last_sequence: 0,
             last_timestamp: 0,
             buffer: Buffer::new(self.buffer.stream_name.clone(), self.buffer.stream_config.clone()),
-            metrics: StreamMetrics::new(&self.name, self.max_buffer_size),
+            metrics: StreamMetrics::new(&self.name, self.config.buf_size),
             tx: self.tx.clone(),
         }
     }

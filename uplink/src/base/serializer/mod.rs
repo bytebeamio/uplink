@@ -818,8 +818,11 @@ mod test {
             MockCollector {
                 stream: Stream::new(
                     "hello",
-                    StreamConfig { topic: "hello/world".to_string(), ..Default::default() },
-                    1,
+                    StreamConfig {
+                        topic: "hello/world".to_string(),
+                        buf_size: 1,
+                        ..Default::default()
+                    },
                     data_tx,
                 ),
             }
