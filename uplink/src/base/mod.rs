@@ -1,9 +1,10 @@
 use std::env::current_dir;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DurationSeconds};
 
 #[cfg(target_os = "linux")]
 use crate::collector::journalctl::JournalCtlConfig;
@@ -21,8 +22,8 @@ pub mod serializer;
 pub const DEFAULT_TIMEOUT: u64 = 60;
 
 #[inline]
-fn default_timeout() -> u64 {
-    DEFAULT_TIMEOUT
+fn default_timeout() -> Duration {
+    Duration::from_secs(DEFAULT_TIMEOUT)
 }
 
 #[inline]
@@ -65,15 +66,17 @@ pub enum Compression {
     Lz4,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamConfig {
     pub topic: String,
     #[serde(default = "max_buf_size")]
     pub buf_size: usize,
     #[serde(default = "default_timeout")]
+    #[serde_as(as = "DurationSeconds<u64>")]
     /// Duration(in seconds) that bridge collector waits from
     /// receiving first element, before the stream gets flushed.
-    pub flush_period: u64,
+    pub flush_period: Duration,
     #[serde(default)]
     pub compression: Compression,
     #[serde(default)]
@@ -149,19 +152,23 @@ pub struct InstallerConfig {
     pub uplink_port: u16,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamMetricsConfig {
     pub enabled: bool,
     pub topic: String,
     pub blacklist: Vec<String>,
-    pub timeout: u64,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout: Duration,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SerializerMetricsConfig {
     pub enabled: bool,
     pub topic: String,
-    pub timeout: u64,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout: Duration,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -191,11 +198,13 @@ pub struct MqttConfig {
     pub network_timeout: u64,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ActionRoute {
     pub name: String,
     #[serde(default = "default_timeout")]
-    pub timeout: u64,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout: Duration,
 }
 
 impl From<&ActionRoute> for ActionRoute {

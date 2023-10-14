@@ -76,7 +76,7 @@ where
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
         let mut stream = Stream::new(name, &config.topic, config.buf_size, tx, config.compression);
-        stream.flush_period = Duration::from_secs(config.flush_period);
+        stream.flush_period = config.flush_period;
         stream
     }
 
