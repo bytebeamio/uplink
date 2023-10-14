@@ -43,14 +43,14 @@ where
     Buffer<T>: Package,
 {
     pub fn new(
-        stream: impl Into<String>,
-        config: StreamConfig,
+        stream_name: impl Into<String>,
+        stream_config: StreamConfig,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let name = Arc::new(stream.into());
-        let config = Arc::new(config);
-        let buffer = Buffer::new(name.clone(), config.clone(), compression);
+        let name = Arc::new(stream_name.into());
+        let config = Arc::new(stream_config);
+        let buffer = Buffer::new(name.clone(), config.clone());
         let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
         let metrics = StreamMetrics::new(&name, max_buffer_size);
 
@@ -78,13 +78,13 @@ where
     }
 
     pub fn dynamic(
-        stream: impl Into<String>,
+        stream_name: impl Into<String>,
         project_id: impl Into<String>,
         device_id: impl Into<String>,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let stream = stream.into();
+        let stream_name = stream_name.into();
         let project_id = project_id.into();
         let device_id = device_id.into();
 
@@ -93,11 +93,11 @@ where
             + "/devices/"
             + &device_id
             + "/events/"
-            + &stream
+            + &stream_name
             + "/jsonarray";
         let config = StreamConfig { topic, ..Default::default() };
 
-        Stream::new(stream, config, max_buffer_size, tx)
+        Stream::new(stream_name, config, max_buffer_size, tx)
     }
 
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
@@ -208,18 +208,18 @@ where
 /// Buffer doesn't put any restriction on type of `T`
 #[derive(Debug)]
 pub struct Buffer<T> {
-    pub stream: Arc<String>,
-    pub config: Arc<StreamConfig>,
+    pub stream_name: Arc<String>,
+    pub stream_config: Arc<StreamConfig>,
     pub buffer: Vec<T>,
     pub anomalies: String,
     pub anomaly_count: usize,
 }
 
 impl<T> Buffer<T> {
-    pub fn new(stream: Arc<String>, config: Arc<StreamConfig>) -> Buffer<T> {
+    pub fn new(stream_name: Arc<String>, stream_config: Arc<StreamConfig>) -> Buffer<T> {
         Buffer {
-            stream,
-            config,
+            stream_name,
+            stream_config,
             buffer: vec![],
             anomalies: String::with_capacity(100),
             anomaly_count: 0,
@@ -232,7 +232,7 @@ impl<T> Buffer<T> {
             return;
         }
 
-        let error = String::from(self.stream.as_ref())
+        let error = self.stream_name.to_string()
             + ".sequence: "
             + &last.to_string()
             + ", "
@@ -265,11 +265,11 @@ where
     Vec<T>: Serialize,
 {
     fn stream_config(&self) -> Arc<StreamConfig> {
-        self.config.clone()
+        self.stream_config.clone()
     }
 
     fn stream_name(&self) -> Arc<String> {
-        self.stream.clone()
+        self.stream_name.clone()
     }
 
     fn serialize(&self) -> serde_json::Result<Vec<u8>> {
@@ -298,7 +298,7 @@ impl<T> Clone for Stream<T> {
             config: self.config.clone(),
             last_sequence: 0,
             last_timestamp: 0,
-            buffer: Buffer::new(self.buffer.stream.clone(), self.buffer.config.clone()),
+            buffer: Buffer::new(self.buffer.stream_name.clone(), self.buffer.stream_config.clone()),
             metrics: StreamMetrics::new(&self.name, self.max_buffer_size),
             tx: self.tx.clone(),
         }
