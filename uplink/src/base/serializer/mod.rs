@@ -821,7 +821,6 @@ mod test {
                     StreamConfig { topic: "hello/world".to_string(), ..Default::default() },
                     1,
                     data_tx,
-                    Compression::Disabled,
                 ),
             }
         }
