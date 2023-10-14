@@ -148,7 +148,7 @@ where
         }
 
         let status = match self.len() {
-            1 => StreamStatus::Init(Duration::from_secs(self.config.flush_period)),
+            1 => StreamStatus::Init(self.config.flush_period),
             len => StreamStatus::Partial(len),
         };
 
@@ -165,7 +165,7 @@ where
         }
 
         let status = match self.len() {
-            1 => StreamStatus::Init(Duration::from_secs(self.config.flush_period)),
+            1 => StreamStatus::Init(self.config.flush_period),
             len => StreamStatus::Partial(len),
         };
 

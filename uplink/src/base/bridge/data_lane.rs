@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::{debug, error};
@@ -47,7 +47,7 @@ impl DataBridge {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
+        let mut metrics_timeout = interval(self.config.stream_metrics.timeout);
 
         loop {
             select! {

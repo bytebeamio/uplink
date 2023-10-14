@@ -103,10 +103,9 @@ impl ActionsBridge {
 
     pub fn register_action_route(
         &mut self,
-        ActionRoute { name, timeout }: ActionRoute,
+        ActionRoute { name, timeout: duration }: ActionRoute,
         actions_tx: Sender<Action>,
     ) -> Result<(), Error> {
-        let duration = Duration::from_secs(timeout);
         let action_router = ActionRouter { actions_tx, duration };
         if self.action_routes.insert(name.clone(), action_router).is_some() {
             return Err(Error::ActionRouteClash(name));
@@ -136,7 +135,7 @@ impl ActionsBridge {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
+        let mut metrics_timeout = interval(self.config.stream_metrics.timeout);
         let mut end: Pin<Box<Sleep>> = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
         self.load_saved_action()?;
 
@@ -461,10 +460,13 @@ mod tests {
         Config {
             stream_metrics: StreamMetricsConfig {
                 enabled: false,
-                timeout: 10,
+                timeout: Duration::from_secs(10),
                 ..Default::default()
             },
-            action_status: StreamConfig { flush_period: 2, ..Default::default() },
+            action_status: StreamConfig {
+                flush_period: Duration::from_secs(2),
+                ..Default::default()
+            },
             ..Default::default()
         }
     }
@@ -510,13 +512,13 @@ mod tests {
         std::env::set_current_dir(&tmpdir).unwrap();
         let config = Arc::new(default_config());
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
-        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
+        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: Duration::from_secs(10) };
 
         let (route_tx, route_1_rx) = bounded(1);
         bridge.register_action_route(route_1, route_tx).unwrap();
 
         let (route_tx, route_2_rx) = bounded(1);
-        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: 30 };
+        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(route_2, route_tx).unwrap();
 
         spawn_bridge(bridge);
@@ -596,7 +598,7 @@ mod tests {
         let config = Arc::new(default_config());
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
 
         let (route_tx, action_rx) = bounded(1);
         bridge.register_action_route(test_route, route_tx).unwrap();
@@ -648,7 +650,7 @@ mod tests {
         let config = Arc::new(default_config());
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
 
         let (route_tx, action_rx) = bounded(1);
         bridge.register_action_route(test_route, route_tx).unwrap();
@@ -699,11 +701,12 @@ mod tests {
         let bridge_tx_2 = bridge.tx();
 
         let (route_tx, action_rx_1) = bounded(1);
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
         let (route_tx, action_rx_2) = bounded(1);
-        let redirect_route = ActionRoute { name: "redirect".to_string(), timeout: 30 };
+        let redirect_route =
+            ActionRoute { name: "redirect".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(redirect_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
@@ -766,11 +769,12 @@ mod tests {
         let bridge_tx_2 = bridge.tx();
 
         let (route_tx, action_rx_1) = bounded(1);
-        let tunshell_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
+        let tunshell_route =
+            ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(tunshell_route, route_tx).unwrap();
 
         let (route_tx, action_rx_2) = bounded(1);
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
@@ -856,11 +860,12 @@ mod tests {
         let bridge_tx_2 = bridge.tx();
 
         let (route_tx, action_rx_1) = bounded(1);
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
         let (route_tx, action_rx_2) = bounded(1);
-        let tunshell_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
+        let tunshell_route =
+            ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(tunshell_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
