@@ -115,15 +115,19 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: safe.directory fix
-        run: git config --global --add safe.directory "*"
+      - name: perms
+        run: chown root:root .
+#
+#      - name: Build for armv7
+#        run: cargo ndk --target armv7-linux-androideabi --platform 23 build --release --bin uplink
+#
+#      - name: Build for aarch64
+#        run: cargo ndk --target aarch64-linux-android --platform 23 build --release --bin uplink
 
-      - name: Build for armv7
-        run: cargo ndk --target armv7-linux-androideabi --platform 23 build --release --bin uplink
-
-      - name: Build for aarch64
-        run: cargo ndk --target aarch64-linux-android --platform 23 build --release --bin uplink
-
+      - name: test
+        run: |
+          mkdir target/aarch64-linux-android/release
+          echo hello > target/aarch64-linux-android/release/uplink
       - name: Rename uplink binaries
         run: |
           mv "target/aarch64-linux-android/release/uplink" "uplink-aarch64-linux-android"
