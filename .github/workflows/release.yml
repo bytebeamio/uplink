@@ -105,3 +105,30 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: uplink*
+  build-release-android:
+    name: Build release
+    runs-on: ubuntu-latest
+    container:
+      image: bytebeamio/rust-android
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Build for armv7
+        run: cargo ndk --target armv7-linux-androideabi --platform 23 build --release
+
+      - name: Build for aarch64
+        run: cargo ndk --target aarch64-linux-android --platform 23 build --release
+
+      - name: Rename uplink binaries
+        run: |
+          mv "target/aarch64-linux-android/release/uplink" "uplink-aarch64-linux-android"
+          mv "target/armv7-linux-androideabi/release/uplink" "uplink-armv7-linux-androideabi"
+
+      - name: Upload release archive
+        uses: softprops/action-gh-release@v1
+        with:
+          files: uplink*
