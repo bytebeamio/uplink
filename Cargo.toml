@@ -5,7 +5,8 @@ serial = { git = "https://github.com/bytebeamio/serial-rs", branch = "android_fi
 resolver = "2"
 members = [
     "uplink",
-    "storage"
+    "storage",
+    "tunshell"
 ]
 exclude = [
     "tools/deserialize-backup",

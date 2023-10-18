@@ -58,7 +58,6 @@ use collector::logcat::Logcat;
 use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
-use collector::tunshell::TunshellClient;
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
@@ -407,12 +406,6 @@ impl Uplink {
 
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
         let bridge_tx = bridge.tx();
-
-        let route = ActionRoute { name: "launch_shell".to_owned(), timeout: 10 };
-        let (actions_tx, actions_rx) = bounded(1);
-        bridge.register_action_route(route, actions_tx)?;
-        let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
-        spawn_named_thread("Tunshell Client", move || tunshell_client.start());
 
         if !self.config.downloader.actions.is_empty() {
             let (actions_tx, actions_rx) = bounded(1);
