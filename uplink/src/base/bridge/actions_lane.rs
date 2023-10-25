@@ -131,8 +131,16 @@ impl ActionsBridge {
         ActionsBridgeTx { status_tx: self.status_tx.clone(), shutdown_handle: self.ctrl_tx.clone() }
     }
 
+    // Clear current_action and delete file if any in disk
     fn clear_current_action(&mut self) {
         self.current_action.take();
+
+        let mut path = self.config.persistence_path.clone();
+        path.push("current_action");
+
+        if let Err(e) = fs::remove_file(path) {
+            error!("Failed to delete current_action file: {e}");
+        }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -207,6 +215,12 @@ impl ActionsBridge {
             Ok(_) => {
                 let response = ActionResponse::progress(&action_id, "Received", 0);
                 self.forward_action_response(response).await;
+
+                // Store current action into file for emergency use.
+                // Prevents action data loss due to SIGKILL
+                if let Err(e) = self.save_current_action() {
+                    error!("Failed to store current action: {e}");
+                }
                 return;
             }
             Err(e) => e,
@@ -231,7 +245,7 @@ impl ActionsBridge {
 
     /// Save current action information in persistence
     fn save_current_action(&mut self) -> Result<(), Error> {
-        let current_action = match self.current_action.take() {
+        let current_action = match &self.current_action {
             Some(c) => c,
             None => return Ok(()),
         };
@@ -386,9 +400,9 @@ impl CurrentAction {
         }
     }
 
-    pub fn write_to_disk(self, path: PathBuf) -> Result<(), Error> {
+    pub fn write_to_disk(&self, path: PathBuf) -> Result<(), Error> {
         let timeout = self.timeout.as_ref().deadline() - Instant::now();
-        let save_action = SaveAction { id: self.id, action: self.action, timeout };
+        let save_action = SaveAction { id: self.id.clone(), action: self.action.clone(), timeout };
         let json = serde_json::to_string(&save_action)?;
         fs::write(path, json)?;
 
