@@ -1,4 +1,9 @@
-use std::{fmt::Debug, mem, sync::Arc, time::Duration};
+use std::{
+    fmt::Debug,
+    mem,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use flume::{SendError, Sender};
 use log::{debug, trace};
@@ -34,7 +39,7 @@ pub struct Stream<T> {
     last_timestamp: u64,
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
-    pub metrics: StreamMetrics,
+    pub metrics: Arc<Mutex<StreamMetrics>>,
     compression: Compression,
 }
 
@@ -52,9 +57,10 @@ where
     ) -> Stream<T> {
         let name = Arc::new(stream.into());
         let topic = Arc::new(topic.into());
-        let buffer = Buffer::new(name.clone(), topic.clone(), compression);
+
+        let metrics = Arc::new(Mutex::new(StreamMetrics::new(&name, max_buffer_size)));
+        let buffer = Buffer::new(name.clone(), topic.clone(), compression, metrics.clone());
         let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
-        let metrics = StreamMetrics::new(&name, max_buffer_size);
 
         Stream {
             name,
@@ -110,7 +116,7 @@ where
 
         // Fill buffer with data
         self.buffer.buffer.push(data);
-        self.metrics.add_point();
+        self.metrics.lock().unwrap().add_point();
 
         // Anomaly detection
         if current_sequence <= self.last_sequence {
@@ -128,7 +134,7 @@ where
 
         // if max_buffer_size is breached, flush
         let buf = if self.buffer.buffer.len() >= self.max_buffer_size {
-            self.metrics.add_batch();
+            self.metrics.lock().unwrap().add_batch();
             Some(self.take_buffer())
         } else {
             None
@@ -143,7 +149,10 @@ where
         let topic = self.topic.clone();
         trace!("Flushing stream name: {}, topic: {}", name, topic);
 
-        mem::replace(&mut self.buffer, Buffer::new(name, topic, self.compression))
+        mem::replace(
+            &mut self.buffer,
+            Buffer::new(name, topic, self.compression, self.metrics.clone()),
+        )
     }
 
     /// Triggers flush and async channel send if not empty
@@ -212,6 +221,7 @@ where
 pub struct Buffer<T> {
     pub stream: Arc<String>,
     pub topic: Arc<String>,
+    pub metrics: Arc<Mutex<StreamMetrics>>,
     pub buffer: Vec<T>,
     pub anomalies: String,
     pub anomaly_count: usize,
@@ -219,7 +229,12 @@ pub struct Buffer<T> {
 }
 
 impl<T> Buffer<T> {
-    pub fn new(stream: Arc<String>, topic: Arc<String>, compression: Compression) -> Buffer<T> {
+    pub fn new(
+        stream: Arc<String>,
+        topic: Arc<String>,
+        compression: Compression,
+        metrics: Arc<Mutex<StreamMetrics>>,
+    ) -> Buffer<T> {
         Buffer {
             stream,
             topic,
@@ -227,6 +242,7 @@ impl<T> Buffer<T> {
             anomalies: String::with_capacity(100),
             anomaly_count: 0,
             compression,
+            metrics,
         }
     }
 
@@ -295,6 +311,10 @@ where
     fn compression(&self) -> Compression {
         self.compression
     }
+
+    fn metrics(&self) -> Arc<Mutex<StreamMetrics>> {
+        self.metrics.clone()
+    }
 }
 
 impl<T> Clone for Stream<T> {
@@ -310,8 +330,9 @@ impl<T> Clone for Stream<T> {
                 self.buffer.stream.clone(),
                 self.buffer.topic.clone(),
                 self.compression,
+                self.metrics.clone(),
             ),
-            metrics: StreamMetrics::new(&self.name, self.max_buffer_size),
+            metrics: self.metrics.clone(),
             tx: self.tx.clone(),
             compression: self.compression,
         }

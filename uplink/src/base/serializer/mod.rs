@@ -489,7 +489,6 @@ impl<C: MqttClient> Serializer<C> {
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     }
-
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
@@ -542,6 +541,7 @@ fn lz4_compress(payload: &mut Vec<u8>) -> Result<(), Error> {
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
 fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
     let stream = data.stream().as_ref().to_owned();
+    let stream_metrics = data.metrics();
     let point_count = data.len();
     let batch_latency = data.latency();
     trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
@@ -549,9 +549,13 @@ fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
     let topic = data.topic().to_string();
     let mut payload = data.serialize()?;
 
+    let data_size = payload.len();
+    let mut compressed_data_size = None;
     if let Compression::Lz4 = data.compression() {
         lz4_compress(&mut payload)?;
+        compressed_data_size = Some(payload.len());
     }
+    stream_metrics.lock().unwrap().add_serialized_sizes(data_size, compressed_data_size);
 
     Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
 }

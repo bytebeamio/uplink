@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use flume::Sender;
 use log::{error, info, trace};
+use pretty_bytes::converter::convert;
 
 use super::stream::{self, StreamStatus, MAX_BUFFER_SIZE};
 use super::StreamMetrics;
@@ -104,16 +105,16 @@ impl Streams {
         &mut self,
     ) -> Result<(), Box<flume::TrySendError<StreamMetrics>>> {
         for (buffer_name, data) in self.map.iter_mut() {
-            let metrics = data.metrics.clone();
+            let mut metrics = data.metrics.lock().unwrap();
 
             // Initialize metrics timeouts when force flush sees data counts
             if metrics.points() > 0 {
                 info!(
-                    "{:>20}: points = {:<5} batches = {:<5} latency = {}",
-                    buffer_name, metrics.points, metrics.batches, metrics.average_batch_latency
+                    "{:>20}: points = {:<5} batches = {:<5} latency = {:<5} data_size = {} compressed_data_size = {}",
+                    buffer_name, metrics.points, metrics.batches, metrics.average_batch_latency, convert(metrics.data_size as f64), convert(metrics.compressed_data_size as f64),
                 );
-                self.metrics_tx.try_send(metrics)?;
-                data.metrics.prepare_next();
+                self.metrics_tx.try_send(metrics.clone())?;
+                metrics.prepare_next();
             }
         }
 

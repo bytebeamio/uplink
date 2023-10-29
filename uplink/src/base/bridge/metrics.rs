@@ -18,6 +18,8 @@ pub struct StreamMetrics {
     pub min_batch_latency: u64,
     pub max_batch_latency: u64,
     pub average_batch_latency: u64,
+    pub data_size: usize,
+    pub compressed_data_size: usize,
 }
 
 impl StreamMetrics {
@@ -34,6 +36,8 @@ impl StreamMetrics {
             average_batch_latency: 0,
             min_batch_latency: 0,
             max_batch_latency: 0,
+            data_size: 0,
+            compressed_data_size: 0,
         }
     }
 
@@ -73,5 +77,12 @@ impl StreamMetrics {
         self.min_batch_latency = 0;
         self.max_batch_latency = 0;
         self.average_batch_latency = 0;
+        self.data_size = 0;
+        self.compressed_data_size = 0;
+    }
+
+    pub fn add_serialized_sizes(&mut self, data_size: usize, compressed_data_size: Option<usize>) {
+        self.data_size += data_size;
+        self.compressed_data_size += compressed_data_size.unwrap_or(data_size);
     }
 }

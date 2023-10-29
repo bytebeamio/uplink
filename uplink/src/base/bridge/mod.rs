@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::join;
 
-use std::{fmt::Debug, sync::Arc};
+use std::{
+    fmt::Debug,
+    sync::{Arc, Mutex},
+};
 
 mod actions_lane;
 mod data_lane;
@@ -41,6 +44,7 @@ pub trait Package: Send + Debug {
         self.len() == 0
     }
     fn compression(&self) -> Compression;
+    fn metrics(&self) -> Arc<Mutex<StreamMetrics>>;
 }
 
 // TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
