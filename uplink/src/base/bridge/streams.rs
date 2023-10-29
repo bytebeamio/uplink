@@ -110,8 +110,8 @@ impl Streams {
             // Initialize metrics timeouts when force flush sees data counts
             if metrics.points() > 0 {
                 info!(
-                    "{:>20}: points = {:<5} batches = {:<5} latency = {:<5} data_size = {} compressed_data_size = {}",
-                    buffer_name, metrics.points, metrics.batches, metrics.average_batch_latency, convert(metrics.data_size as f64), convert(metrics.compressed_data_size as f64),
+                    "{:>20}: points = {:<5} batches = {:<5} latency = {:<5} serialized_data_size = {:>10} compressed_data_size = {:>10}",
+                    buffer_name, metrics.points, metrics.batches, metrics.average_batch_latency, convert(metrics.serialized_data_size as f64), convert(metrics.compressed_data_size as f64),
                 );
                 self.metrics_tx.try_send(metrics.clone())?;
                 metrics.prepare_next();
