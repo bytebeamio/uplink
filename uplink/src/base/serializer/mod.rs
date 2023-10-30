@@ -289,7 +289,7 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
-            let publish = construct_publish(data)?;
+            let publish = self.construct_publish(data)?;
             let storage = self.storage_handler.select(&publish.topic);
             match write_to_disk(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
@@ -317,7 +317,7 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    let publish = construct_publish(data)?;
+                    let publish = self.construct_publish(data)?;
                     let storage = self.storage_handler.select(&publish.topic);
                     match write_to_disk(publish, storage) {
                         Ok(Some(deleted)) => {
@@ -404,7 +404,7 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    let publish = construct_publish(data)?;
+                    let publish = self.construct_publish(data)?;
                     let storage = self.storage_handler.select(&publish.topic);
                     match write_to_disk(publish, storage) {
                         Ok(Some(deleted)) => {
@@ -477,7 +477,7 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    let publish = construct_publish(data)?;
+                    let publish = self.construct_publish(data)?;
                     let payload_size = publish.payload.len();
                     debug!("publishing on {} with size = {}", publish.topic, payload_size);
                     match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, publish.payload) {
@@ -519,6 +519,24 @@ impl<C: MqttClient> Serializer<C> {
             status = next_status;
         }
     }
+
+    // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
+    fn construct_publish(&mut self, data: Box<dyn Package>) -> Result<Publish, Error> {
+        let stream = data.stream().as_ref().to_owned();
+        let point_count = data.len();
+        let batch_latency = data.latency();
+        trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+
+        let topic = data.topic().to_string();
+        let mut payload = data.serialize()?;
+
+        self.metrics.add_uncompressed_size(payload.len());
+        if let Compression::Lz4 = data.compression() {
+            lz4_compress(&mut payload)?;
+        }
+
+        Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
+    }
 }
 
 async fn send_publish<C: MqttClient>(
@@ -537,23 +555,6 @@ fn lz4_compress(payload: &mut Vec<u8>) -> Result<(), Error> {
     *payload = compressor.finish()?;
 
     Ok(())
-}
-
-// Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
-fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
-    let stream = data.stream().as_ref().to_owned();
-    let point_count = data.len();
-    let batch_latency = data.latency();
-    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
-
-    let topic = data.topic().to_string();
-    let mut payload = data.serialize()?;
-
-    if let Compression::Lz4 = data.compression() {
-        lz4_compress(&mut payload)?;
-    }
-
-    Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
 }
 
 // Writes the provided publish packet to disk with [Storage], after setting its pkid to 1.

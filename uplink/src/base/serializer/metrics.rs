@@ -21,7 +21,10 @@ pub struct SerializerMetrics {
     pub lost_segments: usize,
     /// Number of errors faced during serializer operation
     pub errors: usize,
-    /// Size in bytes, of serialized data sent onto network
+    /// Size in bytes, of serialized data before compression, if any
+    pub uncompressed_size: usize,
+    /// Size in bytes, of compressed, serialized data sent onto network.
+    /// Same as uncompressed_size if no compression used.
     pub sent_size: usize,
 }
 
@@ -37,6 +40,7 @@ impl SerializerMetrics {
             disk_files: 0,
             lost_segments: 0,
             errors: 0,
+            uncompressed_size: 0,
             sent_size: 0,
         }
     }
@@ -74,6 +78,10 @@ impl SerializerMetrics {
 
     pub fn increment_lost_segments(&mut self) {
         self.lost_segments += 1;
+    }
+
+    pub fn add_uncompressed_size(&mut self, size: usize) {
+        self.uncompressed_size += size;
     }
 
     pub fn add_sent_size(&mut self, size: usize) {
