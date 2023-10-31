@@ -163,8 +163,9 @@ mod tests {
         let data = DataBridgeTx { data_tx, shutdown_handle };
         let (shutdown_handle, _) = bounded(1);
         let actions = ActionsBridgeTx { status_tx, shutdown_handle };
+        let (mqtt_shutdown, _) = bounded(0);
 
-        (BridgeTx { data, actions }, status_rx)
+        (BridgeTx { data, actions, mqtt_shutdown }, status_rx)
     }
 
     #[test]

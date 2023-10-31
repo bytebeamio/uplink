@@ -1,4 +1,5 @@
 use flume::{Receiver, Sender};
+use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::join;
@@ -138,11 +139,11 @@ impl BridgeTx {
     }
 
     pub async fn trigger_shutdown(&self) {
-        join!(
-            self.actions.trigger_shutdown(),
-            self.data.trigger_shutdown(),
-            self.mqtt_shutdown.send_async(MqttShutdown)
-        );
+        join!(self.actions.trigger_shutdown(), self.data.trigger_shutdown(), async {
+            if let Err(e) = self.mqtt_shutdown.send_async(MqttShutdown).await {
+                error!("Failed to trigger mqtt shutdown. Error = {e}")
+            }
+        });
     }
 
     /*

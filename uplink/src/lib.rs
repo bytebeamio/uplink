@@ -286,7 +286,8 @@ pub struct Uplink {
     serializer_metrics_rx: Receiver<SerializerMetrics>,
     shutdown_tx: Sender<()>,
     shutdown_rx: Receiver<()>,
-    mqtt_shutdown: Sender<MqttShutdown>,
+    mqtt_shutdown_tx: Sender<MqttShutdown>,
+    mqtt_shutdown_rx: Receiver<MqttShutdown>,
 }
 
 impl Uplink {
@@ -296,6 +297,7 @@ impl Uplink {
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
         let (shutdown_tx, shutdown_rx) = bounded(1);
+        let (mqtt_shutdown_tx, mqtt_shutdown_rx) = bounded(1);
 
         Ok(Uplink {
             config,
@@ -309,7 +311,8 @@ impl Uplink {
             serializer_metrics_rx,
             shutdown_tx,
             shutdown_rx,
-            mqtt_shutdown: todo!(),
+            mqtt_shutdown_tx,
+            mqtt_shutdown_rx,
         })
     }
 
@@ -320,13 +323,19 @@ impl Uplink {
             self.stream_metrics_tx(),
             self.action_rx.clone(),
             self.shutdown_tx.clone(),
+            self.mqtt_shutdown_tx.clone(),
         )
     }
 
     pub fn spawn(&mut self, bridge: Bridge) -> Result<(), Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
 
-        let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
+        let mut mqtt = Mqtt::new(
+            self.config.clone(),
+            self.action_tx.clone(),
+            mqtt_metrics_tx,
+            self.mqtt_shutdown_rx.clone(),
+        );
         let mqtt_client = mqtt.client();
 
         let serializer = Serializer::new(
@@ -380,7 +389,7 @@ impl Uplink {
             })
         });
 
-        let Bridge { data: mut data_lane, actions: mut actions_lane, mqtt_shutdown } = bridge;
+        let Bridge { data: mut data_lane, actions: mut actions_lane, .. } = bridge;
 
         // Bridge thread to direct actions
         spawn_named_thread("Bridge actions_lane", || {

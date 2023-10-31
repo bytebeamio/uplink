@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use flume::{bounded, Receiver, Sender, TrySendError};
+use flume::{Receiver, Sender, TrySendError};
 use log::{debug, error, info};
 use thiserror::Error;
 use tokio::time::Duration;
@@ -11,8 +11,8 @@ use std::path::Path;
 
 use crate::{Action, Config};
 use rumqttc::{
-    AsyncClient, ConnectionError, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS,
-    Request, TlsConfiguration, Transport,
+    AsyncClient, ConnectionError, Event, EventLoop, Incoming, Key, MqttOptions, Outgoing, Publish,
+    QoS, Request, TlsConfiguration, Transport,
 };
 use std::sync::Arc;
 
@@ -26,6 +26,10 @@ pub enum Error {
     Serde(#[from] serde_json::Error),
     #[error("TrySend error {0}")]
     TrySend(Box<TrySendError<Action>>),
+    #[error("Io error {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Mqtt error {0}")]
+    Mqtt(#[from] rumqttc::mqttbytes::Error),
 }
 
 impl From<flume::TrySendError<Action>> for Error {
@@ -51,7 +55,6 @@ pub struct Mqtt {
     /// Metrics tx
     metrics_tx: Sender<MqttMetrics>,
     ctrl_rx: Receiver<MqttShutdown>,
-    ctrl_tx: Sender<MqttShutdown>,
 }
 
 impl Mqtt {
@@ -59,12 +62,12 @@ impl Mqtt {
         config: Arc<Config>,
         actions_tx: Sender<Action>,
         metrics_tx: Sender<MqttMetrics>,
+        ctrl_rx: Receiver<MqttShutdown>,
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
         let (client, mut eventloop) = AsyncClient::new(options, 10);
         eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
-        let (ctrl_tx, ctrl_rx) = bounded(1);
 
         Mqtt {
             config,
@@ -74,12 +77,7 @@ impl Mqtt {
             metrics: MqttMetrics::new(),
             metrics_tx,
             ctrl_rx,
-            ctrl_tx,
         }
-    }
-
-    pub fn tx(&self) -> Sender<MqttShutdown> {
-        self.ctrl_tx.clone()
     }
 
     /// Returns a client handle to MQTT interface
@@ -87,30 +85,27 @@ impl Mqtt {
         self.client.clone()
     }
 
-    pub fn persist_inflight(&self) -> Result<(), Error> {
+    pub fn persist_inflight(self) -> Result<(), Error> {
         let publishes = self
             .eventloop
             .pending
-            .into_iter()
-            .filter(|request| match request {
-                Request::Publish(packet) => true,
-                _ => false,
-            })
-            .map(|request| {
-                let Request::Publish(publish) = request;
-                return publish;
+            .filter_map(|request| match &request {
+                Request::Publish(publish) => Some(publish.clone()),
+                _ => None,
             })
             .collect::<Vec<Publish>>();
 
         // logic to write to file
-        let mut f = fs::File::create("/temp").unwrap();
+        let mut path = self.config.persistence_path.clone();
+        path.push("inflight");
+        let mut f = fs::File::create(path)?;
         let mut buff = BytesMut::new();
 
         for publish in publishes {
-            publish.write(&mut buff).unwrap();
+            publish.write(&mut buff)?;
         }
 
-        f.write_all(&buff);
+        f.write_all(&buff)?;
 
         Ok(())
     }
@@ -186,21 +181,27 @@ impl Mqtt {
                         }
                     }
                 },
-                _ = self.ctrl_rx.recv() => {
+                _ = self.ctrl_rx.recv_async() => {
                     // disconnect
-                    self.client.disconnect().await;
+                    if let Err(e) = self.client.disconnect().await {
+                        error!("Client unable to trigger disconnect. Error = {:?}", e);
+                        return
+                    }
 
                     // poll eventloop till the outgoing disconnect packet comes up
                     loop {
-                        if let Ok(Outgoing::disconnect) = self.eventloop.poll().await {
+                        if let Ok(Event::Outgoing(Outgoing::Disconnect)) = self.eventloop.poll().await {
                             break;
                         }
                     }
 
                     // shutdown
                     // -> Write the packets to the disk
-                    self.persist_inflight();
-                    break; // break out of loop of start above
+                    if let Err(e) = self.persist_inflight() {
+                        error!("Couldn't persist inflight messages. Error = {:?}", e);
+                        return
+                    }
+                    return;
                 }
             }
         }
