@@ -506,6 +506,7 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Starts operation of the uplink serializer, which can transition between the modes mentioned earlier.
     pub async fn start(mut self) -> Result<(), Error> {
+        // check for and publish the packets in persistence/inflight file
         let mut status = Status::EventLoopReady;
 
         loop {
