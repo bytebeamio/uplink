@@ -20,7 +20,7 @@ pub use self::{
     data_lane::{DataBridge, DataBridgeTx},
 };
 
-use super::Compression;
+use super::{mqtt::MqttShutdown, Compression};
 pub use metrics::StreamMetrics;
 
 pub trait Point: Send + Debug {
@@ -74,6 +74,7 @@ pub(crate) struct DataBridgeShutdown;
 pub struct Bridge {
     pub(crate) data: DataBridge,
     pub(crate) actions: ActionsBridge,
+    pub(crate) mqtt_shutdown: Sender<MqttShutdown>,
 }
 
 impl Bridge {
@@ -83,15 +84,20 @@ impl Bridge {
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
         shutdown_handle: Sender<()>,
+        mqtt_shutdown: Sender<MqttShutdown>,
     ) -> Self {
         let data = DataBridge::new(config.clone(), package_tx.clone(), metrics_tx.clone());
         let actions =
             ActionsBridge::new(config, package_tx, actions_rx, shutdown_handle, metrics_tx);
-        Self { data, actions }
+        Self { data, actions, mqtt_shutdown }
     }
 
     pub fn tx(&self) -> BridgeTx {
-        BridgeTx { data: self.data.tx(), actions: self.actions.tx() }
+        BridgeTx {
+            data: self.data.tx(),
+            actions: self.actions.tx(),
+            mqtt_shutdown: self.mqtt_shutdown.clone(),
+        }
     }
 
     pub fn register_action_route(
@@ -115,6 +121,7 @@ impl Bridge {
 pub struct BridgeTx {
     pub data: DataBridgeTx,
     pub actions: ActionsBridgeTx,
+    pub mqtt_shutdown: Sender<MqttShutdown>,
 }
 
 impl BridgeTx {
@@ -131,6 +138,20 @@ impl BridgeTx {
     }
 
     pub async fn trigger_shutdown(&self) {
-        join!(self.actions.trigger_shutdown(), self.data.trigger_shutdown());
+        join!(
+            self.actions.trigger_shutdown(),
+            self.data.trigger_shutdown(),
+            self.mqtt_shutdown.send_async(MqttShutdown)
+        );
     }
+
+    /*
+    TODO:
+
+    Description: Shutdown MQTT connection with broker when getting signals for exit/quit
+
+    Create a directory inside the persistence directory
+    - save inflight data packets
+
+     */
 }

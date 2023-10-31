@@ -1,17 +1,18 @@
-use flume::{Sender, TrySendError};
+use bytes::BytesMut;
+use flume::{bounded, Receiver, Sender, TrySendError};
 use log::{debug, error, info};
 use thiserror::Error;
-use tokio::task;
 use tokio::time::Duration;
+use tokio::{select, task};
 
-use std::fs::File;
-use std::io::Read;
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::Path;
 
 use crate::{Action, Config};
 use rumqttc::{
     AsyncClient, ConnectionError, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS,
-    TlsConfiguration, Transport,
+    Request, TlsConfiguration, Transport,
 };
 use std::sync::Arc;
 
@@ -33,6 +34,8 @@ impl From<flume::TrySendError<Action>> for Error {
     }
 }
 
+pub struct MqttShutdown;
+
 /// Interface implementing MQTT protocol to communicate with broker
 pub struct Mqtt {
     /// Uplink config
@@ -47,6 +50,8 @@ pub struct Mqtt {
     metrics: MqttMetrics,
     /// Metrics tx
     metrics_tx: Sender<MqttMetrics>,
+    ctrl_rx: Receiver<MqttShutdown>,
+    ctrl_tx: Sender<MqttShutdown>,
 }
 
 impl Mqtt {
@@ -59,6 +64,7 @@ impl Mqtt {
         let options = mqttoptions(&config);
         let (client, mut eventloop) = AsyncClient::new(options, 10);
         eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
+        let (ctrl_tx, ctrl_rx) = bounded(1);
 
         Mqtt {
             config,
@@ -67,7 +73,13 @@ impl Mqtt {
             native_actions_tx: actions_tx,
             metrics: MqttMetrics::new(),
             metrics_tx,
+            ctrl_rx,
+            ctrl_tx,
         }
+    }
+
+    pub fn tx(&self) -> Sender<MqttShutdown> {
+        self.ctrl_tx.clone()
     }
 
     /// Returns a client handle to MQTT interface
@@ -75,62 +87,120 @@ impl Mqtt {
         self.client.clone()
     }
 
+    pub fn persist_inflight(&self) -> Result<(), Error> {
+        let publishes = self
+            .eventloop
+            .pending
+            .into_iter()
+            .filter(|request| match request {
+                Request::Publish(packet) => true,
+                _ => false,
+            })
+            .map(|request| {
+                let Request::Publish(publish) = request;
+                return publish;
+            })
+            .collect::<Vec<Publish>>();
+
+        // logic to write to file
+        let mut f = fs::File::create("/temp").unwrap();
+        let mut buff = BytesMut::new();
+
+        for publish in publishes {
+            publish.write(&mut buff).unwrap();
+        }
+
+        f.write_all(&buff);
+
+        Ok(())
+    }
+
+    pub fn persist_client_channels(&self) -> Result<(), Error> {
+        todo!()
+    }
+
     /// Poll eventloop to receive packets from broker
     pub async fn start(mut self) {
         loop {
-            match self.eventloop.poll().await {
-                Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
-                    info!("Connected to broker. Session present = {}", connack.session_present);
-                    let subscription = self.config.actions_subscription.clone();
-                    let client = self.client();
+            /*
+            TODO
 
-                    self.metrics.add_connection();
+            Poll eventloop as well as polling receiver end of shut down signal
 
-                    // This can potentially block when client from other threads
-                    // have already filled the channel due to bad network. So we spawn
-                    task::spawn(async move {
-                        match client.subscribe(&subscription, QoS::AtLeastOnce).await {
-                            Ok(..) => info!("Subscribe -> {:?}", subscription),
-                            Err(e) => error!("Failed to send subscription. Error = {:?}", e),
+             */
+            select! {
+                event = self.eventloop.poll() => {
+                    match event {
+                        Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
+                            info!("Connected to broker. Session present = {}", connack.session_present);
+                            let subscription = self.config.actions_subscription.clone();
+                            let client = self.client();
+
+                            self.metrics.add_connection();
+
+                            // This can potentially block when client from other threads
+                            // have already filled the channel due to bad network. So we spawn
+                            task::spawn(async move {
+                                match client.subscribe(&subscription, QoS::AtLeastOnce).await {
+                                    Ok(..) => info!("Subscribe -> {:?}", subscription),
+                                    Err(e) => error!("Failed to send subscription. Error = {:?}", e),
+                                }
+                            });
                         }
-                    });
-                }
-                Ok(Event::Incoming(Incoming::Publish(p))) => {
-                    self.metrics.add_action();
-                    if let Err(e) = self.handle_incoming_publish(p) {
-                        error!("Incoming publish handle failed. Error = {:?}", e);
-                    }
-                }
-                Ok(Event::Incoming(packet)) => {
-                    debug!("Incoming = {:?}", packet);
-                    match packet {
-                        rumqttc::Packet::PubAck(_) => self.metrics.add_puback(),
-                        rumqttc::Packet::PingResp => {
-                            self.metrics.add_pingresp();
-                            let inflight = self.eventloop.state.inflight();
-                            self.metrics.update_inflight(inflight);
-                            if let Err(e) = self.check_and_flush_metrics() {
-                                error!("Failed to flush MQTT metrics. Erro = {:?}", e);
+                        Ok(Event::Incoming(Incoming::Publish(p))) => {
+                            self.metrics.add_action();
+                            if let Err(e) = self.handle_incoming_publish(p) {
+                                error!("Incoming publish handle failed. Error = {:?}", e);
                             }
                         }
-                        _ => {}
-                    }
-                }
-                Ok(Event::Outgoing(packet)) => {
-                    debug!("Outgoing = {:?}", packet);
-                    match packet {
-                        rumqttc::Outgoing::Publish(_) => self.metrics.add_publish(),
-                        rumqttc::Outgoing::PingReq => {
-                            self.metrics.add_pingreq();
+                        Ok(Event::Incoming(packet)) => {
+                            debug!("Incoming = {:?}", packet);
+                            match packet {
+                                rumqttc::Packet::PubAck(_) => self.metrics.add_puback(),
+                                rumqttc::Packet::PingResp => {
+                                    self.metrics.add_pingresp();
+                                    let inflight = self.eventloop.state.inflight();
+                                    self.metrics.update_inflight(inflight);
+                                    if let Err(e) = self.check_and_flush_metrics() {
+                                        error!("Failed to flush MQTT metrics. Erro = {:?}", e);
+                                    }
+                                }
+                                _ => {}
+                            }
                         }
-                        _ => {}
+                        Ok(Event::Outgoing(packet)) => {
+                            debug!("Outgoing = {:?}", packet);
+                            match packet {
+                                rumqttc::Outgoing::Publish(_) => self.metrics.add_publish(),
+                                rumqttc::Outgoing::PingReq => {
+                                    self.metrics.add_pingreq();
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(e) => {
+                            self.metrics.add_reconnection();
+                            self.check_disconnection_metrics(e);
+                            tokio::time::sleep(Duration::from_secs(3)).await;
+                            continue;
+                        }
                     }
-                }
-                Err(e) => {
-                    self.metrics.add_reconnection();
-                    self.check_disconnection_metrics(e);
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                    continue;
+                },
+                _ = self.ctrl_rx.recv() => {
+                    // disconnect
+                    self.client.disconnect().await;
+
+                    // poll eventloop till the outgoing disconnect packet comes up
+                    loop {
+                        if let Ok(Outgoing::disconnect) = self.eventloop.poll().await {
+                            break;
+                        }
+                    }
+
+                    // shutdown
+                    // -> Write the packets to the disk
+                    self.persist_inflight();
+                    break; // break out of loop of start above
                 }
             }
         }

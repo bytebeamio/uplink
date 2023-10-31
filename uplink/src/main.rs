@@ -195,6 +195,8 @@ fn main() -> Result<(), Error> {
             while let Some(signal) = signals.next().await {
                 match signal {
                     SIGTERM | SIGINT | SIGQUIT => bridge_tx.trigger_shutdown().await,
+                    // how to insert graceful shutdown code?
+                    // it is partially there... need to add from here
                     s => error!("Couldn't handle signal: {s}"),
                 }
             }

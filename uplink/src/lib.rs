@@ -260,7 +260,7 @@ pub mod config {
 
 pub use base::actions::{Action, ActionResponse};
 use base::bridge::{Bridge, Package, Payload, Point, StreamMetrics};
-use base::mqtt::Mqtt;
+use base::mqtt::{Mqtt, MqttShutdown};
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
 pub use collector::{simulator, tcpjson::TcpJson};
@@ -286,6 +286,7 @@ pub struct Uplink {
     serializer_metrics_rx: Receiver<SerializerMetrics>,
     shutdown_tx: Sender<()>,
     shutdown_rx: Receiver<()>,
+    mqtt_shutdown: Sender<MqttShutdown>,
 }
 
 impl Uplink {
@@ -308,6 +309,7 @@ impl Uplink {
             serializer_metrics_rx,
             shutdown_tx,
             shutdown_rx,
+            mqtt_shutdown: todo!(),
         })
     }
 
@@ -378,7 +380,7 @@ impl Uplink {
             })
         });
 
-        let Bridge { data: mut data_lane, actions: mut actions_lane } = bridge;
+        let Bridge { data: mut data_lane, actions: mut actions_lane, mqtt_shutdown } = bridge;
 
         // Bridge thread to direct actions
         spawn_named_thread("Bridge actions_lane", || {
