@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use flume::{Receiver, Sender, TrySendError};
 use log::{debug, error, info};
 use thiserror::Error;
-use tokio::time::Duration;
+use tokio::time::{timeout, Duration};
 use tokio::{select, task};
 
 use std::fs::{self, File};
@@ -66,7 +66,7 @@ impl Mqtt {
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
-        let (client, mut eventloop) = AsyncClient::new(options, 10);
+        let (client, mut eventloop) = AsyncClient::new(options, 1);
         eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
 
         Mqtt {
@@ -85,27 +85,33 @@ impl Mqtt {
         self.client.clone()
     }
 
-    pub fn persist_inflight(self) -> Result<(), Error> {
-        let publishes = self
-            .eventloop
-            .pending
+    /// Shutdown eventloop and write inflight publish packets to disk
+    pub fn persist_inflight(&mut self) -> Result<(), Error> {
+        self.eventloop.clean();
+        let pending = std::mem::take(&mut self.eventloop.pending);
+        let publishes: Vec<Publish> = pending
             .filter_map(|request| match &request {
                 Request::Publish(publish) => Some(publish.clone()),
                 _ => None,
             })
-            .collect::<Vec<Publish>>();
+            .collect();
 
-        // logic to write to file
-        let mut path = self.config.persistence_path.clone();
-        path.push("inflight");
-        let mut f = fs::File::create(path)?;
-        let mut buff = BytesMut::new();
-
-        for publish in publishes {
-            publish.write(&mut buff)?;
+        if publishes.is_empty() {
+            return Ok(());
         }
 
-        f.write_all(&buff)?;
+        let mut path = self.config.persistence_path.clone();
+        path.push("inflight");
+        debug!("Writing pending publishes to disk: {}", path.display());
+        let mut f = fs::File::create(path)?;
+        let mut buf = BytesMut::new();
+
+        for publish in publishes {
+            publish.write(&mut buf)?;
+        }
+
+        f.write_all(&buf)?;
+        f.flush()?;
 
         Ok(())
     }
@@ -117,12 +123,6 @@ impl Mqtt {
     /// Poll eventloop to receive packets from broker
     pub async fn start(mut self) {
         loop {
-            /*
-            TODO
-
-            Poll eventloop as well as polling receiver end of shut down signal
-
-             */
             select! {
                 event = self.eventloop.poll() => {
                     match event {
@@ -182,27 +182,32 @@ impl Mqtt {
                     }
                 },
                 _ = self.ctrl_rx.recv_async() => {
-                    // disconnect
-                    if let Err(e) = self.client.disconnect().await {
-                        error!("Client unable to trigger disconnect. Error = {:?}", e);
-                        return
-                    }
-
-                    // poll eventloop till the outgoing disconnect packet comes up
-                    loop {
-                        if let Ok(Event::Outgoing(Outgoing::Disconnect)) = self.eventloop.poll().await {
-                            break;
-                        }
-                    }
-
-                    // shutdown
-                    // -> Write the packets to the disk
-                    if let Err(e) = self.persist_inflight() {
-                        error!("Couldn't persist inflight messages. Error = {:?}", e);
-                        return
-                    }
-                    return;
+                    break;
                 }
+            }
+        }
+
+        // Try to disconnect from mqtt connection, else force persist. Timeout in a second
+        if let Err(e) = timeout(Duration::from_secs(1), self.disconnect()).await {
+            error!("Mqtt disconnection timedout. Error = {:?}", e);
+        }
+
+        if let Err(e) = self.persist_inflight() {
+            error!("Couldn't persist inflight messages. Error = {:?}", e);
+        }
+    }
+
+    async fn disconnect(&mut self) {
+        if let Err(e) = self.client.disconnect().await {
+            error!("Client unable to trigger disconnect. Error = {:?}", e);
+            return;
+        }
+
+        // poll eventloop till the outgoing disconnect packet comes up
+        loop {
+            if let Ok(Event::Outgoing(Outgoing::Disconnect)) = self.eventloop.poll().await {
+                info!("Disconnection successful!");
+                break;
             }
         }
     }
