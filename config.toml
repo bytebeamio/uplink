@@ -1,3 +1,0 @@
-[simulator]
-actions = [{ name = "lock" }]
-gps_paths = "./paths"

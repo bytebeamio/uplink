@@ -22,7 +22,7 @@ port = 7891
 actions = [{ name = "no_response", timeout = 100 }, { name = "restart_response", timeout = 1800 }]
 EOF
 )" > devices/actions.toml
-# docker cp devices/actions.toml simulator:/usr/share/bytebeam/uplink/devices/actions.toml
+docker cp devices/actions.toml simulator:/usr/share/bytebeam/uplink/devices/actions.toml
 
 docker exec -it simulator uplink -a /usr/share/bytebeam/uplink/devices/device_$DEVICE_ID.json -c /usr/share/bytebeam/uplink/devices/actions.toml -vv -m uplink::base::bridge
 
