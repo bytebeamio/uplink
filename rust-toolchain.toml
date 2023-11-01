@@ -7,3 +7,4 @@ targets = [
     "armv7-linux-androideabi"
 ]
 profile = "minimal"
+components = "clippy"
