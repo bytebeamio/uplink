@@ -145,14 +145,4 @@ impl BridgeTx {
             }
         });
     }
-
-    /*
-    TODO:
-
-    Description: Shutdown MQTT connection with broker when getting signals for exit/quit
-
-    Create a directory inside the persistence directory
-    - save inflight data packets
-
-     */
 }
