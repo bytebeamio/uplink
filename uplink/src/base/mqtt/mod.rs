@@ -5,7 +5,7 @@ use thiserror::Error;
 use tokio::time::{timeout, Duration};
 use tokio::{select, task};
 
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 
@@ -86,11 +86,11 @@ impl Mqtt {
     }
 
     /// Shutdown eventloop and write inflight publish packets to disk
-    pub fn persist_inflight(&mut self) -> Result<(), Error> {
-        self.eventloop.clean();
-        let pending = std::mem::take(&mut self.eventloop.pending);
+    pub fn persist_inflight(self) -> Result<(), Error> {
+        let pending = self.eventloop.close();
         let publishes: Vec<Publish> = pending
-            .filter_map(|request| match &request {
+            .into_iter()
+            .filter_map(|request| match request {
                 Request::Publish(publish) => Some(publish.clone()),
                 _ => None,
             })
@@ -103,7 +103,7 @@ impl Mqtt {
         let mut path = self.config.persistence_path.clone();
         path.push("inflight");
         debug!("Writing pending publishes to disk: {}", path.display());
-        let mut f = fs::File::create(path)?;
+        let mut f = File::create(path)?;
         let mut buf = BytesMut::new();
 
         for publish in publishes {
