@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use flume::{Receiver, Sender, TrySendError};
 use log::{debug, error, info};
 use thiserror::Error;
-use tokio::time::{timeout, Duration};
+use tokio::time::Duration;
 use tokio::{select, task};
 
 use std::fs::{self, File};
@@ -11,8 +11,8 @@ use std::path::Path;
 
 use crate::{Action, Config};
 use rumqttc::{
-    AsyncClient, ConnectionError, Event, EventLoop, Incoming, Key, MqttOptions, Outgoing, Publish,
-    QoS, Request, TlsConfiguration, Transport,
+    AsyncClient, ConnectionError, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS,
+    Request, TlsConfiguration, Transport,
 };
 use std::sync::Arc;
 
@@ -187,30 +187,32 @@ impl Mqtt {
             }
         }
 
-        // Try to disconnect from mqtt connection, else force persist. Timeout in a second
-        if let Err(e) = timeout(Duration::from_secs(1), self.disconnect()).await {
-            error!("Mqtt disconnection timedout. Error = {:?}", e);
-        }
+        // TODO: when uplink uses wills to handle unexpected disconnections, the following maybe useful,
+        // till then sending a disconnect to broker is unnecessary.
+        // // Try to disconnect from mqtt connection, else force persist. Timeout in a second
+        // if let Err(e) = timeout(Duration::from_secs(1), self.disconnect()).await {
+        //     error!("Mqtt disconnection timedout. Error = {:?}", e);
+        // }
 
         if let Err(e) = self.persist_inflight() {
             error!("Couldn't persist inflight messages. Error = {:?}", e);
         }
     }
 
-    async fn disconnect(&mut self) {
-        if let Err(e) = self.client.disconnect().await {
-            error!("Client unable to trigger disconnect. Error = {:?}", e);
-            return;
-        }
+    // async fn disconnect(&mut self) {
+    //     if let Err(e) = self.client.disconnect().await {
+    //         error!("Client unable to trigger disconnect. Error = {:?}", e);
+    //         return;
+    //     }
 
-        // poll eventloop till the outgoing disconnect packet comes up
-        loop {
-            if let Ok(Event::Outgoing(Outgoing::Disconnect)) = self.eventloop.poll().await {
-                info!("Disconnection successful!");
-                break;
-            }
-        }
-    }
+    //     // poll eventloop till the outgoing disconnect packet comes up
+    //     loop {
+    //         if let Ok(Event::Outgoing(Outgoing::Disconnect)) = self.eventloop.poll().await {
+    //             info!("Disconnection successful!");
+    //             break;
+    //         }
+    //     }
+    // }
 
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
         if self.config.actions_subscription != publish.topic {
