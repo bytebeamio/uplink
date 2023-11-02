@@ -85,7 +85,7 @@ impl Mqtt {
         self.client.clone()
     }
 
-    /// Shutdown eventloop and write inflight publish packets to disk
+    /// Shutdown eventloop and write all inflight publish packets to disk
     pub fn persist_inflight(&mut self) -> Result<(), Error> {
         self.eventloop.clean();
         let pending = std::mem::take(&mut self.eventloop.pending);
@@ -177,7 +177,8 @@ impl Mqtt {
                         }
                     }
                 },
-                _ = self.ctrl_rx.recv_async() => {
+                // On receiving a shutdown signal, stop polling eventloop
+                Ok(MqttShutdown) = self.ctrl_rx.recv_async() => {
                     break;
                 }
             }
