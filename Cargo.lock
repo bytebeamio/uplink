@@ -3068,6 +3068,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
+name = "utils"
+version = "0.1.0"
+dependencies = [
+ "flume",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio 1.28.2",
+ "tokio-stream",
+ "tokio-util 0.7.8",
+ "uplink",
+]
+
+[[package]]
 name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
