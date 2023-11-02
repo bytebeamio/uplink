@@ -116,10 +116,6 @@ impl Mqtt {
         Ok(())
     }
 
-    pub fn persist_client_channels(&self) -> Result<(), Error> {
-        todo!()
-    }
-
     /// Poll eventloop to receive packets from broker
     pub async fn start(mut self) {
         loop {
