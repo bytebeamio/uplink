@@ -48,7 +48,7 @@ pub struct ActionsBridge {
     /// Actions incoming from backend
     actions_rx: Receiver<Action>,
     /// Contains stream to send ActionResponses on
-    streams: Streams,
+    streams: Streams<ActionResponse>,
     /// Apps registered with the bridge
     /// NOTE: Sometimes action_routes could overlap, the latest route
     /// to be registered will be used in such a circumstance.
@@ -276,7 +276,7 @@ impl ActionsBridge {
         Ok(())
     }
 
-    async fn forward_action_response(&mut self, response: ActionResponse) {
+    async fn forward_action_response(&mut self, mut response: ActionResponse) {
         if self.parallel_actions.contains(&response.action_id) {
             self.forward_parallel_action_response(response).await;
 
@@ -297,7 +297,7 @@ impl ActionsBridge {
         }
 
         info!("Action response = {:?}", response);
-        self.streams.forward(response.as_payload()).await;
+        self.streams.forward(response.clone()).await;
 
         if response.is_completed() || response.is_failed() {
             self.clear_current_action();
@@ -309,7 +309,7 @@ impl ActionsBridge {
         if response.is_done() {
             let mut action = inflight_action.action.clone();
 
-            if let Some(a) = response.done_response {
+            if let Some(a) = response.done_response.take() {
                 action = a;
             }
 
@@ -317,7 +317,7 @@ impl ActionsBridge {
                 // NOTE: send success reponse for actions that don't have redirections configured
                 warn!("Action redirection is not configured for: {:?}", action);
                 let response = ActionResponse::success(&action.action_id);
-                self.streams.forward(response.as_payload()).await;
+                self.streams.forward(response).await;
 
                 self.clear_current_action();
             }
@@ -350,17 +350,17 @@ impl ActionsBridge {
 
     async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
         info!("Action response = {:?}", response);
-        self.streams.forward(response.as_payload()).await;
-
         if response.is_completed() || response.is_failed() {
             self.parallel_actions.remove(&response.action_id);
         }
+
+        self.streams.forward(response).await;
     }
 
     async fn forward_action_error(&mut self, action: Action, error: Error) {
         let response = ActionResponse::failure(&action.action_id, error.to_string());
 
-        self.streams.forward(response.as_payload()).await;
+        self.streams.forward(response).await;
     }
 }
 

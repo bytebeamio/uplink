@@ -22,7 +22,7 @@ pub struct DataBridge {
     /// Rx to receive data from apps
     data_rx: Receiver<Payload>,
     /// Handle to send data over streams
-    streams: Streams,
+    streams: Streams<Payload>,
     ctrl_rx: Receiver<DataBridgeShutdown>,
     ctrl_tx: Sender<DataBridgeShutdown>,
 }
