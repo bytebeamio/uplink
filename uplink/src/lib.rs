@@ -453,7 +453,10 @@ impl Uplink {
 
         #[cfg(target_os = "android")]
         if let Some(config) = self.config.logging.clone() {
-            let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
+            let route = ActionRoute {
+                name: "journalctl_config".to_string(),
+                timeout: Duration::from_secs(10),
+            };
             let (actions_tx, actions_rx) = bounded(1);
             bridge.register_action_route(route, actions_tx)?;
             let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
