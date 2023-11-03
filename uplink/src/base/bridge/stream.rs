@@ -37,7 +37,7 @@ pub struct Stream<T> {
 
 impl<T> Stream<T>
 where
-    T: Point + Debug + Send + 'static,
+    T: Point,
     Buffer<T>: Package,
 {
     pub fn new(
@@ -236,7 +236,7 @@ impl<T> Buffer<T> {
 
 impl<T> Package for Buffer<T>
 where
-    T: Debug + Send + Point,
+    T: Point,
     Vec<T>: Serialize,
 {
     fn stream_config(&self) -> Arc<StreamConfig> {

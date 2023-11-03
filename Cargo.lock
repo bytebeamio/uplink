@@ -3008,7 +3008,7 @@ checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 
 [[package]]
 name = "uplink"
-version = "2.8.1"
+version = "2.9.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3066,6 +3066,20 @@ name = "utf-8"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
+
+[[package]]
+name = "utils"
+version = "0.1.0"
+dependencies = [
+ "flume",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio 1.28.2",
+ "tokio-stream",
+ "tokio-util 0.7.8",
+ "uplink",
+]
 
 [[package]]
 name = "valuable"
