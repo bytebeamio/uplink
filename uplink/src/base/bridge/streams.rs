@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use flume::Sender;
 use log::{error, info, trace};
-use serde::Serialize;
 
 use super::stream::{self, StreamStatus, MAX_BUFFER_SIZE};
 use super::{Point, StreamMetrics};
