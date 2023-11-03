@@ -3,23 +3,24 @@ use std::sync::Arc;
 
 use flume::Sender;
 use log::{error, info, trace};
+use serde::Serialize;
 
 use super::stream::{self, StreamStatus, MAX_BUFFER_SIZE};
-use super::StreamMetrics;
+use super::{Point, StreamMetrics};
 use crate::base::StreamConfig;
-use crate::{Config, Package, Payload, Stream};
+use crate::{Config, Package, Stream};
 
 use super::delaymap::DelayMap;
 
-pub struct Streams {
+pub struct Streams<T> {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
     metrics_tx: Sender<StreamMetrics>,
-    map: HashMap<String, Stream<Payload>>,
+    map: HashMap<String, Stream<T>>,
     pub stream_timeouts: DelayMap<String>,
 }
 
-impl Streams {
+impl<T: Point + Serialize + 'static> Streams<T> {
     pub fn new(
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
@@ -35,8 +36,8 @@ impl Streams {
         }
     }
 
-    pub async fn forward(&mut self, data: Payload) {
-        let stream_name = data.stream.to_owned();
+    pub async fn forward(&mut self, data: T) {
+        let stream_name = data.stream_name().to_string();
 
         let stream = match self.map.get_mut(&stream_name) {
             Some(partition) => partition,
