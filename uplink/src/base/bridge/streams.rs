@@ -20,7 +20,7 @@ pub struct Streams<T> {
     pub stream_timeouts: DelayMap<String>,
 }
 
-impl<T: Point + Serialize + 'static> Streams<T> {
+impl<T: Point> Streams<T> {
     pub fn new(
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,

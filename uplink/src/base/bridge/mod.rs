@@ -23,7 +23,7 @@ pub use self::{
 use super::Compression;
 pub use metrics::StreamMetrics;
 
-pub trait Point: Send + Debug {
+pub trait Point: Send + Debug + Serialize + 'static {
     fn stream_name(&self) -> &str;
     fn sequence(&self) -> u32;
     fn timestamp(&self) -> u64;
