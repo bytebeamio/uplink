@@ -297,8 +297,9 @@ impl ActionsBridge {
         }
 
         info!("Action response = {:?}", response);
+        self.streams.forward(response.clone()).await;
+
         if response.is_completed() || response.is_failed() {
-            self.streams.forward(response).await;
             self.clear_current_action();
             return;
         }
@@ -311,8 +312,6 @@ impl ActionsBridge {
             if let Some(a) = response.done_response.take() {
                 action = a;
             }
-
-            self.streams.forward(response.clone()).await;
 
             if let Err(RedirectionError(action)) = self.redirect_action(action).await {
                 // NOTE: send success reponse for actions that don't have redirections configured
