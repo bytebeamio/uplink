@@ -452,7 +452,10 @@ mod test {
         let mut path = PathBuf::from(DOWNLOAD_DIR);
         path.push("uplink-test");
         let downloader_cfg = DownloaderConfig {
-            actions: vec![ActionRoute { name: "firmware_update".to_owned(), timeout: 10 }],
+            actions: vec![ActionRoute {
+                name: "firmware_update".to_owned(),
+                timeout: Duration::from_secs(10),
+            }],
             path,
         };
         let config = config(downloader_cfg.clone());
