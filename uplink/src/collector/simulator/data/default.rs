@@ -11,9 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::base::clock;
+use crate::simulator::Event;
 use crate::Payload;
-
-use super::Event;
 
 const RESET_LIMIT: u32 = 1500;
 
@@ -57,8 +56,8 @@ pub struct DeviceData {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Gps {
-    latitude: f64,
-    longitude: f64,
+    pub latitude: f64,
+    pub longitude: f64,
 }
 
 impl Gps {

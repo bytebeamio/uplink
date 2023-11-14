@@ -1,7 +1,6 @@
 use crate::base::bridge::{BridgeTx, Payload};
 use crate::base::SimulatorConfig;
 use crate::{Action, ActionResponse};
-use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
 use flume::{bounded, Receiver, Sender};
 use log::{error, info};
 use rand::Rng;
@@ -11,6 +10,8 @@ use tokio::{select, spawn};
 
 use std::time::Duration;
 use std::{fs, io, sync::Arc};
+
+use self::data::{spawn_data_simulators, DeviceData, Gps};
 
 mod data;
 
@@ -79,15 +80,6 @@ pub fn new_device_data(path: Arc<Vec<Gps>>) -> DeviceData {
     DeviceData { path, path_offset: path_index }
 }
 
-pub fn spawn_data_simulators(device: DeviceData, tx: Sender<Event>) {
-    spawn(Gps::simulate(tx.clone(), device));
-    spawn(Bms::simulate(tx.clone()));
-    spawn(Imu::simulate(tx.clone()));
-    spawn(Motor::simulate(tx.clone()));
-    spawn(PeripheralState::simulate(tx.clone()));
-    spawn(DeviceShadow::simulate(tx));
-}
-
 #[tokio::main(flavor = "current_thread")]
 pub async fn start(
     config: SimulatorConfig,
@@ -98,7 +90,7 @@ pub async fn start(
     let device = new_device_data(path);
 
     let (tx, rx) = bounded(10);
-    spawn_data_simulators(device, tx.clone());
+    spawn_data_simulators(config, device, tx.clone());
 
     loop {
         if let Some(actions_rx) = actions_rx.as_ref() {
