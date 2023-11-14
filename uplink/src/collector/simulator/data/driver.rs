@@ -22,9 +22,12 @@ const TIME_PERIOD: f64 = 0.005555; // 20 seconds in hrs is 0.005555
 
 #[derive(Debug, Serialize)]
 pub struct ElectricVehicle {
+    #[serde(rename = "SOC")]
     soc: f64,
+    #[serde(rename = "SOH")]
     soh: f64,
     energy_left: f64,
+    #[serde(rename = "Status")]
     state: String,
     ignition: bool,
     acceleration: f64,
