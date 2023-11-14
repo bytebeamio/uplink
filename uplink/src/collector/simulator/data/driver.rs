@@ -127,7 +127,7 @@ impl ElectricVehicle {
             ev.update_state();
 
             sequence += 1;
-            if let Err(e) = update_and_sleep(&tx, sequence, &trace, &ev).await {
+            if let Err(e) = update_and_sleep(&tx, sequence, trace, &ev).await {
                 error!("{e}");
                 return;
             }
@@ -139,7 +139,7 @@ impl ElectricVehicle {
                 }
                 ev.update_state();
                 sequence += 1;
-                if let Err(e) = update_and_sleep(&tx, sequence, &trace, &ev).await {
+                if let Err(e) = update_and_sleep(&tx, sequence, trace, &ev).await {
                     error!("{e}");
                     return;
                 }
