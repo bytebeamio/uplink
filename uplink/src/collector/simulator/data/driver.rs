@@ -61,6 +61,7 @@ impl ElectricVehicle {
     }
 
     fn drive(&mut self, distance: f64) {
+        self.ignition = true;
         self.distance_travelled += distance;
         self.energy_left -= distance * ENERGY_CONSUMPTION * TIME_PERIOD;
         let speed = distance / TIME_PERIOD;
@@ -69,6 +70,8 @@ impl ElectricVehicle {
         self.rpm = self.speed / (WHEEL_CIRCUMFERENCE * 0.001885);
 
         self.soc = self.energy_left / BATTERY_CAPACITY;
+
+        self.state = "Running".to_string();
 
         if self.soc < 0.2 {
             self.soh -= HEALTH_PENALTY; // penalty for driving on low battery
@@ -83,16 +86,19 @@ impl ElectricVehicle {
         // Some energy is lost when ignition is turned on and system is idling
         if self.ignition {
             self.energy_left -= ENERGY_CONSUMPTION * TIME_PERIOD * 0.001;
+            self.state = "Idling".to_string()
         }
     }
 
     fn stop(&mut self) {
         self.ignition = false;
+        self.state = "Stopped".to_string();
         self.idle();
     }
 
     fn charge(&mut self) {
         self.stop();
+        self.state = "Charging".to_string();
 
         self.energy_left += CHARGING_RATE * TIME_PERIOD; // Assuming 1 time step = 5 seconds
         if self.energy_left > BATTERY_CAPACITY {
@@ -102,22 +108,9 @@ impl ElectricVehicle {
         self.soc = self.energy_left / BATTERY_CAPACITY
     }
 
-    fn update_state(&mut self) {
-        if self.speed > 0.0 {
-            self.state = "Running".to_string()
-        } else if self.ignition {
-            self.state = "Idling".to_string()
-        } else if self.soc < 0.2 && self.soc > 0.0 {
-            self.state = "Charging".to_string()
-        } else {
-            self.state = "Stopped".to_string()
-        }
-    }
-
     // Push data point updates and sleep
     async fn update_and_sleep(&mut self) -> Result<(), SendError<Event>> {
         self.sequence += 1;
-        self.update_state();
         self.tx
             .send_async(Event::Data(Payload {
                 timestamp: clock() as u64,
