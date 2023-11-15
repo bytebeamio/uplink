@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::time::interval;
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::base::clock;
@@ -50,11 +49,11 @@ impl DataType {
 
 #[derive(Clone, PartialEq)]
 pub struct DeviceData {
-    pub path: Arc<Vec<Gps>>,
+    pub path: Vec<Gps>,
     pub path_offset: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Gps {
     pub latitude: f64,
     pub longitude: f64,
