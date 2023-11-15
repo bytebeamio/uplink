@@ -26,6 +26,8 @@ pub struct ElectricVehicle {
     tx: Sender<Event>,
     #[serde(skip)]
     sequence: u32,
+    #[serde(skip)]
+    location: Gps,
     #[serde(rename = "SOC")]
     soc: f64,
     #[serde(rename = "SOH")]
@@ -44,6 +46,7 @@ impl ElectricVehicle {
     fn new(tx: Sender<Event>) -> Self {
         Self {
             tx,
+            location: Gps { latitude: 0.0, longitude: 0.0 },
             sequence: 0,
             soc: 1.0,
             soh: 1.0,
@@ -112,14 +115,14 @@ impl ElectricVehicle {
     }
 
     // Push data point updates and sleep
-    async fn update_and_sleep(&mut self, trace: &Gps) -> Result<(), SendError<Event>> {
+    async fn update_and_sleep(&mut self) -> Result<(), SendError<Event>> {
         self.sequence += 1;
         self.tx
             .send_async(Event::Data(Payload {
                 timestamp: clock() as u64,
                 stream: "gps".to_string(),
                 sequence: self.sequence,
-                payload: json!(trace),
+                payload: json!(self.location),
             }))
             .await?;
 
@@ -138,27 +141,26 @@ impl ElectricVehicle {
     }
 
     async fn trace_map(&mut self, mut map: Iter<'_, Gps>) {
-        let mut last_trace = match map.next() {
-            Some(t) => t,
-            _ => return,
-        };
+        // We don't care about the first trace, since == self.location
+        _ = map.next();
 
         while let Some(mut trace) = map.next() {
-            let mut distance = haversine(trace, last_trace);
-            last_trace = trace;
+            let mut distance = haversine(trace, &self.location);
+            self.location = *trace;
             // Randomly speed up the the vehicle to 2x
             if random::<f64>() < 0.25 {
                 trace = match map.next() {
                     Some(t) => t,
                     _ => return,
                 };
-                distance += haversine(trace, last_trace);
+                distance += haversine(trace, &self.location);
+                self.location = *trace;
             }
 
             self.drive(distance);
             self.update_state();
 
-            if let Err(e) = self.update_and_sleep(trace).await {
+            if let Err(e) = self.update_and_sleep().await {
                 error!("{e}");
                 return;
             }
@@ -169,7 +171,7 @@ impl ElectricVehicle {
                     self.idle()
                 }
                 self.update_state();
-                if let Err(e) = self.update_and_sleep(trace).await {
+                if let Err(e) = self.update_and_sleep().await {
                     error!("{e}");
                     return;
                 }

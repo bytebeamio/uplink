@@ -53,7 +53,7 @@ pub struct DeviceData {
     pub path_offset: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct Gps {
     pub latitude: f64,
     pub longitude: f64,
