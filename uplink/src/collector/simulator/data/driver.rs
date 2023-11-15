@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{slice::Iter, time::Duration};
 
 use flume::{SendError, Sender};
 use log::error;
@@ -22,6 +22,10 @@ const TIME_PERIOD: f64 = 0.005555; // 20 seconds in hrs is 0.005555
 
 #[derive(Debug, Serialize)]
 pub struct ElectricVehicle {
+    #[serde(skip)]
+    tx: Sender<Event>,
+    #[serde(skip)]
+    sequence: u32,
     #[serde(rename = "SOC")]
     soc: f64,
     #[serde(rename = "SOH")]
@@ -36,9 +40,11 @@ pub struct ElectricVehicle {
     rpm: f64,
 }
 
-impl Default for ElectricVehicle {
-    fn default() -> Self {
+impl ElectricVehicle {
+    fn new(tx: Sender<Event>) -> Self {
         Self {
+            tx,
+            sequence: 0,
             soc: 1.0,
             soh: 1.0,
             energy_left: BATTERY_CAPACITY,
@@ -50,9 +56,7 @@ impl Default for ElectricVehicle {
             rpm: 0.0,
         }
     }
-}
 
-impl ElectricVehicle {
     fn drive(&mut self, distance: f64) {
         self.distance_travelled += distance;
         self.energy_left -= distance * ENERGY_CONSUMPTION * TIME_PERIOD;
@@ -107,79 +111,86 @@ impl ElectricVehicle {
         }
     }
 
-    pub async fn simulate(tx: Sender<Event>, device: DeviceData) {
-        let mut ev = Self::default();
-        let mut sequence = 0;
+    // Push data point updates and sleep
+    async fn update_and_sleep(&mut self, trace: &Gps) -> Result<(), SendError<Event>> {
+        self.sequence += 1;
+        self.tx
+            .send_async(Event::Data(Payload {
+                timestamp: clock() as u64,
+                stream: "gps".to_string(),
+                sequence: self.sequence,
+                payload: json!(trace),
+            }))
+            .await?;
 
-        let mut trace_iter = device.path.iter();
-        let mut last_trace = trace_iter.next().unwrap();
+        self.tx
+            .send_async(Event::Data(Payload {
+                timestamp: clock() as u64,
+                stream: "device_shadow".to_string(),
+                sequence: self.sequence,
+                payload: json!(self),
+            }))
+            .await?;
 
-        while let Some(trace) = trace_iter.next() {
+        sleep(Duration::from_secs_f64(3600.0 * TIME_PERIOD)).await;
+
+        Ok(())
+    }
+
+    async fn trace_map(&mut self, mut map: Iter<'_, Gps>) {
+        let mut last_trace = match map.next() {
+            Some(t) => t,
+            _ => return,
+        };
+
+        while let Some(mut trace) = map.next() {
             let mut distance = haversine(trace, last_trace);
             last_trace = trace;
             // Randomly speed up the the vehicle to 2x
             if random::<f64>() < 0.25 {
-                let trace = trace_iter.next().unwrap();
+                trace = match map.next() {
+                    Some(t) => t,
+                    _ => return,
+                };
                 distance += haversine(trace, last_trace);
             }
 
-            ev.drive(distance);
-            ev.update_state();
+            self.drive(distance);
+            self.update_state();
 
-            sequence += 1;
-            if let Err(e) = update_and_sleep(&tx, sequence, trace, &ev).await {
+            if let Err(e) = self.update_and_sleep(trace).await {
                 error!("{e}");
                 return;
             }
             while random::<f64>() < 0.2 {
-                if ev.soc < 0.2 {
-                    ev.charge()
+                if self.soc < 0.2 {
+                    self.charge()
                 } else {
-                    ev.idle()
+                    self.idle()
                 }
-                ev.update_state();
-                sequence += 1;
-                if let Err(e) = update_and_sleep(&tx, sequence, trace, &ev).await {
+                self.update_state();
+                if let Err(e) = self.update_and_sleep(trace).await {
                     error!("{e}");
                     return;
                 }
 
                 // Randomly turn off the vehicle
                 if random::<f64>() > 0.5 {
-                    ev.stop();
+                    self.stop();
                 }
             }
         }
     }
+
+    pub async fn simulate(tx: Sender<Event>, device: DeviceData) {
+        let mut ev = Self::new(tx);
+        let map = device.path;
+
+        ev.trace_map(map.iter()).await;
+    }
 }
 
-async fn update_and_sleep(
-    tx: &Sender<Event>,
-    sequence: u32,
-    trace: &Gps,
-    ev: &ElectricVehicle,
-) -> Result<(), SendError<Event>> {
-    tx.send_async(Event::Data(Payload {
-        timestamp: clock() as u64,
-        stream: "gps".to_string(),
-        sequence,
-        payload: json!(trace),
-    }))
-    .await?;
-
-    tx.send_async(Event::Data(Payload {
-        timestamp: clock() as u64,
-        stream: "device_shadow".to_string(),
-        sequence,
-        payload: json!(ev),
-    }))
-    .await?;
-
-    sleep(Duration::from_secs_f64(3600.0 * TIME_PERIOD)).await;
-
-    Ok(())
-}
-
+// Calculates the distance between two points on the globe
 fn haversine(current: &Gps, last: &Gps) -> f64 {
     let delta_lat = (last.latitude - current.latitude).to_radians();
     let delta_lon = (last.longitude - current.longitude).to_radians();
