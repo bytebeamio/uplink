@@ -184,9 +184,13 @@ impl ElectricVehicle {
 
     pub async fn simulate(tx: Sender<Event>, device: DeviceData) {
         let mut ev = Self::new(tx);
-        let map = device.path;
+        let mut map = device.path;
 
-        ev.trace_map(map.iter()).await;
+        // Follow the map, reverse and return to starting point, repeat
+        loop {
+            ev.trace_map(map.iter()).await;
+            map.reverse();
+        }
     }
 }
 
