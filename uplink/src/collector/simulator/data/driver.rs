@@ -43,10 +43,10 @@ pub struct ElectricVehicle {
 }
 
 impl ElectricVehicle {
-    fn new(tx: Sender<Event>) -> Self {
+    fn new(tx: Sender<Event>, location: Gps) -> Self {
         Self {
             tx,
-            location: Gps { latitude: 0.0, longitude: 0.0 },
+            location,
             sequence: 0,
             soc: 1.0,
             soh: 1.0,
@@ -179,8 +179,8 @@ impl ElectricVehicle {
     }
 
     pub async fn simulate(tx: Sender<Event>, device: DeviceData) {
-        let mut ev = Self::new(tx);
         let mut map = device.path;
+        let mut ev = Self::new(tx, *map.first().unwrap());
 
         // Follow the map, reverse and return to starting point, repeat
         loop {
