@@ -117,6 +117,7 @@ impl ElectricVehicle {
     // Push data point updates and sleep
     async fn update_and_sleep(&mut self) -> Result<(), SendError<Event>> {
         self.sequence += 1;
+        self.update_state();
         self.tx
             .send_async(Event::Data(Payload {
                 timestamp: clock() as u64,
@@ -158,8 +159,6 @@ impl ElectricVehicle {
             }
 
             self.drive(distance);
-            self.update_state();
-
             if let Err(e) = self.update_and_sleep().await {
                 error!("{e}");
                 return;
@@ -170,7 +169,6 @@ impl ElectricVehicle {
                 } else {
                     self.idle()
                 }
-                self.update_state();
                 if let Err(e) = self.update_and_sleep().await {
                     error!("{e}");
                     return;
