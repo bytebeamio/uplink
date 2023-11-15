@@ -164,19 +164,15 @@ impl ElectricVehicle {
                 return;
             }
             while random::<f64>() < 0.2 {
-                if self.soc < 0.2 {
-                    self.charge()
+                // Randomly turn off the vehicle, else idle
+                if random::<f64>() > 0.5 {
+                    self.stop();
                 } else {
                     self.idle()
                 }
                 if let Err(e) = self.update_and_sleep().await {
                     error!("{e}");
                     return;
-                }
-
-                // Randomly turn off the vehicle
-                if random::<f64>() > 0.5 {
-                    self.stop();
                 }
             }
         }
@@ -189,6 +185,15 @@ impl ElectricVehicle {
         // Follow the map, reverse and return to starting point, repeat
         loop {
             ev.trace_map(map.iter()).await;
+
+            // If battery is below 85%, charge at the end of trip
+            while ev.soc < 0.85 {
+                ev.charge();
+                if let Err(e) = ev.update_and_sleep().await {
+                    error!("{e}");
+                }
+            }
+
             map.reverse();
         }
     }
