@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio::time::{self, interval, Instant, Sleep};
 
-use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
@@ -57,7 +56,7 @@ pub struct ActionsBridge {
     action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
-    parallel_actions: HashSet<String>,
+    parallel_actions: HashMap<String, String>,
     ctrl_rx: Receiver<ActionBridgeShutdown>,
     ctrl_tx: Sender<ActionBridgeShutdown>,
     shutdown_handle: Sender<()>,
@@ -82,8 +81,11 @@ impl ActionsBridge {
         }
         action_status.buf_size = 1;
         streams_config.insert("action_status".to_owned(), action_status);
-        let mut streams = Streams::new(config.clone(), package_tx, metrics_tx);
+        let topic_template =
+            "/tenants/{tenant_id}/devices/{device_id}/action_status/{stream_name}".to_string();
+        let mut streams = Streams::new(config.clone(), package_tx, metrics_tx, topic_template);
         streams.config_streams(streams_config);
+        streams.max_buf_size = 1;
 
         Self {
             status_tx,
@@ -94,7 +96,7 @@ impl ActionsBridge {
             action_routes: HashMap::with_capacity(10),
             action_redirections,
             current_action: None,
-            parallel_actions: HashSet::new(),
+            parallel_actions: HashMap::new(),
             shutdown_handle,
             ctrl_rx,
             ctrl_tx,
@@ -266,7 +268,7 @@ impl ActionsBridge {
         let deadline = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
         // current action left unchanged in case of new tunshell action
         if action.name == TUNSHELL_ACTION {
-            self.parallel_actions.insert(action.action_id);
+            self.parallel_actions.insert(action.action_id, action.name);
             return Ok(());
         }
 
@@ -276,7 +278,7 @@ impl ActionsBridge {
     }
 
     async fn forward_action_response(&mut self, mut response: ActionResponse) {
-        if self.parallel_actions.contains(&response.action_id) {
+        if self.parallel_actions.contains_key(&response.action_id) {
             self.forward_parallel_action_response(response).await;
 
             return;
@@ -296,7 +298,8 @@ impl ActionsBridge {
         }
 
         info!("Action response = {:?}", response);
-        self.streams.forward(response.clone()).await;
+        let action_name = inflight_action.action.name.to_owned();
+        send_action_response(&mut self.streams, response.clone(), action_name).await;
 
         if response.is_completed() || response.is_failed() {
             self.clear_current_action();
@@ -316,7 +319,7 @@ impl ActionsBridge {
                 // NOTE: send success reponse for actions that don't have redirections configured
                 warn!("Action redirection is not configured for: {:?}", action);
                 let response = ActionResponse::success(&action.action_id);
-                self.streams.forward(response).await;
+                send_action_response(&mut self.streams, response, action.name).await;
 
                 self.clear_current_action();
             }
@@ -348,19 +351,30 @@ impl ActionsBridge {
     }
 
     async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
+        let action_name = self.parallel_actions.get(&response.action_id).unwrap().to_owned();
         info!("Action response = {:?}", response);
         if response.is_completed() || response.is_failed() {
             self.parallel_actions.remove(&response.action_id);
         }
 
-        self.streams.forward(response).await;
+        send_action_response(&mut self.streams, response, action_name).await;
     }
 
     async fn forward_action_error(&mut self, action: Action, error: Error) {
         let response = ActionResponse::failure(&action.action_id, error.to_string());
 
-        self.streams.forward(response).await;
+        send_action_response(&mut self.streams, response, action.name).await;
     }
+}
+
+async fn send_action_response(
+    streams: &mut Streams<ActionResponse>,
+    mut response: ActionResponse,
+    action_name: String,
+) {
+    streams.forward(response.clone()).await;
+    response.set_action_name(action_name);
+    streams.forward(response).await;
 }
 
 #[derive(Debug, Deserialize, Serialize)]

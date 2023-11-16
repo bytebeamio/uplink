@@ -24,10 +24,14 @@ pub struct Action {
     pub deadline: Option<Instant>,
 }
 
+const DEFAULT_RESPONSE_STREAM: &str = "action_status";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionResponse {
     #[serde(alias = "id")]
     pub action_id: String,
+    #[serde(skip)]
+    pub action_name: Option<String>,
     // sequence number
     pub sequence: u32,
     // timestamp
@@ -48,6 +52,7 @@ impl ActionResponse {
 
         ActionResponse {
             action_id: id.to_owned(),
+            action_name: None,
             sequence: 0,
             timestamp,
             state: state.to_owned(),
@@ -67,6 +72,10 @@ impl ActionResponse {
 
     pub fn is_done(&self) -> bool {
         self.progress == 100
+    }
+
+    pub fn set_action_name(&mut self, action_name: String) {
+        self.action_name = Some(action_name)
     }
 
     pub fn progress(id: &str, state: &str, progress: u8) -> Self {
@@ -105,7 +114,7 @@ impl ActionResponse {
 
 impl Point for ActionResponse {
     fn stream_name(&self) -> &str {
-        "action_status"
+        self.action_name.as_ref().map(|n| n.as_str()).unwrap_or_else(|| DEFAULT_RESPONSE_STREAM)
     }
 
     fn sequence(&self) -> u32 {

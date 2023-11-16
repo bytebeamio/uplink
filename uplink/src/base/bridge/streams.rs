@@ -17,6 +17,8 @@ pub struct Streams<T> {
     metrics_tx: Sender<StreamMetrics>,
     map: HashMap<String, Stream<T>>,
     pub stream_timeouts: DelayMap<String>,
+    pub max_buf_size: usize,
+    topic_template: String,
 }
 
 impl<T: Point> Streams<T> {
@@ -24,8 +26,17 @@ impl<T: Point> Streams<T> {
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
+        topic_template: String,
     ) -> Self {
-        Self { config, data_tx, metrics_tx, map: HashMap::new(), stream_timeouts: DelayMap::new() }
+        Self {
+            config,
+            data_tx,
+            metrics_tx,
+            map: HashMap::new(),
+            stream_timeouts: DelayMap::new(),
+            topic_template,
+            max_buf_size: MAX_BUFFER_SIZE,
+        }
     }
 
     pub fn config_streams(&mut self, streams_config: HashMap<String, StreamConfig>) {
@@ -50,8 +61,9 @@ impl<T: Point> Streams<T> {
                     &stream_name,
                     &self.config.project_id,
                     &self.config.device_id,
-                    MAX_BUFFER_SIZE,
+                    self.max_buf_size,
                     self.data_tx.clone(),
+                    &self.topic_template,
                 );
 
                 self.map.entry(stream_name.to_owned()).or_insert(stream)

@@ -81,25 +81,23 @@ where
     }
 
     pub fn dynamic(
-        stream: impl Into<String>,
-        project_id: impl Into<String>,
+        stream_name: impl Into<String>,
+        tenant_id: impl Into<String>,
         device_id: impl Into<String>,
         max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
+        topic_template: &str,
     ) -> Stream<T> {
-        let stream = stream.into();
-        let project_id = project_id.into();
+        let stream_name = stream_name.into();
+        let tenant_id = tenant_id.into();
         let device_id = device_id.into();
 
-        let topic = String::from("/tenants/")
-            + &project_id
-            + "/devices/"
-            + &device_id
-            + "/events/"
-            + &stream
-            + "/jsonarray";
+        // e.g. "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
+        let topic_template = topic_template.replace("{tenant_id}", &tenant_id);
+        let topic_template = topic_template.replace("{device_id}", &device_id);
+        let topic = topic_template.replace("{stream_name}", &stream_name);
 
-        Stream::new(stream, topic, max_buffer_size, tx, Compression::Disabled)
+        Stream::new(stream_name, topic, max_buffer_size, tx, Compression::Disabled)
     }
 
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
