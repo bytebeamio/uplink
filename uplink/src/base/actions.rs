@@ -114,7 +114,7 @@ impl ActionResponse {
 
 impl Point for ActionResponse {
     fn stream_name(&self) -> &str {
-        self.action_name.as_ref().map(|n| n.as_str()).unwrap_or_else(|| DEFAULT_RESPONSE_STREAM)
+        self.action_name.as_deref().unwrap_or(DEFAULT_RESPONSE_STREAM)
     }
 
     fn sequence(&self) -> u32 {
