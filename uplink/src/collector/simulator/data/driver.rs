@@ -74,7 +74,11 @@ impl ElectricVehicle {
         self.state = "Running".to_string();
 
         if self.soc < 0.2 {
-            self.soh -= HEALTH_PENALTY; // penalty for driving on low battery
+            self.soh -= HEALTH_PENALTY * TIME_PERIOD; // penalty for driving on low battery
+        }
+
+        if self.speed < 65.0 {
+            self.soh -= HEALTH_PENALTY * TIME_PERIOD; // penalty for driving too fast
         }
     }
 
