@@ -150,11 +150,13 @@ impl Mqtt {
             return Ok(());
         }
 
+        let mut action: Action = serde_json::from_slice(&publish.payload)?;
+
         if self.config.actions_subscription != publish.topic {
             // Set a marker in recevied action for later use
+            action.new_topic = true;
         }
 
-        let action: Action = serde_json::from_slice(&publish.payload)?;
         info!("Action = {:?}", action);
         self.native_actions_tx.try_send(action)?;
 

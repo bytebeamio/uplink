@@ -22,6 +22,9 @@ pub struct Action {
     // Instant at which action must be timedout
     #[serde(skip)]
     pub deadline: Option<Instant>,
+    // Marker that action was received through newer action topic and must be responded to on similarly named topic
+    #[serde(skip)]
+    pub new_topic: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
