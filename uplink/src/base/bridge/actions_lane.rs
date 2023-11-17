@@ -550,6 +550,7 @@ mod tests {
             name: "route_1".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            new_topic: false,
         };
         actions_tx.send(action_1).unwrap();
 
@@ -574,6 +575,7 @@ mod tests {
             name: "route_2".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            new_topic: false,
         };
         actions_tx.send(action_2).unwrap();
 
@@ -618,6 +620,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            new_topic: false,
         };
         actions_tx.send(action_1).unwrap();
 
@@ -633,6 +636,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            new_topic: false,
         };
         actions_tx.send(action_2).unwrap();
 
@@ -674,6 +678,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            new_topic: false,
         };
         actions_tx.send(action).unwrap();
 
@@ -739,6 +744,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            new_topic: false,
         };
         actions_tx.send(action).unwrap();
 
@@ -809,6 +815,7 @@ mod tests {
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            new_topic: false,
         };
         actions_tx.send(action).unwrap();
 
@@ -820,6 +827,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            new_topic: false,
         };
         actions_tx.send(action).unwrap();
 
@@ -900,6 +908,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            new_topic: false,
         };
         actions_tx.send(action).unwrap();
 
@@ -911,6 +920,7 @@ mod tests {
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            new_topic: false,
         };
         actions_tx.send(action).unwrap();
 
