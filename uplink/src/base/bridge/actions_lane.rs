@@ -298,7 +298,8 @@ impl ActionsBridge {
         }
 
         info!("Action response = {:?}", response);
-        // response.action_name = inflight_action.action.name.clone();
+        let action = &inflight_action.action;
+        response.with_action(action);
         self.streams.forward(response.clone()).await;
 
         if response.is_completed() || response.is_failed() {
@@ -318,8 +319,8 @@ impl ActionsBridge {
             if let Err(RedirectionError(action)) = self.redirect_action(action).await {
                 // NOTE: send success reponse for actions that don't have redirections configured
                 warn!("Action redirection is not configured for: {:?}", action);
-                let response = ActionResponse::success(&action.action_id);
-                // response.action_name = action.name.clone();
+                let mut response = ActionResponse::success(&action.action_id);
+                response.with_action(&action);
                 self.streams.forward(response).await;
 
                 self.clear_current_action();
@@ -351,10 +352,10 @@ impl ActionsBridge {
         Ok(())
     }
 
-    async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
+    async fn forward_parallel_action_response(&mut self, mut response: ActionResponse) {
         info!("Action response = {:?}", response);
-        // let action = self.parallel_actions.get(&response.action_id).unwrap();
-        // response.action_name = action.name.clone();
+        let action = self.parallel_actions.get(&response.action_id).unwrap();
+        response.with_action(action);
         if response.is_completed() || response.is_failed() {
             self.parallel_actions.remove(&response.action_id);
         }
@@ -362,9 +363,9 @@ impl ActionsBridge {
     }
 
     async fn forward_action_error(&mut self, action: Action, error: Error) {
-        let response = ActionResponse::failure(&action.action_id, error.to_string());
+        let mut response = ActionResponse::failure(&action.action_id, error.to_string());
+        response.with_action(&action);
 
-        // response.action_name = action.name.clone();
         self.streams.forward(response).await;
     }
 }

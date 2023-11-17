@@ -77,8 +77,11 @@ impl ActionResponse {
         self.progress == 100
     }
 
-    pub fn set_action_name(&mut self, action_name: String) {
-        self.action_name = Some(action_name)
+    // Associate with the action to send on new topic
+    pub fn with_action(&mut self, action: &Action) {
+        if action.action_id == self.action_id && action.new_topic {
+            self.action_name = Some(action.name.clone())
+        }
     }
 
     pub fn progress(id: &str, state: &str, progress: u8) -> Self {
