@@ -56,7 +56,7 @@ pub struct ActionsBridge {
     action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
-    parallel_actions: HashMap<String, String>,
+    parallel_actions: HashMap<String, Action>,
     ctrl_rx: Receiver<ActionBridgeShutdown>,
     ctrl_tx: Sender<ActionBridgeShutdown>,
     shutdown_handle: Sender<()>,
@@ -268,7 +268,7 @@ impl ActionsBridge {
         let deadline = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
         // current action left unchanged in case of new tunshell action
         if action.name == TUNSHELL_ACTION {
-            self.parallel_actions.insert(action.action_id, action.name);
+            self.parallel_actions.insert(action.action_id.clone(), action);
             return Ok(());
         }
 
@@ -298,8 +298,8 @@ impl ActionsBridge {
         }
 
         info!("Action response = {:?}", response);
-        let action_name = inflight_action.action.name.to_owned();
-        send_action_response(&mut self.streams, response.clone(), action_name).await;
+        // response.action_name = inflight_action.action.name.clone();
+        self.streams.forward(response.clone()).await;
 
         if response.is_completed() || response.is_failed() {
             self.clear_current_action();
@@ -319,7 +319,8 @@ impl ActionsBridge {
                 // NOTE: send success reponse for actions that don't have redirections configured
                 warn!("Action redirection is not configured for: {:?}", action);
                 let response = ActionResponse::success(&action.action_id);
-                send_action_response(&mut self.streams, response, action.name).await;
+                // response.action_name = action.name.clone();
+                self.streams.forward(response).await;
 
                 self.clear_current_action();
             }
@@ -351,30 +352,21 @@ impl ActionsBridge {
     }
 
     async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
-        let action_name = self.parallel_actions.get(&response.action_id).unwrap().to_owned();
         info!("Action response = {:?}", response);
+        // let action = self.parallel_actions.get(&response.action_id).unwrap();
+        // response.action_name = action.name.clone();
         if response.is_completed() || response.is_failed() {
             self.parallel_actions.remove(&response.action_id);
         }
-
-        send_action_response(&mut self.streams, response, action_name).await;
+        self.streams.forward(response).await;
     }
 
     async fn forward_action_error(&mut self, action: Action, error: Error) {
         let response = ActionResponse::failure(&action.action_id, error.to_string());
 
-        send_action_response(&mut self.streams, response, action.name).await;
+        // response.action_name = action.name.clone();
+        self.streams.forward(response).await;
     }
-}
-
-async fn send_action_response(
-    streams: &mut Streams<ActionResponse>,
-    mut response: ActionResponse,
-    action_name: String,
-) {
-    streams.forward(response.clone()).await;
-    response.set_action_name(action_name);
-    streams.forward(response).await;
 }
 
 #[derive(Debug, Deserialize, Serialize)]
