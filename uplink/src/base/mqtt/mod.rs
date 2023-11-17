@@ -85,8 +85,8 @@ impl Mqtt {
                     // - /tenants/{tenant_id}/devices/{device_id}/actions
                     // - /tenants/{tenant_id}/devices/{device_id}/actions/+
                     let base_topic = self.config.actions_subscription.clone();
-                    let new_topic = format!("{base_topic}/+");
-                    let subscriptions = vec![base_topic, new_topic];
+                    let on_new_topic = format!("{base_topic}/+");
+                    let subscriptions = vec![base_topic, on_new_topic];
 
                     let client = self.client();
 
@@ -154,7 +154,7 @@ impl Mqtt {
 
         if self.config.actions_subscription != publish.topic {
             // Set a marker in recevied action for later use
-            action.new_topic = true;
+            action.on_new_topic = true;
         }
 
         info!("Action = {:?}", action);

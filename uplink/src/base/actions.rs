@@ -24,7 +24,7 @@ pub struct Action {
     pub deadline: Option<Instant>,
     // Marker that action was received through newer action topic and must be responded to on similarly named topic
     #[serde(skip)]
-    pub new_topic: bool,
+    pub on_new_topic: bool,
 }
 
 const DEFAULT_RESPONSE_STREAM: &str = "action_status";
@@ -79,7 +79,7 @@ impl ActionResponse {
 
     // Associate with the action to send on new topic
     pub fn with_action(&mut self, action: &Action) {
-        if action.action_id == self.action_id && action.new_topic {
+        if action.action_id == self.action_id && action.on_new_topic {
             self.action_name = Some(action.name.clone())
         }
     }
