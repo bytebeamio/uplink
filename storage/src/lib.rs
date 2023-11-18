@@ -124,35 +124,35 @@ impl Storage {
             return Ok(false);
         }
 
-        if let Some(persistence) = &mut self.persistence {
-            // Remove read file on completion in destructive-read mode
-            let read_is_destructive = !persistence.non_destructive_read;
-            let read_file_id = persistence.current_read_file_id.take();
-            if let Some(id) = read_is_destructive.then_some(read_file_id).flatten() {
-                let deleted_file = persistence.remove(id)?;
-                debug!("Completed reading a persistence file, deleting it; storage = {}, path = {deleted_file:?}", self.name);
-            }
-
-            // Swap read buffer with write buffer to read data in inmemory write
-            // buffer when all the backlog disk files are done
-            if persistence.backlog_files.is_empty() {
-                mem::swap(&mut self.current_read_file, &mut self.current_write_file);
-                // If read buffer is 0 after swapping, all the data is caught up
-                return Ok(self.current_read_file.is_empty());
-            }
-
-            if let Err(e) = persistence.load_next_read_file(&mut self.current_read_file) {
-                self.current_read_file.clear();
-                persistence.current_read_file_id.take();
-                return Err(e);
-            }
-
-            Ok(false)
-        } else {
+        let Some(persistence) = &mut self.persistence else {
             mem::swap(&mut self.current_read_file, &mut self.current_write_file);
             // If read buffer is 0 after swapping, all the data is caught up
-            Ok(self.current_read_file.is_empty())
+            return Ok(self.current_read_file.is_empty());
+        };
+
+        // Remove read file on completion in destructive-read mode
+        let read_is_destructive = !persistence.non_destructive_read;
+        let read_file_id = persistence.current_read_file_id.take();
+        if let Some(id) = read_is_destructive.then_some(read_file_id).flatten() {
+            let deleted_file = persistence.remove(id)?;
+            debug!("Completed reading a persistence file, deleting it; storage = {}, path = {deleted_file:?}", self.name);
         }
+
+        // Swap read buffer with write buffer to read data in inmemory write
+        // buffer when all the backlog disk files are done
+        if persistence.backlog_files.is_empty() {
+            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
+            // If read buffer is 0 after swapping, all the data is caught up
+            return Ok(self.current_read_file.is_empty());
+        }
+
+        if let Err(e) = persistence.load_next_read_file(&mut self.current_read_file) {
+            self.current_read_file.clear();
+            persistence.current_read_file_id.take();
+            return Err(e);
+        }
+
+        Ok(false)
     }
 }
 
