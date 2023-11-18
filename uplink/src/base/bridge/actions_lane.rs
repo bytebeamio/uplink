@@ -278,19 +278,16 @@ impl ActionsBridge {
         Ok(())
     }
 
-    async fn forward_action_response(&mut self, mut response: ActionResponse) {
+    async fn forward_action_response(&mut self, response: ActionResponse) {
         if self.parallel_actions.contains(&response.action_id) {
             self.forward_parallel_action_response(response).await;
 
             return;
         }
 
-        let inflight_action = match &mut self.current_action {
-            Some(v) => v,
-            None => {
-                error!("Action timed out already/not present, ignoring response: {:?}", response);
-                return;
-            }
+        let Some(inflight_action) = &self.current_action else {
+            error!("Action timed out already/not present, ignoring response: {:?}", response);
+            return;
         };
 
         if inflight_action.action.action_id != response.action_id {
@@ -312,11 +309,7 @@ impl ActionsBridge {
         // Forward actions included in the config to the appropriate forward route, when
         // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
         if response.is_done() {
-            let mut action = inflight_action.action.clone();
-
-            if let Some(a) = response.done_response.take() {
-                action = a;
-            }
+            let action = response.done_response.unwrap_or_else(|| inflight_action.action.clone());
 
             if let Err(RedirectionError(action)) = self.redirect_action(action).await {
                 // NOTE: send success reponse for actions that don't have redirections configured
