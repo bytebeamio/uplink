@@ -150,9 +150,9 @@ impl ActionsBridge {
                     self.forward_action_response(response).await;
                 }
                 _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
-                    let action = self.current_action.take().unwrap();
-                    error!("Timeout waiting for action response. Action ID = {}", action.id);
-                    self.forward_action_error(action.action, Error::ActionTimeout).await;
+                    let action = self.current_action.take().unwrap().action;
+                    error!("Timeout waiting for action response. Action ID = {}", action.action_id);
+                    self.forward_action_error(action, Error::ActionTimeout).await;
 
                     // Remove action because it timedout
                     self.clear_current_action()
@@ -193,7 +193,7 @@ impl ActionsBridge {
             if action.name != TUNSHELL_ACTION {
                 warn!(
                     "Another action is currently occupying uplink; action_id = {}",
-                    current_action.id
+                    current_action.action.action_id
                 );
                 self.forward_action_error(action, Error::Busy).await;
                 return;
@@ -249,7 +249,10 @@ impl ActionsBridge {
 
         if path.is_file() {
             let current_action = CurrentAction::read_from_disk(path)?;
-            info!("Loading saved action from persistence; action_id: {}", current_action.id);
+            info!(
+                "Loading saved action from persistence; action_id: {}",
+                current_action.action.action_id
+            );
             self.current_action = Some(current_action)
         }
 
@@ -290,8 +293,11 @@ impl ActionsBridge {
             }
         };
 
-        if *inflight_action.id != response.action_id {
-            error!("response id({}) != active action({})", response.action_id, inflight_action.id);
+        if inflight_action.action.action_id != response.action_id {
+            error!(
+                "response id({}) != active action({})",
+                response.action_id, inflight_action.action.action_id
+            );
             return;
         }
 
@@ -365,29 +371,23 @@ impl ActionsBridge {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct SaveAction {
-    pub id: String,
     pub action: Action,
     pub timeout: Duration,
 }
 
 struct CurrentAction {
-    pub id: String,
     pub action: Action,
     pub timeout: Pin<Box<Sleep>>,
 }
 
 impl CurrentAction {
     pub fn new(action: Action, deadline: Instant) -> CurrentAction {
-        CurrentAction {
-            id: action.action_id.clone(),
-            action,
-            timeout: Box::pin(time::sleep_until(deadline)),
-        }
+        CurrentAction { action, timeout: Box::pin(time::sleep_until(deadline)) }
     }
 
     pub fn write_to_disk(self, path: PathBuf) -> Result<(), Error> {
         let timeout = self.timeout.as_ref().deadline() - Instant::now();
-        let save_action = SaveAction { id: self.id, action: self.action, timeout };
+        let save_action = SaveAction { action: self.action, timeout };
         let json = serde_json::to_string(&save_action)?;
         fs::write(path, json)?;
 
@@ -399,11 +399,7 @@ impl CurrentAction {
         let json: SaveAction = serde_json::from_slice(&read)?;
         fs::remove_file(path)?;
 
-        Ok(CurrentAction {
-            id: json.id,
-            action: json.action,
-            timeout: Box::pin(time::sleep(json.timeout)),
-        })
+        Ok(CurrentAction { action: json.action, timeout: Box::pin(time::sleep(json.timeout)) })
     }
 }
 
