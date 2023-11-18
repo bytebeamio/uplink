@@ -37,12 +37,10 @@ impl<T: Eq + Hash + Clone + Display> DelayMap<T> {
 
     // Remove a key from map if it has timedout.
     pub async fn next(&mut self) -> Option<T> {
-        if let Some(item) = self.queue.next().await {
-            self.map.remove(item.get_ref());
-            return Some(item.into_inner());
-        }
+        let item = self.queue.next().await?;
+        self.map.remove(item.get_ref());
 
-        None
+        Some(item.into_inner())
     }
 
     // Check if queue is empty.
