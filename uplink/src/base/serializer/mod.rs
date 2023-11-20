@@ -537,7 +537,6 @@ impl<C: MqttClient> Serializer<C> {
         let mut inflight_file = File::open(&path)?;
         inflight_file.read_to_end(&mut buf)?;
         let mut buf = BytesMut::from(buf.as_slice());
-        // parse into publishes
         while let Ok(publish) = read(&mut buf, self.config.mqtt.max_packet_size) {
             match publish {
                 Packet::Publish(publish) => {
