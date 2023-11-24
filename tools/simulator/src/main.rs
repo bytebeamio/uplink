@@ -18,7 +18,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use uplink::Action;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{fs, io, sync::Arc};
+use std::{fs, io};
 
 mod basic;
 mod ice_driver;
@@ -124,18 +124,16 @@ impl Payload {
     }
 }
 
-pub fn read_gps_path(paths_dir: &str) -> Arc<Vec<Gps>> {
+pub fn read_gps_path(paths_dir: &str) -> Vec<Gps> {
     let i = rand::thread_rng().gen_range(0..10);
     let file_name: String = format!("{}/path{}.json", paths_dir, i);
 
     let contents = fs::read_to_string(file_name).expect("Oops, failed ot read path");
 
-    let parsed: Vec<Gps> = serde_json::from_str(&contents).unwrap();
-
-    Arc::new(parsed)
+    serde_json::from_str(&contents).unwrap()
 }
 
-pub fn new_device_data(path: Arc<Vec<Gps>>) -> DeviceData {
+pub fn new_device_data(path: Vec<Gps>) -> DeviceData {
     let mut rng = rand::thread_rng();
 
     let path_index = rng.gen_range(0..path.len()) as u32;

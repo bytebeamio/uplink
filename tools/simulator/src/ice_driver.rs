@@ -1,16 +1,114 @@
 use std::time::Duration;
 
-use flume::Sender;
+use flume::{bounded, Receiver, Sender};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde_json::json;
-use tokio::time::interval;
+use tokio::{spawn, time::interval};
 use uplink::base::clock;
 use vd_lib::{Car, Gear, HandBrake};
 
-use crate::{basic::DeviceData, Payload};
+use crate::{
+    basic::{DeviceData, Gps},
+    Payload,
+};
+
+const RADIUS_EARTH: f64 = 6371.0;
+
+async fn update_gps(device: DeviceData, rx: Receiver<f64>, tx: Sender<Payload>) {
+    let mut gps_track = GpsTrack::new(device.path.as_slice().to_vec());
+    let mut sequence = 0;
+    loop {
+        let speed = rx.recv_async().await.unwrap();
+        let distance_travelled = speed / 3600.0;
+        for trace in gps_track.traverse(distance_travelled) {
+            let payload = json!(trace);
+            sequence += 1;
+            let data =
+                Payload { stream: "gps".to_string(), sequence, timestamp: clock() as u64, payload };
+            tx.send_async(data).await.unwrap();
+        }
+    }
+}
+
+// Calculates the distance between two points on the globe
+fn haversine(current: &Gps, last: &Gps) -> f64 {
+    let delta_lat = (last.latitude - current.latitude).to_radians();
+    let delta_lon = (last.longitude - current.longitude).to_radians();
+
+    let a = (delta_lat / 2.0).sin().powi(2)
+        + current.latitude.to_radians().cos()
+            * last.latitude.to_radians().cos()
+            * (delta_lon / 2.0).sin().powi(2);
+    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+
+    RADIUS_EARTH * c
+}
+
+struct GpsTrack {
+    map: Vec<(f64, Gps)>,
+    trace_i: usize,
+    distance_travelled: f64,
+}
+
+impl GpsTrack {
+    fn new(mut trace_list: Vec<Gps>) -> Self {
+        let mut traces = trace_list.iter();
+        let Some(mut last) = traces.next() else {
+            panic!("Not enough traces!");
+        };
+        let mut map = vec![(0.0, last.clone())];
+
+        for trace in traces {
+            let distance = haversine(trace, last);
+            map.push((distance, trace.clone()));
+            last = trace;
+        }
+        trace_list.reverse();
+        let mut traces = trace_list.iter();
+        let Some(mut last) = traces.next() else {
+            panic!("Not enough traces!");
+        };
+        for trace in traces {
+            let distance = haversine(trace, last);
+            map.push((distance, trace.clone()));
+            last = trace;
+        }
+
+        Self { map, trace_i: 0, distance_travelled: 0.0 }
+    }
+
+    fn traverse(&mut self, distance_travelled: f64) -> Vec<Gps> {
+        let mut traces = vec![];
+
+        // include trace 0 only for first set of point
+        if self.distance_travelled == 0.0 && self.trace_i == 0 {
+            traces.push(self.map[0].1.clone())
+        }
+        self.distance_travelled += distance_travelled;
+        loop {
+            // skip trace 0 every other time
+            if self.trace_i == 0 {
+                self.trace_i += 1;
+                continue;
+            }
+
+            let next_distance = self.map[self.trace_i].0;
+
+            if self.distance_travelled < next_distance {
+                return traces;
+            }
+
+            self.distance_travelled -= next_distance;
+            traces.push(self.map[self.trace_i].1.clone());
+            self.trace_i += 1;
+            self.trace_i %= self.map.len();
+        }
+    }
+}
 
 pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
-    let _ = device;
+    let (speed_tx, speed_rx) = bounded(10);
+    spawn(update_gps(device, speed_rx, tx.clone()));
     let mut car = Car::default();
     car.set_handbrake_position(HandBrake::Disengaged);
     car.set_clutch_position(1.0);
@@ -26,6 +124,7 @@ pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
 
     loop {
         car.update();
+        speed_tx.send_async(car.speed()).await.unwrap();
         forward_device_shadow(&tx, &car).await;
         interval.tick().await;
 

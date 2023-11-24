@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::time::interval;
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::Payload;
