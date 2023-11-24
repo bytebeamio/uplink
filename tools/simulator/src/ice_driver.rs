@@ -1,15 +1,16 @@
 use std::time::Duration;
 
-use rand::Rng;
+use flume::Sender;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde_json::json;
 use tokio::time::interval;
-use uplink::base::{
-    bridge::{BridgeTx, Payload},
-    clock,
-};
+use uplink::base::clock;
 use vd_lib::{Car, Gear, HandBrake};
 
-async fn simulate(tx: BridgeTx) {
+use crate::{basic::DeviceData, Payload};
+
+pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
+    let _ = device;
     let mut car = Car::default();
     car.set_handbrake_position(HandBrake::Disengaged);
     car.set_clutch_position(1.0);
@@ -21,7 +22,7 @@ async fn simulate(tx: BridgeTx) {
     car.set_clutch_position(0.0);
 
     let mut interval = interval(Duration::from_secs(1));
-    let mut rng = rand::thread_rng();
+    let mut rng = StdRng::from_entropy();
 
     loop {
         car.update();
@@ -109,7 +110,7 @@ fn shift_gears(car: &mut Car, clutch_position: f64) {
     }
 }
 
-async fn forward_device_shadow(tx: &BridgeTx, car: &Car) {
+async fn forward_device_shadow(tx: &Sender<Payload>, car: &Car) {
     let payload = json!({
         "speed": car.speed(),
         "gear": car.gear(),
@@ -125,5 +126,5 @@ async fn forward_device_shadow(tx: &BridgeTx, car: &Car) {
         timestamp: clock() as u64,
         payload,
     };
-    tx.send_payload(data).await;
+    tx.send_async(data).await.unwrap();
 }

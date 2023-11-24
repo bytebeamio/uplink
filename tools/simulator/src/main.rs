@@ -35,6 +35,9 @@ pub struct CommandLine {
     /// log level (v: info, vv: debug, vvv: trace)
     #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
     pub verbose: u8,
+    /// simulator number (0: default, 1: ice_driver)
+    #[structopt(short = "n")]
+    pub simulator: u8,
 }
 
 #[derive(Error, Debug)]
@@ -161,7 +164,12 @@ async fn main() -> Result<(), Error> {
     let (mut data_tx, mut actions_rx) = Framed::new(stream, LinesCodec::new()).split();
 
     let (tx, rx) = bounded(10);
-    spawn_data_simulators(device, tx.clone());
+    if commandline.simulator == 1 {
+        let tx = tx.clone();
+        spawn(ice_driver::simulate(device, tx));
+    } else {
+        spawn_data_simulators(device, tx.clone());
+    }
 
     loop {
         select! {
