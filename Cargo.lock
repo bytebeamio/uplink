@@ -2689,7 +2689,6 @@ dependencies = [
 [[package]]
 name = "tunshell-client"
 version = "0.1.0"
-source = "git+https://github.com/bytebeamio/tunshell.git?branch=android_patch#a05b990230eeedcf47e68980f6ab9266977ba248"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2732,7 +2731,6 @@ dependencies = [
 [[package]]
 name = "tunshell-shared"
 version = "0.1.0"
-source = "git+https://github.com/bytebeamio/tunshell.git?branch=android_patch#a05b990230eeedcf47e68980f6ab9266977ba248"
 dependencies = [
  "afl",
  "anyhow",

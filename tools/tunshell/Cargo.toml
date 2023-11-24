@@ -18,8 +18,7 @@ features = ["rt-threaded"]
 version = "0.2.21"
 
 [dependencies.tunshell-client]
-git = "https://github.com/bytebeamio/tunshell.git"
-branch = "android_patch"
+path = "../../../tunshell/tunshell-client"
 
 [dependencies.ureq]
 features = ["json"]
