@@ -1,4 +1,4 @@
-use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
+use basic::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
 use flume::{bounded, Sender};
 use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
@@ -20,7 +20,7 @@ use uplink::Action;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fs, io, sync::Arc};
 
-mod data;
+mod basic;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "simulator", about = "simulates a demo device")]
