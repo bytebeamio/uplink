@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["Devdutt Shenoi <devdutt@bytebeam.io>"]
 
 [dependencies]
+vd_lib = { path = "../vd-lib", package = "vehicle-dynamics" }
 fake = { version = "2.5.0", features = ["derive"] }
 flume = "0.10"
 futures-util = "0.3"

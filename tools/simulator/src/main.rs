@@ -21,6 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fs, io, sync::Arc};
 
 mod basic;
+mod ice_driver;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "simulator", about = "simulates a demo device")]
