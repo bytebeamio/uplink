@@ -48,14 +48,14 @@ impl DataType {
 
 #[derive(Clone, PartialEq)]
 pub struct DeviceData {
-    pub path: Arc<Vec<Gps>>,
+    pub path: Vec<Gps>,
     pub path_offset: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Gps {
-    latitude: f64,
-    longitude: f64,
+    pub latitude: f64,
+    pub longitude: f64,
 }
 
 impl Gps {
