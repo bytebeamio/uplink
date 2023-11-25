@@ -215,6 +215,7 @@ fn shift_gears(car: &mut Car, clutch_position: f64) {
 async fn forward_device_shadow(tx: &Sender<Payload>, car: &Car, sequence: u32) {
     let payload = json!({
         "speed": car.speed(),
+        "distance_travelled": car.speed() / 3600.0,
         "gear": car.gear(),
         "rpm": car.rpm(),
         "accelerator": car.accelerator_position(),
