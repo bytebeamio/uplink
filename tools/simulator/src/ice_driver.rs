@@ -109,6 +109,7 @@ impl GpsTrack {
 pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
     let (speed_tx, speed_rx) = bounded(10);
     spawn(update_gps(device, speed_rx, tx.clone()));
+    let mut sequence = 0;
     let mut car = Car::default();
     car.set_handbrake_position(HandBrake::Disengaged);
     car.set_clutch_position(1.0);
@@ -116,7 +117,8 @@ pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
     car.set_clutch_position(0.5);
     car.set_accelerator_position(0.5);
     car.update();
-    forward_device_shadow(&tx, &car).await;
+    sequence += 1;
+    forward_device_shadow(&tx, &car, sequence).await;
     car.set_clutch_position(0.0);
 
     let mut interval = interval(Duration::from_secs(1));
@@ -125,7 +127,8 @@ pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
     loop {
         car.update();
         speed_tx.send_async(car.speed()).await.unwrap();
-        forward_device_shadow(&tx, &car).await;
+        sequence += 1;
+        forward_device_shadow(&tx, &car, sequence).await;
         interval.tick().await;
 
         if rng.gen_bool(0.05) && car.rpm() > 2500 || car.rpm() > 3500 || car.rpm() < 1250 {
@@ -209,7 +212,7 @@ fn shift_gears(car: &mut Car, clutch_position: f64) {
     }
 }
 
-async fn forward_device_shadow(tx: &Sender<Payload>, car: &Car) {
+async fn forward_device_shadow(tx: &Sender<Payload>, car: &Car, sequence: u32) {
     let payload = json!({
         "speed": car.speed(),
         "gear": car.gear(),
@@ -221,7 +224,7 @@ async fn forward_device_shadow(tx: &Sender<Payload>, car: &Car) {
     });
     let data = Payload {
         stream: "device_shadow".to_string(),
-        sequence: 0,
+        sequence,
         timestamp: clock() as u64,
         payload,
     };
