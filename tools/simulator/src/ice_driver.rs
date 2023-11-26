@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use flume::{bounded, Receiver, Sender};
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -110,7 +110,10 @@ pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
     let (speed_tx, speed_rx) = bounded(10);
     spawn(update_gps(device, speed_rx, tx.clone()));
     let mut sequence = 0;
-    let mut car = Car::default();
+
+    let mut rng = StdRng::from_entropy();
+    let fuel_level = rng.gen_range(0.0..1.0);
+    let mut car = Car::new(fuel_level);
     car.set_handbrake_position(HandBrake::Disengaged);
     car.set_clutch_position(1.0);
     car.shift_gear(Gear::First);
@@ -122,7 +125,7 @@ pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
     car.set_clutch_position(0.0);
 
     let mut interval = interval(Duration::from_secs(1));
-    let mut rng = StdRng::from_entropy();
+    let mut refuelling = None;
 
     loop {
         car.update();
@@ -130,6 +133,33 @@ pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
         sequence += 1;
         forward_device_shadow(&tx, &car, sequence).await;
         interval.tick().await;
+
+        // Stop for refuelling, slowly get into the gas station
+        if car.fuel_level() < 0.25 && car.speed() != 0.0 {
+            let position = rng.gen_range(0.3..0.7);
+            car.set_clutch_position(position);
+            car.set_brake_position(position);
+            continue;
+        }
+        // Start refuelling
+        if car.fuel_level() < 0.25 && car.speed() == 0.0 && refuelling.is_none() {
+            car.set_handbrake_position(HandBrake::Full);
+            refuelling = Some(
+                // Time during which car is stationary at the refuelling point: between 7.5-17.5 minutes
+                Instant::now() + Duration::from_secs_f32(300.0 + 60.0 * rng.gen_range(2.5..12.5)),
+            );
+        }
+
+        if let Some(till) = refuelling {
+            if till < Instant::now() {
+                refuelling.take();
+                car.set_handbrake_position(HandBrake::Disengaged);
+                continue;
+            }
+            car.refuel(0.001);
+            continue;
+        }
+
 
         if rng.gen_bool(0.05) && car.rpm() > 2500 || car.rpm() > 3500 || car.rpm() < 1250 {
             shift_gears(&mut car, rng.gen_range(0.25..1.0));
@@ -216,6 +246,7 @@ async fn forward_device_shadow(tx: &Sender<Payload>, car: &Car, sequence: u32) {
     let payload = json!({
         "speed": car.speed(),
         "distance_travelled": car.speed() / 3600.0,
+        "fuel_level": car.fuel_level() * 40.0,
         "gear": car.gear(),
         "rpm": car.rpm(),
         "accelerator": car.accelerator_position(),
