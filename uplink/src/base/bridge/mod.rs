@@ -1,4 +1,5 @@
 use flume::{Receiver, Sender};
+use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::join;
@@ -20,7 +21,7 @@ pub use self::{
     data_lane::{DataBridge, DataBridgeTx},
 };
 
-use super::Compression;
+use super::{serializer::SerializerShutdown, Compression};
 pub use metrics::StreamMetrics;
 
 pub trait Point: Send + Debug + Serialize + 'static {
@@ -79,6 +80,7 @@ pub(crate) struct DataBridgeShutdown;
 pub struct Bridge {
     pub(crate) data: DataBridge,
     pub(crate) actions: ActionsBridge,
+    pub(crate) serializer_shutdown: Sender<SerializerShutdown>,
 }
 
 impl Bridge {
@@ -88,15 +90,20 @@ impl Bridge {
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
         shutdown_handle: Sender<()>,
+        serializer_shutdown: Sender<SerializerShutdown>,
     ) -> Self {
         let data = DataBridge::new(config.clone(), package_tx.clone(), metrics_tx.clone());
         let actions =
             ActionsBridge::new(config, package_tx, actions_rx, shutdown_handle, metrics_tx);
-        Self { data, actions }
+        Self { data, actions, serializer_shutdown }
     }
 
     pub fn tx(&self) -> BridgeTx {
-        BridgeTx { data: self.data.tx(), actions: self.actions.tx() }
+        BridgeTx {
+            data: self.data.tx(),
+            actions: self.actions.tx(),
+            serializer_shutdown: self.serializer_shutdown.clone(),
+        }
     }
 
     pub fn register_action_route(
@@ -120,6 +127,7 @@ impl Bridge {
 pub struct BridgeTx {
     pub data: DataBridgeTx,
     pub actions: ActionsBridgeTx,
+    pub serializer_shutdown: Sender<SerializerShutdown>,
 }
 
 impl BridgeTx {
@@ -136,6 +144,10 @@ impl BridgeTx {
     }
 
     pub async fn trigger_shutdown(&self) {
-        join!(self.actions.trigger_shutdown(), self.data.trigger_shutdown());
+        join!(self.actions.trigger_shutdown(), self.data.trigger_shutdown(), async {
+            if let Err(e) = self.serializer_shutdown.send_async(SerializerShutdown).await {
+                error!("Failed to trigger serializer shutdown. Error = {e}")
+            }
+        });
     }
 }
