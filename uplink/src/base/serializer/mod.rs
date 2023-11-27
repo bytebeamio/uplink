@@ -1,10 +1,11 @@
 mod metrics;
 
 use std::collections::{HashMap, VecDeque};
-use std::io::{self, Write};
+use std::fs::File;
+use std::io::{self, Read, Write};
 use std::{sync::Arc, time::Duration};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use flume::{Receiver, RecvError, Sender};
 use log::{debug, error, info, trace};
 use lz4_flex::frame::FrameEncoder;
@@ -506,7 +507,7 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Starts operation of the uplink serializer, which can transition between the modes mentioned earlier.
     pub async fn start(mut self) -> Result<(), Error> {
-        // check for and publish the packets in persistence/inflight file
+        self.reload_inflight().await?;
         let mut status = Status::EventLoopReady;
 
         loop {
@@ -519,6 +520,37 @@ impl<C: MqttClient> Serializer<C> {
 
             status = next_status;
         }
+    }
+
+    /// check for and publish the packets in persistence/inflight file
+    /// once done, delete the file.
+    async fn reload_inflight(&self) -> Result<(), Error> {
+        let mut path = self.config.persistence_path.clone();
+        path.push("inflight");
+
+        if !path.is_file() {
+            return Ok(());
+        }
+
+        let mut buf = Vec::new();
+        let mut inflight_file = File::open(&path)?;
+        inflight_file.read_to_end(&mut buf)?;
+        let mut buf = BytesMut::from(buf.as_slice());
+
+        while let Ok(packet) = read(&mut buf, self.config.mqtt.max_packet_size) {
+            match packet {
+                Packet::Publish(publish) => {
+                    self.client
+                        .publish(publish.topic, QoS::AtLeastOnce, false, publish.payload)
+                        .await?;
+                }
+                packet => unreachable!("Unexpected packet: {:?}", packet),
+            }
+        }
+        info!("Read and published inflight packets; removing file: {}", path.display());
+        std::fs::remove_file(path)?;
+
+        Ok(())
     }
 }
 
