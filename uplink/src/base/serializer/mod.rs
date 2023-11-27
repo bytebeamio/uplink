@@ -294,6 +294,8 @@ impl<C: MqttClient> Serializer<C> {
                 Ok(_) => {}
                 Err(e) => error!("Crash loop: write error = {:?}", e),
             }
+        } else {
+            debug!("Forced into crash mode, writing all incoming data to persistence.");
         }
 
         loop {
