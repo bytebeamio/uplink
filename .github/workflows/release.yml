@@ -96,11 +96,39 @@ jobs:
       - name: Rename ${{ matrix.target }} binary
         if: matrix.build != 'windows'
         run: mv "target/${{ matrix.target }}/release/uplink" "uplink-${{ matrix.target }}"
-      
+
       - name: Rename ${{ matrix.target }} binary
         if: matrix.build == 'windows'
         run: mv "target/${{ matrix.target }}/release/uplink.exe" "uplink-${{ matrix.target }}.exe"
-      
+
+      - name: Upload release archive
+        uses: softprops/action-gh-release@v1
+        with:
+          files: uplink*
+  build-release-android:
+    name: Build release for android
+    runs-on: ubuntu-latest
+    container:
+      image: bytebeamio/rust-android
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: perms
+        run: chown root:root .
+
+      - name: Build for armv7
+        run: cargo ndk --target armv7-linux-androideabi --platform 23 build --release --bin uplink
+
+      - name: Build for aarch64
+        run: cargo ndk --target aarch64-linux-android --platform 23 build --release --bin uplink
+
+      - name: Rename uplink binaries
+        run: |
+          mv "target/aarch64-linux-android/release/uplink" "uplink-aarch64-linux-android"
+          mv "target/armv7-linux-androideabi/release/uplink" "uplink-armv7-linux-androideabi"
+
       - name: Upload release archive
         uses: softprops/action-gh-release@v1
         with:

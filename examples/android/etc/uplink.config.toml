@@ -1,0 +1,39 @@
+processes = []
+action_redirections = { "update_firmware" = "install_update", "send_script" = "run_script" }
+script_runner = [{ name = "run_script" }]
+persistence_path = "/data/local/tmp/uplink/persistence"
+
+[tcpapps.app]
+port = 8031
+#actions = [{ name = "install_update" }]
+
+[tcpapps.app2]
+port = 8032
+
+[system_stats]
+enabled = true
+process_names = ["/data/local/uplinkmodule/bin/uplink", "com.foobnix.pro.pdf.reader"]
+update_period = 2
+stream_size = 1
+
+[ota_installer]
+path="/data/local/tmp/uplink/installer"
+actions=[{name="install_update", timeout=310}]
+uplink_port=8032
+
+[downloader]
+actions = [{ name = "update_firmware" }, { name = "send_script" }]
+path = "/data/local/tmp/uplink/downloader"
+
+[streams.device_shadow]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
+buf_size = 128
+flush_period = 30
+
+[logging]
+tags = ["*"]
+min_level = 4
+
+[console]
+enabled = true
+port = 9328
