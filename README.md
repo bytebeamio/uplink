@@ -14,7 +14,6 @@ Uplink is a rust based utility for efficiently sending data and receiving comman
 - Provides remote shell access through [Tunshell][tunshell]
 - Supports TLS with easy cross-compilation.
 
-
 ### Quickstart
 
 #### Install Uplink

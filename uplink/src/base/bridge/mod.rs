@@ -24,7 +24,8 @@ pub use self::{
 use super::{mqtt::MqttShutdown, serializer::SerializerShutdown, Compression};
 pub use metrics::StreamMetrics;
 
-pub trait Point: Send + Debug {
+pub trait Point: Send + Debug + Serialize + 'static {
+    fn stream_name(&self) -> &str;
     fn sequence(&self) -> u32;
     fn timestamp(&self) -> u64;
 }
@@ -57,6 +58,10 @@ pub struct Payload {
 }
 
 impl Point for Payload {
+    fn stream_name(&self) -> &str {
+        &self.stream
+    }
+
     fn sequence(&self) -> u32 {
         self.sequence
     }

@@ -11,8 +11,8 @@ use std::path::Path;
 
 use crate::{Action, Config};
 use rumqttc::{
-    AsyncClient, ConnectionError, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS,
-    Request, TlsConfiguration, Transport,
+    AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Publish, QoS, Request,
+    TlsConfiguration, Transport,
 };
 use std::sync::Arc;
 
@@ -270,7 +270,7 @@ fn mqttoptions(config: &Config) -> MqttOptions {
         let transport = Transport::Tls(TlsConfiguration::Simple {
             ca,
             alpn: None,
-            client_auth: Some((device_certificate, Key::RSA(device_private_key))),
+            client_auth: Some((device_certificate, device_private_key)),
         });
 
         mqttoptions.set_transport(transport);

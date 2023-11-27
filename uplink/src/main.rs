@@ -32,7 +32,7 @@ fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
         match commandline.modules.clone().into_iter().reduce(|e, acc| format!("{e}={level},{acc}"))
         {
             Some(f) => format!("{f}={level}"),
-            _ => format!("uplink={level},disk={level}"),
+            _ => format!("uplink={level},storage={level}"),
         };
 
     let builder = tracing_subscriber::fmt()
