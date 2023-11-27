@@ -262,7 +262,7 @@ pub mod config {
 pub use base::actions::{Action, ActionResponse};
 use base::bridge::{Bridge, Package, Payload, Point, StreamMetrics};
 use base::mqtt::{Mqtt, MqttShutdown};
-use base::serializer::{Serializer, SerializerMetrics};
+use base::serializer::{Serializer, SerializerMetrics, SerializerShutdown};
 pub use base::{ActionRoute, Config};
 pub use collector::{simulator, tcpjson::TcpJson};
 pub use storage::Storage;
@@ -289,6 +289,8 @@ pub struct Uplink {
     shutdown_rx: Receiver<()>,
     mqtt_shutdown_tx: Sender<MqttShutdown>,
     mqtt_shutdown_rx: Receiver<MqttShutdown>,
+    serializer_shutdown_tx: Sender<SerializerShutdown>,
+    serializer_shutdown_rx: Receiver<SerializerShutdown>,
 }
 
 impl Uplink {
@@ -299,6 +301,7 @@ impl Uplink {
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
         let (shutdown_tx, shutdown_rx) = bounded(1);
         let (mqtt_shutdown_tx, mqtt_shutdown_rx) = bounded(1);
+        let (serializer_shutdown_tx, serializer_shutdown_rx) = bounded(1);
 
         Ok(Uplink {
             config,
@@ -314,6 +317,8 @@ impl Uplink {
             shutdown_rx,
             mqtt_shutdown_tx,
             mqtt_shutdown_rx,
+            serializer_shutdown_tx,
+            serializer_shutdown_rx,
         })
     }
 
@@ -325,6 +330,7 @@ impl Uplink {
             self.action_rx.clone(),
             self.shutdown_tx.clone(),
             self.mqtt_shutdown_tx.clone(),
+            self.serializer_shutdown_tx.clone(),
         )
     }
 
@@ -344,6 +350,7 @@ impl Uplink {
             self.data_rx.clone(),
             mqtt_client.clone(),
             self.serializer_metrics_tx(),
+            self.serializer_shutdown_rx.clone(),
         )?;
 
         // Serializer thread to handle network conditions state machine

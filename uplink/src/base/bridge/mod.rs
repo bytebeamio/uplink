@@ -21,7 +21,7 @@ pub use self::{
     data_lane::{DataBridge, DataBridgeTx},
 };
 
-use super::{mqtt::MqttShutdown, Compression};
+use super::{mqtt::MqttShutdown, serializer::SerializerShutdown, Compression};
 pub use metrics::StreamMetrics;
 
 pub trait Point: Send + Debug + Serialize + 'static {
@@ -81,6 +81,7 @@ pub struct Bridge {
     pub(crate) data: DataBridge,
     pub(crate) actions: ActionsBridge,
     pub(crate) mqtt_shutdown: Sender<MqttShutdown>,
+    pub(crate) serializer_shutdown: Sender<SerializerShutdown>,
 }
 
 impl Bridge {
@@ -91,11 +92,12 @@ impl Bridge {
         actions_rx: Receiver<Action>,
         shutdown_handle: Sender<()>,
         mqtt_shutdown: Sender<MqttShutdown>,
+        serializer_shutdown: Sender<SerializerShutdown>,
     ) -> Self {
         let data = DataBridge::new(config.clone(), package_tx.clone(), metrics_tx.clone());
         let actions =
             ActionsBridge::new(config, package_tx, actions_rx, shutdown_handle, metrics_tx);
-        Self { data, actions, mqtt_shutdown }
+        Self { data, actions, mqtt_shutdown, serializer_shutdown }
     }
 
     pub fn tx(&self) -> BridgeTx {
@@ -103,6 +105,7 @@ impl Bridge {
             data: self.data.tx(),
             actions: self.actions.tx(),
             mqtt_shutdown: self.mqtt_shutdown.clone(),
+            serializer_shutdown: self.serializer_shutdown.clone(),
         }
     }
 
@@ -128,6 +131,7 @@ pub struct BridgeTx {
     pub data: DataBridgeTx,
     pub actions: ActionsBridgeTx,
     pub mqtt_shutdown: Sender<MqttShutdown>,
+    pub serializer_shutdown: Sender<SerializerShutdown>,
 }
 
 impl BridgeTx {
@@ -144,10 +148,19 @@ impl BridgeTx {
     }
 
     pub async fn trigger_shutdown(&self) {
-        join!(self.actions.trigger_shutdown(), self.data.trigger_shutdown(), async {
-            if let Err(e) = self.mqtt_shutdown.send_async(MqttShutdown).await {
-                error!("Failed to trigger mqtt shutdown. Error = {e}")
+        join!(
+            self.actions.trigger_shutdown(),
+            self.data.trigger_shutdown(),
+            async {
+                if let Err(e) = self.mqtt_shutdown.send_async(MqttShutdown).await {
+                    error!("Failed to trigger mqtt shutdown. Error = {e}")
+                }
+            },
+            async {
+                if let Err(e) = self.serializer_shutdown.send_async(SerializerShutdown).await {
+                    error!("Failed to trigger serializer shutdown. Error = {e}")
+                }
             }
-        });
+        );
     }
 }
