@@ -85,6 +85,8 @@ impl Storage {
             return Ok(None);
         }
 
+        // Make this a function on it's own, just so that it can be triggered
+        // even when the write buffer ain't full
         match &mut self.persistence {
             Some(persistence) => {
                 let hash = hash(&self.current_write_file[..]);

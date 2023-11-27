@@ -202,6 +202,8 @@ impl StorageHandler {
 
         None
     }
+
+    // TODO: Force flush all storages, call the newly separated out `Storage::flush()` for all streams in map`
 }
 
 /// The uplink Serializer is the component that deals with serializing, compressing and writing data onto disk or Network.
@@ -289,7 +291,15 @@ impl<C: MqttClient> Serializer<C> {
 
         loop {
             // Collect next data packet and write to disk
-            let data = self.collector_rx.recv_async().await?;
+            let data = match self.collector_rx.recv_async().await {
+                Ok(d) => d,
+                Err(e) => {
+                    // TODO: Nothing left to recv, force flush 
+                    // storage from in-memory onto disk, ensuring
+                    // data is not lost due to not overflowing
+                    return Err(e.into());
+                }
+            };
             let publish = construct_publish(data)?;
             let storage = self.storage_handler.select(&publish.topic);
             match write_to_disk(publish, storage) {
