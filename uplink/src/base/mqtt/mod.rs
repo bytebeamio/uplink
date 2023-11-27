@@ -106,7 +106,8 @@ impl Mqtt {
         let mut f = fs::File::create(path)?;
         let mut buf = BytesMut::new();
 
-        for publish in publishes {
+        for mut publish in publishes {
+            publish.pkid = 1;
             publish.write(&mut buf)?;
         }
 
