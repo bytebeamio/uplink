@@ -164,8 +164,9 @@ mod tests {
         let (shutdown_handle, _) = bounded(1);
         let actions = ActionsBridgeTx { status_tx, shutdown_handle };
         let (mqtt_shutdown, _) = bounded(0);
+        let (serializer_shutdown, _) = bounded(0);
 
-        (BridgeTx { data, actions, mqtt_shutdown }, status_rx)
+        (BridgeTx { data, actions, mqtt_shutdown, serializer_shutdown }, status_rx)
     }
 
     #[test]
