@@ -112,7 +112,7 @@ pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
     let mut sequence = 0;
 
     let mut rng = StdRng::from_entropy();
-    let fuel_level = rng.gen_range(0.0..0.4);
+    let fuel_level = rng.gen_range(0.0..1.0);
     let mut car = Car::new(fuel_level);
     car.turn_key(true);
     car.set_handbrake_position(HandBrake::Disengaged);
