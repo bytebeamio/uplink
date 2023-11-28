@@ -114,14 +114,12 @@ pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
     let mut rng = StdRng::from_entropy();
     let fuel_level = rng.gen_range(0.0..0.4);
     let mut car = Car::new(fuel_level);
+    car.turn_key(true);
     car.set_handbrake_position(HandBrake::Disengaged);
     car.set_clutch_position(1.0);
     car.shift_gear(Gear::First);
     car.set_clutch_position(0.5);
     car.set_accelerator_position(0.5);
-    car.update();
-    sequence += 1;
-    forward_device_shadow(&tx, &car, sequence).await;
     car.set_clutch_position(0.0);
 
     let mut interval = interval(Duration::from_secs(1));
@@ -146,7 +144,9 @@ pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
             car.shift_gear(Gear::Neutral);
             car.set_clutch_position(0.0);
             car.set_brake_position(0.0);
-
+            if rng.gen_bool(0.5) {
+                car.turn_key(false);
+            }
             refuelling = Some(
                 // Time during which car is stationary at the refuelling point: between 7.5-17.5 minutes
                 Instant::now() + Duration::from_secs_f32(300.0 + 60.0 * rng.gen_range(2.5..12.5)),
@@ -156,8 +156,9 @@ pub async fn simulate(device: DeviceData, tx: Sender<Payload>) {
         if let Some(till) = refuelling {
             if till < Instant::now() {
                 refuelling.take();
-                car.set_handbrake_position(HandBrake::Disengaged);
-                continue;
+                if !car.ignition() {
+                    car.turn_key(true);
+                }
             }
             car.refuel(0.001);
             continue;
