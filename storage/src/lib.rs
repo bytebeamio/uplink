@@ -85,6 +85,11 @@ impl Storage {
             return Ok(None);
         }
 
+        self.flush()
+    }
+
+    /// Force flush the contents of write buffer onto disk
+    pub fn flush(&mut self) -> Result<Option<u64>, Error> {
         match &mut self.persistence {
             Some(persistence) => {
                 let hash = hash(&self.current_write_file[..]);

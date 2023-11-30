@@ -59,6 +59,8 @@ pub enum Error {
     EmptyStorage,
     #[error("Permission denied while accessing persistence directory \"{0}\"")]
     Persistence(String),
+    #[error("Serializer has shutdown after handling crash")]
+    Shutdown,
 }
 
 #[derive(Debug, PartialEq)]
@@ -204,6 +206,14 @@ impl StorageHandler {
 
         None
     }
+
+    fn flush_all(&mut self) {
+        for (stream_name, storage) in self.map.iter_mut() {
+            if let Err(e) = storage.flush() {
+                error!("Error when force flushing storage = {stream_name}; error = {e}")
+            }
+        }
+    }
 }
 
 pub struct SerializerShutdown;
@@ -300,7 +310,10 @@ impl<C: MqttClient> Serializer<C> {
 
         loop {
             // Collect next data packet and write to disk
-            let data = self.collector_rx.recv_async().await?;
+            let Ok(data) = self.collector_rx.recv_async().await else {
+                self.storage_handler.flush_all();
+                return Err(Error::Shutdown);
+            };
             let publish = construct_publish(data)?;
             let storage = self.storage_handler.select(&publish.topic);
             match write_to_disk(publish, storage) {
