@@ -141,6 +141,7 @@ impl Network {
     /// Update metrics values for network usage over time
     fn update(&mut self, data: &NetworkData, timestamp: u64, sequence: u32) {
         let update_period = self.timer.elapsed().as_secs_f64();
+        // TODO: check if these calculations are correct
         self.incoming_data_rate = data.total_received() as f64 / update_period;
         self.outgoing_data_rate = data.total_transmitted() as f64 / update_period;
         self.timestamp = timestamp;

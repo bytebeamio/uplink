@@ -40,7 +40,7 @@ pub struct Stream<T> {
 
 impl<T> Stream<T>
 where
-    T: Point + Debug + Send + 'static,
+    T: Point,
     Buffer<T>: Package,
 {
     pub fn new(
@@ -76,7 +76,7 @@ where
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
         let mut stream = Stream::new(name, &config.topic, config.buf_size, tx, config.compression);
-        stream.flush_period = Duration::from_secs(config.flush_period);
+        stream.flush_period = config.flush_period;
         stream
     }
 
@@ -265,7 +265,7 @@ impl<T> Buffer<T> {
 
 impl<T> Package for Buffer<T>
 where
-    T: Debug + Send + Point,
+    T: Point,
     Vec<T>: Serialize,
 {
     fn topic(&self) -> Arc<String> {

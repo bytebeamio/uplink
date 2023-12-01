@@ -11,8 +11,8 @@ use std::path::Path;
 
 use crate::{Action, Config};
 use rumqttc::{
-    AsyncClient, ConnectionError, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS,
-    Request, TlsConfiguration, Transport,
+    AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Publish, QoS, Request,
+    TlsConfiguration, Transport,
 };
 use std::sync::Arc;
 
@@ -184,7 +184,7 @@ impl Mqtt {
         }
 
         // TODO: when uplink uses last-wills to handle unexpected disconnections, try to disconnect from
-        // mqtt connection, before force persisting in-flight publishes to disk. Timedout in a second. 
+        // mqtt connection, before force persisting in-flight publishes to disk. Timedout in a second.
         // But otherwise sending a disconnect to broker is unnecessary.
 
         if let Err(e) = self.persist_inflight() {
@@ -251,7 +251,7 @@ fn mqttoptions(config: &Config) -> MqttOptions {
         let transport = Transport::Tls(TlsConfiguration::Simple {
             ca,
             alpn: None,
-            client_auth: Some((device_certificate, Key::RSA(device_private_key))),
+            client_auth: Some((device_certificate, device_private_key)),
         });
 
         mqttoptions.set_transport(transport);

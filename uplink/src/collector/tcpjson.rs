@@ -1,4 +1,4 @@
-use flume::{Receiver, RecvError, SendError};
+use flume::{Receiver, RecvError};
 use futures_util::SinkExt;
 use log::{debug, error, info};
 use thiserror::Error;
@@ -20,8 +20,6 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Receiver error {0}")]
     Recv(#[from] RecvError),
-    #[error("Sender error {0}")]
-    Send(#[from] SendError<ActionResponse>),
     #[error("Stream done")]
     StreamDone,
     #[error("Lines codec error {0}")]
