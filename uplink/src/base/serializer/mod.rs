@@ -2,6 +2,7 @@ mod metrics;
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Write};
+use std::time::Instant;
 use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
@@ -58,6 +59,8 @@ pub enum Error {
     EmptyStorage,
     #[error("Permission denied while accessing persistence directory \"{0}\"")]
     Persistence(String),
+    #[error("Serializer has shutdown after handling crash")]
+    Shutdown,
 }
 
 #[derive(Debug, PartialEq)]
@@ -203,6 +206,16 @@ impl StorageHandler {
 
         None
     }
+
+    fn flush_all(&mut self) {
+        for (stream_name, storage) in self.map.iter_mut() {
+            match storage.flush() {
+                Ok(_) => trace!("Force flushed stream = {stream_name} onto disk"),
+                Err(storage::Error::NoWrites) => {}
+                Err(e) => error!("Error when force flushing storage = {stream_name}; error = {e}"),
+            }
+        }
+    }
 }
 
 pub struct SerializerShutdown;
@@ -298,8 +311,13 @@ impl<C: MqttClient> Serializer<C> {
         }
 
         loop {
-            // Collect next data packet and write to disk
-            let data = self.collector_rx.recv_async().await?;
+            // Collect remaining data packets and write to disk
+            // NOTE: wait 2s to allow bridge to shutdown and flush leftover data.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let Ok(data) = self.collector_rx.recv_deadline(deadline) else {
+                self.storage_handler.flush_all();
+                return Err(Error::Shutdown);
+            };
             let publish = construct_publish(data)?;
             let storage = self.storage_handler.select(&publish.topic);
             match write_to_disk(publish, storage) {

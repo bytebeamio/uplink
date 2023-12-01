@@ -203,7 +203,7 @@ fn main() -> Result<(), Error> {
         uplink.resolve_on_shutdown().await.unwrap();
         info!("Uplink shutting down...");
         // NOTE: wait 5s to allow serializer to write to network/disk
-        sleep(Duration::from_secs(5)).await;
+        sleep(Duration::from_secs(10)).await;
     });
 
     Ok(())
