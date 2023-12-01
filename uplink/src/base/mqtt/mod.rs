@@ -183,32 +183,14 @@ impl Mqtt {
             }
         }
 
-        // TODO: when uplink uses wills to handle unexpected disconnections, the following maybe useful,
-        // till then sending a disconnect to broker is unnecessary.
-        // // Try to disconnect from mqtt connection, else force persist. Timeout in a second
-        // if let Err(e) = timeout(Duration::from_secs(1), self.disconnect()).await {
-        //     error!("Mqtt disconnection timedout. Error = {:?}", e);
-        // }
+        // TODO: when uplink uses last-wills to handle unexpected disconnections, try to disconnect from
+        // mqtt connection, before force persisting in-flight publishes to disk. Timedout in a second. 
+        // But otherwise sending a disconnect to broker is unnecessary.
 
         if let Err(e) = self.persist_inflight() {
             error!("Couldn't persist inflight messages. Error = {:?}", e);
         }
     }
-
-    // async fn disconnect(&mut self) {
-    //     if let Err(e) = self.client.disconnect().await {
-    //         error!("Client unable to trigger disconnect. Error = {:?}", e);
-    //         return;
-    //     }
-
-    //     // poll eventloop till the outgoing disconnect packet comes up
-    //     loop {
-    //         if let Ok(Event::Outgoing(Outgoing::Disconnect)) = self.eventloop.poll().await {
-    //             info!("Disconnection successful!");
-    //             break;
-    //         }
-    //     }
-    // }
 
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
         if self.config.actions_subscription != publish.topic {
