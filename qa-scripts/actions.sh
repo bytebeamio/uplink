@@ -14,7 +14,7 @@ actions = [{ name = "send_file" },{ name = "send_script"}]
 path = "/var/tmp/downloads"
 
 [simulator]
-actions = [{ name = "load_file" }]
+actions = ["load_file"]
 gps_paths = "./paths/"
 
 [tcpapps.blackhole]
