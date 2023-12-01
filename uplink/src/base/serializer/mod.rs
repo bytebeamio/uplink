@@ -3,6 +3,7 @@ mod metrics;
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{self, Read, Write};
+use std::time::Instant;
 use std::{sync::Arc, time::Duration};
 
 use bytes::{Bytes, BytesMut};
@@ -312,8 +313,9 @@ impl<C: MqttClient> Serializer<C> {
 
         loop {
             // Collect remaining data packets and write to disk
-            // TODO: what about the data that bridge pushes post an empty error here?
-            let Ok(data) = self.collector_rx.try_recv() else {
+            // NOTE: wait 2s to allow bridge to shutdown and flush leftover data.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let Ok(data) = self.collector_rx.recv_deadline(deadline) else {
                 self.storage_handler.flush_all();
                 return Err(Error::Shutdown);
             };
