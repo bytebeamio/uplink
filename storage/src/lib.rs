@@ -90,7 +90,7 @@ impl Storage {
 
     /// Force flush the contents of write buffer onto disk
     pub fn flush(&mut self) -> Result<Option<u64>, Error> {
-        if self.current_read_file.is_empty() {
+        if self.current_write_file.is_empty() {
             return Ok(None);
         }
         match &mut self.persistence {
