@@ -378,7 +378,7 @@ impl<C: MqttClient> Serializer<C> {
                     check_metrics(&mut self.metrics, &self.storage_handler);
                 }
                 // Transition into crash mode when uplink is shutting down
-                _ = self.ctrl_rx.recv_async() => {
+                Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
                     break Ok(Status::EventLoopCrash(None))
                 }
             }
@@ -489,7 +489,7 @@ impl<C: MqttClient> Serializer<C> {
                     let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler);
                 }
                 // Transition into crash mode when uplink is shutting down
-                _ = self.ctrl_rx.recv_async() => {
+                Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
                     return Ok(Status::EventLoopCrash(None))
                 }
             }
@@ -538,7 +538,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
                 }
                 // Transition into crash mode when uplink is shutting down
-                _ = self.ctrl_rx.recv_async() => {
+                Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
                     return Ok(Status::EventLoopCrash(None))
                 }
             }
