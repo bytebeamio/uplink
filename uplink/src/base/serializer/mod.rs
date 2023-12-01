@@ -210,8 +210,8 @@ impl StorageHandler {
     fn flush_all(&mut self) {
         for (stream_name, storage) in self.map.iter_mut() {
             match storage.flush() {
-                Ok(Some(_)) => trace!("Force flushed stream = {stream_name} onto disk"),
-                Ok(_) => {}
+                Ok(_) => trace!("Force flushed stream = {stream_name} onto disk"),
+                Err(storage::Error::NoWrites) => {}
                 Err(e) => error!("Error when force flushing storage = {stream_name}; error = {e}"),
             }
         }

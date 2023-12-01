@@ -16,6 +16,8 @@ pub enum Error {
     NotBackup,
     #[error("Corrupted backup file")]
     CorruptedFile,
+    #[error("Empty write buffer")]
+    NoWrites,
 }
 
 pub struct Storage {
@@ -91,7 +93,7 @@ impl Storage {
     /// Force flush the contents of write buffer onto disk
     pub fn flush(&mut self) -> Result<Option<u64>, Error> {
         if self.current_write_file.is_empty() {
-            return Ok(None);
+            return Err(Error::NoWrites);
         }
         match &mut self.persistence {
             Some(persistence) => {
