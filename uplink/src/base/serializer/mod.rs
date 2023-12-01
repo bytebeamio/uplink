@@ -310,7 +310,7 @@ impl<C: MqttClient> Serializer<C> {
         }
 
         loop {
-            // Collect next data packet and write to disk
+            // Collect remaining data packets and write to disk
             let Ok(data) = self.collector_rx.recv_async().await else {
                 self.storage_handler.flush_all();
                 return Err(Error::Shutdown);
