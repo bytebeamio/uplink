@@ -177,7 +177,7 @@ impl Mqtt {
                         }
                     }
                 },
-                _ = self.ctrl_rx.recv_async() => {
+                Ok(MqttShutdown) = self.ctrl_rx.recv_async() => {
                     break;
                 }
             }
