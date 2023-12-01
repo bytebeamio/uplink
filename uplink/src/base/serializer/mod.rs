@@ -311,7 +311,8 @@ impl<C: MqttClient> Serializer<C> {
 
         loop {
             // Collect remaining data packets and write to disk
-            let Ok(data) = self.collector_rx.recv_async().await else {
+            // TODO: what about the data that bridge pushes post an empty error here?
+            let Ok(data) = self.collector_rx.try_recv() else {
                 self.storage_handler.flush_all();
                 return Err(Error::Shutdown);
             };
