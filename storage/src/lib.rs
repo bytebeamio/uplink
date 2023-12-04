@@ -97,6 +97,10 @@ impl Storage {
                 next_file.file.write_all(&hash.to_be_bytes())?;
                 next_file.file.write_all(&self.current_write_file[..])?;
                 next_file.file.flush()?;
+
+                // 8 is the number of bytes the hash(u64) occupies
+                persistence.bytes_occupied += 8 + self.current_write_file.len();
+
                 self.current_write_file.clear();
                 Ok(next_file.deleted)
             }
@@ -213,6 +217,8 @@ struct Persistence {
     // /// Deleted file id
     // deleted: Option<u64>,
     non_destructive_read: bool,
+    /// Disk space(in bytes) currently occupied by persistence files
+    bytes_occupied: usize,
 }
 
 impl Persistence {
@@ -228,6 +234,7 @@ impl Persistence {
             current_read_file_id: None,
             // deleted: None,
             non_destructive_read: false,
+            bytes_occupied: 0,
         })
     }
 
@@ -239,8 +246,13 @@ impl Persistence {
     }
 
     /// Removes a file with provided id
-    fn remove(&self, id: u64) -> Result<PathBuf, Error> {
+    fn remove(&mut self, id: u64) -> Result<PathBuf, Error> {
         let path = self.path(id)?;
+
+        // Query the fs to track size of removed persistence file
+        let metadata = fs::metadata(&path)?;
+        self.bytes_occupied -= metadata.len() as usize;
+
         fs::remove_file(&path)?;
 
         Ok(path)
