@@ -70,6 +70,13 @@ impl Storage {
         }
     }
 
+    pub fn disk_utilized(&self) -> usize {
+        match &self.persistence {
+            Some(p) => p.bytes_occupied,
+            None => 0,
+        }
+    }
+
     pub fn inmemory_read_size(&self) -> usize {
         self.current_read_file.len()
     }

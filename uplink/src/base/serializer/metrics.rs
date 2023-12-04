@@ -17,6 +17,8 @@ pub struct SerializerMetrics {
     pub read_memory: usize,
     /// Number of files that have been written to disk
     pub disk_files: usize,
+    /// Number of bytes that have been written to disk
+    pub disk_utilized: usize,
     /// Nuber of persistence files that had to deleted before being consumed
     pub lost_segments: usize,
     /// Number of errors faced during serializer operation
@@ -35,6 +37,7 @@ impl SerializerMetrics {
             write_memory: 0,
             read_memory: 0,
             disk_files: 0,
+            disk_utilized: 0,
             lost_segments: 0,
             errors: 0,
             sent_size: 0,
@@ -66,6 +69,10 @@ impl SerializerMetrics {
 
     pub fn set_disk_files(&mut self, count: usize) {
         self.disk_files = count;
+    }
+
+    pub fn set_disk_utilized(&mut self, bytes: usize) {
+        self.disk_utilized = bytes;
     }
 
     pub fn increment_errors(&mut self) {
