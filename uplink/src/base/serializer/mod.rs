@@ -578,24 +578,28 @@ fn check_metrics(metrics: &mut SerializerMetrics, storage_handler: &StorageHandl
     let mut inmemory_write_size = 0;
     let mut inmemory_read_size = 0;
     let mut file_count = 0;
+    let mut disk_utilized = 0;
 
     for storage in storage_handler.map.values() {
         inmemory_read_size += storage.inmemory_read_size();
         inmemory_write_size += storage.inmemory_write_size();
         file_count += storage.file_count();
+        disk_utilized += storage.disk_utilized();
     }
 
     metrics.set_write_memory(inmemory_write_size);
     metrics.set_read_memory(inmemory_read_size);
     metrics.set_disk_files(file_count);
+    metrics.set_disk_utilized(disk_utilized);
 
     info!(
-        "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
+        "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
         metrics.mode,
         metrics.batches,
         metrics.errors,
         metrics.lost_segments,
         metrics.disk_files,
+        convert(metrics.disk_utilized as f64),
         convert(metrics.write_memory as f64),
         convert(metrics.read_memory as f64),
     );
@@ -609,16 +613,19 @@ fn save_and_prepare_next_metrics(
     let mut inmemory_write_size = 0;
     let mut inmemory_read_size = 0;
     let mut file_count = 0;
+    let mut disk_utilized = 0;
 
     for storage in storage_handler.map.values() {
         inmemory_write_size += storage.inmemory_write_size();
         inmemory_read_size += storage.inmemory_read_size();
         file_count += storage.file_count();
+        disk_utilized += storage.disk_utilized();
     }
 
     metrics.set_write_memory(inmemory_write_size);
     metrics.set_read_memory(inmemory_read_size);
     metrics.set_disk_files(file_count);
+    metrics.set_disk_utilized(disk_utilized);
 
     let m = metrics.clone();
     pending.push_back(m);
@@ -637,27 +644,31 @@ fn check_and_flush_metrics(
     let mut inmemory_write_size = 0;
     let mut inmemory_read_size = 0;
     let mut file_count = 0;
+    let mut disk_utilized = 0;
 
     for storage in storage_handler.map.values() {
         inmemory_write_size += storage.inmemory_write_size();
         inmemory_read_size += storage.inmemory_read_size();
         file_count += storage.file_count();
+        disk_utilized += storage.disk_utilized();
     }
 
     metrics.set_write_memory(inmemory_write_size);
     metrics.set_read_memory(inmemory_read_size);
     metrics.set_disk_files(file_count);
+    metrics.set_disk_utilized(disk_utilized);
 
     // Send pending metrics. This signifies state change
     while let Some(metrics) = pending.get(0) {
         // Always send pending metrics. They represent state changes
         info!(
-            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
+            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
             metrics.mode,
             metrics.batches,
             metrics.errors,
             metrics.lost_segments,
             metrics.disk_files,
+            convert(metrics.disk_utilized as f64),
             convert(metrics.write_memory as f64),
             convert(metrics.read_memory as f64),
         );
@@ -667,12 +678,13 @@ fn check_and_flush_metrics(
 
     if metrics.batches() > 0 {
         info!(
-            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
+            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
             metrics.mode,
             metrics.batches,
             metrics.errors,
             metrics.lost_segments,
             metrics.disk_files,
+            convert(metrics.disk_utilized as f64),
             convert(metrics.write_memory as f64),
             convert(metrics.read_memory as f64),
         );
