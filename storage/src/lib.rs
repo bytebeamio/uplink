@@ -72,6 +72,13 @@ impl Storage {
         }
     }
 
+    pub fn disk_utilized(&self) -> usize {
+        match &self.persistence {
+            Some(p) => p.bytes_occupied,
+            None => 0,
+        }
+    }
+
     pub fn inmemory_read_size(&self) -> usize {
         self.current_read_file.len()
     }
@@ -107,6 +114,10 @@ impl Storage {
                 next_file.file.write_all(&hash.to_be_bytes())?;
                 next_file.file.write_all(&self.current_write_file[..])?;
                 next_file.file.flush()?;
+
+                // 8 is the number of bytes the hash(u64) occupies
+                persistence.bytes_occupied += 8 + self.current_write_file.len();
+
                 self.current_write_file.clear();
                 Ok(next_file.deleted)
             }
@@ -223,6 +234,8 @@ struct Persistence {
     // /// Deleted file id
     // deleted: Option<u64>,
     non_destructive_read: bool,
+    /// Disk space(in bytes) currently occupied by persistence files
+    bytes_occupied: usize,
 }
 
 impl Persistence {
@@ -231,6 +244,13 @@ impl Persistence {
         let backlog_files = get_file_ids(&path)?;
         info!("List of file ids loaded from disk: {backlog_files:?}");
 
+        let bytes_occupied = backlog_files.iter().fold(0, |acc, id| {
+            let mut file = PathBuf::from(&path);
+            let file_name = format!("backup@{id}");
+            file.push(file_name);
+            fs::metadata(&file).unwrap().len() as usize + acc
+        });
+
         Ok(Persistence {
             path,
             max_file_count,
@@ -238,6 +258,7 @@ impl Persistence {
             current_read_file_id: None,
             // deleted: None,
             non_destructive_read: false,
+            bytes_occupied,
         })
     }
 
@@ -249,8 +270,13 @@ impl Persistence {
     }
 
     /// Removes a file with provided id
-    fn remove(&self, id: u64) -> Result<PathBuf, Error> {
+    fn remove(&mut self, id: u64) -> Result<PathBuf, Error> {
         let path = self.path(id)?;
+
+        // Query the fs to track size of removed persistence file
+        let metadata = fs::metadata(&path)?;
+        self.bytes_occupied -= metadata.len() as usize;
+
         fs::remove_file(&path)?;
 
         Ok(path)
