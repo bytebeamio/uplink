@@ -234,6 +234,13 @@ impl Persistence {
         let backlog_files = get_file_ids(&path)?;
         info!("List of file ids loaded from disk: {backlog_files:?}");
 
+        let bytes_occupied = backlog_files.iter().fold(0, |acc, id| {
+            let mut file = PathBuf::from(&path);
+            let file_name = format!("backup@{id}");
+            file.push(file_name);
+            fs::metadata(&file).unwrap().len() as usize + acc
+        });
+
         Ok(Persistence {
             path,
             max_file_count,
@@ -241,7 +248,7 @@ impl Persistence {
             current_read_file_id: None,
             // deleted: None,
             non_destructive_read: false,
-            bytes_occupied: 0,
+            bytes_occupied,
         })
     }
 
