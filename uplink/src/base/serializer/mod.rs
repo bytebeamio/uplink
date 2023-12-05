@@ -591,6 +591,7 @@ impl<C: MqttClient> Serializer<C> {
                     // indefinitely write to disk to not loose data.
                     let client = match o {
                         Ok(c) => c,
+                        // NOTE: while we have to transition into crash mode, might be better not to write inflight packets onto disk
                         Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish)),
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
