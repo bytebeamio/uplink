@@ -590,7 +590,7 @@ fn check_metrics(metrics: &mut SerializerMetrics, storage_handler: &StorageHandl
     metrics.set_write_memory(inmemory_write_size);
     metrics.set_read_memory(inmemory_read_size);
     metrics.set_disk_files(file_count);
-    metrics.set_disk_files(disk_utilized);
+    metrics.set_disk_utilized(disk_utilized);
 
     info!(
         "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
