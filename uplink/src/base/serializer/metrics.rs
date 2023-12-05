@@ -17,7 +17,7 @@ pub struct SerializerMetrics {
     pub read_memory: usize,
     /// Number of files that have been written to disk
     pub disk_files: usize,
-    /// Number of bytes that have been written to disk
+    /// Disk size currently occupied by persistence files
     pub disk_utilized: usize,
     /// Nuber of persistence files that had to deleted before being consumed
     pub lost_segments: usize,
