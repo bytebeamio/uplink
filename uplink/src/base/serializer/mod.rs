@@ -593,12 +593,13 @@ fn check_metrics(metrics: &mut SerializerMetrics, storage_handler: &StorageHandl
     metrics.set_disk_files(disk_utilized);
 
     info!(
-        "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
+        "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
         metrics.mode,
         metrics.batches,
         metrics.errors,
         metrics.lost_segments,
         metrics.disk_files,
+        convert(metrics.disk_utilized as f64),
         convert(metrics.write_memory as f64),
         convert(metrics.read_memory as f64),
     );
@@ -661,12 +662,13 @@ fn check_and_flush_metrics(
     while let Some(metrics) = pending.get(0) {
         // Always send pending metrics. They represent state changes
         info!(
-            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
+            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
             metrics.mode,
             metrics.batches,
             metrics.errors,
             metrics.lost_segments,
             metrics.disk_files,
+            convert(metrics.disk_utilized as f64),
             convert(metrics.write_memory as f64),
             convert(metrics.read_memory as f64),
         );
