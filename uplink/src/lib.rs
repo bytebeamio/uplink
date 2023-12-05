@@ -407,7 +407,7 @@ impl Uplink {
     }
 
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
-        let bridge_tx = bridge.tx();
+        let bridge_tx = bridge.bridge_tx();
 
         let route =
             ActionRoute { name: "launch_shell".to_owned(), timeout: Duration::from_secs(10) };

@@ -1,20 +1,20 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Router};
 use log::info;
-use uplink::base::bridge::BridgeTx;
+use uplink::base::bridge::CtrlTx;
 
 use crate::ReloadHandle;
 
 #[derive(Debug, Clone)]
 struct StateHandle {
     reload_handle: ReloadHandle,
-    bridge_handle: BridgeTx,
+    ctrl_tx: CtrlTx,
 }
 
 #[tokio::main]
-pub async fn start(port: u16, reload_handle: ReloadHandle, bridge_handle: BridgeTx) {
+pub async fn start(port: u16, reload_handle: ReloadHandle, ctrl_tx: CtrlTx) {
     let address = format!("0.0.0.0:{port}");
     info!("Starting uplink console server: {address}");
-    let state = StateHandle { reload_handle, bridge_handle };
+    let state = StateHandle { reload_handle, ctrl_tx };
     let app = Router::new()
         .route("/logs", post(reload_loglevel))
         .route("/shutdown", post(shutdown))
@@ -34,7 +34,7 @@ async fn reload_loglevel(State(state): State<StateHandle>, filter: String) -> im
 
 async fn shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Shutting down uplink");
-    state.bridge_handle.trigger_shutdown().await;
+    state.ctrl_tx.trigger_shutdown().await;
 
     StatusCode::OK
 }
