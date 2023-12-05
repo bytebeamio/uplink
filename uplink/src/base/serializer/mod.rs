@@ -257,6 +257,9 @@ pub struct SerializerShutdown;
 ///                         but continue trying to publish                                                              
 ///
 ///```
+///
+/// NOTE: Shutdown mode and crash mode are only different in how they get triggered,
+/// but should be considered as interchangeable in the above diagram.
 /// [`start()`]: Serializer::start
 /// [`try_publish()`]: AsyncClient::try_publish
 /// [`publish()`]: AsyncClient::publish
