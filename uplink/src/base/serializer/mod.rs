@@ -68,9 +68,8 @@ enum Status {
     Normal,
     SlowEventloop(Publish),
     EventLoopReady,
-    // Transitions into Crash mode need not
-    // be triggered by `EventLoop` dying out
-    EventLoopCrash(Option<Publish>),
+    EventLoopCrash(Publish),
+    Shutdown,
 }
 
 /// Description of an interface that the [`Serializer`] expects to be provided by the MQTT client to publish the serialized data with.
@@ -296,19 +295,10 @@ impl<C: MqttClient> Serializer<C> {
         })
     }
 
-    /// Write all data received, from here-on, to disk only.
-    async fn crash(&mut self, publish: Option<Publish>) -> Result<Status, Error> {
-        if let Some(publish) = publish {
-            let storage = self.storage_handler.select(&publish.topic);
-            // Write failed publish to disk first, metrics don't matter
-            match write_to_disk(publish, storage) {
-                Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
-                Ok(_) => {}
-                Err(e) => error!("Crash loop: write error = {:?}", e),
-            }
-        } else {
-            debug!("Forced into crash mode, writing all incoming data to persistence.");
-        }
+    /// Write all data received, from here-on, to disk only, shutdown serializer
+    /// after handling all data payloads.
+    async fn shutdown(&mut self) -> Result<Status, Error> {
+        debug!("Forced into crash mode, writing all incoming data to persistence.");
 
         loop {
             // Collect remaining data packets and write to disk
@@ -318,6 +308,28 @@ impl<C: MqttClient> Serializer<C> {
                 self.storage_handler.flush_all();
                 return Err(Error::Shutdown);
             };
+            let publish = construct_publish(data)?;
+            let storage = self.storage_handler.select(&publish.topic);
+            match write_to_disk(publish, storage) {
+                Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
+                Ok(_) => {}
+                Err(e) => error!("Crash loop: write error = {:?}", e),
+            }
+        }
+    }
+
+    /// Write all data received, from here-on, to disk only.
+    async fn crash(&mut self, publish: Publish) -> Result<Status, Error> {
+        let storage = self.storage_handler.select(&publish.topic);
+        // Write failed publish to disk first, metrics don't matter
+        match write_to_disk(publish, storage) {
+            Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
+            Ok(_) => {}
+            Err(e) => error!("Crash loop: write error = {:?}", e),
+        }
+
+        loop {
+            let data = self.collector_rx.recv_async().await?;
             let publish = construct_publish(data)?;
             let storage = self.storage_handler.select(&publish.topic);
             match write_to_disk(publish, storage) {
@@ -368,7 +380,7 @@ impl<C: MqttClient> Serializer<C> {
                         break Ok(Status::EventLoopReady)
                     }
                     Err(MqttError::Send(Request::Publish(publish))) => {
-                        break Ok(Status::EventLoopCrash(Some(publish)));
+                        break Ok(Status::EventLoopCrash(publish));
                     },
                     Err(e) => {
                         unreachable!("Unexpected error: {}", e);
@@ -379,7 +391,7 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 // Transition into crash mode when uplink is shutting down
                 Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
-                    break Ok(Status::EventLoopCrash(None))
+                    break Ok(Status::Shutdown)
                 }
             }
         };
@@ -460,7 +472,7 @@ impl<C: MqttClient> Serializer<C> {
                     // indefinitely write to disk to not loose data
                     let client = match o {
                         Ok(c) => c,
-                        Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(Some(publish))),
+                        Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish)),
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
@@ -490,7 +502,7 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 // Transition into crash mode when uplink is shutting down
                 Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
-                    return Ok(Status::EventLoopCrash(None))
+                    return Ok(Status::Shutdown)
                 }
             }
         };
@@ -539,7 +551,7 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 // Transition into crash mode when uplink is shutting down
                 Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
-                    return Ok(Status::EventLoopCrash(None))
+                    return Ok(Status::Shutdown)
                 }
             }
         }
@@ -555,6 +567,7 @@ impl<C: MqttClient> Serializer<C> {
                 Status::SlowEventloop(publish) => self.slow(publish).await?,
                 Status::EventLoopReady => self.catchup().await?,
                 Status::EventLoopCrash(publish) => self.crash(publish).await?,
+                Status::Shutdown => self.shutdown().await?,
             };
 
             status = next_status;
@@ -961,9 +974,7 @@ mod test {
         );
 
         match tokio::runtime::Runtime::new().unwrap().block_on(serializer.slow(publish)).unwrap() {
-            Status::EventLoopCrash(Some(Publish {
-                qos: QoS::AtLeastOnce, topic, payload, ..
-            })) => {
+            Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
@@ -1067,7 +1078,7 @@ mod test {
         write_to_disk(publish.clone(), &mut storage).unwrap();
 
         match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
-            Status::EventLoopCrash(Some(Publish { topic, payload, .. })) => {
+            Status::EventLoopCrash(Publish { topic, payload, .. }) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
