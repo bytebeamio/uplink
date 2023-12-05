@@ -221,25 +221,25 @@ impl StorageHandler {
 ///
 /// ```text
 ///
-///                         Send publishes in Storage to                                  No more publishes
-///                         Network, write new data to disk                               left in Storage
-///                        ┌---------------------┐                                       ┌──────┐
-///                        │Serializer::catchup()├───────────────────────────────────────►Normal│
-///                        └---------▲---------┬-┘                                       └───┬──┘
-///                                  │         │     Network has crashed                     │
-///                       Network is │         │    ┌───────────────────────┐                │
-///                        available │         ├────►EventloopCrash(publish)│                │
-/// ┌-------------------┐    ┌───────┴──────┐  │    └───────────┬───────────┘     ┌----------▼---------┐
-/// │Serializer::start()├────►EventloopReady│  │   ┌------------▼-------------┐   │Serializer::normal()│ Forward all data to Network
-/// └-------------------┘    └───────▲──────┘  │   │Serializer::crash(publish)├─┐ └----------┬---------┘
-///                                  │         │   └-------------------------▲┘ │            │
-///                                  │         │    Write all data to Storage└──┘            │
-///                                  │         │                                             │
-///                        ┌---------┴---------┴-----┐                           ┌───────────▼──────────┐
-///                        │Serializer::slow(publish)◄───────────────────────────┤SlowEventloop(publish)│
-///                        └-------------------------┘                           └──────────────────────┘
-///                         Write to storage,                                     Slow network encountered
-///                         but continue trying to publish                                                              
+///                                                Send publishes in Storage to                                  No more publishes
+///                                                Network, write new data to disk                               left in Storage
+///                                                ┌---------------------┐                                       ┌──────┐
+///                                                │Serializer::catchup()├───────────────────────────────────────►Normal│
+///                                                └---------▲---------┬-┘                                       └───┬──┘
+///                                                          │         │     Network has crashed                     │
+///                                               Network is │         │    ┌───────────────────────┐                │
+///                                                available │         ├────►EventloopCrash(publish)│                │
+/// ┌-------------------┐  ┌----------------------┐  ┌───────┴──────┐  │    └───────────┬───────────┘     ┌----------▼---------┐
+/// │Serializer::start()├──►Serializer::recovery()├──►EventloopReady│  │   ┌------------▼-------------┐   │Serializer::normal()│ Forward all data to Network
+/// └-------------------┘  └----------------------┘  └───────▲──────┘  │   │Serializer::crash(publish)├─┐ └----------┬---------┘
+///                                                          │         │   └-------------------------▲┘ │            │
+///                                                          │         │    Write all data to Storage└──┘            │
+///                                                          │         │                                             │
+///                                                ┌---------┴---------┴-----┐                           ┌───────────▼──────────┐
+///                                                │Serializer::slow(publish)◄───────────────────────────┤SlowEventloop(publish)│
+///                                                └-------------------------┘                           └──────────────────────┘
+///                                                 Write to storage,                                     Slow network encountered
+///                                                 but continue trying to publish                                                              
 ///
 ///```
 /// [`start()`]: Serializer::start
@@ -507,8 +507,7 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Starts operation of the uplink serializer, which can transition between the modes mentioned earlier.
     pub async fn start(mut self) -> Result<(), Error> {
-        self.reload_inflight().await?;
-        let mut status = Status::EventLoopReady;
+        let mut status = self.recovery().await?;
 
         loop {
             let next_status = match status {
@@ -522,35 +521,112 @@ impl<C: MqttClient> Serializer<C> {
         }
     }
 
-    /// check for and publish the packets in persistence/inflight file
-    /// once done, delete the file.
-    async fn reload_inflight(&self) -> Result<(), Error> {
+    /// Like catchup mode, but handling inflight packets before storage.
+    /// Checks for and publishes data waiting in persistence/inflight file
+    /// once done, deletes the file, wile writing incoming data into storage.
+    async fn recovery(&mut self) -> Result<Status, Error> {
+        info!("Switching to recovery mode!!");
+        let mut interval = interval(METRICS_INTERVAL);
+        self.metrics.set_mode("recovery");
+
         let mut path = self.config.persistence_path.clone();
         path.push("inflight");
 
         if !path.is_file() {
-            return Ok(());
+            return Ok(Status::EventLoopReady);
         }
 
         let mut buf = Vec::new();
         let mut inflight_file = File::open(&path)?;
         inflight_file.read_to_end(&mut buf)?;
         let mut buf = BytesMut::from(buf.as_slice());
+        let max_packet_size = self.config.mqtt.max_packet_size;
+        let client = self.client.clone();
 
-        while let Ok(packet) = read(&mut buf, self.config.mqtt.max_packet_size) {
-            match packet {
-                Packet::Publish(publish) => {
-                    self.client
-                        .publish(publish.topic, QoS::AtLeastOnce, false, publish.payload)
-                        .await?;
-                }
-                packet => unreachable!("Unexpected packet: {:?}", packet),
+        // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
+        // This leads to force switching to catchup mode. Increasing max_payload_size to bypass this
+        let publish = match read(&mut buf, max_packet_size) {
+            Ok(Packet::Publish(publish)) => publish,
+            Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+            Err(e) => {
+                self.metrics.increment_errors();
+                error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+                save_and_prepare_next_metrics(
+                    &mut self.pending_metrics,
+                    &mut self.metrics,
+                    &self.storage_handler,
+                );
+                return Ok(Status::EventLoopReady);
             }
-        }
+        };
+
+        let mut last_publish_payload_size = publish.payload.len();
+        let send = send_publish(client, publish.topic, publish.payload);
+        tokio::pin!(send);
+
+        let v = loop {
+            select! {
+                data = self.collector_rx.recv_async() => {
+                    let data = data?;
+                    let publish = construct_publish(data)?;
+                    let storage = self.storage_handler.select(&publish.topic);
+                    match write_to_disk(publish, storage) {
+                        Ok(Some(deleted)) => {
+                            debug!("Lost segment = {deleted}");
+                            self.metrics.increment_lost_segments();
+                        }
+                        Ok(_) => {},
+                        Err(e) => {
+                            error!("Storage write error = {:?}", e);
+                            self.metrics.increment_errors();
+                        }
+                    };
+
+                    // Update metrics
+                    self.metrics.add_batch();
+                }
+                o = &mut send => {
+                    self.metrics.add_sent_size(last_publish_payload_size);
+                    // Send failure implies eventloop crash. Switch state to
+                    // indefinitely write to disk to not loose data.
+                    let client = match o {
+                        Ok(c) => c,
+                        Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish)),
+                        Err(e) => unreachable!("Unexpected error: {}", e),
+                    };
+
+                    let publish = match read(&mut buf, max_packet_size) {
+                        Ok(Packet::Publish(publish)) => publish,
+                        Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+                        Err(e) => {
+                            error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+                            break Ok(Status::EventLoopReady)
+                        }
+                    };
+
+                    self.metrics.add_batch();
+
+                    let payload = publish.payload;
+                    last_publish_payload_size = payload.len();
+                    send.set(send_publish(client, publish.topic, payload));
+                }
+                // On a regular interval, forwards metrics information to network
+                _ = interval.tick() => {
+                    let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler);
+                }
+            }
+        };
+
+        save_and_prepare_next_metrics(
+            &mut self.pending_metrics,
+            &mut self.metrics,
+            &self.storage_handler,
+        );
+
         info!("Read and published inflight packets; removing file: {}", path.display());
         std::fs::remove_file(path)?;
 
-        Ok(())
+        v
     }
 }
 
