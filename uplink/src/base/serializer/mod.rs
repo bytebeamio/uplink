@@ -678,12 +678,13 @@ fn check_and_flush_metrics(
 
     if metrics.batches() > 0 {
         info!(
-            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
+            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
             metrics.mode,
             metrics.batches,
             metrics.errors,
             metrics.lost_segments,
             metrics.disk_files,
+            convert(metrics.disk_utilized as f64),
             convert(metrics.write_memory as f64),
             convert(metrics.read_memory as f64),
         );
