@@ -1,4 +1,5 @@
 use std::env::current_dir;
+use std::hash::Hash;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
@@ -59,7 +60,7 @@ pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, Hash, PartialEq, Eq)]
 pub enum Compression {
     #[default]
     Disabled,
@@ -67,7 +68,7 @@ pub enum Compression {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Eq)]
 pub struct StreamConfig {
     pub topic: String,
     #[serde(default = "max_buf_size")]
@@ -95,7 +96,19 @@ impl Default for StreamConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl Hash for StreamConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.topic.hash(state)
+    }
+}
+
+impl PartialEq for StreamConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.topic == other.topic
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Hash, PartialEq, Eq)]
 pub struct Persistence {
     #[serde(default = "default_file_size")]
     pub max_file_size: usize,
