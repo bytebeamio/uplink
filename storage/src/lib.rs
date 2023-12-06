@@ -19,7 +19,7 @@ pub enum Error {
 }
 
 pub struct Storage {
-    name: String,
+    pub name: String,
     /// maximum allowed file size
     max_file_size: usize,
     /// current open file

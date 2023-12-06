@@ -391,25 +391,30 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.mqtt.max_packet_size;
         let client = self.client.clone();
 
-        let (stream, storage) = match self.storage_handler.next(&mut self.metrics) {
-            Some(s) => s,
-            _ => return Ok(Status::Normal),
-        };
+        let (stream, publish) = loop {
+            let (stream, storage) = match self.storage_handler.next(&mut self.metrics) {
+                Some(s) => s,
+                _ => return Ok(Status::Normal),
+            };
 
-        // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
-        // This leads to force switching to normal mode. Increasing max_payload_size to bypass this
-        let publish = match read(storage.reader(), max_packet_size) {
-            Ok(Packet::Publish(publish)) => publish,
-            Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
-            Err(e) => {
-                self.metrics.increment_errors();
-                error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
-                save_and_prepare_next_metrics(
-                    &mut self.pending_metrics,
-                    &mut self.metrics,
-                    &self.storage_handler,
-                );
-                return Ok(Status::Normal);
+            // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
+            // This leads to force switching to normal mode. Increasing max_payload_size to bypass this
+            match read(storage.reader(), max_packet_size) {
+                Ok(Packet::Publish(publish)) => break (stream, publish),
+                Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+                Err(e) => {
+                    self.metrics.increment_errors();
+                    error!(
+                        "Failed to read from storage: {}. Error = {:?}",
+                        storage.name,
+                        e
+                    );
+                    save_and_prepare_next_metrics(
+                        &mut self.pending_metrics,
+                        &mut self.metrics,
+                        &self.storage_handler,
+                    );
+                }
             }
         };
 
@@ -458,8 +463,8 @@ impl<C: MqttClient> Serializer<C> {
                         Ok(Packet::Publish(publish)) => publish,
                         Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
                         Err(e) => {
-                            error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
-                            break Ok(Status::Normal)
+                            error!("Failed to read from storage: {}. Error = {:?}", storage.name, e);
+                            continue
                         }
                     };
 
