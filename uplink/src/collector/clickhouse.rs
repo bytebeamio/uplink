@@ -26,6 +26,7 @@ struct QueryLog {
     user: String,
     exception_code: i32,
     exception: String,
+    http_user_agent: String,
 }
 
 impl From<QueryLog> for Payload {
