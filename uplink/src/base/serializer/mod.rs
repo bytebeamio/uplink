@@ -565,7 +565,7 @@ impl<C: MqttClient> Serializer<C> {
             Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
             Err(e) => {
                 self.metrics.increment_errors();
-                error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+                error!("Failed to read inflight file. Forcing into Catchup mode. Error = {:?}", e);
                 save_and_prepare_next_metrics(
                     &mut self.pending_metrics,
                     &mut self.metrics,
@@ -622,9 +622,10 @@ impl<C: MqttClient> Serializer<C> {
                     let publish = match read(&mut buf, max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
                         Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+                        Err(mqttbytes::Error::InsufficientBytes(2)) => break Ok(Status::EventLoopReady),
                         Err(e) => {
-                            error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
-                            break Ok(Status::EventLoopReady)
+                            error!("Failed to read inflight file. Forcing into Catchup mode. Error = {:?}", e);
+                            break Ok(Status::EventLoopReady);
                         }
                     };
 
