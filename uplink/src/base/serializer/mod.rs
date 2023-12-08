@@ -539,7 +539,7 @@ impl<C: MqttClient> Serializer<C> {
         }
     }
 
-    /// Like catchup mode, but handling inflight packets before storage.
+    /// Similar to catchup mode, handles inflight packets before storage.
     /// Checks for and publishes data waiting in persistence/inflight file
     /// once done, deletes the file, wile writing incoming data into storage.
     async fn recovery(&mut self) -> Result<Status, Error> {
@@ -622,6 +622,7 @@ impl<C: MqttClient> Serializer<C> {
                     let publish = match read(&mut buf, max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
                         Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+                        // The following condition is expected after reading all pending publishes from file
                         Err(mqttbytes::Error::InsufficientBytes(2)) => break Ok(Status::EventLoopReady),
                         Err(e) => {
                             error!("Failed to read inflight file. Forcing into Catchup mode. Error = {:?}", e);
