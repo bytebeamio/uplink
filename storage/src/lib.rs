@@ -199,20 +199,22 @@ fn get_file_ids(path: &Path) -> Result<VecDeque<u64>, Error> {
     Ok(file_ids)
 }
 
+/// A handle to describe a persistence file on disk
 pub struct PersistenceFile<'a> {
+    /// Path to the persistence directory
     dir: &'a Path,
-    file_id: u64,
+    /// Name of the file e.g. `backup@1`
+    file_name: String,
 }
 
 impl<'a> PersistenceFile<'a> {
-    pub fn new(dir: &'a Path, file_id: u64) -> Result<Self, Error> {
-        Ok(Self { dir, file_id })
+    pub fn new(dir: &'a Path, file_name: String) -> Result<Self, Error> {
+        Ok(Self { dir, file_name })
     }
 
     /// Path of persistence file when stored on disk
     pub fn path(&self) -> PathBuf {
-        let file_name = format!("backup@{}", self.file_id);
-        self.dir.join(file_name)
+        self.dir.join(&self.file_name)
     }
 
     // Moves the corrupt persistence file into special directory
@@ -220,9 +222,7 @@ impl<'a> PersistenceFile<'a> {
         let path_src = self.path();
         let dest_dir = self.dir.join("corrupted");
         fs::create_dir_all(&dest_dir)?;
-
-        let file_name = path_src.file_name().unwrap();
-        let path_dest = dest_dir.join(file_name);
+        let path_dest = dest_dir.join(&self.file_name);
 
         warn!("Moving corrupted file from {path_src:?} to {path_dest:?}");
         fs::rename(path_src, path_dest)?;
@@ -329,7 +329,8 @@ impl Persistence {
 
     /// Removes a persistence file with provided id
     fn remove(&mut self, id: u64) -> Result<PathBuf, Error> {
-        let mut file = PersistenceFile::new(&self.path, id)?;
+        let file_name = format!("backup@{}", id);
+        let mut file = PersistenceFile::new(&self.path, file_name)?;
         let path = file.path();
 
         self.bytes_occupied -= file.delete()? as usize;
@@ -368,14 +369,16 @@ impl Persistence {
             None
         };
 
-        Ok(NextFile { file: PersistenceFile::new(&self.path, next_file_id)?, deleted })
+        let file_name = format!("backup@{}", next_file_id);
+        Ok(NextFile { file: PersistenceFile::new(&self.path, file_name)?, deleted })
     }
 
     /// Load the next persistence file to be read into memory
     fn load_next_read_file(&mut self, current_read_file: &mut BytesMut) -> Result<(), Error> {
         // Len always > 0 because of above if. Doesn't panic
         let id = self.backlog_files.pop_front().unwrap();
-        let mut file = PersistenceFile::new(&self.path, id)?;
+        let file_name = format!("backup@{}", id);
+        let mut file = PersistenceFile::new(&self.path, file_name)?;
 
         // Load file into memory and store its id for deleting in the future
         file.read(current_read_file)?;
