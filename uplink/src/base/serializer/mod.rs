@@ -24,24 +24,15 @@ const METRICS_INTERVAL: Duration = Duration::from_secs(10);
 #[derive(thiserror::Error, Debug)]
 pub enum MqttError {
     #[error("SendError(..)")]
-    Send(Arc<StreamConfig>, Request),
+    Send(Request),
     #[error("TrySendError(..)")]
     TrySend(Request),
-}
-
-impl From<(Arc<StreamConfig>, ClientError)> for MqttError {
-    fn from((stream, e): (Arc<StreamConfig>, ClientError)) -> Self {
-        match e {
-            ClientError::Request(r) => MqttError::Send(stream, r),
-            ClientError::TryRequest(r) => MqttError::TrySend(r),
-        }
-    }
 }
 
 impl From<ClientError> for MqttError {
     fn from(e: ClientError) -> Self {
         match e {
-            ClientError::Request(r) => MqttError::Send(Arc::new(Default::default()), r),
+            ClientError::Request(r) => MqttError::Send(r),
             ClientError::TryRequest(r) => MqttError::TrySend(r),
         }
     }
@@ -81,14 +72,15 @@ enum Status {
 #[async_trait::async_trait]
 pub trait MqttClient: Clone {
     /// Accept payload and resolve as an error only when the client has died(thread kill). Useful in Slow/Catchup mode.
-    async fn publish<V>(
+    async fn publish<S, V>(
         &self,
-        stream: Arc<StreamConfig>,
+        topic: S,
         qos: QoS,
         retain: bool,
         payload: V,
     ) -> Result<(), MqttError>
     where
+        S: Into<String> + Send,
         V: Into<Vec<u8>> + Send;
 
     /// Accept payload and resolve as an error if data can't be sent over network, immediately. Useful in Normal mode.
@@ -100,23 +92,24 @@ pub trait MqttClient: Clone {
         payload: V,
     ) -> Result<(), MqttError>
     where
-        S: Into<String>,
-        V: Into<Vec<u8>>;
+        S: Into<String> + Send,
+        V: Into<Vec<u8>> + Send;
 }
 
 #[async_trait::async_trait]
 impl MqttClient for AsyncClient {
-    async fn publish<V>(
+    async fn publish<S, V>(
         &self,
-        stream: Arc<StreamConfig>,
+        topic: S,
         qos: QoS,
         retain: bool,
         payload: V,
     ) -> Result<(), MqttError>
     where
+        S: Into<String> + Send,
         V: Into<Vec<u8>> + Send,
     {
-        self.publish(&stream.topic, qos, retain, payload).await.map_err(|e| (stream, e))?;
+        self.publish(topic, qos, retain, payload).await?;
         Ok(())
     }
 
@@ -326,7 +319,7 @@ impl<C: MqttClient> Serializer<C> {
         // Note: self.client.publish() is executing code before await point
         // in publish method every time. Verify this behaviour later
         let payload = Bytes::copy_from_slice(&publish.payload[..]);
-        let publish = send_publish(self.client.clone(), publish.topic, payload, stream);
+        let publish = send_publish(self.client.clone(), publish.topic, payload);
         tokio::pin!(publish);
 
         let v: Result<Status, Error> = loop {
@@ -355,7 +348,7 @@ impl<C: MqttClient> Serializer<C> {
                     Ok(_) => {
                         break Ok(Status::EventLoopReady)
                     }
-                    Err(MqttError::Send(stream, Request::Publish(publish))) => {
+                    Err(MqttError::Send(Request::Publish(publish))) => {
                         break Ok(Status::EventLoopCrash(publish, stream));
                     },
                     Err(e) => {
@@ -414,7 +407,8 @@ impl<C: MqttClient> Serializer<C> {
         };
 
         let mut last_publish_payload_size = publish.payload.len();
-        let send = send_publish(client, publish.topic, publish.payload, stream.clone());
+        let mut last_publish_stream = stream.clone();
+        let send = send_publish(client, publish.topic, publish.payload);
         tokio::pin!(send);
 
         let v: Result<Status, Error> = loop {
@@ -445,7 +439,7 @@ impl<C: MqttClient> Serializer<C> {
                     // indefinitely write to disk to not loose data
                     let client = match o {
                         Ok(c) => c,
-                        Err(MqttError::Send(stream, Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish, stream)),
+                        Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish, last_publish_stream.clone())),
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
@@ -467,7 +461,8 @@ impl<C: MqttClient> Serializer<C> {
 
                     let payload = publish.payload;
                     last_publish_payload_size = payload.len();
-                    send.set(send_publish(client, publish.topic, payload, stream.clone()));
+                    last_publish_stream = stream.clone();
+                    send.set(send_publish(client, publish.topic, payload));
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
@@ -544,10 +539,9 @@ async fn send_publish<C: MqttClient>(
     client: C,
     topic: String,
     payload: Bytes,
-    stream: Arc<StreamConfig>,
 ) -> Result<C, MqttError> {
     debug!("publishing on {topic} with size = {}", payload.len());
-    client.publish(stream, QoS::AtLeastOnce, false, payload).await?;
+    client.publish(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
 }
 
@@ -739,23 +733,21 @@ mod test {
 
     #[async_trait::async_trait]
     impl MqttClient for MockClient {
-        async fn publish<V>(
+        async fn publish<S, V>(
             &self,
-            stream: Arc<StreamConfig>,
+            topic: S,
             qos: QoS,
             retain: bool,
             payload: V,
         ) -> Result<(), MqttError>
         where
+            S: Into<String> + Send,
             V: Into<Vec<u8>> + Send,
         {
-            let mut publish = Publish::new(&stream.topic, qos, payload);
+            let mut publish = Publish::new(topic, qos, payload);
             publish.retain = retain;
             let publish = Request::Publish(publish);
-            self.net_tx
-                .send_async(publish)
-                .await
-                .map_err(|e| MqttError::Send(stream, e.into_inner()))?;
+            self.net_tx.send_async(publish).await.map_err(|e| MqttError::Send(e.into_inner()))?;
             Ok(())
         }
 
