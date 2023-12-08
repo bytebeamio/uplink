@@ -1,8 +1,7 @@
 mod metrics;
 
 use std::collections::{HashMap, VecDeque};
-use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::{sync::Arc, time::Duration};
 
 use bytes::{Bytes, BytesMut};
@@ -10,7 +9,7 @@ use flume::{Receiver, RecvError, Sender};
 use log::{debug, error, info, trace};
 use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
-use storage::Storage;
+use storage::{PersistenceFile, Storage};
 use thiserror::Error;
 use tokio::{select, time::interval};
 
@@ -548,17 +547,14 @@ impl<C: MqttClient> Serializer<C> {
         let mut interval = interval(METRICS_INTERVAL);
         self.metrics.set_mode("recovery");
 
-        let mut path = self.config.persistence_path.clone();
-        path.push("inflight");
-
+        let mut file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string())?;
+        let path = file.path();
         if !path.is_file() {
             return Ok(Status::EventLoopReady);
         }
 
-        let mut buf = Vec::new();
-        let mut inflight_file = File::open(&path)?;
-        inflight_file.read_to_end(&mut buf)?;
-        let mut buf = BytesMut::from(buf.as_slice());
+        let mut buf = BytesMut::new();
+        file.read(&mut buf)?;
         let max_packet_size = self.config.mqtt.max_packet_size;
         let client = self.client.clone();
 
@@ -652,7 +648,7 @@ impl<C: MqttClient> Serializer<C> {
         );
 
         info!("Read and published inflight packets; removing file: {}", path.display());
-        std::fs::remove_file(path)?;
+        file.delete()?;
 
         v
     }

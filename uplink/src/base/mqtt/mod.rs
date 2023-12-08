@@ -1,12 +1,13 @@
 use bytes::BytesMut;
 use flume::{Receiver, Sender, TrySendError};
 use log::{debug, error, info};
+use storage::PersistenceFile;
 use thiserror::Error;
 use tokio::time::Duration;
 use tokio::{select, task};
 
-use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 
 use crate::{Action, Config};
@@ -30,6 +31,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Mqtt error {0}")]
     Mqtt(#[from] rumqttc::mqttbytes::Error),
+    #[error("Storage error {0}")]
+    Storage(#[from] storage::Error),
 }
 
 impl From<flume::TrySendError<Action>> for Error {
@@ -100,10 +103,8 @@ impl Mqtt {
             return Ok(());
         }
 
-        let mut path = self.config.persistence_path.clone();
-        path.push("inflight");
-        debug!("Writing pending publishes to disk: {}", path.display());
-        let mut f = fs::File::create(path)?;
+        let mut file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string())?;
+        debug!("Writing pending publishes to disk: {}", file.path().display());
         let mut buf = BytesMut::new();
 
         for mut publish in publishes {
@@ -111,8 +112,7 @@ impl Mqtt {
             publish.write(&mut buf)?;
         }
 
-        f.write_all(&buf)?;
-        f.flush()?;
+        file.write(&mut buf)?;
 
         Ok(())
     }
