@@ -233,7 +233,7 @@ impl<'a> PersistenceFile<'a> {
     /// Read contents of the persistence file from disk into buffer in memory
     pub fn read(&mut self, buf: &mut BytesMut) -> Result<(), Error> {
         let path = self.path();
-        let mut file = OpenOptions::new().read(true).open(&path)?;
+        let mut file = OpenOptions::new().read(true).open(path)?;
 
         // Initialize buffer and load next read file
         buf.clear();
@@ -258,7 +258,7 @@ impl<'a> PersistenceFile<'a> {
     /// Write contents of buffer from memory onto the persistence file in disk
     pub fn write(&mut self, buf: &mut BytesMut) -> Result<(), Error> {
         let path = self.path();
-        let mut file = OpenOptions::new().write(true).create(true).open(&path)?;
+        let mut file = OpenOptions::new().write(true).create(true).open(path)?;
 
         let hash = hash(&buf[..]);
         file.write_all(&hash.to_be_bytes())?;
