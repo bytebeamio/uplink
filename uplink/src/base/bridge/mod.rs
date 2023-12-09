@@ -1,7 +1,6 @@
 use flume::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::join;
 
 use std::{fmt::Debug, sync::Arc};
 
@@ -12,10 +11,10 @@ mod metrics;
 pub(crate) mod stream;
 mod streams;
 
-pub use actions_lane::StatusTx;
 use actions_lane::{ActionsBridge, Error};
+pub use actions_lane::{CtrlTx as ActionsLaneCtrlTx, StatusTx};
 use data_lane::DataBridge;
-pub use data_lane::DataTx;
+pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
 use super::StreamConfig;
 use crate::base::ActionRoute;
@@ -98,8 +97,8 @@ impl Bridge {
         BridgeTx { data_tx: self.data.data_tx(), status_tx: self.actions.status_tx() }
     }
 
-    pub fn ctrl_tx(&self) -> CtrlTx {
-        CtrlTx { data_lane: self.data.ctrl_tx(), actions_lane: self.actions.ctrl_tx() }
+    pub(crate) fn ctrl_tx(&self) -> (actions_lane::CtrlTx, data_lane::CtrlTx) {
+        (self.actions.ctrl_tx(), self.data.ctrl_tx())
     }
 
     pub fn register_action_route(
@@ -136,17 +135,5 @@ impl BridgeTx {
 
     pub async fn send_action_response(&self, response: ActionResponse) {
         self.status_tx.send_action_response(response).await
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CtrlTx {
-    actions_lane: actions_lane::CtrlTx,
-    data_lane: data_lane::CtrlTx,
-}
-
-impl CtrlTx {
-    pub async fn trigger_shutdown(&self) {
-        join!(self.actions_lane.trigger_shutdown(), self.data_lane.trigger_shutdown());
     }
 }

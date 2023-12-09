@@ -128,7 +128,6 @@ fn main() -> Result<(), Error> {
     uplink.spawn_builtins(&mut bridge)?;
 
     let bridge_tx = bridge.bridge_tx();
-    let ctrl_tx = bridge.ctrl_tx();
 
     let mut tcpapps = vec![];
     for (app, cfg) in config.tcpapps.clone() {
@@ -152,7 +151,7 @@ fn main() -> Result<(), Error> {
         route_rx
     });
 
-    uplink.spawn(bridge)?;
+    let ctrl_tx = uplink.spawn(bridge)?;
 
     if let Some(config) = config.simulator.clone() {
         spawn_named_thread("Simulator", || {

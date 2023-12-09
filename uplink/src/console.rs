@@ -1,6 +1,6 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Router};
 use log::info;
-use uplink::base::bridge::CtrlTx;
+use uplink::base::CtrlTx;
 
 use crate::ReloadHandle;
 
