@@ -1370,15 +1370,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mqttbytes"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9b7801639a5398353b9acf0764907d6571ca92e6b7a3662013b03861789449c"
-dependencies = [
- "bytes 1.5.0",
-]
-
-[[package]]
 name = "nanorand"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2537,9 +2528,9 @@ version = "0.1.0"
 dependencies = [
  "bytes 1.5.0",
  "log",
- "mqttbytes",
  "pretty_env_logger",
- "rand 0.7.3",
+ "rand 0.8.5",
+ "rumqttc",
  "seahash",
  "tempdir",
  "thiserror",
