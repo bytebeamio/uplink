@@ -2835,7 +2835,6 @@ dependencies = [
  "libc",
  "mio 0.8.9",
  "num_cpus",
- "parking_lot",
  "pin-project-lite 0.2.13",
  "signal-hook-registry",
  "socket2 0.5.5",
