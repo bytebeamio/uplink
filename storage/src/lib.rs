@@ -391,7 +391,7 @@ impl Persistence {
 #[cfg(test)]
 mod test {
     use super::*;
-    use mqttbytes::*;
+    use rumqttc::*;
     use tempdir::TempDir;
 
     fn init_backup_folders() -> TempDir {
