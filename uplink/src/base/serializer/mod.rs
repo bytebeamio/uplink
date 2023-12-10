@@ -555,6 +555,8 @@ impl<C: MqttClient> Serializer<C> {
                     // indefinitely write to disk to not loose data.
                     let client = match o {
                         Ok(c) => c,
+                        // TODO: while we have to transition into crash mode, it's better not to write any inflight packets onto disk.
+                        // This can be achieved with the serializer shutdown mode introduced in bytebeamio/uplink#311
                         Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish, last_publish_stream)),
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
