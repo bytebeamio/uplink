@@ -523,8 +523,8 @@ impl<C: MqttClient> Serializer<C> {
         }
 
         let mut last_publish_payload_size = publish.payload.len();
-        let send =
-            send_publish(client, publish.payload, placeholder_stream_config(publish.topic.clone()));
+        let mut last_publish_stream = placeholder_stream_config(publish.topic.clone());
+        let send = send_publish(client, publish.topic, publish.payload);
         tokio::pin!(send);
 
         let v = loop {
@@ -555,8 +555,7 @@ impl<C: MqttClient> Serializer<C> {
                     // indefinitely write to disk to not loose data.
                     let client = match o {
                         Ok(c) => c,
-                        // NOTE: while we have to transition into crash mode, might be better not to write inflight packets onto disk
-                        Err(MqttError::Send(stream ,Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish, stream)),
+                        Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish, last_publish_stream)),
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
@@ -575,7 +574,8 @@ impl<C: MqttClient> Serializer<C> {
 
                     let payload = publish.payload;
                     last_publish_payload_size = payload.len();
-                    send.set(send_publish(client, payload, placeholder_stream_config(publish.topic.clone())));
+                    last_publish_stream = placeholder_stream_config(publish.topic.clone());
+                    send.set(send_publish(client, publish.topic,payload));
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
@@ -653,9 +653,9 @@ impl<C: MqttClient> Serializer<C> {
 
 async fn send_publish<C: MqttClient>(
     client: C,
+    topic: String,
     payload: Bytes,
 ) -> Result<C, MqttError> {
-    let topic = &stream.topic;
     debug!("publishing on {topic} with size = {}", payload.len());
     client.publish(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
