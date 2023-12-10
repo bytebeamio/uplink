@@ -176,7 +176,7 @@ impl ActionsBridge {
                         error!("Failed to save current action: {e}");
                     }
                     // NOTE: there might be events still waiting for recv on bridge_rx
-                    self.shutdown_handle.blocking_send(()).unwrap();
+                    self.shutdown_handle.send(()).await.unwrap();
 
                     return Ok(())
                 }
