@@ -329,6 +329,7 @@ impl Uplink {
 
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
         let mqtt_client = mqtt.client();
+        let ctrl_mqtt = mqtt.ctrl_tx();
 
         let serializer = Serializer::new(
             self.config.clone(),
@@ -336,6 +337,7 @@ impl Uplink {
             mqtt_client.clone(),
             self.serializer_metrics_tx(),
         )?;
+        let ctrl_serializer = serializer.ctrl_tx();
 
         // Serializer thread to handle network conditions state machine
         // and send data to mqtt thread
@@ -405,7 +407,12 @@ impl Uplink {
             })
         });
 
-        Ok(CtrlTx { actions_lane: ctrl_actions_lane, data_lane: ctrl_data_lane })
+        Ok(CtrlTx {
+            actions_lane: ctrl_actions_lane,
+            data_lane: ctrl_data_lane,
+            mqtt: ctrl_mqtt,
+            serializer: ctrl_serializer,
+        })
     }
 
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {

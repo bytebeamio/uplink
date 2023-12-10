@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use flume::{Receiver, RecvError, Sender};
+use flume::{bounded, Receiver, RecvError, Sender};
 use log::{debug, error, info, trace};
 use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
@@ -264,6 +264,9 @@ pub struct Serializer<C: MqttClient> {
     metrics: SerializerMetrics,
     metrics_tx: Sender<SerializerMetrics>,
     pending_metrics: VecDeque<SerializerMetrics>,
+    /// Control handles
+    ctrl_rx: Receiver<SerializerShutdown>,
+    ctrl_tx: Sender<SerializerShutdown>,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -276,6 +279,7 @@ impl<C: MqttClient> Serializer<C> {
         metrics_tx: Sender<SerializerMetrics>,
     ) -> Result<Serializer<C>, Error> {
         let storage_handler = StorageHandler::new(config.clone())?;
+        let (ctrl_tx, ctrl_rx) = bounded(1);
 
         Ok(Serializer {
             config,
@@ -285,7 +289,13 @@ impl<C: MqttClient> Serializer<C> {
             metrics: SerializerMetrics::new("catchup"),
             metrics_tx,
             pending_metrics: VecDeque::with_capacity(3),
+            ctrl_tx,
+            ctrl_rx,
         })
+    }
+
+    pub fn ctrl_tx(&self) -> CtrlTx {
+        CtrlTx { inner: self.ctrl_tx.clone() }
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -715,6 +725,22 @@ fn check_and_flush_metrics(
     }
 
     Ok(())
+}
+
+/// Command to remotely trigger `Serializer` shutdown
+pub(crate) struct SerializerShutdown;
+
+/// Handle to send control messages to `Serializer`
+#[derive(Debug, Clone)]
+pub struct CtrlTx {
+    pub(crate) inner: Sender<SerializerShutdown>,
+}
+
+impl CtrlTx {
+    /// Triggers shutdown of `Serializer`
+    pub async fn trigger_shutdown(&self) {
+        self.inner.send_async(SerializerShutdown).await.unwrap()
+    }
 }
 
 // TODO(RT): Test cases

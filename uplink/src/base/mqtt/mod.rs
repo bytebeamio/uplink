@@ -1,4 +1,4 @@
-use flume::{Sender, TrySendError};
+use flume::{bounded, Receiver, Sender, TrySendError};
 use log::{debug, error, info};
 use thiserror::Error;
 use tokio::task;
@@ -47,6 +47,9 @@ pub struct Mqtt {
     metrics: MqttMetrics,
     /// Metrics tx
     metrics_tx: Sender<MqttMetrics>,
+    /// Control handles
+    ctrl_rx: Receiver<MqttShutdown>,
+    ctrl_tx: Sender<MqttShutdown>,
 }
 
 impl Mqtt {
@@ -59,6 +62,7 @@ impl Mqtt {
         let options = mqttoptions(&config);
         let (client, mut eventloop) = AsyncClient::new(options, 10);
         eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
+        let (ctrl_tx, ctrl_rx) = bounded(1);
 
         Mqtt {
             config,
@@ -67,12 +71,18 @@ impl Mqtt {
             native_actions_tx: actions_tx,
             metrics: MqttMetrics::new(),
             metrics_tx,
+            ctrl_tx,
+            ctrl_rx,
         }
     }
 
     /// Returns a client handle to MQTT interface
     pub fn client(&mut self) -> AsyncClient {
         self.client.clone()
+    }
+
+    pub fn ctrl_tx(&self) -> CtrlTx {
+        CtrlTx { inner: self.ctrl_tx.clone() }
     }
 
     /// Poll eventloop to receive packets from broker
@@ -215,4 +225,20 @@ fn _get_certs(key_path: &Path, ca_path: &Path) -> (Vec<u8>, Vec<u8>) {
     ca_file.read_to_end(&mut ca).unwrap();
 
     (key, ca)
+}
+
+/// Command to remotely trigger `Mqtt` shutdown
+pub(crate) struct MqttShutdown;
+
+/// Handle to send control messages to `Mqtt`
+#[derive(Debug, Clone)]
+pub struct CtrlTx {
+    pub(crate) inner: Sender<MqttShutdown>,
+}
+
+impl CtrlTx {
+    /// Triggers shutdown of `Mqtt`
+    pub async fn trigger_shutdown(&self) {
+        self.inner.send_async(MqttShutdown).await.unwrap()
+    }
 }
