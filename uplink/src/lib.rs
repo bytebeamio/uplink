@@ -262,7 +262,7 @@ pub mod config {
 
 pub use base::actions::{Action, ActionResponse};
 use base::bridge::{Bridge, Package, Payload, Point, StreamMetrics};
-use base::mqtt::{Mqtt, MqttShutdown};
+use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
 pub use collector::{simulator, tcpjson::TcpJson};
@@ -288,8 +288,6 @@ pub struct Uplink {
     serializer_metrics_rx: Receiver<SerializerMetrics>,
     shutdown_tx: Sender<()>,
     shutdown_rx: Receiver<()>,
-    mqtt_shutdown_tx: Sender<MqttShutdown>,
-    mqtt_shutdown_rx: Receiver<MqttShutdown>,
 }
 
 impl Uplink {
@@ -299,7 +297,6 @@ impl Uplink {
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
         let (shutdown_tx, shutdown_rx) = bounded(1);
-        let (mqtt_shutdown_tx, mqtt_shutdown_rx) = bounded(1);
 
         Ok(Uplink {
             config,
@@ -313,8 +310,6 @@ impl Uplink {
             serializer_metrics_rx,
             shutdown_tx,
             shutdown_rx,
-            mqtt_shutdown_tx,
-            mqtt_shutdown_rx,
         })
     }
 
@@ -325,7 +320,6 @@ impl Uplink {
             self.stream_metrics_tx(),
             self.action_rx.clone(),
             self.shutdown_tx.clone(),
-            self.mqtt_shutdown_tx.clone(),
         )
     }
 
@@ -333,13 +327,9 @@ impl Uplink {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
         let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
 
-        let mut mqtt = Mqtt::new(
-            self.config.clone(),
-            self.action_tx.clone(),
-            mqtt_metrics_tx,
-            self.mqtt_shutdown_rx.clone(),
-        );
+        let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
         let mqtt_client = mqtt.client();
+        let ctrl_mqtt = mqtt.ctrl_tx();
 
         let serializer = Serializer::new(
             self.config.clone(),
@@ -416,7 +406,7 @@ impl Uplink {
             })
         });
 
-        Ok(CtrlTx { actions_lane: ctrl_actions_lane, data_lane: ctrl_data_lane })
+        Ok(CtrlTx { actions_lane: ctrl_actions_lane, data_lane: ctrl_data_lane, mqtt: ctrl_mqtt })
     }
 
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {

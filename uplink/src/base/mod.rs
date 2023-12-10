@@ -15,6 +15,7 @@ use crate::collector::logcat::LogcatConfig;
 
 use self::bridge::stream::MAX_BUFFER_SIZE;
 use self::bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
+use self::mqtt::CtrlTx as MqttCtrlTx;
 
 pub mod actions;
 pub mod bridge;
@@ -289,10 +290,15 @@ pub struct Config {
 pub struct CtrlTx {
     pub actions_lane: ActionsLaneCtrlTx,
     pub data_lane: DataLaneCtrlTx,
+    pub mqtt: MqttCtrlTx,
 }
 
 impl CtrlTx {
     pub async fn trigger_shutdown(&self) {
-        join!(self.actions_lane.trigger_shutdown(), self.data_lane.trigger_shutdown());
+        join!(
+            self.actions_lane.trigger_shutdown(),
+            self.data_lane.trigger_shutdown(),
+            self.mqtt.trigger_shutdown(),
+        );
     }
 }
