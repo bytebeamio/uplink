@@ -1,5 +1,4 @@
 use flume::{Receiver, Sender};
-use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -19,7 +18,6 @@ pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
 use super::StreamConfig;
 use crate::base::ActionRoute;
-use crate::base::serializer::SerializerShutdown;
 use crate::{Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 
@@ -78,7 +76,6 @@ pub(crate) struct DataBridgeShutdown;
 pub struct Bridge {
     pub(crate) data: DataBridge,
     pub(crate) actions: ActionsBridge,
-    pub(crate) serializer_shutdown: Sender<SerializerShutdown>,
 }
 
 impl Bridge {
@@ -88,12 +85,11 @@ impl Bridge {
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
         shutdown_handle: Sender<()>,
-        serializer_shutdown: Sender<SerializerShutdown>,
     ) -> Self {
         let data = DataBridge::new(config.clone(), package_tx.clone(), metrics_tx.clone());
         let actions =
             ActionsBridge::new(config, package_tx, actions_rx, shutdown_handle, metrics_tx);
-        Self { data, actions, serializer_shutdown }
+        Self { data, actions }
     }
 
     /// Handle to send data/action status messages

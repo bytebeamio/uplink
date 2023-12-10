@@ -263,7 +263,7 @@ pub mod config {
 pub use base::actions::{Action, ActionResponse};
 use base::bridge::{Bridge, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
-use base::serializer::{Serializer, SerializerMetrics, SerializerShutdown};
+use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
 pub use collector::{simulator, tcpjson::TcpJson};
 pub use storage::Storage;
@@ -288,8 +288,6 @@ pub struct Uplink {
     serializer_metrics_rx: Receiver<SerializerMetrics>,
     shutdown_tx: Sender<()>,
     shutdown_rx: Receiver<()>,
-    serializer_shutdown_tx: Sender<SerializerShutdown>,
-    serializer_shutdown_rx: Receiver<SerializerShutdown>,
 }
 
 impl Uplink {
@@ -299,7 +297,6 @@ impl Uplink {
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
         let (shutdown_tx, shutdown_rx) = bounded(1);
-        let (serializer_shutdown_tx, serializer_shutdown_rx) = bounded(1);
 
         Ok(Uplink {
             config,
@@ -313,8 +310,6 @@ impl Uplink {
             serializer_metrics_rx,
             shutdown_tx,
             shutdown_rx,
-            serializer_shutdown_tx,
-            serializer_shutdown_rx,
         })
     }
 
@@ -325,7 +320,6 @@ impl Uplink {
             self.stream_metrics_tx(),
             self.action_rx.clone(),
             self.shutdown_tx.clone(),
-            self.serializer_shutdown_tx.clone(),
         )
     }
 
@@ -341,8 +335,8 @@ impl Uplink {
             self.data_rx.clone(),
             mqtt_client.clone(),
             self.serializer_metrics_tx(),
-            self.serializer_shutdown_rx.clone(),
         )?;
+        let ctrl_serializer = serializer.ctrl_tx();
 
         // Serializer thread to handle network conditions state machine
         // and send data to mqtt thread
@@ -412,7 +406,11 @@ impl Uplink {
             })
         });
 
-        Ok(CtrlTx { actions_lane: ctrl_actions_lane, data_lane: ctrl_data_lane })
+        Ok(CtrlTx {
+            actions_lane: ctrl_actions_lane,
+            data_lane: ctrl_data_lane,
+            serializer: ctrl_serializer,
+        })
     }
 
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
