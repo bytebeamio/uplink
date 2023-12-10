@@ -3,7 +3,7 @@ use log::{debug, error, info};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
-use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task::{spawn, JoinHandle};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
@@ -64,8 +64,7 @@ impl TcpJson {
         let addr = format!("0.0.0.0:{}", self.config.port);
         let listener = TcpListener::bind(&addr).await?;
         let mut handle: Option<JoinHandle<()>> = None;
-        let mut actions_rx = self.actions_rx.take().unwrap();
-        let (mut actions_tx, _) = channel(0);
+        let (mut actions_tx, _) = channel(1);
 
         info!("Waiting for app = {} to connect on {:?}", self.name, addr);
         loop {
@@ -97,12 +96,22 @@ impl TcpJson {
                 }
 
                 // Accepts action only if tx is not closed
-                action = actions_rx.recv(), if !actions_tx.is_closed() => {
-                    let action = action.ok_or(Error::Recv)?;
-                    actions_tx.send(action).await.unwrap();
+                o = self.fwd_actions(&actions_tx), if !actions_tx.is_closed() => {
+                    o?
                 }
             }
         }
+    }
+
+    async fn fwd_actions(&mut self, actions_tx: &Sender<Action>) -> Result<(), Error> {
+        let Some(actions_rx) = self.actions_rx.as_mut() else {
+            return Ok(());
+        };
+
+        let action = actions_rx.recv().await.ok_or(Error::Recv)?;
+        actions_tx.send(action).await.unwrap();
+
+        Ok(())
     }
 
     async fn collect(
