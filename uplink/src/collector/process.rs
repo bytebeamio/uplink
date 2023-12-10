@@ -1,9 +1,9 @@
-use flume::{Receiver, RecvError, SendError};
 use log::{debug, error, info};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::select;
+use tokio::sync::mpsc::{error::SendError, Receiver};
 use tokio::time::timeout_at;
 
 use crate::base::bridge::BridgeTx;
@@ -18,8 +18,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Json error {0}")]
     Json(#[from] serde_json::Error),
-    #[error("Recv error {0}")]
-    Recv(#[from] RecvError),
+    #[error("Recv error")]
+    Recv,
     #[error("Send error {0}")]
     Send(#[from] SendError<Box<dyn Package>>),
     #[error("Busy with previous action")]
@@ -81,7 +81,7 @@ impl ProcessHandler {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) -> Result<(), Error> {
         loop {
-            let action = self.actions_rx.recv_async().await?;
+            let action = self.actions_rx.recv().await.ok_or(Error::Recv)?;
             let command = String::from("tools/") + &action.name;
             let deadline = match &action.deadline {
                 Some(d) => *d,

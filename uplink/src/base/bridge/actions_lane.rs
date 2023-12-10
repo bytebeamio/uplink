@@ -1,7 +1,7 @@
-use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use tokio::select;
+use tokio::sync::mpsc::{channel, error::TrySendError, Receiver, Sender};
 use tokio::time::{self, interval, Instant, Sleep};
 
 use std::collections::HashSet;
@@ -18,8 +18,8 @@ const TUNSHELL_ACTION: &str = "launch_shell";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Receiver error {0}")]
-    Recv(#[from] RecvError),
+    #[error("Receiver error")]
+    Recv,
     #[error("Io error {0}")]
     Io(#[from] std::io::Error),
     #[error("Serde error {0}")]
@@ -71,9 +71,9 @@ impl ActionsBridge {
         shutdown_handle: Sender<()>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
-        let (status_tx, status_rx) = bounded(10);
+        let (status_tx, status_rx) = channel(10);
         let action_redirections = config.action_redirections.clone();
-        let (ctrl_tx, ctrl_rx) = bounded(1);
+        let (ctrl_tx, ctrl_rx) = channel(1);
 
         let mut streams_config = HashMap::new();
         let mut action_status = config.action_status.clone();
@@ -141,12 +141,12 @@ impl ActionsBridge {
 
         loop {
             select! {
-                action = self.actions_rx.recv_async() => {
-                    let action = action?;
+                action = self.actions_rx.recv() => {
+                    let action = action.ok_or(Error::Recv)?;
                     self.handle_action(action).await;
                 }
-                response = self.status_rx.recv_async() => {
-                    let response = response?;
+                response = self.status_rx.recv() => {
+                    let response = response.ok_or(Error::Recv)?;
                     self.forward_action_response(response).await;
                 }
                 _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
@@ -171,12 +171,12 @@ impl ActionsBridge {
                     }
                 }
                 // Handle a shutdown signal
-                _ = self.ctrl_rx.recv_async() => {
+                _ = self.ctrl_rx.recv() => {
                     if let Err(e) = self.save_current_action() {
                         error!("Failed to save current action: {e}");
                     }
                     // NOTE: there might be events still waiting for recv on bridge_rx
-                    self.shutdown_handle.send(()).unwrap();
+                    self.shutdown_handle.blocking_send(()).unwrap();
 
                     return Ok(())
                 }
@@ -434,11 +434,11 @@ pub struct ActionsBridgeTx {
 
 impl ActionsBridgeTx {
     pub async fn send_action_response(&self, response: ActionResponse) {
-        self.status_tx.send_async(response).await.unwrap()
+        self.status_tx.send(response).await.unwrap()
     }
 
     pub async fn trigger_shutdown(&self) {
-        self.shutdown_handle.send_async(ActionBridgeShutdown).await.unwrap()
+        self.shutdown_handle.send(ActionBridgeShutdown).await.unwrap()
     }
 }
 
@@ -446,7 +446,7 @@ impl ActionsBridgeTx {
 mod tests {
     use std::{sync::Arc, time::Duration};
 
-    use flume::{bounded, Receiver, Sender};
+    use tokio::sync::mpsc::{channel, Receiver, Sender};
     use tokio::{runtime::Runtime, select};
 
     use crate::{
@@ -474,10 +474,10 @@ mod tests {
     fn create_bridge(
         config: Arc<Config>,
     ) -> (ActionsBridge, Sender<Action>, Receiver<Box<dyn Package>>) {
-        let (data_tx, data_rx) = bounded(10);
-        let (actions_tx, actions_rx) = bounded(10);
-        let (shutdown_handle, _) = bounded(1);
-        let (metrics_tx, _) = bounded(1);
+        let (data_tx, data_rx) = channel(10);
+        let (actions_tx, actions_rx) = channel(10);
+        let (shutdown_handle, _) = channel(1);
+        let (metrics_tx, _) = channel(1);
         let bridge = ActionsBridge::new(config, data_tx, actions_rx, shutdown_handle, metrics_tx);
 
         (bridge, actions_tx, data_rx)
@@ -498,7 +498,7 @@ mod tests {
     impl Responses {
         fn next(&mut self) -> ActionResponse {
             if self.responses.is_empty() {
-                let status = self.rx.recv().unwrap().serialize().unwrap();
+                let status = self.rx.blocking_recv().unwrap().serialize().unwrap();
                 self.responses = serde_json::from_slice(&status).unwrap();
             }
 
@@ -514,10 +514,10 @@ mod tests {
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
         let route_1 = ActionRoute { name: "route_1".to_string(), timeout: Duration::from_secs(10) };
 
-        let (route_tx, route_1_rx) = bounded(1);
+        let (route_tx, mut route_1_rx) = channel(1);
         bridge.register_action_route(route_1, route_tx).unwrap();
 
-        let (route_tx, route_2_rx) = bounded(1);
+        let (route_tx, mut route_2_rx) = channel(1);
         let route_2 = ActionRoute { name: "route_2".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(route_2, route_tx).unwrap();
 
@@ -528,12 +528,12 @@ mod tests {
             rt.block_on(async {
                 loop {
                     select! {
-                        action = route_1_rx.recv_async() => {
+                        action = route_1_rx.recv() => {
                             let action = action.unwrap();
                             assert_eq!(action.action_id, "1".to_owned());
                         }
 
-                        action = route_2_rx.recv_async() => {
+                        action = route_2_rx.recv() => {
                             let action = action.unwrap();
                             assert_eq!(action.action_id, "2".to_owned());
                         }
@@ -551,7 +551,7 @@ mod tests {
             payload: "test".to_string(),
             deadline: None,
         };
-        actions_tx.send(action_1).unwrap();
+        actions_tx.blocking_send(action_1).unwrap();
 
         let mut responses = Responses { rx: data_rx, responses: vec![] };
 
@@ -575,7 +575,7 @@ mod tests {
             payload: "test".to_string(),
             deadline: None,
         };
-        actions_tx.send(action_2).unwrap();
+        actions_tx.blocking_send(action_2).unwrap();
 
         let status = responses.next();
         assert_eq!(status.state, "Received".to_owned());
@@ -600,13 +600,13 @@ mod tests {
 
         let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
 
-        let (route_tx, action_rx) = bounded(1);
+        let (route_tx, mut action_rx) = channel(1);
         bridge.register_action_route(test_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
 
         std::thread::spawn(move || loop {
-            let action = action_rx.recv().unwrap();
+            let action = action_rx.blocking_recv().unwrap();
             assert_eq!(action.action_id, "1".to_owned());
         });
 
@@ -619,7 +619,7 @@ mod tests {
             payload: "test".to_string(),
             deadline: None,
         };
-        actions_tx.send(action_1).unwrap();
+        actions_tx.blocking_send(action_1).unwrap();
 
         let mut responses = Responses { rx: data_rx, responses: vec![] };
 
@@ -634,7 +634,7 @@ mod tests {
             payload: "test".to_string(),
             deadline: None,
         };
-        actions_tx.send(action_2).unwrap();
+        actions_tx.blocking_send(action_2).unwrap();
 
         let status = responses.next();
         // verify response is uplink occupied failure
@@ -652,14 +652,14 @@ mod tests {
 
         let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
 
-        let (route_tx, action_rx) = bounded(1);
+        let (route_tx, mut action_rx) = channel(1);
         bridge.register_action_route(test_route, route_tx).unwrap();
         let bridge_tx = bridge.tx();
 
         spawn_bridge(bridge);
 
         std::thread::spawn(move || loop {
-            let action = action_rx.recv().unwrap();
+            let action = action_rx.blocking_recv().unwrap();
             assert_eq!(action.action_id, "1".to_owned());
             std::thread::sleep(Duration::from_secs(1));
             let response = ActionResponse::progress("1", "Tested", 100);
@@ -675,7 +675,7 @@ mod tests {
             payload: "test".to_string(),
             deadline: None,
         };
-        actions_tx.send(action).unwrap();
+        actions_tx.blocking_send(action).unwrap();
 
         let mut responses = Responses { rx: data_rx, responses: vec![] };
 
@@ -700,11 +700,11 @@ mod tests {
         let bridge_tx_1 = bridge.tx();
         let bridge_tx_2 = bridge.tx();
 
-        let (route_tx, action_rx_1) = bounded(1);
+        let (route_tx, mut action_rx_1) = channel(1);
         let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
-        let (route_tx, action_rx_2) = bounded(1);
+        let (route_tx, mut action_rx_2) = channel(1);
         let redirect_route =
             ActionRoute { name: "redirect".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(redirect_route, route_tx).unwrap();
@@ -713,7 +713,7 @@ mod tests {
 
         std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
-            let action = action_rx_1.recv().unwrap();
+            let action = action_rx_1.blocking_recv().unwrap();
             assert_eq!(action.action_id, "1".to_owned());
             std::thread::sleep(Duration::from_secs(1));
             let response = ActionResponse::progress("1", "Tested", 100);
@@ -722,7 +722,7 @@ mod tests {
 
         std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
-            let action = action_rx_2.recv().unwrap();
+            let action = action_rx_2.blocking_recv().unwrap();
             assert_eq!(action.action_id, "1".to_owned());
             let response = ActionResponse::progress("1", "Redirected", 0);
             rt.block_on(bridge_tx_2.send_action_response(response));
@@ -740,7 +740,7 @@ mod tests {
             payload: "test".to_string(),
             deadline: None,
         };
-        actions_tx.send(action).unwrap();
+        actions_tx.blocking_send(action).unwrap();
 
         let mut responses = Responses { rx: data_rx, responses: vec![] };
 
@@ -768,12 +768,12 @@ mod tests {
         let bridge_tx_1 = bridge.tx();
         let bridge_tx_2 = bridge.tx();
 
-        let (route_tx, action_rx_1) = bounded(1);
+        let (route_tx, mut action_rx_1) = channel(1);
         let tunshell_route =
             ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(tunshell_route, route_tx).unwrap();
 
-        let (route_tx, action_rx_2) = bounded(1);
+        let (route_tx, mut action_rx_2) = channel(1);
         let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
@@ -781,7 +781,7 @@ mod tests {
 
         std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
-            let action = action_rx_1.recv().unwrap();
+            let action = action_rx_1.blocking_recv().unwrap();
             assert_eq!(action.action_id, "1");
             let response = ActionResponse::progress(&action.action_id, "Launched", 0);
             rt.block_on(bridge_tx_1.send_action_response(response));
@@ -792,7 +792,7 @@ mod tests {
 
         std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
-            let action = action_rx_2.recv().unwrap();
+            let action = action_rx_2.blocking_recv().unwrap();
             assert_eq!(action.action_id, "2");
             let response = ActionResponse::progress(&action.action_id, "Running", 0);
             rt.block_on(bridge_tx_2.send_action_response(response));
@@ -810,7 +810,7 @@ mod tests {
             payload: "test".to_string(),
             deadline: None,
         };
-        actions_tx.send(action).unwrap();
+        actions_tx.blocking_send(action).unwrap();
 
         std::thread::sleep(Duration::from_secs(1));
 
@@ -821,7 +821,7 @@ mod tests {
             payload: "test".to_string(),
             deadline: None,
         };
-        actions_tx.send(action).unwrap();
+        actions_tx.blocking_send(action).unwrap();
 
         let mut responses = Responses { rx: data_rx, responses: vec![] };
 
@@ -859,11 +859,11 @@ mod tests {
         let bridge_tx_1 = bridge.tx();
         let bridge_tx_2 = bridge.tx();
 
-        let (route_tx, action_rx_1) = bounded(1);
+        let (route_tx, mut action_rx_1) = channel(1);
         let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
-        let (route_tx, action_rx_2) = bounded(1);
+        let (route_tx, mut action_rx_2) = channel(1);
         let tunshell_route =
             ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(tunshell_route, route_tx).unwrap();
@@ -872,7 +872,7 @@ mod tests {
 
         std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
-            let action = action_rx_1.recv().unwrap();
+            let action = action_rx_1.blocking_recv().unwrap();
             assert_eq!(action.action_id, "1");
             let response = ActionResponse::progress(&action.action_id, "Running", 0);
             rt.block_on(bridge_tx_1.send_action_response(response));
@@ -883,7 +883,7 @@ mod tests {
 
         std::thread::spawn(move || {
             let rt = Runtime::new().unwrap();
-            let action = action_rx_2.recv().unwrap();
+            let action = action_rx_2.blocking_recv().unwrap();
             assert_eq!(action.action_id, "2");
             let response = ActionResponse::progress(&action.action_id, "Launched", 0);
             rt.block_on(bridge_tx_2.send_action_response(response));
@@ -901,7 +901,7 @@ mod tests {
             payload: "test".to_string(),
             deadline: None,
         };
-        actions_tx.send(action).unwrap();
+        actions_tx.blocking_send(action).unwrap();
 
         std::thread::sleep(Duration::from_secs(1));
 
@@ -912,7 +912,7 @@ mod tests {
             payload: "test".to_string(),
             deadline: None,
         };
-        actions_tx.send(action).unwrap();
+        actions_tx.blocking_send(action).unwrap();
 
         let mut responses = Responses { rx: data_rx, responses: vec![] };
 

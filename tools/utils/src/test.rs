@@ -1,20 +1,21 @@
 use std::time::Duration;
 
+use tokio::sync::mpsc::channel;
+
 #[tokio::main]
 async fn main() {
-    let (t1, r1) = flume::bounded(1);
-    let (t2, _) = flume::bounded(10);
+    let (t1, mut r1) = channel(1);
+    let (t2, _) = channel(10);
     {
-        let r1 = r1.clone();
         let t2 = t2.clone();
         tokio::spawn(async move {
             loop {
-                let value = match r1.recv_async().await {
-                    Ok(value) => value,
-                    Err(_) => break,
+                let value = match r1.recv().await {
+                    Some(value) => value,
+                    _ => break,
                 };
                 first_response(value);
-                match t2.send_async(value).await {
+                match t2.send(value).await {
                     Ok(value) => value,
                     Err(_) => break,
                 }
@@ -34,7 +35,7 @@ async fn main() {
     tokio::spawn(async move {
         let mut idx = 1;
         loop {
-            match t1.send_async(idx).await {
+            match t1.send(idx).await {
                 Ok(value) => value,
                 Err(_) => break,
             };

@@ -1,7 +1,7 @@
-use flume::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::join;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 use std::{fmt::Debug, sync::Arc};
 

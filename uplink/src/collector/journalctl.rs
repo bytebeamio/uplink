@@ -1,5 +1,5 @@
-use flume::Receiver;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Receiver;
 
 use std::io::BufRead;
 use std::process::{Command, Stdio};
@@ -13,8 +13,8 @@ use crate::{base::bridge::BridgeTx, ActionResponse, Payload};
 pub enum Error {
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
-    #[error("Error receiving Action {0}")]
-    Recv(#[from] flume::RecvError),
+    #[error("Error receiving Action")]
+    Recv,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -129,7 +129,7 @@ impl JournalCtl {
         self.spawn_logger(self.config.clone()).await;
 
         loop {
-            let action = self.actions_rx.recv()?;
+            let action = self.actions_rx.blocking_recv().ok_or(Error::Recv)?;
             let mut config = serde_json::from_str::<JournalCtlConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
             config.units.retain(|unit| !unit.is_empty());

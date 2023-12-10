@@ -2,10 +2,10 @@ use crate::base::bridge::{BridgeTx, Payload};
 use crate::base::SimulatorConfig;
 use crate::{Action, ActionResponse};
 use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
-use flume::{bounded, Receiver, Sender};
 use log::{error, info};
 use rand::Rng;
 use thiserror::Error;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::interval;
 use tokio::{select, spawn};
 
@@ -23,8 +23,8 @@ pub enum Event {
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] io::Error),
-    #[error("Recv error {0}")]
-    Recv(#[from] flume::RecvError),
+    #[error("Recv error")]
+    Recv,
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
 }
@@ -42,7 +42,7 @@ impl ActionResponse {
             sequence += 1;
             let response = ActionResponse::progress(&action_id, "in_progress", progress)
                 .set_sequence(sequence);
-            if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
+            if let Err(e) = tx.send(Event::ActionResponse(response)).await {
                 error!("{e}");
                 break;
             }
@@ -53,7 +53,7 @@ impl ActionResponse {
         sequence += 1;
         let response =
             ActionResponse::progress(&action_id, "Completed", 100).set_sequence(sequence);
-        if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
+        if let Err(e) = tx.send(Event::ActionResponse(response)).await {
             error!("{e}");
         }
         info!("Successfully sent all action responses");
@@ -92,26 +92,26 @@ pub fn spawn_data_simulators(device: DeviceData, tx: Sender<Event>) {
 pub async fn start(
     config: SimulatorConfig,
     bridge_tx: BridgeTx,
-    actions_rx: Option<Receiver<Action>>,
+    mut actions_rx: Option<Receiver<Action>>,
 ) -> Result<(), Error> {
     let path = read_gps_path(&config.gps_paths);
     let device = new_device_data(path);
 
-    let (tx, rx) = bounded(10);
+    let (tx, mut rx) = channel(10);
     spawn_data_simulators(device, tx.clone());
 
     loop {
-        if let Some(actions_rx) = actions_rx.as_ref() {
+        if let Some(actions_rx) = actions_rx.as_mut() {
             select! {
-                action = actions_rx.recv_async() => {
-                    let action = action?;
+                action = actions_rx.recv() => {
+                    let action = action.ok_or(Error::Recv)?;
                     spawn(ActionResponse::simulate(action,  tx.clone()));
                 }
-                event = rx.recv_async() => {
+                event = rx.recv() => {
                     match event {
-                        Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
-                        Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
-                        Err(_) => {
+                        Some(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
+                        Some(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
+                        None => {
                             error!("All generators have stopped!");
                             return Ok(())
                         }
@@ -119,10 +119,10 @@ pub async fn start(
                 }
             }
         } else {
-            match rx.recv_async().await {
-                Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
-                Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
-                Err(_) => {
+            match rx.recv().await {
+                Some(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
+                Some(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
+                None => {
                     error!("All generators have stopped!");
                     return Ok(());
                 }

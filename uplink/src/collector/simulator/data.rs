@@ -1,10 +1,10 @@
 use fake::{Dummy, Fake, Faker};
-use flume::Sender;
 use log::{error, trace};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::sync::mpsc::Sender;
 use tokio::time::interval;
 
 use std::sync::Arc;
@@ -76,7 +76,7 @@ impl Gps {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Event::Data(Payload {
+                .send(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "gps".to_string(),
                     sequence,
@@ -207,7 +207,7 @@ impl Bms {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Event::Data(Payload {
+                .send(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "bms".to_string(),
                     sequence,
@@ -256,7 +256,7 @@ impl Imu {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Event::Data(Payload {
+                .send(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "imu".to_string(),
                     sequence,
@@ -299,7 +299,7 @@ impl Motor {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Event::Data(Payload {
+                .send(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "motor".to_string(),
                     sequence,
@@ -348,7 +348,7 @@ impl PeripheralState {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Event::Data(Payload {
+                .send(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "peripheral_state".to_string(),
                     sequence,
@@ -394,7 +394,7 @@ impl DeviceShadow {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Event::Data(Payload {
+                .send(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "device_shadow".to_string(),
                     sequence,

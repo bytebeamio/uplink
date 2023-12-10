@@ -1,6 +1,6 @@
-use flume::Receiver;
 use log::error;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Receiver;
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
@@ -23,15 +23,21 @@ pub struct Keys {
     encryption: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TunshellClient {
-    actions_rx: Receiver<Action>,
+    actions_rx: Option<Receiver<Action>>,
     bridge: BridgeTx,
+}
+
+impl Clone for TunshellClient {
+    fn clone(&self) -> Self {
+        Self { actions_rx: None, bridge: self.bridge.clone() }
+    }
 }
 
 impl TunshellClient {
     pub fn new(actions_rx: Receiver<Action>, bridge: BridgeTx) -> Self {
-        Self { actions_rx, bridge }
+        Self { actions_rx: Some(actions_rx), bridge }
     }
 
     fn config(&self, keys: Keys) -> Config {
@@ -48,8 +54,9 @@ impl TunshellClient {
     }
 
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(self) {
-        while let Ok(action) = self.actions_rx.recv_async().await {
+    pub async fn start(mut self) {
+        let mut actions_rx = self.actions_rx.take().expect("Actions rx should be present");
+        while let Some(action) = actions_rx.recv().await {
             let session = self.clone();
             //TODO(RT): Findout why this is spawned. We want to send other action's with shell?
             tokio::spawn(async move {

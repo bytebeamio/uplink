@@ -1,6 +1,6 @@
-use flume::{Sender, TrySendError};
 use log::{debug, error, info};
 use thiserror::Error;
+use tokio::sync::mpsc::{error::TrySendError, Sender};
 use tokio::task;
 use tokio::time::Duration;
 
@@ -10,7 +10,7 @@ use std::path::Path;
 
 use crate::{Action, Config};
 use rumqttc::{
-    AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Publish, QoS,
+    AsyncClient, ConnectionError, Event, EventLoop, Incoming, Key, MqttOptions, Publish, QoS,
     TlsConfiguration, Transport,
 };
 use std::sync::Arc;
@@ -27,8 +27,8 @@ pub enum Error {
     TrySend(Box<TrySendError<Action>>),
 }
 
-impl From<flume::TrySendError<Action>> for Error {
-    fn from(e: flume::TrySendError<Action>) -> Self {
+impl From<TrySendError<Action>> for Error {
+    fn from(e: TrySendError<Action>) -> Self {
         Self::TrySend(Box::new(e))
     }
 }
@@ -163,7 +163,7 @@ impl Mqtt {
     }
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
-    pub fn check_and_flush_metrics(&mut self) -> Result<(), flume::TrySendError<MqttMetrics>> {
+    pub fn check_and_flush_metrics(&mut self) -> Result<(), TrySendError<MqttMetrics>> {
         let metrics = self.metrics.clone();
         info!(
             "{:>35}: publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3} inflight = {}",
@@ -195,7 +195,7 @@ fn mqttoptions(config: &Config) -> MqttOptions {
         let transport = Transport::Tls(TlsConfiguration::Simple {
             ca,
             alpn: None,
-            client_auth: Some((device_certificate, device_private_key)),
+            client_auth: Some((device_certificate, Key::RSA(device_private_key))),
         });
 
         mqttoptions.set_transport(transport);

@@ -1,9 +1,9 @@
 use std::io;
 use std::sync::Arc;
 
-use flume::{Receiver, RecvError};
 use rumqttc::{AsyncClient, ClientError, QoS, Request};
 use tokio::select;
+use tokio::sync::mpsc::Receiver;
 
 use crate::base::bridge::StreamMetrics;
 use crate::Config;
@@ -36,7 +36,7 @@ impl Monitor {
         Monitor { config, client, stream_metrics_rx, serializer_metrics_rx, mqtt_metrics_rx }
     }
 
-    pub async fn start(&self) -> Result<(), Error> {
+    pub async fn start(&mut self) -> Result<(), Error> {
         let stream_metrics_config = self.config.stream_metrics.clone();
         let stream_metrics_topic = stream_metrics_config.topic;
         let mut stream_metrics = Vec::with_capacity(10);
@@ -51,8 +51,8 @@ impl Monitor {
 
         loop {
             select! {
-                o = self.stream_metrics_rx.recv_async() => {
-                    let o = o?;
+                o = self.stream_metrics_rx.recv() => {
+                    let o = o.ok_or(Error::Collector)?;
 
                     if stream_metrics_config.blacklist.contains(o.stream()) {
                         continue;
@@ -64,15 +64,15 @@ impl Monitor {
                     stream_metrics.clear();
                     self.client.publish(&stream_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                 }
-                o = self.serializer_metrics_rx.recv_async() => {
-                    let o = o?;
+                o = self.serializer_metrics_rx.recv() => {
+                    let o = o.ok_or(Error::Collector)?;
                     serializer_metrics.push(o);
                     let v = serde_json::to_string(&serializer_metrics).unwrap();
                     serializer_metrics.clear();
                     self.client.publish(&serializer_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                 }
-                o = self.mqtt_metrics_rx.recv_async() => {
-                    let o = o?;
+                o = self.mqtt_metrics_rx.recv() => {
+                    let o = o.ok_or(Error::Collector)?;
                     mqtt_metrics.push(o);
                     let v = serde_json::to_string(&mqtt_metrics).unwrap();
                     mqtt_metrics.clear();
@@ -102,8 +102,8 @@ impl From<ClientError> for MqttError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Collector recv error {0}")]
-    Collector(#[from] RecvError),
+    #[error("Collector recv error")]
+    Collector,
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Io error {0}")]

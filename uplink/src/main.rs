@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Error;
-use flume::bounded;
 use log::info;
 use structopt::StructOpt;
+use tokio::sync::mpsc::channel;
 use tokio::time::sleep;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
@@ -133,7 +133,7 @@ fn main() -> Result<(), Error> {
     for (app, cfg) in config.tcpapps.clone() {
         let mut route_rx = None;
         if !cfg.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
+            let (actions_tx, actions_rx) = channel(1);
             bridge.register_action_routes(&cfg.actions, actions_tx)?;
             route_rx = Some(actions_rx)
         }
@@ -143,7 +143,7 @@ fn main() -> Result<(), Error> {
     let simulator_actions = config.simulator.as_ref().and_then(|cfg| {
         let mut route_rx = None;
         if !cfg.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
+            let (actions_tx, actions_rx) = channel(1);
             bridge.register_action_routes(&cfg.actions, actions_tx).unwrap();
             route_rx = Some(actions_rx)
         }

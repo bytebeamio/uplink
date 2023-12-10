@@ -1,9 +1,9 @@
 use std::{fs::File, path::PathBuf};
 
-use flume::Receiver;
 use log::{debug, error, warn};
 use tar::Archive;
 use tokio::process::Command;
+use tokio::sync::mpsc::Receiver;
 
 use super::downloader::DownloadFile;
 use crate::base::{bridge::BridgeTx, InstallerConfig};
@@ -33,8 +33,8 @@ impl OTAInstaller {
     }
 
     #[tokio::main]
-    pub async fn start(&self) {
-        while let Ok(action) = self.actions_rx.recv_async().await {
+    pub async fn start(&mut self) {
+        while let Some(action) = self.actions_rx.recv().await {
             if let Err(e) = self.extractor(&action) {
                 error!("Error extracting tarball: {e}");
                 self.forward_action_error(action, e).await;

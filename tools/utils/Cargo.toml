@@ -20,7 +20,6 @@ name = "wait_and_send"
 path = "src/wait_and_send.rs"
 
 [dependencies]
-flume = { workspace = true }
 futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

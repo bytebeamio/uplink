@@ -5,12 +5,13 @@ use std::io::{self, Write};
 use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use flume::{Receiver, RecvError, Sender};
 use log::{debug, error, info, trace};
 use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
 use storage::Storage;
 use thiserror::Error;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::{select, time::interval};
 
 use crate::base::Compression;
@@ -40,8 +41,8 @@ impl From<ClientError> for MqttError {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Collector recv error {0}")]
-    Collector(#[from] RecvError),
+    #[error("Collector recv error")]
+    Collector,
     #[error("Serde error {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Io error {0}")]
@@ -297,7 +298,7 @@ impl<C: MqttClient> Serializer<C> {
 
         loop {
             // Collect next data packet and write to disk
-            let data = self.collector_rx.recv_async().await?;
+            let data = self.collector_rx.recv().await.ok_or(Error::Collector)?;
             let publish = construct_publish(data)?;
             let storage = self.storage_handler.select(&stream);
             match write_to_disk(publish, storage) {
@@ -324,8 +325,8 @@ impl<C: MqttClient> Serializer<C> {
 
         let v: Result<Status, Error> = loop {
             select! {
-                data = self.collector_rx.recv_async() => {
-                    let data = data?;
+                data = self.collector_rx.recv() => {
+                    let data = data.ok_or(Error::Collector)?;
                     let stream = data.stream_config();
                     let publish = construct_publish(data)?;
                     let storage = self.storage_handler.select(&stream);
@@ -413,8 +414,8 @@ impl<C: MqttClient> Serializer<C> {
 
         let v: Result<Status, Error> = loop {
             select! {
-                data = self.collector_rx.recv_async() => {
-                    let data = data?;
+                data = self.collector_rx.recv() => {
+                    let data = data.ok_or(Error::Collector)?;
                     let stream = data.stream_config();
                     let publish = construct_publish(data)?;
                     let storage = self.storage_handler.select(&stream);
@@ -488,8 +489,8 @@ impl<C: MqttClient> Serializer<C> {
 
         loop {
             select! {
-                data = self.collector_rx.recv_async() => {
-                    let data = data?;
+                data = self.collector_rx.recv() => {
+                    let data = data.ok_or(Error::Collector)?;
                     let stream = data.stream_config();
                     let publish = construct_publish(data)?;
                     let payload_size = publish.payload.len();
@@ -653,7 +654,7 @@ fn check_and_flush_metrics(
     metrics: &mut SerializerMetrics,
     metrics_tx: &Sender<SerializerMetrics>,
     storage_handler: &StorageHandler,
-) -> Result<(), flume::TrySendError<SerializerMetrics>> {
+) -> Result<(), TrySendError<SerializerMetrics>> {
     use pretty_bytes::converter::convert;
 
     let mut inmemory_write_size = 0;
@@ -717,6 +718,7 @@ fn check_and_flush_metrics(
 #[cfg(test)]
 mod test {
     use serde_json::Value;
+    use tokio::sync::mpsc::error::SendError;
 
     use std::collections::HashMap;
     use std::time::Duration;
@@ -726,9 +728,16 @@ mod test {
     use crate::base::MqttConfig;
     use crate::Payload;
 
+    fn from_try_send(e: TrySendError<Request>) -> MqttError {
+        match e {
+            TrySendError::Closed(r) => MqttError::TrySend(r),
+            TrySendError::Full(r) => MqttError::TrySend(r),
+        }
+    }
+
     #[derive(Clone)]
     pub struct MockClient {
-        pub net_tx: flume::Sender<Request>,
+        pub net_tx: tokio::sync::mpsc::Sender<Request>,
     }
 
     #[async_trait::async_trait]
@@ -747,7 +756,7 @@ mod test {
             let mut publish = Publish::new(topic, qos, payload);
             publish.retain = retain;
             let publish = Request::Publish(publish);
-            self.net_tx.send_async(publish).await.map_err(|e| MqttError::Send(e.into_inner()))?;
+            self.net_tx.send(publish).await.map_err(|SendError(r)| MqttError::Send(r))?;
             Ok(())
         }
 
@@ -765,7 +774,7 @@ mod test {
             let mut publish = Publish::new(topic, qos, payload);
             publish.retain = retain;
             let publish = Request::Publish(publish);
-            self.net_tx.try_send(publish).map_err(|e| MqttError::TrySend(e.into_inner()))?;
+            self.net_tx.try_send(publish).map_err(from_try_send)?;
             Ok(())
         }
     }
@@ -796,10 +805,11 @@ mod test {
 
     fn defaults(
         config: Arc<Config>,
-    ) -> (Serializer<MockClient>, flume::Sender<Box<dyn Package>>, Receiver<Request>) {
-        let (data_tx, data_rx) = flume::bounded(1);
-        let (net_tx, net_rx) = flume::bounded(1);
-        let (metrics_tx, _metrics_rx) = flume::bounded(1);
+    ) -> (Serializer<MockClient>, tokio::sync::mpsc::Sender<Box<dyn Package>>, Receiver<Request>)
+    {
+        let (data_tx, data_rx) = tokio::sync::mpsc::channel(1);
+        let (net_tx, net_rx) = tokio::sync::mpsc::channel(1);
+        let (metrics_tx, _metrics_rx) = tokio::sync::mpsc::channel(1);
         let client = MockClient { net_tx };
 
         (Serializer::new(config, data_rx, client, metrics_tx).unwrap(), data_tx, net_rx)
@@ -818,7 +828,7 @@ mod test {
     }
 
     impl MockCollector {
-        fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
+        fn new(data_tx: tokio::sync::mpsc::Sender<Box<dyn Package>>) -> MockCollector {
             MockCollector {
                 stream: Stream::new(
                     "hello",
@@ -849,12 +859,12 @@ mod test {
     // Force runs serializer in normal mode, without persistence
     fn normal_to_slow() {
         let config = default_config();
-        let (mut serializer, data_tx, net_rx) = defaults(Arc::new(config));
+        let (mut serializer, data_tx, mut net_rx) = defaults(Arc::new(config));
 
         // Slow Network, takes packets only once in 10s
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_secs(10));
-            net_rx.recv().unwrap();
+            net_rx.blocking_recv().unwrap();
         });
 
         let mut collector = MockCollector::new(data_tx);
@@ -903,12 +913,12 @@ mod test {
     fn disk_to_catchup() {
         let config = Arc::new(default_config());
 
-        let (mut serializer, data_tx, net_rx) = defaults(config);
+        let (mut serializer, data_tx, mut net_rx) = defaults(config);
 
         // Slow Network, takes packets only once in 10s
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_secs(5));
-            net_rx.recv().unwrap();
+            net_rx.blocking_recv().unwrap();
         });
 
         let mut collector = MockCollector::new(data_tx);
@@ -988,7 +998,7 @@ mod test {
     fn catchup_to_normal_with_persistence() {
         let config = Arc::new(default_config());
 
-        let (mut serializer, data_tx, net_rx) = defaults(config);
+        let (mut serializer, data_tx, mut net_rx) = defaults(config);
 
         let mut storage = serializer
             .storage_handler
@@ -1009,7 +1019,7 @@ mod test {
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(5));
             for i in 1..6 {
-                match net_rx.recv().unwrap() {
+                match net_rx.blocking_recv().unwrap() {
                     Request::Publish(Publish { payload, .. }) => {
                         let recvd = String::from_utf8(payload.to_vec()).unwrap();
                         let expected = format!(

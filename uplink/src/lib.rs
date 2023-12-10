@@ -60,8 +60,8 @@ use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
-use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub mod base;
 pub mod collector;
@@ -277,36 +277,36 @@ where
 
 pub struct Uplink {
     config: Arc<Config>,
-    action_rx: Receiver<Action>,
+    action_rx: Option<Receiver<Action>>,
     action_tx: Sender<Action>,
-    data_rx: Receiver<Box<dyn Package>>,
+    data_rx: Option<Receiver<Box<dyn Package>>>,
     data_tx: Sender<Box<dyn Package>>,
     stream_metrics_tx: Sender<StreamMetrics>,
-    stream_metrics_rx: Receiver<StreamMetrics>,
+    stream_metrics_rx: Option<Receiver<StreamMetrics>>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
-    serializer_metrics_rx: Receiver<SerializerMetrics>,
+    serializer_metrics_rx: Option<Receiver<SerializerMetrics>>,
     shutdown_tx: Sender<()>,
     shutdown_rx: Receiver<()>,
 }
 
 impl Uplink {
     pub fn new(config: Arc<Config>) -> Result<Uplink, Error> {
-        let (action_tx, action_rx) = bounded(10);
-        let (data_tx, data_rx) = bounded(10);
-        let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
-        let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
-        let (shutdown_tx, shutdown_rx) = bounded(1);
+        let (action_tx, action_rx) = channel(10);
+        let (data_tx, data_rx) = channel(10);
+        let (stream_metrics_tx, stream_metrics_rx) = channel(10);
+        let (serializer_metrics_tx, serializer_metrics_rx) = channel(10);
+        let (shutdown_tx, shutdown_rx) = channel(1);
 
         Ok(Uplink {
             config,
-            action_rx,
+            action_rx: Some(action_rx),
             action_tx,
-            data_rx,
+            data_rx: Some(data_rx),
             data_tx,
             stream_metrics_tx,
-            stream_metrics_rx,
+            stream_metrics_rx: Some(stream_metrics_rx),
             serializer_metrics_tx,
-            serializer_metrics_rx,
+            serializer_metrics_rx: Some(serializer_metrics_rx),
             shutdown_tx,
             shutdown_rx,
         })
@@ -317,20 +317,20 @@ impl Uplink {
             self.config.clone(),
             self.data_tx.clone(),
             self.stream_metrics_tx(),
-            self.action_rx.clone(),
+            self.bridge_action_rx(),
             self.shutdown_tx.clone(),
         )
     }
 
     pub fn spawn(&mut self, bridge: Bridge) -> Result<(), Error> {
-        let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
+        let (mqtt_metrics_tx, mqtt_metrics_rx) = channel(10);
 
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
         let mqtt_client = mqtt.client();
 
         let serializer = Serializer::new(
             self.config.clone(),
-            self.data_rx.clone(),
+            self.data_rx.take().expect("The Data rx handle should be present here"),
             mqtt_client.clone(),
             self.serializer_metrics_tx(),
         )?;
@@ -360,11 +360,15 @@ impl Uplink {
             })
         });
 
-        let monitor = Monitor::new(
+        let mut monitor = Monitor::new(
             self.config.clone(),
             mqtt_client,
-            self.stream_metrics_rx.clone(),
-            self.serializer_metrics_rx.clone(),
+            self.stream_metrics_rx
+                .take()
+                .expect("The Stream Metrics rx handle should be present here"),
+            self.serializer_metrics_rx
+                .take()
+                .expect("The Serializer Metrics rx handle should be present here"),
             mqtt_metrics_rx,
         );
 
@@ -411,13 +415,13 @@ impl Uplink {
 
         let route =
             ActionRoute { name: "launch_shell".to_owned(), timeout: Duration::from_secs(10) };
-        let (actions_tx, actions_rx) = bounded(1);
+        let (actions_tx, actions_rx) = channel(1);
         bridge.register_action_route(route, actions_tx)?;
         let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
         spawn_named_thread("Tunshell Client", move || tunshell_client.start());
 
         if !self.config.downloader.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
+            let (actions_tx, actions_rx) = channel(1);
             bridge.register_action_routes(&self.config.downloader.actions, actions_tx)?;
             let file_downloader =
                 FileDownloader::new(self.config.clone(), actions_rx, bridge_tx.clone())?;
@@ -428,9 +432,9 @@ impl Uplink {
         spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
 
         if !self.config.ota_installer.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
+            let (actions_tx, actions_rx) = channel(1);
             bridge.register_action_routes(&self.config.ota_installer.actions, actions_tx)?;
-            let ota_installer =
+            let mut ota_installer =
                 OTAInstaller::new(self.config.ota_installer.clone(), actions_rx, bridge_tx.clone());
             spawn_named_thread("OTA Installer", move || ota_installer.start());
         }
@@ -441,7 +445,7 @@ impl Uplink {
                 name: "journalctl_config".to_string(),
                 timeout: Duration::from_secs(10),
             };
-            let (actions_tx, actions_rx) = bounded(1);
+            let (actions_tx, actions_rx) = channel(1);
             bridge.register_action_route(route, actions_tx)?;
             let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
             spawn_named_thread("Logger", || {
@@ -457,7 +461,7 @@ impl Uplink {
                 name: "journalctl_config".to_string(),
                 timeout: Duration::from_secs(10),
             };
-            let (actions_tx, actions_rx) = bounded(1);
+            let (actions_tx, actions_rx) = channel(1);
             bridge.register_action_route(route, actions_tx)?;
             let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
             spawn_named_thread("Logger", || {
@@ -473,7 +477,7 @@ impl Uplink {
         };
 
         if !self.config.processes.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
+            let (actions_tx, actions_rx) = channel(1);
             bridge.register_action_routes(&self.config.processes, actions_tx)?;
             let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
             spawn_named_thread("Process Handler", || {
@@ -484,7 +488,7 @@ impl Uplink {
         }
 
         if !self.config.script_runner.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
+            let (actions_tx, actions_rx) = channel(1);
             bridge.register_action_routes(&self.config.script_runner, actions_tx)?;
             let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
             spawn_named_thread("Script Runner", || {
@@ -497,8 +501,8 @@ impl Uplink {
         Ok(())
     }
 
-    pub fn bridge_action_rx(&self) -> Receiver<Action> {
-        self.action_rx.clone()
+    pub fn bridge_action_rx(&mut self) -> Receiver<Action> {
+        self.action_rx.take().expect("The Action rx handle should be present here")
     }
 
     pub fn bridge_data_tx(&self) -> Sender<Box<dyn Package>> {
@@ -513,7 +517,7 @@ impl Uplink {
         self.serializer_metrics_tx.clone()
     }
 
-    pub async fn resolve_on_shutdown(&self) -> Result<(), RecvError> {
-        self.shutdown_rx.recv_async().await
+    pub async fn resolve_on_shutdown(&mut self) -> Option<()> {
+        self.shutdown_rx.recv().await
     }
 }

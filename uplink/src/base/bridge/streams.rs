@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use flume::Sender;
 use log::{error, info, trace};
+use tokio::sync::mpsc::{error::TrySendError, Sender};
 
 use super::stream::{self, StreamStatus};
 use super::{Point, StreamMetrics};
@@ -99,9 +99,7 @@ impl<T: Point> Streams<T> {
     }
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
-    pub fn check_and_flush_metrics(
-        &mut self,
-    ) -> Result<(), Box<flume::TrySendError<StreamMetrics>>> {
+    pub fn check_and_flush_metrics(&mut self) -> Result<(), Box<TrySendError<StreamMetrics>>> {
         for (buffer_name, data) in self.map.iter_mut() {
             let metrics = data.metrics.clone();
 

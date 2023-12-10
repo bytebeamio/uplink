@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use flume::{bounded, Receiver, RecvError, Sender};
 use log::{debug, error};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::{select, time::interval};
 
 use crate::Config;
@@ -10,8 +10,8 @@ use super::{streams::Streams, DataBridgeShutdown, Package, Payload, StreamMetric
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Receiver error {0}")]
-    Recv(#[from] RecvError),
+    #[error("Receiver error")]
+    Recv,
 }
 
 pub struct DataBridge {
@@ -33,8 +33,8 @@ impl DataBridge {
         package_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
-        let (data_tx, data_rx) = bounded(10);
-        let (ctrl_tx, ctrl_rx) = bounded(1);
+        let (data_tx, data_rx) = channel(10);
+        let (ctrl_tx, ctrl_rx) = channel(1);
 
         let mut streams = Streams::new(config.clone(), package_tx, metrics_tx);
         streams.config_streams(config.streams.clone());
@@ -51,8 +51,8 @@ impl DataBridge {
 
         loop {
             select! {
-                data = self.data_rx.recv_async() => {
-                    let data = data?;
+                data = self.data_rx.recv() => {
+                    let data = data.ok_or(Error::Recv)?;
                     self.streams.forward(data).await;
                 }
                 // Flush streams that timeout
@@ -69,7 +69,7 @@ impl DataBridge {
                     }
                 }
                 // Handle a shutdown signal
-                _ = self.ctrl_rx.recv_async() => {
+                _ = self.ctrl_rx.recv() => {
                     self.streams.flush_all().await;
 
                     return Ok(())
@@ -88,14 +88,14 @@ pub struct DataBridgeTx {
 
 impl DataBridgeTx {
     pub async fn send_payload(&self, payload: Payload) {
-        self.data_tx.send_async(payload).await.unwrap()
+        self.data_tx.send(payload).await.unwrap()
     }
 
     pub fn send_payload_sync(&self, payload: Payload) {
-        self.data_tx.send(payload).unwrap()
+        self.data_tx.blocking_send(payload).unwrap()
     }
 
     pub async fn trigger_shutdown(&self) {
-        self.shutdown_handle.send_async(DataBridgeShutdown).await.unwrap()
+        self.shutdown_handle.send(DataBridgeShutdown).await.unwrap()
     }
 }

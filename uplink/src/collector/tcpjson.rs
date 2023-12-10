@@ -1,9 +1,9 @@
-use flume::{Receiver, RecvError};
 use futures_util::SinkExt;
 use log::{debug, error, info};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
+use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::{spawn, JoinHandle};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
@@ -18,8 +18,8 @@ use crate::{Action, ActionResponse, Payload};
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] io::Error),
-    #[error("Receiver error {0}")]
-    Recv(#[from] RecvError),
+    #[error("Receiver error")]
+    Recv,
     #[error("Stream done")]
     StreamDone,
     #[error("Lines codec error {0}")]
@@ -28,7 +28,7 @@ pub enum Error {
     Json(#[from] serde_json::error::Error),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TcpJson {
     name: String,
     config: AppConfig,
@@ -36,6 +36,17 @@ pub struct TcpJson {
     bridge: BridgeTx,
     /// Action receiver
     actions_rx: Option<Receiver<Action>>,
+}
+
+impl Clone for TcpJson {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            config: self.config.clone(),
+            bridge: self.bridge.clone(),
+            actions_rx: None,
+        }
+    }
 }
 
 impl TcpJson {
@@ -49,65 +60,73 @@ impl TcpJson {
         TcpJson { name, config, bridge, actions_rx }
     }
 
-    pub async fn start(self) -> Result<(), Error> {
+    pub async fn start(mut self) -> Result<(), Error> {
         let addr = format!("0.0.0.0:{}", self.config.port);
         let listener = TcpListener::bind(&addr).await?;
         let mut handle: Option<JoinHandle<()>> = None;
+        let mut actions_rx = self.actions_rx.take().unwrap();
+        let (mut actions_tx, _) = channel(0);
 
         info!("Waiting for app = {} to connect on {:?}", self.name, addr);
         loop {
-            let framed = match listener.accept().await {
-                Ok((stream, addr)) => {
-                    info!("Accepted connection from app = {} on {addr}", self.name);
-                    Framed::new(stream, LinesCodec::new())
-                }
-                Err(e) => {
-                    error!("Tcp connection accept error = {e}, app = {}", self.name);
-                    continue;
-                }
-            };
+            select! {
+                accepted = listener.accept() => {
+                    let (tx,actions_rx) = channel(0);
+                    actions_tx = tx;
+                    let framed = match accepted {
+                        Ok((stream, addr)) => {
+                            info!("Accepted connection from app = {} on {addr}", self.name);
+                            Framed::new(stream, LinesCodec::new())
+                        }
+                        Err(e) => {
+                            error!("Tcp connection accept error = {e}, app = {}", self.name);
+                            continue;
+                        }
+                    };
 
-            if let Some(handle) = handle {
-                handle.abort();
+                    if let Some(handle) = handle {
+                        handle.abort();
+                    }
+
+                    let mut tcpjson = self.clone();
+                    handle = Some(spawn(async move {
+                        if let Err(e) = tcpjson.collect(framed, actions_rx).await {
+                            error!("TcpJson failed. app = {}, Error = {e}", tcpjson.name);
+                        }
+                    }));
+                }
+
+                // Accepts action only if tx is not closed
+                action = actions_rx.recv(), if !actions_tx.is_closed() => {
+                    let action = action.ok_or(Error::Recv)?;
+                    actions_tx.send(action).await.unwrap();
+                }
             }
-
-            let tcpjson = self.clone();
-            handle = Some(spawn(async move {
-                if let Err(e) = tcpjson.collect(framed).await {
-                    error!("TcpJson failed. app = {}, Error = {e}", tcpjson.name);
-                }
-            }));
         }
     }
 
-    async fn collect(&self, mut client: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
-        if let Some(actions_rx) = self.actions_rx.as_ref() {
-            loop {
-                select! {
-                    line = client.next() => {
-                        let line = line.ok_or(Error::StreamDone)??;
-                        if let Err(e) = self.handle_incoming_line(line).await {
-                            error!("Error handling incoming line = {e}, app = {}", self.name);
-                        }
-                    }
-                    action = actions_rx.recv_async() => {
-                        let action = action?;
-                        match serde_json::to_string(&action) {
-                            Ok(data) => client.send(data).await?,
-                            Err(e) => {
-                                error!("Serialization error = {e}, app = {}", self.name);
-                                continue
-                            }
-                        }
+    async fn collect(
+        &mut self,
+        mut client: Framed<TcpStream, LinesCodec>,
+        mut actions_rx: Receiver<Action>,
+    ) -> Result<(), Error> {
+        loop {
+            select! {
+                line = client.next() => {
+                    let line = line.ok_or(Error::StreamDone)??;
+                    if let Err(e) = self.handle_incoming_line(line).await {
+                        error!("Error handling incoming line = {e}, app = {}", self.name);
                     }
                 }
-            }
-        } else {
-            loop {
-                let line = client.next().await;
-                let line = line.ok_or(Error::StreamDone)??;
-                if let Err(e) = self.handle_incoming_line(line).await {
-                    error!("Error handling incoming line = {e}, app = {}", self.name);
+                action = actions_rx.recv() => {
+                    let action = action.ok_or(Error::Recv)?;
+                    match serde_json::to_string(&action) {
+                        Ok(data) => client.send(data).await?,
+                        Err(e) => {
+                            error!("Serialization error = {e}, app = {}", self.name);
+                            continue
+                        }
+                    }
                 }
             }
         }

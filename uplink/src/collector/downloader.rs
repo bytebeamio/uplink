@@ -48,12 +48,12 @@
 //! [`action_redirections`]: Config#structfield.action_redirections
 
 use bytes::BytesMut;
-use flume::Receiver;
 use futures_util::{Future, StreamExt};
 use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identity, Response};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Receiver;
 use tokio::time::{timeout_at, Instant};
 
 use std::fs::{metadata, remove_dir_all, File};
@@ -140,10 +140,10 @@ impl FileDownloader {
         info!("Downloader thread is ready to receive download actions");
         loop {
             self.sequence = 0;
-            let action = match self.actions_rx.recv_async().await {
-                Ok(a) => a,
-                Err(e) => {
-                    error!("Downloader thread had to stop: {e}");
+            let action = match self.actions_rx.recv().await {
+                Some(a) => a,
+                None => {
+                    error!("Downloader thread had to stop");
                     break;
                 }
             };
@@ -407,8 +407,8 @@ impl DownloadState {
 
 #[cfg(test)]
 mod test {
-    use flume::bounded;
     use serde_json::json;
+    use tokio::sync::mpsc::channel;
 
     use std::{collections::HashMap, time::Duration};
 
@@ -433,11 +433,11 @@ mod test {
     }
 
     fn create_bridge() -> (BridgeTx, Receiver<ActionResponse>) {
-        let (data_tx, _) = flume::bounded(2);
-        let (status_tx, status_rx) = flume::bounded(2);
-        let (shutdown_handle, _) = bounded(1);
+        let (data_tx, _) = channel(2);
+        let (status_tx, status_rx) = channel(2);
+        let (shutdown_handle, _) = channel(1);
         let data = DataBridgeTx { data_tx, shutdown_handle };
-        let (shutdown_handle, _) = bounded(1);
+        let (shutdown_handle, _) = channel(1);
         let actions = ActionsBridgeTx { status_tx, shutdown_handle };
 
         (BridgeTx { data, actions }, status_rx)
@@ -459,10 +459,10 @@ mod test {
             path,
         };
         let config = config(downloader_cfg.clone());
-        let (bridge_tx, status_rx) = create_bridge();
+        let (bridge_tx, mut status_rx) = create_bridge();
 
         // Create channels to forward and push actions on
-        let (download_tx, download_rx) = bounded(1);
+        let (download_tx, download_rx) = channel(1);
         let downloader = FileDownloader::new(Arc::new(config), download_rx, bridge_tx).unwrap();
 
         // Start FileDownloader in separate thread
@@ -494,13 +494,13 @@ mod test {
         download_tx.try_send(download_action).unwrap();
 
         // Collect action_status and ensure it is as expected
-        let status = status_rx.recv().unwrap();
+        let status = status_rx.blocking_recv().unwrap();
         assert_eq!(status.state, "Downloading");
         let mut progress = 0;
 
         // Collect and ensure forwarded action contains expected info
         loop {
-            let status = status_rx.recv().unwrap();
+            let status = status_rx.blocking_recv().unwrap();
 
             assert!(progress <= status.progress);
             progress = status.progress;

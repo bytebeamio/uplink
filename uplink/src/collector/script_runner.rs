@@ -1,9 +1,9 @@
-use flume::{Receiver, RecvError, SendError};
 use log::{debug, error, info, warn};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::select;
+use tokio::sync::mpsc::{error::SendError, Receiver};
 use tokio::time::timeout_at;
 
 use super::downloader::DownloadFile;
@@ -20,8 +20,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Json error {0}")]
     Json(#[from] serde_json::Error),
-    #[error("Recv error {0}")]
-    Recv(#[from] RecvError),
+    #[error("Recv error")]
+    Recv,
     #[error("Send error {0}")]
     Send(#[from] SendError<Box<dyn Package>>),
     #[error("Busy with previous action")]
@@ -97,7 +97,7 @@ impl ScriptRunner {
         info!("Script runner is ready");
 
         loop {
-            let action = self.actions_rx.recv_async().await?;
+            let action = self.actions_rx.recv().await.ok_or(Error::Recv)?;
             let command = match serde_json::from_str::<DownloadFile>(&action.payload) {
                 Ok(DownloadFile { download_path: Some(download_path), .. }) => download_path,
                 Ok(_) => {
@@ -154,14 +154,14 @@ mod tests {
         Action,
     };
 
-    use flume::bounded;
+    use tokio::sync::mpsc::channel;
 
     fn create_bridge() -> (BridgeTx, Receiver<ActionResponse>) {
-        let (data_tx, _) = flume::bounded(2);
-        let (status_tx, status_rx) = flume::bounded(2);
-        let (shutdown_handle, _) = bounded(1);
+        let (data_tx, _) = channel(2);
+        let (status_tx, status_rx) = channel(2);
+        let (shutdown_handle, _) = channel(1);
         let data = DataBridgeTx { data_tx, shutdown_handle };
-        let (shutdown_handle, _) = bounded(1);
+        let (shutdown_handle, _) = channel(1);
         let actions = ActionsBridgeTx { status_tx, shutdown_handle };
 
         (BridgeTx { data, actions }, status_rx)
@@ -169,14 +169,14 @@ mod tests {
 
     #[test]
     fn empty_payload() {
-        let (bridge_tx, status_rx) = create_bridge();
+        let (bridge_tx, mut status_rx) = create_bridge();
 
-        let (actions_tx, actions_rx) = bounded(1);
+        let (actions_tx, actions_rx) = channel(1);
         let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
         thread::spawn(move || script_runner.start().unwrap());
 
         actions_tx
-            .send(Action {
+            .blocking_send(Action {
                 action_id: "1".to_string(),
                 kind: "1".to_string(),
                 name: "test".to_string(),
@@ -185,22 +185,22 @@ mod tests {
             })
             .unwrap();
 
-        let ActionResponse { state, errors, .. } = status_rx.recv().unwrap();
+        let ActionResponse { state, errors, .. } = status_rx.blocking_recv().unwrap();
         assert_eq!(state, "Failed");
         assert_eq!(errors, ["Failed to deserialize action payload: \"EOF while parsing a value at line 1 column 0\"; payload: \"\""]);
     }
 
     #[test]
     fn missing_path() {
-        let (bridge_tx, status_rx) = create_bridge();
+        let (bridge_tx, mut status_rx) = create_bridge();
 
-        let (actions_tx, actions_rx) = bounded(1);
+        let (actions_tx, actions_rx) = channel(1);
         let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
 
         thread::spawn(move || script_runner.start().unwrap());
 
         actions_tx
-            .send(Action {
+            .blocking_send(Action {
                 action_id: "1".to_string(),
                 kind: "1".to_string(),
                 name: "test".to_string(),
@@ -210,7 +210,7 @@ mod tests {
             })
             .unwrap();
 
-        let ActionResponse { state, errors, .. } = status_rx.recv().unwrap();
+        let ActionResponse { state, errors, .. } = status_rx.blocking_recv().unwrap();
         assert_eq!(state, "Failed");
         assert_eq!(errors, ["Action payload doesn't contain path for script execution; payload: \"{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}\""]);
     }

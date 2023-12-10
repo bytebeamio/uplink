@@ -1,8 +1,8 @@
 use std::{fmt::Debug, mem, sync::Arc, time::Duration};
 
-use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::Serialize;
+use tokio::sync::mpsc::{error::SendError, Sender};
 
 use crate::base::StreamConfig;
 
@@ -123,7 +123,7 @@ where
     pub async fn flush(&mut self) -> Result<(), Error> {
         if !self.is_empty() {
             let buf = self.take_buffer();
-            self.tx.send_async(Box::new(buf)).await?;
+            self.tx.send(Box::new(buf)).await?;
         }
 
         Ok(())
@@ -143,7 +143,7 @@ where
     /// Returns [`StreamStatus`].
     pub async fn fill(&mut self, data: T) -> Result<StreamStatus, Error> {
         if let Some(buf) = self.add(data)? {
-            self.tx.send_async(Box::new(buf)).await?;
+            self.tx.send(Box::new(buf)).await?;
             return Ok(StreamStatus::Flushed);
         }
 
@@ -160,7 +160,7 @@ where
     /// Returns [`StreamStatus`].
     pub fn push(&mut self, data: T) -> Result<StreamStatus, Error> {
         if let Some(buf) = self.add(data)? {
-            self.tx.send(Box::new(buf))?;
+            self.tx.blocking_send(Box::new(buf))?;
             return Ok(StreamStatus::Flushed);
         }
 
