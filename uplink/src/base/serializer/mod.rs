@@ -309,7 +309,7 @@ impl<C: MqttClient> Serializer<C> {
     /// Write all data received, from here-on, to disk only, shutdown serializer
     /// after handling all data payloads.
     async fn shutdown(&mut self) -> Result<Status, Error> {
-        debug!("Forced into crash mode, writing all incoming data to persistence.");
+        debug!("Forced into shutdown mode, writing all incoming data to persistence.");
 
         loop {
             // Collect remaining data packets and write to disk
@@ -325,7 +325,7 @@ impl<C: MqttClient> Serializer<C> {
             match write_to_disk(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
-                Err(e) => error!("Crash loop: write error = {:?}", e),
+                Err(e) => error!("Shutdown: write error = {:?}", e),
             }
         }
     }
