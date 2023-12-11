@@ -49,6 +49,7 @@ use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
+use base::CtrlTx;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
@@ -328,8 +329,9 @@ impl Uplink {
         )
     }
 
-    pub fn spawn(&mut self, bridge: Bridge) -> Result<(), Error> {
+    pub fn spawn(&mut self, bridge: Bridge) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
+        let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
 
         let mut mqtt = Mqtt::new(
             self.config.clone(),
@@ -414,11 +416,11 @@ impl Uplink {
             })
         });
 
-        Ok(())
+        Ok(CtrlTx { actions_lane: ctrl_actions_lane, data_lane: ctrl_data_lane })
     }
 
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
-        let bridge_tx = bridge.tx();
+        let bridge_tx = bridge.bridge_tx();
 
         let route =
             ActionRoute { name: "launch_shell".to_owned(), timeout: Duration::from_secs(10) };
