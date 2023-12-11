@@ -6,6 +6,7 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
+use tokio::join;
 
 #[cfg(target_os = "linux")]
 use crate::collector::journalctl::JournalCtlConfig;
@@ -13,6 +14,7 @@ use crate::collector::journalctl::JournalCtlConfig;
 use crate::collector::logcat::LogcatConfig;
 
 use self::bridge::stream::MAX_BUFFER_SIZE;
+use self::bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
 
 pub mod actions;
 pub mod bridge;
@@ -278,4 +280,19 @@ pub struct Config {
     pub logging: Option<JournalCtlConfig>,
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
+}
+
+/// Send control messages to the various components in uplink. Currently this is
+/// used only to trigger uplink shutdown. Shutdown signals are sent to all
+/// components simultaneously with a join.
+#[derive(Debug, Clone)]
+pub struct CtrlTx {
+    pub actions_lane: ActionsLaneCtrlTx,
+    pub data_lane: DataLaneCtrlTx,
+}
+
+impl CtrlTx {
+    pub async fn trigger_shutdown(&self) {
+        join!(self.actions_lane.trigger_shutdown(), self.data_lane.trigger_shutdown());
+    }
 }
