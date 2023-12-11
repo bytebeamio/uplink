@@ -126,8 +126,14 @@ impl ActionsBridge {
         Ok(())
     }
 
-    pub fn tx(&self) -> ActionsBridgeTx {
-        ActionsBridgeTx { status_tx: self.status_tx.clone(), shutdown_handle: self.ctrl_tx.clone() }
+    /// Handle to send action status messages from connected application
+    pub fn status_tx(&self) -> StatusTx {
+        StatusTx { inner: self.status_tx.clone() }
+    }
+
+    /// Handle to send action lane control messages
+    pub fn ctrl_tx(&self) -> CtrlTx {
+        CtrlTx { inner: self.ctrl_tx.clone() }
     }
 
     fn clear_current_action(&mut self) {
@@ -425,20 +431,28 @@ impl ActionRouter {
     }
 }
 
+/// Handle for apps to send action status to bridge
 #[derive(Debug, Clone)]
-pub struct ActionsBridgeTx {
-    // Handle for apps to send action status to bridge
-    pub(crate) status_tx: Sender<ActionResponse>,
-    pub(crate) shutdown_handle: Sender<ActionBridgeShutdown>,
+pub struct StatusTx {
+    pub(crate) inner: Sender<ActionResponse>,
 }
 
-impl ActionsBridgeTx {
+impl StatusTx {
     pub async fn send_action_response(&self, response: ActionResponse) {
-        self.status_tx.send_async(response).await.unwrap()
+        self.inner.send_async(response).await.unwrap()
     }
+}
 
+/// Handle to send control messages to action lane
+#[derive(Debug, Clone)]
+pub struct CtrlTx {
+    pub(crate) inner: Sender<ActionBridgeShutdown>,
+}
+
+impl CtrlTx {
+    /// Triggers shutdown of `bridge::actions_lane`
     pub async fn trigger_shutdown(&self) {
-        self.shutdown_handle.send_async(ActionBridgeShutdown).await.unwrap()
+        self.inner.send_async(ActionBridgeShutdown).await.unwrap()
     }
 }
 
@@ -654,7 +668,7 @@ mod tests {
 
         let (route_tx, action_rx) = bounded(1);
         bridge.register_action_route(test_route, route_tx).unwrap();
-        let bridge_tx = bridge.tx();
+        let bridge_tx = bridge.status_tx();
 
         spawn_bridge(bridge);
 
@@ -697,8 +711,8 @@ mod tests {
         let mut config = default_config();
         config.action_redirections.insert("test".to_string(), "redirect".to_string());
         let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
-        let bridge_tx_1 = bridge.tx();
-        let bridge_tx_2 = bridge.tx();
+        let bridge_tx_1 = bridge.status_tx();
+        let bridge_tx_2 = bridge.status_tx();
 
         let (route_tx, action_rx_1) = bounded(1);
         let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
@@ -765,8 +779,8 @@ mod tests {
         std::env::set_current_dir(&tmpdir).unwrap();
         let config = default_config();
         let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
-        let bridge_tx_1 = bridge.tx();
-        let bridge_tx_2 = bridge.tx();
+        let bridge_tx_1 = bridge.status_tx();
+        let bridge_tx_2 = bridge.status_tx();
 
         let (route_tx, action_rx_1) = bounded(1);
         let tunshell_route =
@@ -856,8 +870,8 @@ mod tests {
         std::env::set_current_dir(&tmpdir).unwrap();
         let config = default_config();
         let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
-        let bridge_tx_1 = bridge.tx();
-        let bridge_tx_2 = bridge.tx();
+        let bridge_tx_1 = bridge.status_tx();
+        let bridge_tx_2 = bridge.status_tx();
 
         let (route_tx, action_rx_1) = bounded(1);
         let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
