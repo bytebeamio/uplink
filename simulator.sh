@@ -83,7 +83,7 @@ download_auth_config() {
     echo "Downloading config: $url"
     mkdir -p devices
     curl --location $url \
-        --header 'x-bytebeam-tenant: demo' \
+        --header "x-bytebeam-tenant: $BYTEBEAM_TENANT_ID" \
         --header "x-bytebeam-api-key: $BYTEBEAM_API_KEY" > devices/device_$id.json
 }
 
