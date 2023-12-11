@@ -3261,6 +3261,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tunshell-client",
+ "vehicle-dynamics",
  "vergen",
 ]
 

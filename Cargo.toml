@@ -12,7 +12,6 @@ exclude = [
     "tools/deserialize-backup",
     "tools/simulator",
     "tools/tunshell",
-    "tools/vd-lib",
 ]
 
 [profile.dev]

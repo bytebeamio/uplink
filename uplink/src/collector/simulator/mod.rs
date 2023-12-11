@@ -1,5 +1,5 @@
 use crate::base::bridge::{BridgeTx, Payload};
-use crate::base::SimulatorConfig;
+use crate::base::{SimulatorConfig, SimulatorProfile};
 use crate::{Action, ActionResponse};
 use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
 use flume::{bounded, Receiver, Sender};
@@ -13,6 +13,7 @@ use std::time::Duration;
 use std::{fs, io, sync::Arc};
 
 mod data;
+mod ice_driver;
 
 pub enum Event {
     Data(Payload),
@@ -98,8 +99,13 @@ pub async fn start(
     let device = new_device_data(path);
 
     let (tx, rx) = bounded(10);
-    spawn_data_simulators(device, tx.clone());
 
+    match config.profile {
+        SimulatorProfile::Default => spawn_data_simulators(device, tx.clone()),
+        SimulatorProfile::IceDriver => {
+            spawn(ice_driver::simulate(device, tx.clone()));
+        }
+    }
     loop {
         if let Some(actions_rx) = actions_rx.as_ref() {
             select! {

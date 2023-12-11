@@ -41,6 +41,7 @@ tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch =
 # simulator
 fake = { version = "2.5.0", features = ["derive"] }
 rand = "0.8"
+vd_lib = { path = "../vd-lib", package = "vehicle-dynamics" }
 # downloader
 fs2 = "0.4"
 futures-util = "0.3"

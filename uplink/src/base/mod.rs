@@ -125,11 +125,20 @@ pub struct Stats {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub enum SimulatorProfile {
+    #[default]
+    Default,
+    IceDriver,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct SimulatorConfig {
     /// path to directory containing files with gps paths to be used in simulation
     pub gps_paths: String,
     /// actions that are to be routed to simulator
     pub actions: Vec<ActionRoute>,
+    /// simulator profile
+    pub profile: SimulatorProfile,
 }
 
 #[derive(Debug, Clone, Deserialize)]
