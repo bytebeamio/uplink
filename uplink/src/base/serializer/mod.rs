@@ -488,14 +488,15 @@ impl<C: MqttClient> Serializer<C> {
         let mut interval = interval(METRICS_INTERVAL);
         self.metrics.set_mode("recovery");
 
+        // Read contents of inflight file into an in-memory buffer
         let mut file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string())?;
         let path = file.path();
         if !path.is_file() {
             return Ok(Status::EventLoopReady);
         }
-
         let mut buf = BytesMut::new();
         file.read(&mut buf)?;
+
         let max_packet_size = self.config.mqtt.max_packet_size;
         let client = self.client.clone();
 
@@ -516,14 +517,7 @@ impl<C: MqttClient> Serializer<C> {
             }
         };
 
-        // NOTE: the following shouldn't matter as much as these are just placeholder values
-        fn placeholder_stream_config(topic: String) -> Arc<StreamConfig> {
-            let stream_config = StreamConfig { topic, ..Default::default() };
-            Arc::new(stream_config)
-        }
-
         let mut last_publish_payload_size = publish.payload.len();
-        let mut last_publish_stream = placeholder_stream_config(publish.topic.clone());
         let send = send_publish(client, publish.topic, publish.payload);
         tokio::pin!(send);
 
@@ -553,13 +547,7 @@ impl<C: MqttClient> Serializer<C> {
                     self.metrics.add_sent_size(last_publish_payload_size);
                     // Send failure implies eventloop crash. Switch state to
                     // indefinitely write to disk to not loose data.
-                    let client = match o {
-                        Ok(c) => c,
-                        // TODO: while we have to transition into crash mode, it's better not to write any inflight packets onto disk.
-                        // This can be achieved with the serializer shutdown mode introduced in bytebeamio/uplink#311
-                        Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish, last_publish_stream)),
-                        Err(e) => unreachable!("Unexpected error: {}", e),
-                    };
+                    let client = o?;
 
                     let publish = match read(&mut buf, max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
@@ -576,7 +564,6 @@ impl<C: MqttClient> Serializer<C> {
 
                     let payload = publish.payload;
                     last_publish_payload_size = payload.len();
-                    last_publish_stream = placeholder_stream_config(publish.topic.clone());
                     send.set(send_publish(client, publish.topic,payload));
                 }
                 // On a regular interval, forwards metrics information to network
