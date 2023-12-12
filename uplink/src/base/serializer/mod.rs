@@ -350,6 +350,7 @@ impl<C: MqttClient> Serializer<C> {
         }
 
         loop {
+            // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
             let publish = construct_publish(data)?;
             let storage = self.storage_handler.select(&stream);
