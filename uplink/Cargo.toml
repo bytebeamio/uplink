@@ -5,16 +5,16 @@ authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2021"
 
 [dependencies]
-bytes = "1"
-flume = "0.10"
-rumqttc = { git = "https://github.com/bytebeamio/rumqtt" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1.0"
+bytes = { workspace = true }
+flume = { workspace = true }
+rumqttc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 serde_with = "3.3.0"
-thiserror = "1"
-tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["codec", "time"] }
-tokio-stream = "0.1"
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
 
 # binary utils
 anyhow = "1"
@@ -29,7 +29,7 @@ pretty-bytes = "0.2.2"
 storage = { path = "../storage" }
 
 # logging
-log = "0.4"
+log = { workspace = true }
 regex = "1.7.1"
 tracing = { version="0.1", features=["log"] }
 tracing-subscriber = { version="=0.3.14", features=["env-filter"] }
@@ -40,11 +40,11 @@ tokio-compat-02 = "0.2.0"
 tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch" }
 # simulator
 fake = { version = "2.5.0", features = ["derive"] }
-rand = "0.8"
+rand = { workspace = true }
 vd_lib = { path = "../vd-lib", package = "vehicle-dynamics" }
 # downloader
 fs2 = "0.4"
-futures-util = "0.3"
+futures-util = { workspace = true }
 human_bytes = "0.4"
 reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
 # systemstats
@@ -67,4 +67,4 @@ signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 vergen = { version = "7", features = ["git", "build", "time"] }
 
 [dev-dependencies]
-tempdir = "0.3"
+tempdir = { workspace = true }

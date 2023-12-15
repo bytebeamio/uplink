@@ -1,7 +1,6 @@
 use flume::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::join;
 
 use std::{fmt::Debug, sync::Arc};
 
@@ -12,15 +11,14 @@ mod metrics;
 pub(crate) mod stream;
 mod streams;
 
-use crate::{Action, ActionResponse, ActionRoute, Config};
+use actions_lane::{ActionsBridge, Error};
+pub use actions_lane::{CtrlTx as ActionsLaneCtrlTx, StatusTx};
+use data_lane::DataBridge;
+pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
-use self::actions_lane::Error;
-pub use self::{
-    actions_lane::{ActionsBridge, ActionsBridgeTx},
-    data_lane::{DataBridge, DataBridgeTx},
-};
-
-use super::Compression;
+use super::StreamConfig;
+use crate::base::ActionRoute;
+use crate::{Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 
 pub trait Point: Send + Debug + Serialize + 'static {
@@ -30,8 +28,8 @@ pub trait Point: Send + Debug + Serialize + 'static {
 }
 
 pub trait Package: Send + Debug {
-    fn topic(&self) -> Arc<String>;
-    fn stream(&self) -> Arc<String>;
+    fn stream_config(&self) -> Arc<StreamConfig>;
+    fn stream_name(&self) -> Arc<String>;
     // TODO: Implement a generic Return type that can wrap
     // around custom serialization error types.
     fn serialize(&self) -> serde_json::Result<Vec<u8>>;
@@ -41,7 +39,6 @@ pub trait Package: Send + Debug {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn compression(&self) -> Compression;
 }
 
 // TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
@@ -95,8 +92,13 @@ impl Bridge {
         Self { data, actions }
     }
 
-    pub fn tx(&self) -> BridgeTx {
-        BridgeTx { data: self.data.tx(), actions: self.actions.tx() }
+    /// Handle to send data/action status messages
+    pub fn bridge_tx(&self) -> BridgeTx {
+        BridgeTx { data_tx: self.data.data_tx(), status_tx: self.actions.status_tx() }
+    }
+
+    pub(crate) fn ctrl_tx(&self) -> (actions_lane::CtrlTx, data_lane::CtrlTx) {
+        (self.actions.ctrl_tx(), self.data.ctrl_tx())
     }
 
     pub fn register_action_route(
@@ -118,24 +120,20 @@ impl Bridge {
 
 #[derive(Debug, Clone)]
 pub struct BridgeTx {
-    pub data: DataBridgeTx,
-    pub actions: ActionsBridgeTx,
+    pub data_tx: DataTx,
+    pub status_tx: StatusTx,
 }
 
 impl BridgeTx {
     pub async fn send_payload(&self, payload: Payload) {
-        self.data.send_payload(payload).await
+        self.data_tx.send_payload(payload).await
     }
 
     pub fn send_payload_sync(&self, payload: Payload) {
-        self.data.send_payload_sync(payload)
+        self.data_tx.send_payload_sync(payload)
     }
 
     pub async fn send_action_response(&self, response: ActionResponse) {
-        self.actions.send_action_response(response).await
-    }
-
-    pub async fn trigger_shutdown(&self) {
-        join!(self.actions.trigger_shutdown(), self.data.trigger_shutdown());
+        self.status_tx.send_action_response(response).await
     }
 }
