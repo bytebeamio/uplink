@@ -1,4 +1,6 @@
-use log::LevelFilter;
+use std::time::Duration;
+
+use log::{error, LevelFilter};
 use simplelog::{
     ColorChoice, CombinedLogger, ConfigBuilder, LevelPadding, TermLogger, TerminalMode,
 };
@@ -20,7 +22,7 @@ pub struct CommandLine {
     #[structopt(short = "P", help = "processes")]
     pub process_names: Vec<String>,
     /// time between updates
-    #[structopt(short = "t", help = "update period", default_value = "60")]
+    #[structopt(short = "t", help = "update period", default_value = "30")]
     pub update_period: u64,
 }
 
@@ -30,12 +32,20 @@ async fn main() {
 
     let addr = format!("localhost:{}", port);
 
-    let stream = TcpStream::connect(addr).await.unwrap();
-    let client = Framed::new(stream, LinesCodec::new());
-    let config = Config { process_names, update_period };
+    loop {
+        let Ok(stream) = TcpStream::connect(&addr).await else {
+            error!("Uplink is not running, will reconnect after sleeping");
+            std::thread::sleep(Duration::from_secs(update_period));
+            continue;
+        };
+        let client = Framed::new(stream, LinesCodec::new());
+        let config = Config { process_names: process_names.clone(), update_period };
 
-    let collector = StatCollector::new(config, client);
-    collector.start().await;
+        let collector = StatCollector::new(config, client);
+        if let Err(e) = collector.start().await {
+            error!("Error forwarding stats: {e}");
+        }
+    }
 }
 
 fn init() -> CommandLine {

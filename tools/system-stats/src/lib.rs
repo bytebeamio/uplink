@@ -537,34 +537,17 @@ impl StatCollector {
 
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
     /// Update system information values and increment sequence numbers, while.sending to specific data streams.
-    pub async fn start(mut self) {
+    pub async fn start(mut self) -> Result<(), Error> {
         let mut interval = interval(Duration::from_secs(self.config.update_period));
         loop {
             interval.tick().await;
 
-            if let Err(e) = self.update_memory_stats().await {
-                error!("Error refreshing system memory statistics: {}", e);
-            }
-
-            if let Err(e) = self.update_disk_stats().await {
-                error!("Error refreshing disk statistics: {}", e);
-            }
-
-            if let Err(e) = self.update_network_stats().await {
-                error!("Error refreshing network statistics: {}", e);
-            }
-
-            if let Err(e) = self.update_cpu_stats().await {
-                error!("Error refreshing CPU statistics: {}", e);
-            }
-
-            if let Err(e) = self.update_component_stats().await {
-                error!("Error refreshing component statistics: {}", e);
-            }
-
-            if let Err(e) = self.update_process_stats().await {
-                error!("Error refreshing process statistics: {}", e);
-            }
+            self.update_memory_stats().await?;
+            self.update_disk_stats().await?;
+            self.update_network_stats().await?;
+            self.update_cpu_stats().await?;
+            self.update_component_stats().await?;
+            self.update_process_stats().await?;
         }
     }
 
