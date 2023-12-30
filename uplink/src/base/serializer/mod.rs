@@ -4,12 +4,12 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{self, Write};
 use std::{sync::Arc, time::Duration};
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use flume::{Receiver, RecvError, Sender};
 use log::{debug, error, info, trace};
 use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
-use storage::{PersistenceFile, Storage};
+use storage::Storage;
 use thiserror::Error;
 use tokio::{select, time::interval};
 
@@ -480,111 +480,6 @@ impl<C: MqttClient> Serializer<C> {
         v
     }
 
-    /// Similar to catchup mode, handles inflight packets before storage.
-    /// Checks for and publishes data waiting in persistence/inflight file
-    /// once done, deletes the file, wile writing incoming data into storage.
-    async fn recovery(&mut self) -> Result<Status, Error> {
-        info!("Switching to recovery mode!!");
-        let mut interval = interval(METRICS_INTERVAL);
-        self.metrics.set_mode("recovery");
-
-        // Read contents of inflight file into an in-memory buffer
-        let mut file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string())?;
-        let path = file.path();
-        if !path.is_file() {
-            return Ok(Status::EventLoopReady);
-        }
-        let mut buf = BytesMut::new();
-        file.read(&mut buf)?;
-
-        let max_packet_size = self.config.mqtt.max_packet_size;
-        let client = self.client.clone();
-
-        // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
-        // This leads to force switching to catchup mode. Increasing max_payload_size to bypass this
-        let publish = match read(&mut buf, max_packet_size) {
-            Ok(Packet::Publish(publish)) => publish,
-            Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
-            Err(e) => {
-                self.metrics.increment_errors();
-                error!("Failed to read inflight file. Forcing into Catchup mode. Error = {:?}", e);
-                save_and_prepare_next_metrics(
-                    &mut self.pending_metrics,
-                    &mut self.metrics,
-                    &self.storage_handler,
-                );
-                return Ok(Status::EventLoopReady);
-            }
-        };
-
-        let mut last_publish_payload_size = publish.payload.len();
-        let send = send_publish(client, publish.topic, publish.payload);
-        tokio::pin!(send);
-
-        let v = loop {
-            select! {
-                data = self.collector_rx.recv_async() => {
-                    let data = data?;
-                    let stream_config = data.stream_config();
-                    let publish = construct_publish(data)?;
-                    let storage = self.storage_handler.select(&stream_config);
-                    match write_to_disk(publish, storage) {
-                        Ok(Some(deleted)) => {
-                            debug!("Lost segment = {deleted}");
-                            self.metrics.increment_lost_segments();
-                        }
-                        Ok(_) => {},
-                        Err(e) => {
-                            error!("Storage write error = {:?}", e);
-                            self.metrics.increment_errors();
-                        }
-                    };
-
-                    // Update metrics
-                    self.metrics.add_batch();
-                }
-                o = &mut send => {
-                    self.metrics.add_sent_size(last_publish_payload_size);
-                    // Send failure implies eventloop crash. Switch state to
-                    // indefinitely write to disk to not loose data.
-                    let client = o?;
-
-                    let publish = match read(&mut buf, max_packet_size) {
-                        Ok(Packet::Publish(publish)) => publish,
-                        Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
-                        // The following condition is expected after reading all pending publishes from file
-                        Err(mqttbytes::Error::InsufficientBytes(2)) => break Ok(Status::EventLoopReady),
-                        Err(e) => {
-                            error!("Failed to read inflight file. Forcing into Catchup mode. Error = {:?}", e);
-                            break Ok(Status::EventLoopReady);
-                        }
-                    };
-
-                    self.metrics.add_batch();
-
-                    let payload = publish.payload;
-                    last_publish_payload_size = payload.len();
-                    send.set(send_publish(client, publish.topic,payload));
-                }
-                // On a regular interval, forwards metrics information to network
-                _ = interval.tick() => {
-                    let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler);
-                }
-            }
-        };
-
-        save_and_prepare_next_metrics(
-            &mut self.pending_metrics,
-            &mut self.metrics,
-            &self.storage_handler,
-        );
-
-        info!("Read and published inflight packets; removing file: {}", path.display());
-        file.delete()?;
-
-        v
-    }
-
     async fn normal(&mut self) -> Result<Status, Error> {
         let mut interval = interval(METRICS_INTERVAL);
         self.metrics.set_mode("normal");
@@ -625,7 +520,7 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Starts operation of the uplink serializer, which can transition between the modes mentioned earlier.
     pub async fn start(mut self) -> Result<(), Error> {
-        let mut status = self.recovery().await?;
+        let mut status = Status::EventLoopReady;
 
         loop {
             let next_status = match status {

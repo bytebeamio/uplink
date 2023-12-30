@@ -12,8 +12,8 @@ use std::path::Path;
 
 use crate::{Action, Config};
 use rumqttc::{
-    AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Publish, QoS, Request,
-    TlsConfiguration, Transport,
+    read, AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Packet, Publish,
+    QoS, Request, TlsConfiguration, Transport,
 };
 use std::sync::Arc;
 
@@ -122,8 +122,46 @@ impl Mqtt {
         Ok(())
     }
 
+    /// Checks for and loads data pending in persistence/inflight file
+    /// once done, deletes the file, wile writing incoming data into storage.
+    fn recover_inflight(&mut self) {
+        // Read contents of inflight file into an in-memory buffer
+        let mut file =
+            match PersistenceFile::new(&self.config.persistence_path, "inflight".to_string()) {
+                Ok(f) => f,
+                Err(e) => {
+                    error!("Error opening inflight file: {e}");
+                    return;
+                }
+            };
+        let path = file.path();
+        if !path.is_file() {
+            return;
+        }
+        let mut buf = BytesMut::new();
+        if let Err(e) = file.read(&mut buf) {
+            error!("Error reading from file: {e}")
+        }
+
+        let max_packet_size = self.config.mqtt.max_packet_size;
+
+        let mut pending = vec![];
+        loop {
+            // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
+            // This leads to force switching to catchup mode. Increasing max_payload_size to bypass this
+            match read(&mut buf, max_packet_size) {
+                Ok(Packet::Publish(publish)) => pending.push(Request::Publish(publish)),
+                Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+                Err(rumqttc::Error::InsufficientBytes(_)) => break,
+                Err(e) => error!("Error reading from file: {e}"),
+            }
+        }
+        self.eventloop.pending = pending.into_iter();
+    }
+
     /// Poll eventloop to receive packets from broker
     pub async fn start(mut self) {
+        self.recover_inflight();
         loop {
             select! {
                 event = self.eventloop.poll() => {
