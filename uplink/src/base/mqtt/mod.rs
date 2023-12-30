@@ -157,6 +157,11 @@ impl Mqtt {
             }
         }
         self.eventloop.pending = pending.into_iter();
+
+        info!("Read and published inflight packets; removing file: {}", path.display());
+        if let Err(e) = file.delete() {
+            error!("Error deleting inflight file: {e}")
+        }
     }
 
     /// Poll eventloop to receive packets from broker
