@@ -154,7 +154,7 @@ impl Mqtt {
         }
         self.eventloop.pending = pending.into_iter();
 
-        info!("Read and published inflight packets; removing file: {}", path.display());
+        info!("Reloaded inflight publishes from previous session; removing file: {}", path.display());
         file.delete()?;
 
         Ok(())
