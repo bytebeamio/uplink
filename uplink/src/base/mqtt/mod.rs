@@ -111,7 +111,6 @@ impl Mqtt {
         }
 
         let mut file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string())?;
-        debug!("Writing pending publishes to disk: {}", file.path().display());
         let mut buf = BytesMut::new();
 
         for publish in publishes {
@@ -120,6 +119,7 @@ impl Mqtt {
         }
 
         file.write(&mut buf)?;
+        debug!("Pending publishes written to disk: {}", file.path().display());
 
         Ok(())
     }
