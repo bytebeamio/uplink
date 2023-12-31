@@ -137,13 +137,13 @@ impl Mqtt {
         file.read(&mut buf)?;
 
         let max_packet_size = self.config.mqtt.max_packet_size;
-
-        let mut pending = vec![];
         loop {
             // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
             // This leads to force switching to catchup mode. Increasing max_payload_size to bypass this
             match read(&mut buf, max_packet_size) {
-                Ok(Packet::Publish(publish)) => pending.push(Request::Publish(publish)),
+                Ok(Packet::Publish(publish)) => {
+                    self.eventloop.pending.push(Request::Publish(publish))
+                }
                 Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
                 Err(rumqttc::Error::InsufficientBytes(_)) => break,
                 Err(e) => {
@@ -152,7 +152,6 @@ impl Mqtt {
                 }
             }
         }
-        self.eventloop.pending = pending.into_iter();
 
         info!("Reloaded inflight publishes from previous session; removing file: {}", path.display());
         file.delete()?;
