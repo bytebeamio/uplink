@@ -124,24 +124,15 @@ impl Mqtt {
 
     /// Checks for and loads data pending in persistence/inflight file
     /// once done, deletes the file, wile writing incoming data into storage.
-    fn recover_inflight(&mut self) {
+    fn recover_inflight(&mut self) -> Result<(), Error> {
         // Read contents of inflight file into an in-memory buffer
-        let mut file =
-            match PersistenceFile::new(&self.config.persistence_path, "inflight".to_string()) {
-                Ok(f) => f,
-                Err(e) => {
-                    error!("Error opening inflight file: {e}");
-                    return;
-                }
-            };
+        let mut file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string())?;
         let path = file.path();
         if !path.is_file() {
-            return;
+            return Ok(());
         }
         let mut buf = BytesMut::new();
-        if let Err(e) = file.read(&mut buf) {
-            error!("Error reading from file: {e}")
-        }
+        file.read(&mut buf)?;
 
         let max_packet_size = self.config.mqtt.max_packet_size;
 
@@ -153,20 +144,26 @@ impl Mqtt {
                 Ok(Packet::Publish(publish)) => pending.push(Request::Publish(publish)),
                 Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
                 Err(rumqttc::Error::InsufficientBytes(_)) => break,
-                Err(e) => error!("Error reading from file: {e}"),
+                Err(e) => {
+                    error!("Error reading from file: {e}");
+                    break;
+                }
             }
         }
         self.eventloop.pending = pending.into_iter();
 
         info!("Read and published inflight packets; removing file: {}", path.display());
-        if let Err(e) = file.delete() {
-            error!("Error deleting inflight file: {e}")
-        }
+        file.delete()?;
+
+        Ok(())
     }
 
     /// Poll eventloop to receive packets from broker
     pub async fn start(mut self) {
-        self.recover_inflight();
+        if let Err(e) = self.recover_inflight() {
+            error!("Error recovering data from inflight file: {e}");
+        }
+
         loop {
             select! {
                 event = self.eventloop.poll() => {
