@@ -96,10 +96,12 @@ impl Mqtt {
     /// Shutdown eventloop and write inflight publish packets to disk
     pub fn persist_inflight(&mut self) -> Result<(), Error> {
         self.eventloop.clean();
-        let pending = std::mem::take(&mut self.eventloop.pending);
-        let publishes: Vec<Publish> = pending
-            .filter_map(|request| match &request {
-                Request::Publish(publish) => Some(publish.clone()),
+        let publishes: Vec<&mut Publish> = self
+            .eventloop
+            .pending
+            .iter_mut()
+            .filter_map(|request| match request {
+                Request::Publish(publish) => Some(publish),
                 _ => None,
             })
             .collect();
@@ -112,7 +114,7 @@ impl Mqtt {
         debug!("Writing pending publishes to disk: {}", file.path().display());
         let mut buf = BytesMut::new();
 
-        for mut publish in publishes {
+        for publish in publishes {
             publish.pkid = 1;
             publish.write(&mut buf)?;
         }
