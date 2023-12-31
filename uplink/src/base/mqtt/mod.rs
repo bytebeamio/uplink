@@ -68,7 +68,7 @@ impl Mqtt {
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
-        let (client, mut eventloop) = AsyncClient::new(options, 1);
+        let (client, mut eventloop) = AsyncClient::new(options, 0);
         eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
         let (ctrl_tx, ctrl_rx) = bounded(1);
 
