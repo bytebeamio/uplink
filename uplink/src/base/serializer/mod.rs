@@ -243,7 +243,7 @@ impl StorageHandler {
 ///                        │Serializer::slow(publish)◄───────────────────────────┤SlowEventloop(publish)│
 ///                        └-------------------------┘                           └──────────────────────┘
 ///                         Write to storage,                                     Slow network encountered
-///                         but continue trying to publish                                                                                 
+///                         but continue trying to publish
 ///
 ///```
 /// [`start()`]: Serializer::start
