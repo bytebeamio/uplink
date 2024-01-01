@@ -1,9 +1,12 @@
 use std::env::current_dir;
+use std::hash::Hash;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DurationSeconds};
+use tokio::join;
 
 #[cfg(target_os = "linux")]
 use crate::collector::journalctl::JournalCtlConfig;
@@ -11,6 +14,7 @@ use crate::collector::journalctl::JournalCtlConfig;
 use crate::collector::logcat::LogcatConfig;
 
 use self::bridge::stream::MAX_BUFFER_SIZE;
+use self::bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
 
 pub mod actions;
 pub mod bridge;
@@ -21,8 +25,8 @@ pub mod serializer;
 pub const DEFAULT_TIMEOUT: u64 = 60;
 
 #[inline]
-fn default_timeout() -> u64 {
-    DEFAULT_TIMEOUT
+fn default_timeout() -> Duration {
+    Duration::from_secs(DEFAULT_TIMEOUT)
 }
 
 #[inline]
@@ -58,22 +62,24 @@ pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, Hash, PartialEq, Eq)]
 pub enum Compression {
     #[default]
     Disabled,
     Lz4,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, Deserialize, Eq)]
 pub struct StreamConfig {
     pub topic: String,
     #[serde(default = "max_buf_size")]
     pub buf_size: usize,
     #[serde(default = "default_timeout")]
+    #[serde_as(as = "DurationSeconds<u64>")]
     /// Duration(in seconds) that bridge collector waits from
     /// receiving first element, before the stream gets flushed.
-    pub flush_period: u64,
+    pub flush_period: Duration,
     #[serde(default)]
     pub compression: Compression,
     #[serde(default)]
@@ -92,7 +98,19 @@ impl Default for StreamConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl Hash for StreamConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.topic.hash(state)
+    }
+}
+
+impl PartialEq for StreamConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.topic == other.topic
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Hash, PartialEq, Eq)]
 pub struct Persistence {
     #[serde(default = "default_file_size")]
     pub max_file_size: usize,
@@ -149,19 +167,23 @@ pub struct InstallerConfig {
     pub uplink_port: u16,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamMetricsConfig {
     pub enabled: bool,
     pub topic: String,
     pub blacklist: Vec<String>,
-    pub timeout: u64,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout: Duration,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SerializerMetricsConfig {
     pub enabled: bool,
     pub topic: String,
-    pub timeout: u64,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout: Duration,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -191,11 +213,13 @@ pub struct MqttConfig {
     pub network_timeout: u64,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ActionRoute {
     pub name: String,
     #[serde(default = "default_timeout")]
-    pub timeout: u64,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout: Duration,
 }
 
 impl From<&ActionRoute> for ActionRoute {
@@ -256,4 +280,19 @@ pub struct Config {
     pub logging: Option<JournalCtlConfig>,
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
+}
+
+/// Send control messages to the various components in uplink. Currently this is
+/// used only to trigger uplink shutdown. Shutdown signals are sent to all
+/// components simultaneously with a join.
+#[derive(Debug, Clone)]
+pub struct CtrlTx {
+    pub actions_lane: ActionsLaneCtrlTx,
+    pub data_lane: DataLaneCtrlTx,
+}
+
+impl CtrlTx {
+    pub async fn trigger_shutdown(&self) {
+        join!(self.actions_lane.trigger_shutdown(), self.data_lane.trigger_shutdown());
+    }
 }

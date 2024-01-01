@@ -48,7 +48,7 @@ pub struct ActionsBridge {
     /// Actions incoming from backend
     actions_rx: Receiver<Action>,
     /// Contains stream to send ActionResponses on
-    streams: Streams,
+    streams: Streams<ActionResponse>,
     /// Apps registered with the bridge
     /// NOTE: Sometimes action_routes could overlap, the latest route
     /// to be registered will be used in such a circumstance.
@@ -103,10 +103,9 @@ impl ActionsBridge {
 
     pub fn register_action_route(
         &mut self,
-        ActionRoute { name, timeout }: ActionRoute,
+        ActionRoute { name, timeout: duration }: ActionRoute,
         actions_tx: Sender<Action>,
     ) -> Result<(), Error> {
-        let duration = Duration::from_secs(timeout);
         let action_router = ActionRouter { actions_tx, duration };
         if self.action_routes.insert(name.clone(), action_router).is_some() {
             return Err(Error::ActionRouteClash(name));
@@ -127,8 +126,14 @@ impl ActionsBridge {
         Ok(())
     }
 
-    pub fn tx(&self) -> ActionsBridgeTx {
-        ActionsBridgeTx { status_tx: self.status_tx.clone(), shutdown_handle: self.ctrl_tx.clone() }
+    /// Handle to send action status messages from connected application
+    pub fn status_tx(&self) -> StatusTx {
+        StatusTx { inner: self.status_tx.clone() }
+    }
+
+    /// Handle to send action lane control messages
+    pub fn ctrl_tx(&self) -> CtrlTx {
+        CtrlTx { inner: self.ctrl_tx.clone() }
     }
 
     fn clear_current_action(&mut self) {
@@ -136,7 +141,7 @@ impl ActionsBridge {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let mut metrics_timeout = interval(Duration::from_secs(self.config.stream_metrics.timeout));
+        let mut metrics_timeout = interval(self.config.stream_metrics.timeout);
         let mut end: Pin<Box<Sleep>> = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
         self.load_saved_action()?;
 
@@ -276,7 +281,7 @@ impl ActionsBridge {
         Ok(())
     }
 
-    async fn forward_action_response(&mut self, response: ActionResponse) {
+    async fn forward_action_response(&mut self, mut response: ActionResponse) {
         if self.parallel_actions.contains(&response.action_id) {
             self.forward_parallel_action_response(response).await;
 
@@ -297,7 +302,7 @@ impl ActionsBridge {
         }
 
         info!("Action response = {:?}", response);
-        self.streams.forward(response.as_payload()).await;
+        self.streams.forward(response.clone()).await;
 
         if response.is_completed() || response.is_failed() {
             self.clear_current_action();
@@ -309,7 +314,7 @@ impl ActionsBridge {
         if response.is_done() {
             let mut action = inflight_action.action.clone();
 
-            if let Some(a) = response.done_response {
+            if let Some(a) = response.done_response.take() {
                 action = a;
             }
 
@@ -317,7 +322,7 @@ impl ActionsBridge {
                 // NOTE: send success reponse for actions that don't have redirections configured
                 warn!("Action redirection is not configured for: {:?}", action);
                 let response = ActionResponse::success(&action.action_id);
-                self.streams.forward(response.as_payload()).await;
+                self.streams.forward(response).await;
 
                 self.clear_current_action();
             }
@@ -350,17 +355,17 @@ impl ActionsBridge {
 
     async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
         info!("Action response = {:?}", response);
-        self.streams.forward(response.as_payload()).await;
-
         if response.is_completed() || response.is_failed() {
             self.parallel_actions.remove(&response.action_id);
         }
+
+        self.streams.forward(response).await;
     }
 
     async fn forward_action_error(&mut self, action: Action, error: Error) {
         let response = ActionResponse::failure(&action.action_id, error.to_string());
 
-        self.streams.forward(response.as_payload()).await;
+        self.streams.forward(response).await;
     }
 }
 
@@ -426,20 +431,28 @@ impl ActionRouter {
     }
 }
 
+/// Handle for apps to send action status to bridge
 #[derive(Debug, Clone)]
-pub struct ActionsBridgeTx {
-    // Handle for apps to send action status to bridge
-    pub(crate) status_tx: Sender<ActionResponse>,
-    pub(crate) shutdown_handle: Sender<ActionBridgeShutdown>,
+pub struct StatusTx {
+    pub(crate) inner: Sender<ActionResponse>,
 }
 
-impl ActionsBridgeTx {
+impl StatusTx {
     pub async fn send_action_response(&self, response: ActionResponse) {
-        self.status_tx.send_async(response).await.unwrap()
+        self.inner.send_async(response).await.unwrap()
     }
+}
 
+/// Handle to send control messages to action lane
+#[derive(Debug, Clone)]
+pub struct CtrlTx {
+    pub(crate) inner: Sender<ActionBridgeShutdown>,
+}
+
+impl CtrlTx {
+    /// Triggers shutdown of `bridge::actions_lane`
     pub async fn trigger_shutdown(&self) {
-        self.shutdown_handle.send_async(ActionBridgeShutdown).await.unwrap()
+        self.inner.send_async(ActionBridgeShutdown).await.unwrap()
     }
 }
 
@@ -461,10 +474,13 @@ mod tests {
         Config {
             stream_metrics: StreamMetricsConfig {
                 enabled: false,
-                timeout: 10,
+                timeout: Duration::from_secs(10),
                 ..Default::default()
             },
-            action_status: StreamConfig { flush_period: 2, ..Default::default() },
+            action_status: StreamConfig {
+                flush_period: Duration::from_secs(2),
+                ..Default::default()
+            },
             ..Default::default()
         }
     }
@@ -510,13 +526,13 @@ mod tests {
         std::env::set_current_dir(&tmpdir).unwrap();
         let config = Arc::new(default_config());
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
-        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: 10 };
+        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: Duration::from_secs(10) };
 
         let (route_tx, route_1_rx) = bounded(1);
         bridge.register_action_route(route_1, route_tx).unwrap();
 
         let (route_tx, route_2_rx) = bounded(1);
-        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: 30 };
+        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(route_2, route_tx).unwrap();
 
         spawn_bridge(bridge);
@@ -596,7 +612,7 @@ mod tests {
         let config = Arc::new(default_config());
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
 
         let (route_tx, action_rx) = bounded(1);
         bridge.register_action_route(test_route, route_tx).unwrap();
@@ -648,11 +664,11 @@ mod tests {
         let config = Arc::new(default_config());
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
 
         let (route_tx, action_rx) = bounded(1);
         bridge.register_action_route(test_route, route_tx).unwrap();
-        let bridge_tx = bridge.tx();
+        let bridge_tx = bridge.status_tx();
 
         spawn_bridge(bridge);
 
@@ -695,15 +711,16 @@ mod tests {
         let mut config = default_config();
         config.action_redirections.insert("test".to_string(), "redirect".to_string());
         let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
-        let bridge_tx_1 = bridge.tx();
-        let bridge_tx_2 = bridge.tx();
+        let bridge_tx_1 = bridge.status_tx();
+        let bridge_tx_2 = bridge.status_tx();
 
         let (route_tx, action_rx_1) = bounded(1);
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
         let (route_tx, action_rx_2) = bounded(1);
-        let redirect_route = ActionRoute { name: "redirect".to_string(), timeout: 30 };
+        let redirect_route =
+            ActionRoute { name: "redirect".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(redirect_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
@@ -762,15 +779,16 @@ mod tests {
         std::env::set_current_dir(&tmpdir).unwrap();
         let config = default_config();
         let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
-        let bridge_tx_1 = bridge.tx();
-        let bridge_tx_2 = bridge.tx();
+        let bridge_tx_1 = bridge.status_tx();
+        let bridge_tx_2 = bridge.status_tx();
 
         let (route_tx, action_rx_1) = bounded(1);
-        let tunshell_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
+        let tunshell_route =
+            ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(tunshell_route, route_tx).unwrap();
 
         let (route_tx, action_rx_2) = bounded(1);
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
@@ -852,15 +870,16 @@ mod tests {
         std::env::set_current_dir(&tmpdir).unwrap();
         let config = default_config();
         let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
-        let bridge_tx_1 = bridge.tx();
-        let bridge_tx_2 = bridge.tx();
+        let bridge_tx_1 = bridge.status_tx();
+        let bridge_tx_2 = bridge.status_tx();
 
         let (route_tx, action_rx_1) = bounded(1);
-        let test_route = ActionRoute { name: "test".to_string(), timeout: 30 };
+        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
         let (route_tx, action_rx_2) = bounded(1);
-        let tunshell_route = ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: 30 };
+        let tunshell_route =
+            ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: Duration::from_secs(30) };
         bridge.register_action_route(tunshell_route, route_tx).unwrap();
 
         spawn_bridge(bridge);

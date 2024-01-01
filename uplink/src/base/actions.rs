@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tokio::time::Instant;
 
 use crate::{Payload, Point};
@@ -98,33 +97,17 @@ impl ActionResponse {
         self
     }
 
-    pub fn as_payload(&self) -> Payload {
-        Payload::from(self)
-    }
-
     pub fn from_payload(payload: &Payload) -> Result<Self, serde_json::Error> {
         let intermediate = serde_json::to_value(payload)?;
         serde_json::from_value(intermediate)
     }
 }
 
-impl From<&ActionResponse> for Payload {
-    fn from(resp: &ActionResponse) -> Self {
-        Self {
-            stream: "action_status".to_owned(),
-            sequence: resp.sequence,
-            timestamp: resp.timestamp,
-            payload: json!({
-                "id": resp.action_id,
-                "state": resp.state,
-                "progress": resp.progress,
-                "errors": resp.errors
-            }),
-        }
-    }
-}
-
 impl Point for ActionResponse {
+    fn stream_name(&self) -> &str {
+        "action_status"
+    }
+
     fn sequence(&self) -> u32 {
         self.sequence
     }

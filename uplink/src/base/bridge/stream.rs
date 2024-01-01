@@ -9,7 +9,7 @@ use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::Serialize;
 
-use crate::base::{Compression, StreamConfig, DEFAULT_TIMEOUT};
+use crate::base::StreamConfig;
 
 use super::{Package, Point, StreamMetrics};
 
@@ -32,68 +32,39 @@ pub const MAX_BUFFER_SIZE: usize = 100;
 #[derive(Debug)]
 pub struct Stream<T> {
     pub name: Arc<String>,
-    pub max_buffer_size: usize,
-    pub flush_period: Duration,
-    topic: Arc<String>,
+    pub config: Arc<StreamConfig>,
     last_sequence: u32,
     last_timestamp: u64,
     buffer: Buffer<T>,
     tx: Sender<Box<dyn Package>>,
     pub metrics: Arc<Mutex<StreamMetrics>>,
-    compression: Compression,
 }
 
 impl<T> Stream<T>
 where
-    T: Point + Debug + Send + 'static,
+    T: Point,
     Buffer<T>: Package,
 {
     pub fn new(
-        stream: impl Into<String>,
-        topic: impl Into<String>,
-        max_buffer_size: usize,
-        tx: Sender<Box<dyn Package>>,
-        compression: Compression,
-    ) -> Stream<T> {
-        let name = Arc::new(stream.into());
-        let topic = Arc::new(topic.into());
-
-        let metrics = Arc::new(Mutex::new(StreamMetrics::new(&name, max_buffer_size)));
-        let buffer = Buffer::new(name.clone(), topic.clone(), compression, metrics.clone());
-        let flush_period = Duration::from_secs(DEFAULT_TIMEOUT);
-
-        Stream {
-            name,
-            max_buffer_size,
-            flush_period,
-            topic,
-            last_sequence: 0,
-            last_timestamp: 0,
-            buffer,
-            tx,
-            metrics,
-            compression,
-        }
-    }
-
-    pub fn with_config(
-        name: &str,
-        config: &StreamConfig,
+        stream_name: impl Into<String>,
+        stream_config: StreamConfig,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let mut stream = Stream::new(name, &config.topic, config.buf_size, tx, config.compression);
-        stream.flush_period = Duration::from_secs(config.flush_period);
-        stream
+        let name = Arc::new(stream_name.into());
+        let config = Arc::new(stream_config);
+        let metrics = Arc::new(Mutex::new(StreamMetrics::new(&name, config.buf_size)));
+        let buffer = Buffer::new(name.clone(), config.clone(), metrics.clone());
+
+        Stream { name, config, last_sequence: 0, last_timestamp: 0, buffer, tx, metrics }
     }
 
     pub fn dynamic(
-        stream: impl Into<String>,
+        stream_name: impl Into<String>,
         project_id: impl Into<String>,
         device_id: impl Into<String>,
-        max_buffer_size: usize,
         tx: Sender<Box<dyn Package>>,
     ) -> Stream<T> {
-        let stream = stream.into();
+        let stream_name = stream_name.into();
         let project_id = project_id.into();
         let device_id = device_id.into();
 
@@ -102,10 +73,11 @@ where
             + "/devices/"
             + &device_id
             + "/events/"
-            + &stream
+            + &stream_name
             + "/jsonarray";
+        let config = StreamConfig { topic, ..Default::default() };
 
-        Stream::new(stream, topic, max_buffer_size, tx, Compression::Disabled)
+        Stream::new(stream_name, config, tx)
     }
 
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
@@ -133,7 +105,7 @@ where
         self.last_timestamp = current_timestamp;
 
         // if max_buffer_size is breached, flush
-        let buf = if self.buffer.buffer.len() >= self.max_buffer_size {
+        let buf = if self.buffer.buffer.len() >= self.config.buf_size {
             self.metrics.lock().unwrap().add_batch();
             Some(self.take_buffer())
         } else {
@@ -146,13 +118,10 @@ where
     // Returns buffer content, replacing with empty buffer in-place
     fn take_buffer(&mut self) -> Buffer<T> {
         let name = self.name.clone();
-        let topic = self.topic.clone();
-        trace!("Flushing stream name: {}, topic: {}", name, topic);
+        let config = self.config.clone();
+        trace!("Flushing stream name: {}, topic: {}", name, config.topic);
 
-        mem::replace(
-            &mut self.buffer,
-            Buffer::new(name, topic, self.compression, self.metrics.clone()),
-        )
+        mem::replace(&mut self.buffer, Buffer::new(name, config, self.metrics.clone()))
     }
 
     /// Triggers flush and async channel send if not empty
@@ -184,7 +153,7 @@ where
         }
 
         let status = match self.len() {
-            1 => StreamStatus::Init(self.flush_period),
+            1 => StreamStatus::Init(self.config.flush_period),
             len => StreamStatus::Partial(len),
         };
 
@@ -201,7 +170,7 @@ where
         }
 
         let status = match self.len() {
-            1 => StreamStatus::Init(self.flush_period),
+            1 => StreamStatus::Init(self.config.flush_period),
             len => StreamStatus::Partial(len),
         };
 
@@ -219,29 +188,26 @@ where
 /// Buffer doesn't put any restriction on type of `T`
 #[derive(Debug)]
 pub struct Buffer<T> {
-    pub stream: Arc<String>,
-    pub topic: Arc<String>,
+    pub stream_name: Arc<String>,
+    pub stream_config: Arc<StreamConfig>,
     pub metrics: Arc<Mutex<StreamMetrics>>,
     pub buffer: Vec<T>,
     pub anomalies: String,
     pub anomaly_count: usize,
-    pub compression: Compression,
 }
 
 impl<T> Buffer<T> {
     pub fn new(
-        stream: Arc<String>,
-        topic: Arc<String>,
-        compression: Compression,
+        stream_name: Arc<String>,
+        stream_config: Arc<StreamConfig>,
         metrics: Arc<Mutex<StreamMetrics>>,
     ) -> Buffer<T> {
         Buffer {
-            stream,
-            topic,
-            buffer: vec![],
+            buffer: Vec::with_capacity(stream_config.buf_size),
+            stream_name,
+            stream_config,
             anomalies: String::with_capacity(100),
             anomaly_count: 0,
-            compression,
             metrics,
         }
     }
@@ -252,7 +218,7 @@ impl<T> Buffer<T> {
             return;
         }
 
-        let error = String::from(self.stream.as_ref())
+        let error = self.stream_name.to_string()
             + ".sequence: "
             + &last.to_string()
             + ", "
@@ -281,15 +247,15 @@ impl<T> Buffer<T> {
 
 impl<T> Package for Buffer<T>
 where
-    T: Debug + Send + Point,
+    T: Point,
     Vec<T>: Serialize,
 {
-    fn topic(&self) -> Arc<String> {
-        self.topic.clone()
+    fn stream_config(&self) -> Arc<StreamConfig> {
+        self.stream_config.clone()
     }
 
-    fn stream(&self) -> Arc<String> {
-        self.stream.clone()
+    fn stream_name(&self) -> Arc<String> {
+        self.stream_name.clone()
     }
 
     fn serialize(&self) -> serde_json::Result<Vec<u8>> {
@@ -308,10 +274,6 @@ where
         0
     }
 
-    fn compression(&self) -> Compression {
-        self.compression
-    }
-
     fn metrics(&self) -> Arc<Mutex<StreamMetrics>> {
         self.metrics.clone()
     }
@@ -321,20 +283,16 @@ impl<T> Clone for Stream<T> {
     fn clone(&self) -> Self {
         Stream {
             name: self.name.clone(),
-            flush_period: self.flush_period,
-            max_buffer_size: self.max_buffer_size,
-            topic: self.topic.clone(),
+            config: self.config.clone(),
             last_sequence: 0,
             last_timestamp: 0,
             buffer: Buffer::new(
-                self.buffer.stream.clone(),
-                self.buffer.topic.clone(),
-                self.compression,
+                self.buffer.stream_name.clone(),
+                self.buffer.stream_config.clone(),
                 self.metrics.clone(),
             ),
             metrics: self.metrics.clone(),
             tx: self.tx.clone(),
-            compression: self.compression,
         }
     }
 }

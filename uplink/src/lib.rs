@@ -43,11 +43,13 @@
 //! [`name`]: Action#structfield.name
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
+use base::CtrlTx;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
@@ -321,8 +323,9 @@ impl Uplink {
         )
     }
 
-    pub fn spawn(&mut self, bridge: Bridge) -> Result<(), Error> {
+    pub fn spawn(&mut self, bridge: Bridge) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
+        let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
 
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
         let mqtt_client = mqtt.client();
@@ -402,13 +405,14 @@ impl Uplink {
             })
         });
 
-        Ok(())
+        Ok(CtrlTx { actions_lane: ctrl_actions_lane, data_lane: ctrl_data_lane })
     }
 
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
-        let bridge_tx = bridge.tx();
+        let bridge_tx = bridge.bridge_tx();
 
-        let route = ActionRoute { name: "launch_shell".to_owned(), timeout: 10 };
+        let route =
+            ActionRoute { name: "launch_shell".to_owned(), timeout: Duration::from_secs(10) };
         let (actions_tx, actions_rx) = bounded(1);
         bridge.register_action_route(route, actions_tx)?;
         let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
@@ -435,7 +439,10 @@ impl Uplink {
 
         #[cfg(target_os = "linux")]
         if let Some(config) = self.config.logging.clone() {
-            let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
+            let route = ActionRoute {
+                name: "journalctl_config".to_string(),
+                timeout: Duration::from_secs(10),
+            };
             let (actions_tx, actions_rx) = bounded(1);
             bridge.register_action_route(route, actions_tx)?;
             let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
@@ -448,7 +455,10 @@ impl Uplink {
 
         #[cfg(target_os = "android")]
         if let Some(config) = self.config.logging.clone() {
-            let route = ActionRoute { name: "journalctl_config".to_string(), timeout: 10 };
+            let route = ActionRoute {
+                name: "journalctl_config".to_string(),
+                timeout: Duration::from_secs(10),
+            };
             let (actions_tx, actions_rx) = bounded(1);
             bridge.register_action_route(route, actions_tx)?;
             let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
