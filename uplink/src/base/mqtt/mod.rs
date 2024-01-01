@@ -142,7 +142,7 @@ impl Mqtt {
             // This leads to force switching to catchup mode. Increasing max_payload_size to bypass this
             match read(&mut buf, max_packet_size) {
                 Ok(Packet::Publish(publish)) => {
-                    self.eventloop.pending.push(Request::Publish(publish))
+                    self.eventloop.pending.push_back(Request::Publish(publish))
                 }
                 Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
                 Err(rumqttc::Error::InsufficientBytes(_)) => break,
