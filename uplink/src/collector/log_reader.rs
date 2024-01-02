@@ -33,8 +33,25 @@ pub fn parse_timestamp(date: &mut OffsetDateTime, s: &str, template: &Regex) -> 
     }
     *date = date.replace_year(year).ok()?;
 
-    let month = matches.name("month").and_then(to_int).unwrap_or(0);
-    let month = Month::try_from(month as u8).ok()?;
+    let month = matches.name("month").unwrap().as_str();
+    let month = match month {
+        "January" | "Jan" => Month::January,
+        "February" | "Feb" => Month::February,
+        "March" | "Mar" => Month::March,
+        "April" | "Apr" => Month::April,
+        "May" => Month::May,
+        "June" | "Jun" => Month::June,
+        "July" | "Jul" => Month::July,
+        "August" | "Aug" => Month::August,
+        "September" | "Sep" => Month::September,
+        "October" | "Oct" => Month::October,
+        "November" | "Nov" => Month::November,
+        "December" | "Dec" => Month::December,
+        m => {
+            let month: u8 = m.parse().ok()?;
+            Month::try_from(month).ok()?
+        }
+    };
     *date = date.replace_month(month).ok()?;
 
     let day = matches.name("day").and_then(to_int).unwrap_or(0);
