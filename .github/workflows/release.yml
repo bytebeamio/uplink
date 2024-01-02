@@ -4,6 +4,33 @@ on:
     types: [published]
 
 jobs:
+  release-tools:
+    name: Build tools/${{ matrix.build }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [system-stats]
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+          target: x86_64-unknown-linux-musl
+
+      - name: Build binary
+        working-directory: tools/${{ matrix.build }}
+        run: cargo build --verbose --release
+
+      - name: Upload release archive
+        uses: softprops/action-gh-release@v1
+        with:
+          files: tools/${{ matrix.build }}/target/release/${{ matrix.build }}
+
   build-release:
     name: Build release for ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
@@ -105,6 +132,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: uplink*
+
   build-release-android:
     name: Build release for android
     runs-on: ubuntu-latest
