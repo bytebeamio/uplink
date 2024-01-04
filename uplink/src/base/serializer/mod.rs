@@ -2,10 +2,11 @@ mod metrics;
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Write};
+use std::time::Instant;
 use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use flume::{Receiver, RecvError, Sender};
+use flume::{bounded, Receiver, RecvError, Sender};
 use log::{debug, error, info, trace};
 use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
@@ -58,6 +59,8 @@ pub enum Error {
     EmptyStorage,
     #[error("Permission denied while accessing persistence directory \"{0}\"")]
     Persistence(String),
+    #[error("Serializer has shutdown after handling crash")]
+    Shutdown,
 }
 
 #[derive(Debug, PartialEq)]
@@ -66,6 +69,7 @@ enum Status {
     SlowEventloop(Publish, Arc<StreamConfig>),
     EventLoopReady,
     EventLoopCrash(Publish, Arc<StreamConfig>),
+    Shutdown,
 }
 
 /// Description of an interface that the [`Serializer`] expects to be provided by the MQTT client to publish the serialized data with.
@@ -206,6 +210,19 @@ impl StorageHandler {
 
         None
     }
+
+    fn flush_all(&mut self) {
+        for (stream_config, storage) in self.map.iter_mut() {
+            match storage.flush() {
+                Ok(_) => trace!("Force flushed stream = {} onto disk", stream_config.topic),
+                Err(storage::Error::NoWrites) => {}
+                Err(e) => error!(
+                    "Error when force flushing storage = {}; error = {e}",
+                    stream_config.topic
+                ),
+            }
+        }
+    }
 }
 
 /// The uplink Serializer is the component that deals with serializing, compressing and writing data onto disk or Network.
@@ -246,6 +263,9 @@ impl StorageHandler {
 ///                         but continue trying to publish                                                              
 ///
 ///```
+///
+/// NOTE: Shutdown mode and crash mode are only different in how they get triggered,
+/// but should be considered as interchangeable in the above diagram.
 /// [`start()`]: Serializer::start
 /// [`try_publish()`]: AsyncClient::try_publish
 /// [`publish()`]: AsyncClient::publish
@@ -257,6 +277,9 @@ pub struct Serializer<C: MqttClient> {
     metrics: SerializerMetrics,
     metrics_tx: Sender<SerializerMetrics>,
     pending_metrics: VecDeque<SerializerMetrics>,
+    /// Control handles
+    ctrl_rx: Receiver<SerializerShutdown>,
+    ctrl_tx: Sender<SerializerShutdown>,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -269,6 +292,7 @@ impl<C: MqttClient> Serializer<C> {
         metrics_tx: Sender<SerializerMetrics>,
     ) -> Result<Serializer<C>, Error> {
         let storage_handler = StorageHandler::new(config.clone())?;
+        let (ctrl_tx, ctrl_rx) = bounded(1);
 
         Ok(Serializer {
             config,
@@ -278,7 +302,37 @@ impl<C: MqttClient> Serializer<C> {
             metrics: SerializerMetrics::new("catchup"),
             metrics_tx,
             pending_metrics: VecDeque::with_capacity(3),
+            ctrl_tx,
+            ctrl_rx,
         })
+    }
+
+    pub fn ctrl_tx(&self) -> CtrlTx {
+        CtrlTx { inner: self.ctrl_tx.clone() }
+    }
+
+    /// Write all data received, from here-on, to disk only, shutdown serializer
+    /// after handling all data payloads.
+    fn shutdown(&mut self) -> Result<(), Error> {
+        debug!("Forced into shutdown mode, writing all incoming data to persistence.");
+
+        loop {
+            // Collect remaining data packets and write to disk
+            // NOTE: wait 2s to allow bridge to shutdown and flush leftover data.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let Ok(data) = self.collector_rx.recv_deadline(deadline) else {
+                self.storage_handler.flush_all();
+                return Ok(());
+            };
+            let stream_config = data.stream_config();
+            let publish = construct_publish(data)?;
+            let storage = self.storage_handler.select(&stream_config);
+            match write_to_disk(publish, storage) {
+                Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
+                Ok(_) => {}
+                Err(e) => error!("Shutdown: write error = {:?}", e),
+            }
+        }
     }
 
     /// Write all data received, from here-on, to disk only.
@@ -357,6 +411,10 @@ impl<C: MqttClient> Serializer<C> {
                 },
                 _ = interval.tick() => {
                     check_metrics(&mut self.metrics, &self.storage_handler);
+                }
+                // Transition into crash mode when uplink is shutting down
+                Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
+                    break Ok(Status::Shutdown)
                 }
             }
         };
@@ -468,6 +526,10 @@ impl<C: MqttClient> Serializer<C> {
                 _ = interval.tick() => {
                     let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler);
                 }
+                // Transition into crash mode when uplink is shutting down
+                Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
+                    return Ok(Status::Shutdown)
+                }
             }
         };
 
@@ -514,6 +576,10 @@ impl<C: MqttClient> Serializer<C> {
                         debug!("Failed to flush serializer metrics (normal). Error = {}", e);
                     }
                 }
+                // Transition into crash mode when uplink is shutting down
+                Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
+                    return Ok(Status::Shutdown)
+                }
             }
         }
     }
@@ -528,10 +594,17 @@ impl<C: MqttClient> Serializer<C> {
                 Status::SlowEventloop(publish, stream) => self.slow(publish, stream).await?,
                 Status::EventLoopReady => self.catchup().await?,
                 Status::EventLoopCrash(publish, stream) => self.crash(publish, stream).await?,
+                Status::Shutdown => break,
             };
 
             status = next_status;
         }
+
+        self.shutdown()?;
+        
+        info!("Serializer has handled all pending packets, shutting down");
+
+        Ok(())
     }
 }
 
@@ -709,6 +782,22 @@ fn check_and_flush_metrics(
     }
 
     Ok(())
+}
+
+/// Command to remotely trigger `Serializer` shutdown
+pub(crate) struct SerializerShutdown;
+
+/// Handle to send control messages to `Serializer`
+#[derive(Debug, Clone)]
+pub struct CtrlTx {
+    pub(crate) inner: Sender<SerializerShutdown>,
+}
+
+impl CtrlTx {
+    /// Triggers shutdown of `Serializer`
+    pub async fn trigger_shutdown(&self) {
+        self.inner.send_async(SerializerShutdown).await.unwrap()
+    }
 }
 
 // TODO(RT): Test cases
