@@ -151,7 +151,7 @@ impl Mqtt {
             }
         }
 
-        info!("Reloaded inflight publishes from previous session; removing file: {}", path.display());
+        info!("Pending publishes read from disk; removing file: {}", path.display());
         file.delete()?;
 
         Ok(())
