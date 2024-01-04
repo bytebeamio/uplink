@@ -313,7 +313,7 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Write all data received, from here-on, to disk only, shutdown serializer
     /// after handling all data payloads.
-    async fn shutdown(&mut self) -> Result<Status, Error> {
+    fn shutdown(&mut self) -> Result<(), Error> {
         debug!("Forced into shutdown mode, writing all incoming data to persistence.");
 
         loop {
@@ -322,7 +322,7 @@ impl<C: MqttClient> Serializer<C> {
             let deadline = Instant::now() + Duration::from_secs(2);
             let Ok(data) = self.collector_rx.recv_deadline(deadline) else {
                 self.storage_handler.flush_all();
-                return Err(Error::Shutdown);
+                return Ok(());
             };
             let stream_config = data.stream_config();
             let publish = construct_publish(data)?;
@@ -594,11 +594,17 @@ impl<C: MqttClient> Serializer<C> {
                 Status::SlowEventloop(publish, stream) => self.slow(publish, stream).await?,
                 Status::EventLoopReady => self.catchup().await?,
                 Status::EventLoopCrash(publish, stream) => self.crash(publish, stream).await?,
-                Status::Shutdown => self.shutdown().await?,
+                Status::Shutdown => break,
             };
 
             status = next_status;
         }
+
+        self.shutdown()?;
+        
+        info!("Serializer has handled all pending packets, shutting down");
+
+        Ok(())
     }
 }
 
