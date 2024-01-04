@@ -2042,7 +2042,7 @@ dependencies = [
 [[package]]
 name = "rumqttc"
 version = "0.23.0"
-source = "git+https://github.com/bytebeamio/rumqtt?branch=fix-pending#a342e8d5700044391e410b57ef8e6b344dd85a6e"
+source = "git+https://github.com/bytebeamio/rumqtt#eca37defa880f5060dd66be4d779bba0fbf91e8a"
 dependencies = [
  "bytes 1.5.0",
  "flume 0.11.0",
