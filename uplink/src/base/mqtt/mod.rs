@@ -124,8 +124,8 @@ impl Mqtt {
     }
 
     /// Checks for and loads data pending in persistence/inflight file
-    /// once done, deletes the file, wile writing incoming data into storage.
-    fn recover_inflight(&mut self) -> Result<(), Error> {
+    /// once done, deletes the file, while writing incoming data into storage.
+    fn reload_from_inflight_file(&mut self) -> Result<(), Error> {
         // Read contents of inflight file into an in-memory buffer
         let mut file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string())?;
         let path = file.path();
@@ -159,7 +159,7 @@ impl Mqtt {
 
     /// Poll eventloop to receive packets from broker
     pub async fn start(mut self) {
-        if let Err(e) = self.recover_inflight() {
+        if let Err(e) = self.reload_from_inflight_file() {
             error!("Error recovering data from inflight file: {e}");
         }
 
