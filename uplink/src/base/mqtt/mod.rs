@@ -138,8 +138,7 @@ impl Mqtt {
 
         let max_packet_size = self.config.mqtt.max_packet_size;
         loop {
-            // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
-            // This leads to force switching to catchup mode. Increasing max_payload_size to bypass this
+            // NOTE: This can fail when packet sizes > max_payload_size in config are written to disk.
             match read(&mut buf, max_packet_size) {
                 Ok(Packet::Publish(publish)) => {
                     self.eventloop.pending.push_back(Request::Publish(publish))
