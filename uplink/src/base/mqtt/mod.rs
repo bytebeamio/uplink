@@ -96,10 +96,10 @@ impl Mqtt {
     /// Shutdown eventloop and write inflight publish packets to disk
     pub fn persist_inflight(&mut self) -> Result<(), Error> {
         self.eventloop.clean();
-        let publishes: Vec<&mut Publish> = self
+        let publishes: Vec<&Publish> = self
             .eventloop
             .pending
-            .iter_mut()
+            .iter()
             .filter_map(|request| match request {
                 Request::Publish(publish) => Some(publish),
                 _ => None,
@@ -114,7 +114,6 @@ impl Mqtt {
         let mut buf = BytesMut::new();
 
         for publish in publishes {
-            publish.pkid = 1;
             publish.write(&mut buf)?;
         }
 
