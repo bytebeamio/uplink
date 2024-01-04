@@ -260,7 +260,7 @@ impl StorageHandler {
 ///                        │Serializer::slow(publish)◄───────────────────────────┤SlowEventloop(publish)│
 ///                        └-------------------------┘                           └──────────────────────┘
 ///                         Write to storage,                                     Slow network encountered
-///                         but continue trying to publish                                                              
+///                         but continue trying to publish
 ///
 ///```
 ///
@@ -538,8 +538,8 @@ impl<C: MqttClient> Serializer<C> {
             &mut self.metrics,
             &self.storage_handler,
         );
-        let v = v?;
-        Ok(v)
+
+        v
     }
 
     async fn normal(&mut self) -> Result<Status, Error> {
