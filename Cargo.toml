@@ -11,6 +11,7 @@ members = [
 exclude = [
     "tools/deserialize-backup",
     "tools/simulator",
+    "tools/system-stats",
     "tools/tunshell",
 ]
 

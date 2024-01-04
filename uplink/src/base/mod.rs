@@ -16,6 +16,7 @@ use crate::collector::logcat::LogcatConfig;
 use self::bridge::stream::MAX_BUFFER_SIZE;
 use self::bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
 use self::mqtt::CtrlTx as MqttCtrlTx;
+use self::serializer::CtrlTx as SerializerCtrlTx;
 
 pub mod actions;
 pub mod bridge;
@@ -291,6 +292,7 @@ pub struct CtrlTx {
     pub actions_lane: ActionsLaneCtrlTx,
     pub data_lane: DataLaneCtrlTx,
     pub mqtt: MqttCtrlTx,
+    pub serializer: SerializerCtrlTx,
 }
 
 impl CtrlTx {
@@ -299,6 +301,7 @@ impl CtrlTx {
             self.actions_lane.trigger_shutdown(),
             self.data_lane.trigger_shutdown(),
             self.mqtt.trigger_shutdown(),
+            self.serializer.trigger_shutdown()
         );
     }
 }
