@@ -16,7 +16,7 @@ use tokio::{select, time::interval};
 
 use crate::base::Compression;
 use crate::{Config, Package};
-pub use metrics::SerializerMetrics;
+pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
 
 use super::{default_file_size, StreamConfig};
 
@@ -171,10 +171,7 @@ impl StorageHandler {
             .or_insert_with(|| Storage::new(&stream.topic, default_file_size()))
     }
 
-    fn next(
-        &mut self,
-        metrics: &mut SerializerMetrics,
-    ) -> Option<(&Arc<StreamConfig>, &mut Storage)> {
+    fn next(&mut self, metrics: &mut Metrics) -> Option<(&Arc<StreamConfig>, &mut Storage)> {
         let storages = self.map.iter_mut();
 
         for (stream, storage) in storages {
@@ -274,9 +271,10 @@ pub struct Serializer<C: MqttClient> {
     collector_rx: Receiver<Box<dyn Package>>,
     client: C,
     storage_handler: StorageHandler,
-    metrics: SerializerMetrics,
+    metrics: Metrics,
     metrics_tx: Sender<SerializerMetrics>,
     pending_metrics: VecDeque<SerializerMetrics>,
+    stream_metrics: HashMap<String, StreamMetrics>,
     /// Control handles
     ctrl_rx: Receiver<SerializerShutdown>,
     ctrl_tx: Sender<SerializerShutdown>,
@@ -299,7 +297,8 @@ impl<C: MqttClient> Serializer<C> {
             collector_rx,
             client,
             storage_handler,
-            metrics: SerializerMetrics::new("catchup"),
+            metrics: Metrics::new("catchup"),
+            stream_metrics: HashMap::new(),
             metrics_tx,
             pending_metrics: VecDeque::with_capacity(3),
             ctrl_tx,
@@ -325,7 +324,7 @@ impl<C: MqttClient> Serializer<C> {
                 return Ok(());
             };
             let stream_config = data.stream_config();
-            let publish = construct_publish(data)?;
+            let publish = construct_publish(data, &mut self.stream_metrics)?;
             let storage = self.storage_handler.select(&stream_config);
             match write_to_disk(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
@@ -352,7 +351,7 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
-            let publish = construct_publish(data)?;
+            let publish = construct_publish(data, &mut self.stream_metrics)?;
             let storage = self.storage_handler.select(&stream);
             match write_to_disk(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
@@ -381,7 +380,7 @@ impl<C: MqttClient> Serializer<C> {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
                     let stream = data.stream_config();
-                    let publish = construct_publish(data)?;
+                    let publish = construct_publish(data, &mut self.stream_metrics)?;
                     let storage = self.storage_handler.select(&stream);
                     match write_to_disk(publish, storage) {
                         Ok(Some(deleted)) => {
@@ -410,7 +409,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
                 },
                 _ = interval.tick() => {
-                    check_metrics(&mut self.metrics, &self.storage_handler);
+                    check_metrics(&mut self.metrics, &self.stream_metrics, &self.storage_handler);
                 }
                 // Transition into crash mode when uplink is shutting down
                 Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
@@ -422,6 +421,7 @@ impl<C: MqttClient> Serializer<C> {
         save_and_prepare_next_metrics(
             &mut self.pending_metrics,
             &mut self.metrics,
+            &mut self.stream_metrics,
             &self.storage_handler,
         );
         let v = v?;
@@ -458,6 +458,7 @@ impl<C: MqttClient> Serializer<C> {
                 save_and_prepare_next_metrics(
                     &mut self.pending_metrics,
                     &mut self.metrics,
+                    &mut self.stream_metrics,
                     &self.storage_handler,
                 );
                 return Ok(Status::Normal);
@@ -474,7 +475,7 @@ impl<C: MqttClient> Serializer<C> {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
                     let stream = data.stream_config();
-                    let publish = construct_publish(data)?;
+                    let publish = construct_publish(data, &mut self.stream_metrics)?;
                     let storage = self.storage_handler.select(&stream);
                     match write_to_disk(publish, storage) {
                         Ok(Some(deleted)) => {
@@ -536,6 +537,7 @@ impl<C: MqttClient> Serializer<C> {
         save_and_prepare_next_metrics(
             &mut self.pending_metrics,
             &mut self.metrics,
+            &mut self.stream_metrics,
             &self.storage_handler,
         );
 
@@ -553,7 +555,7 @@ impl<C: MqttClient> Serializer<C> {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
                     let stream = data.stream_config();
-                    let publish = construct_publish(data)?;
+                    let publish = construct_publish(data, &mut self.stream_metrics)?;
                     let payload_size = publish.payload.len();
                     debug!("publishing on {} with size = {}", publish.topic, payload_size);
                     match self.client.try_publish(&stream.topic, QoS::AtLeastOnce, false, publish.payload) {
@@ -601,7 +603,7 @@ impl<C: MqttClient> Serializer<C> {
         }
 
         self.shutdown()?;
-        
+
         info!("Serializer has handled all pending packets, shutting down");
 
         Ok(())
@@ -627,7 +629,10 @@ fn lz4_compress(payload: &mut Vec<u8>) -> Result<(), Error> {
 }
 
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
-fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
+fn construct_publish(
+    data: Box<dyn Package>,
+    stream_metrics: &mut HashMap<String, StreamMetrics>,
+) -> Result<Publish, Error> {
     let stream_name = data.stream_name().as_ref().to_owned();
     let stream_config = data.stream_config();
     let point_count = data.len();
@@ -636,10 +641,18 @@ fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
 
     let topic = stream_config.topic.clone();
     let mut payload = data.serialize()?;
+    let data_size = payload.len();
+    let mut compressed_data_size = None;
 
     if let Compression::Lz4 = stream_config.compression {
         lz4_compress(&mut payload)?;
+        compressed_data_size = Some(payload.len());
     }
+
+    stream_metrics
+        .entry(stream_name.clone())
+        .or_insert_with(|| StreamMetrics::new(&stream_name))
+        .add_serialized_sizes(data_size, compressed_data_size);
 
     Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
 }
@@ -661,7 +674,11 @@ fn write_to_disk(
     Ok(deleted)
 }
 
-fn check_metrics(metrics: &mut SerializerMetrics, storage_handler: &StorageHandler) {
+fn check_metrics(
+    metrics: &mut Metrics,
+    stream_metrics: &HashMap<String, StreamMetrics>,
+    storage_handler: &StorageHandler,
+) {
     use pretty_bytes::converter::convert;
     let mut inmemory_write_size = 0;
     let mut inmemory_read_size = 0;
@@ -691,11 +708,21 @@ fn check_metrics(metrics: &mut SerializerMetrics, storage_handler: &StorageHandl
         convert(metrics.write_memory as f64),
         convert(metrics.read_memory as f64),
     );
+
+    for metrics in stream_metrics.values() {
+        info!(
+            "{:>17}: serialized_data_size = {} compressed_data_size = {}",
+            metrics.stream,
+            convert(metrics.serialized_data_size as f64),
+            convert(metrics.compressed_data_size as f64),
+        );
+    }
 }
 
 fn save_and_prepare_next_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
-    metrics: &mut SerializerMetrics,
+    metrics: &mut Metrics,
+    stream_metrics: &mut HashMap<String, StreamMetrics>,
     storage_handler: &StorageHandler,
 ) {
     let mut inmemory_write_size = 0;
@@ -716,14 +743,20 @@ fn save_and_prepare_next_metrics(
     metrics.set_disk_utilized(disk_utilized);
 
     let m = metrics.clone();
-    pending.push_back(m);
+    pending.push_back(SerializerMetrics::Main(m));
     metrics.prepare_next();
+
+    for metrics in stream_metrics.values_mut() {
+        let m = metrics.clone();
+        pending.push_back(SerializerMetrics::Stream(m));
+        metrics.prepare_next();
+    }
 }
 
 // // Enable actual metrics timers when there is data. This method is called every minute by the bridge
 fn check_and_flush_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
-    metrics: &mut SerializerMetrics,
+    metrics: &mut Metrics,
     metrics_tx: &Sender<SerializerMetrics>,
     storage_handler: &StorageHandler,
 ) -> Result<(), flume::TrySendError<SerializerMetrics>> {
@@ -748,20 +781,35 @@ fn check_and_flush_metrics(
 
     // Send pending metrics. This signifies state change
     while let Some(metrics) = pending.get(0) {
-        // Always send pending metrics. They represent state changes
-        info!(
-            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
-            metrics.mode,
-            metrics.batches,
-            metrics.errors,
-            metrics.lost_segments,
-            metrics.disk_files,
-            convert(metrics.disk_utilized as f64),
-            convert(metrics.write_memory as f64),
-            convert(metrics.read_memory as f64),
-        );
-        metrics_tx.try_send(metrics.clone())?;
-        pending.pop_front();
+        match metrics {
+            SerializerMetrics::Main(metrics) => {
+                // Always send pending metrics. They represent state changes
+                info!(
+                    "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
+                    metrics.mode,
+                    metrics.batches,
+                    metrics.errors,
+                    metrics.lost_segments,
+                    metrics.disk_files,
+                    convert(metrics.disk_utilized as f64),
+                    convert(metrics.write_memory as f64),
+                    convert(metrics.read_memory as f64),
+                );
+                metrics_tx.try_send(SerializerMetrics::Main(metrics.clone()))?;
+                pending.pop_front();
+            }
+            SerializerMetrics::Stream(metrics) => {
+                // Always send pending metrics. They represent state changes
+                info!(
+                    "{:>17}: serialized_data_size = {} compressed_data_size = {}",
+                    metrics.stream,
+                    convert(metrics.serialized_data_size as f64),
+                    convert(metrics.compressed_data_size as f64),
+                );
+                metrics_tx.try_send(SerializerMetrics::Stream(metrics.clone()))?;
+                pending.pop_front();
+            }
+        }
     }
 
     if metrics.batches() > 0 {
@@ -777,7 +825,7 @@ fn check_and_flush_metrics(
             convert(metrics.read_memory as f64),
         );
 
-        metrics_tx.try_send(metrics.clone())?;
+        metrics_tx.try_send(SerializerMetrics::Main(metrics.clone()))?;
         metrics.prepare_next();
     }
 

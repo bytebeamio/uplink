@@ -173,7 +173,8 @@ pub struct InstallerConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamMetricsConfig {
     pub enabled: bool,
-    pub topic: String,
+    pub bridge_topic: String,
+    pub serializer_topic: String,
     pub blacklist: Vec<String>,
     #[serde_as(as = "DurationSeconds<u64>")]
     pub timeout: Duration,

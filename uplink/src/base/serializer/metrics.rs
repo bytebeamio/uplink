@@ -4,7 +4,7 @@ use crate::base::clock;
 
 /// Metrics information relating to the operation of the `Serializer`, all values are reset on metrics flush
 #[derive(Debug, Serialize, Clone)]
-pub struct SerializerMetrics {
+pub struct Metrics {
     timestamp: u128,
     sequence: u32,
     /// One of **Catchup**, **Normal**, **Slow** or **Crash**
@@ -27,9 +27,9 @@ pub struct SerializerMetrics {
     pub sent_size: usize,
 }
 
-impl SerializerMetrics {
+impl Metrics {
     pub fn new(mode: &str) -> Self {
-        SerializerMetrics {
+        Metrics {
             timestamp: clock(),
             sequence: 1,
             mode: mode.to_owned(),
@@ -98,4 +98,42 @@ impl SerializerMetrics {
         self.sent_size = 0;
         self.errors = 0;
     }
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct StreamMetrics {
+    pub timestamp: u128,
+    pub sequence: u32,
+    pub stream: String,
+    pub serialized_data_size: usize,
+    pub compressed_data_size: usize,
+}
+
+impl StreamMetrics {
+    pub fn new(name: &str) -> Self {
+        StreamMetrics {
+            stream: name.to_owned(),
+            timestamp: clock(),
+            sequence: 1,
+            serialized_data_size: 0,
+            compressed_data_size: 0,
+        }
+    }
+
+    pub fn add_serialized_sizes(&mut self, data_size: usize, compressed_data_size: Option<usize>) {
+        self.serialized_data_size += data_size;
+        self.compressed_data_size += compressed_data_size.unwrap_or(data_size);
+    }
+
+    pub fn prepare_next(&mut self) {
+        self.timestamp = clock();
+        self.sequence += 1;
+        self.serialized_data_size = 0;
+        self.compressed_data_size = 0;
+    }
+}
+
+pub enum SerializerMetrics {
+    Main(Metrics),
+    Stream(StreamMetrics),
 }
