@@ -409,7 +409,7 @@ impl<C: MqttClient> Serializer<C> {
                     }
                 },
                 _ = interval.tick() => {
-                    check_metrics(&mut self.metrics, &self.stream_metrics, &self.storage_handler);
+                    check_metrics(&mut self.metrics, &mut self.stream_metrics, &self.storage_handler);
                 }
                 // Transition into crash mode when uplink is shutting down
                 Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
@@ -640,19 +640,29 @@ fn construct_publish(
     trace!("Data received on stream: {stream_name}; message count = {point_count}; batching latency = {batch_latency}");
 
     let topic = stream_config.topic.clone();
+
+    let metrics = stream_metrics
+        .entry(stream_name.clone())
+        .or_insert_with(|| StreamMetrics::new(&stream_name));
+
+    let serialization_start = Instant::now();
     let mut payload = data.serialize()?;
+    let serialization_time = serialization_start.elapsed();
+    metrics.add_serialization_time(serialization_time);
+
     let data_size = payload.len();
     let mut compressed_data_size = None;
 
     if let Compression::Lz4 = stream_config.compression {
+        let compression_start = Instant::now();
         lz4_compress(&mut payload)?;
+        let compression_time = compression_start.elapsed();
+        metrics.add_compression_time(compression_time);
+
         compressed_data_size = Some(payload.len());
     }
 
-    stream_metrics
-        .entry(stream_name.clone())
-        .or_insert_with(|| StreamMetrics::new(&stream_name))
-        .add_serialized_sizes(data_size, compressed_data_size);
+    metrics.add_serialized_sizes(data_size, compressed_data_size);
 
     Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
 }
@@ -676,7 +686,7 @@ fn write_to_disk(
 
 fn check_metrics(
     metrics: &mut Metrics,
-    stream_metrics: &HashMap<String, StreamMetrics>,
+    stream_metrics: &mut HashMap<String, StreamMetrics>,
     storage_handler: &StorageHandler,
 ) {
     use pretty_bytes::converter::convert;
@@ -709,12 +719,15 @@ fn check_metrics(
         convert(metrics.read_memory as f64),
     );
 
-    for metrics in stream_metrics.values() {
+    for metrics in stream_metrics.values_mut() {
+        metrics.prepare_snapshot();
         info!(
-            "{:>17}: serialized_data_size = {} compressed_data_size = {}",
+            "{:>17}: serialized_data_size = {} compressed_data_size = {} avg_serialization_time = {}us avg_compression_time = {}us",
             metrics.stream,
             convert(metrics.serialized_data_size as f64),
             convert(metrics.compressed_data_size as f64),
+            metrics.avg_serialization_time.as_micros(),
+            metrics.avg_compression_time.as_micros()
         );
     }
 }
@@ -747,6 +760,7 @@ fn save_and_prepare_next_metrics(
     metrics.prepare_next();
 
     for metrics in stream_metrics.values_mut() {
+        metrics.prepare_snapshot();
         let m = metrics.clone();
         pending.push_back(SerializerMetrics::Stream(m));
         metrics.prepare_next();
@@ -801,10 +815,12 @@ fn check_and_flush_metrics(
             SerializerMetrics::Stream(metrics) => {
                 // Always send pending metrics. They represent state changes
                 info!(
-                    "{:>17}: serialized_data_size = {} compressed_data_size = {}",
+                    "{:>17}: serialized_data_size = {} compressed_data_size = {} avg_serialization_time = {}us avg_compression_time = {}us",
                     metrics.stream,
                     convert(metrics.serialized_data_size as f64),
                     convert(metrics.compressed_data_size as f64),
+                    metrics.avg_serialization_time.as_micros(),
+                    metrics.avg_compression_time.as_micros()
                 );
                 metrics_tx.try_send(SerializerMetrics::Stream(metrics.clone()))?;
                 pending.pop_front();
