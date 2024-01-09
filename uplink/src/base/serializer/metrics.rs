@@ -1,4 +1,7 @@
+use std::time::Duration;
+
 use serde::Serialize;
+use serde_with::{serde_as, DurationNanoSeconds};
 
 use crate::base::clock;
 
@@ -100,6 +103,7 @@ impl Metrics {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Clone)]
 pub struct StreamMetrics {
     pub timestamp: u128,
@@ -107,6 +111,10 @@ pub struct StreamMetrics {
     pub stream: String,
     pub serialized_data_size: usize,
     pub compressed_data_size: usize,
+    #[serde_as(as = "DurationNanoSeconds<u64>")]
+    pub total_serialization_time: Duration,
+    #[serde_as(as = "DurationNanoSeconds<u64>")]
+    pub total_compression_time: Duration,
 }
 
 impl StreamMetrics {
@@ -117,12 +125,22 @@ impl StreamMetrics {
             sequence: 1,
             serialized_data_size: 0,
             compressed_data_size: 0,
+            total_serialization_time: Duration::ZERO,
+            total_compression_time: Duration::ZERO,
         }
     }
 
     pub fn add_serialized_sizes(&mut self, data_size: usize, compressed_data_size: Option<usize>) {
         self.serialized_data_size += data_size;
         self.compressed_data_size += compressed_data_size.unwrap_or(data_size);
+    }
+
+    pub fn add_serialization_time(&mut self, serialization_time: Duration) {
+        self.total_serialization_time += serialization_time;
+    }
+
+    pub fn add_compression_time(&mut self, compression_time: Duration) {
+        self.total_compression_time += compression_time;
     }
 
     pub fn prepare_next(&mut self) {

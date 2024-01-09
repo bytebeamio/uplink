@@ -640,19 +640,29 @@ fn construct_publish(
     trace!("Data received on stream: {stream_name}; message count = {point_count}; batching latency = {batch_latency}");
 
     let topic = stream_config.topic.clone();
+
+    let metrics = stream_metrics
+        .entry(stream_name.clone())
+        .or_insert_with(|| StreamMetrics::new(&stream_name));
+
+    let serialization_start = Instant::now();
     let mut payload = data.serialize()?;
+    let serialization_time = serialization_start.elapsed();
+    metrics.add_serialization_time(serialization_time);
+
     let data_size = payload.len();
     let mut compressed_data_size = None;
 
     if let Compression::Lz4 = stream_config.compression {
+        let compression_start = Instant::now();
         lz4_compress(&mut payload)?;
+        let compression_time = compression_start.elapsed();
+        metrics.add_compression_time(compression_time);
+
         compressed_data_size = Some(payload.len());
     }
 
-    stream_metrics
-        .entry(stream_name.clone())
-        .or_insert_with(|| StreamMetrics::new(&stream_name))
-        .add_serialized_sizes(data_size, compressed_data_size);
+    metrics.add_serialized_sizes(data_size, compressed_data_size);
 
     Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
 }
