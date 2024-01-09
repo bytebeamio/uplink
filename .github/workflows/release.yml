@@ -24,12 +24,12 @@ jobs:
 
       - name: Build binary
         working-directory: tools/${{ matrix.build }}
-        run: cargo build --verbose --release
+        run: cargo build --verbose --release --target x86_64-unknown-linux-musl
 
       - name: Upload release archive
         uses: softprops/action-gh-release@v1
         with:
-          files: tools/${{ matrix.build }}/target/release/${{ matrix.build }}
+          files: tools/${{ matrix.build }}/target/x86_64-unknown-linux-musl/release/${{ matrix.build }}
 
   build-release:
     name: Build release for ${{ matrix.target }}
