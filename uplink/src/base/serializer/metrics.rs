@@ -111,10 +111,18 @@ pub struct StreamMetrics {
     pub stream: String,
     pub serialized_data_size: usize,
     pub compressed_data_size: usize,
+    #[serde(skip)]
+    pub serializations: u32,
     #[serde_as(as = "DurationNanoSeconds<u64>")]
     pub total_serialization_time: Duration,
     #[serde_as(as = "DurationNanoSeconds<u64>")]
+    pub avg_serialization_time: Duration,
+    #[serde(skip)]
+    pub compressions: u32,
+    #[serde_as(as = "DurationNanoSeconds<u64>")]
     pub total_compression_time: Duration,
+    #[serde_as(as = "DurationNanoSeconds<u64>")]
+    pub avg_compression_time: Duration,
 }
 
 impl StreamMetrics {
@@ -125,8 +133,12 @@ impl StreamMetrics {
             sequence: 1,
             serialized_data_size: 0,
             compressed_data_size: 0,
+            serializations: 0,
             total_serialization_time: Duration::ZERO,
+            avg_serialization_time: Duration::ZERO,
+            compressions: 0,
             total_compression_time: Duration::ZERO,
+            avg_compression_time: Duration::ZERO,
         }
     }
 
@@ -136,11 +148,20 @@ impl StreamMetrics {
     }
 
     pub fn add_serialization_time(&mut self, serialization_time: Duration) {
+        self.serializations += 1;
         self.total_serialization_time += serialization_time;
     }
 
     pub fn add_compression_time(&mut self, compression_time: Duration) {
+        self.compressions += 1;
         self.total_compression_time += compression_time;
+    }
+
+    // Should be called before serializing metrics to ensure averages are computed.
+    // Averages aren't calculated for ever `add_*` call to save on costs.
+    pub fn prepare_snapshot(&mut self) {
+        self.avg_serialization_time = self.total_serialization_time / self.serializations;
+        self.avg_compression_time = self.total_compression_time / self.compressions;
     }
 
     pub fn prepare_next(&mut self) {
