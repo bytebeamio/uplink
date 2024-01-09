@@ -160,8 +160,12 @@ impl StreamMetrics {
     // Should be called before serializing metrics to ensure averages are computed.
     // Averages aren't calculated for ever `add_*` call to save on costs.
     pub fn prepare_snapshot(&mut self) {
-        self.avg_serialization_time = self.total_serialization_time / self.serializations;
-        self.avg_compression_time = self.total_compression_time / self.compressions;
+        self.avg_serialization_time = self
+            .total_serialization_time
+            .checked_div(self.serializations)
+            .unwrap_or(Duration::ZERO);
+        self.avg_compression_time =
+            self.total_compression_time.checked_div(self.compressions).unwrap_or(Duration::ZERO);
     }
 
     pub fn prepare_next(&mut self) {
