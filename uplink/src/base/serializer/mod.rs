@@ -755,13 +755,13 @@ fn save_and_prepare_next_metrics(
     metrics.set_disk_files(file_count);
     metrics.set_disk_utilized(disk_utilized);
 
-    let m = metrics.clone();
+    let m = Box::new(metrics.clone());
     pending.push_back(SerializerMetrics::Main(m));
     metrics.prepare_next();
 
     for metrics in stream_metrics.values_mut() {
         metrics.prepare_snapshot();
-        let m = metrics.clone();
+        let m = Box::new(metrics.clone());
         pending.push_back(SerializerMetrics::Stream(m));
         metrics.prepare_next();
     }
@@ -841,7 +841,7 @@ fn check_and_flush_metrics(
             convert(metrics.read_memory as f64),
         );
 
-        metrics_tx.try_send(SerializerMetrics::Main(metrics.clone()))?;
+        metrics_tx.try_send(SerializerMetrics::Main(Box::new(metrics.clone())))?;
         metrics.prepare_next();
     }
 

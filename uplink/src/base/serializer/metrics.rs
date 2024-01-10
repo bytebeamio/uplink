@@ -177,6 +177,6 @@ impl StreamMetrics {
 }
 
 pub enum SerializerMetrics {
-    Main(Metrics),
-    Stream(StreamMetrics),
+    Main(Box<Metrics>),
+    Stream(Box<StreamMetrics>),
 }
