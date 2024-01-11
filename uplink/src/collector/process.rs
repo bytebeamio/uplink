@@ -82,7 +82,7 @@ impl ProcessHandler {
     pub async fn start(mut self) -> Result<(), Error> {
         loop {
             let action = self.actions_rx.recv_async().await?;
-            let command = String::from("tools/") + &action.name;
+            let command = format!("tools/{}", action.name);
             let deadline = match &action.deadline {
                 Some(d) => *d,
                 _ => {
