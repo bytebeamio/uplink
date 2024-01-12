@@ -1,11 +1,12 @@
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::base::clock;
 use flume::{bounded, Receiver, Sender};
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use serde::Serialize;
 use serde_json::json;
 use tokio::{spawn, time::interval};
-use vd_lib::{Car, Gear, HandBrake};
+use vd_lib::{Car, HandBrake};
 
 use super::{
     data::{DeviceData, Gps},
@@ -24,8 +25,12 @@ async fn update_gps(device: DeviceData, rx: Receiver<f64>, tx: Sender<Event>) {
         for trace in gps_track.traverse(distance_travelled) {
             let payload = json!(trace);
             sequence += 1;
-            let data =
-                Payload { stream: "gps".to_string(), sequence, timestamp: clock() as u64, payload };
+            let data = Payload {
+                stream: "c2c_gps".to_string(),
+                sequence,
+                timestamp: clock() as u64,
+                payload,
+            };
             tx.send_async(Event::Data(data)).await.unwrap();
         }
     }
@@ -107,24 +112,30 @@ impl GpsTrack {
     }
 }
 
+#[derive(Serialize)]
+struct Session {
+    session_start: u64,
+    session_end: u64,
+}
+
 pub async fn simulate(device: DeviceData, tx: Sender<Event>) {
     let (speed_tx, speed_rx) = bounded(10);
     spawn(update_gps(device, speed_rx, tx.clone()));
     let mut sequence = 0;
 
     let mut rng = StdRng::from_entropy();
-    let fuel_level = rng.gen_range(0.0..1.0);
-    let mut car = Car::new(fuel_level);
+    let charge = rng.gen_range(0.4..1.0);
+    let health = rng.gen_range(0.9..1.0);
+    let mut car = Car::new(charge, health);
     car.turn_key(true);
     car.set_handbrake_position(HandBrake::Disengaged);
-    car.set_clutch_position(1.0);
-    car.shift_gear(Gear::First);
-    car.set_clutch_position(0.5);
     car.set_accelerator_position(0.5);
-    car.set_clutch_position(0.0);
 
     let mut interval = interval(Duration::from_secs(UPDATE_INTERVAL));
-    let mut refuelling = None;
+    let mut charging = None;
+    let mut stopped = None;
+    let mut session_start = Some(clock());
+    let mut stopping = false;
 
     loop {
         car.update();
@@ -133,42 +144,61 @@ pub async fn simulate(device: DeviceData, tx: Sender<Event>) {
         forward_device_shadow(&tx, &car, sequence).await;
         interval.tick().await;
 
-        // Stop for refuelling, slowly get into the gas station
-        if car.fuel_level() < 0.25 && car.speed() != 0.0 {
-            car.set_clutch_position(rng.gen_range(0.3..0.9));
-            car.set_brake_position(rng.gen_range(0.3..0.9));
+        // Turn off for very infrequently
+        if car.speed() == 0.0 && car.soc() > 0.25 && stopping {
+            stopping = false;
+            car.set_handbrake_position(HandBrake::Full);
+            car.set_brake_position(0.0);
+            car.turn_key(false);
+
+            stopped = Some(
+                // Time during which car is stationary: between 5-100 minutes
+                Instant::now() + Duration::from_secs_f32(300.0 + 0.0 * rng.gen_range(0.0..95.0)),
+            );
+            if let Some(start) = session_start.take() {
+                forward_session(&tx, start, sequence).await
+            }
+        }
+
+        if let Some(till) = stopped {
+            if till < Instant::now() {
+                stopped.take();
+                car.turn_key(true);
+                session_start = Some(clock());
+            }
             continue;
         }
-        // Start refuelling
-        if car.fuel_level() < 0.25 && car.speed() == 0.0 && refuelling.is_none() {
+
+        // Stop for charging when low battery or very infrequently to end a session
+        if (car.soc() < 0.25 || rng.gen_bool(0.0005)) && car.speed() != 0.0 {
+            car.set_brake_position(rng.gen_range(0.3..0.9));
+            stopping = true;
+            continue;
+        }
+        // Start charging
+        if car.soc() < 0.25 && car.speed() == 0.0 && charging.is_none() {
             car.set_handbrake_position(HandBrake::Full);
-            car.shift_gear(Gear::Neutral);
-            car.set_clutch_position(0.0);
             car.set_brake_position(0.0);
             if rng.gen_bool(0.5) {
                 car.turn_key(false);
             }
-            refuelling = Some(
-                // Time during which car is stationary at the refuelling point: between 7.5-17.5 minutes
+            car.set_status("Charging");
+            charging = Some(
+                // Time during which car is stationary at the charging point: between 7.5-17.5 minutes
                 Instant::now() + Duration::from_secs_f32(300.0 + 60.0 * rng.gen_range(2.5..12.5)),
             );
         }
 
-        if let Some(till) = refuelling {
+        if let Some(till) = charging {
             if till < Instant::now() {
-                refuelling.take();
+                charging.take();
                 if !car.ignition() {
                     car.turn_key(true);
+                    car.set_status("Running");
                 }
             }
-            car.refuel(0.001);
+            car.charge(rng.gen_range(0.01..0.05));
             continue;
-        }
-
-        if rng.gen_bool(0.05) && car.rpm() > 2500 || car.rpm() > 3500 || car.rpm() < 1250 {
-            shift_gears(&mut car, rng.gen_range(0.25..1.0));
-        } else {
-            car.set_clutch_position(0.0);
         }
 
         // very few times, press the brake to slow down, else remove
@@ -201,62 +231,14 @@ pub async fn simulate(device: DeviceData, tx: Sender<Event>) {
     }
 }
 
-fn shift_gears(car: &mut Car, clutch_position: f64) {
-    let clutch_gear_combo = |car: &mut Car, gear| {
-        car.set_clutch_position(clutch_position);
-        car.shift_gear(gear);
-    };
-    match car.gear() {
-        Gear::Reverse => clutch_gear_combo(car, Gear::Neutral),
-        Gear::Neutral => {
-            if car.clutch_position() > 0.5 {
-                clutch_gear_combo(car, Gear::First)
-            }
-        }
-        Gear::First => {
-            if car.rpm() > 2500 && car.speed() > 10.0 {
-                clutch_gear_combo(car, Gear::Second)
-            }
-        }
-        Gear::Second => match car.speed() as u8 {
-            0..=10 => clutch_gear_combo(car, Gear::First),
-            s if s > 25 && car.rpm() > 3000 => clutch_gear_combo(car, Gear::Third),
-            _ => {}
-        },
-        Gear::Third => match car.speed() as u8 {
-            0..=10 => clutch_gear_combo(car, Gear::First),
-            11..=20 => clutch_gear_combo(car, Gear::Second),
-            s if s > 50 && car.rpm() > 3500 => clutch_gear_combo(car, Gear::Fourth),
-            _ => {}
-        },
-        Gear::Fourth => match car.speed() as u8 {
-            0..=10 => clutch_gear_combo(car, Gear::First),
-            11..=20 => clutch_gear_combo(car, Gear::Second),
-            21..=40 => clutch_gear_combo(car, Gear::Third),
-            s if s > 80 && car.rpm() > 4000 => clutch_gear_combo(car, Gear::Fifth),
-            _ => {}
-        },
-        Gear::Fifth => match car.speed() as u8 {
-            0..=10 => clutch_gear_combo(car, Gear::First),
-            11..=20 => clutch_gear_combo(car, Gear::Second),
-            21..=40 => clutch_gear_combo(car, Gear::Third),
-            41..=70 => clutch_gear_combo(car, Gear::Fourth),
-            _ => {}
-        },
-    }
-}
-
 async fn forward_device_shadow(tx: &Sender<Event>, car: &Car, sequence: u32) {
     let payload = json!({
+        "Status": car.get_status(),
+        "efficiency": car.distance_travelled() / car.energy_consumed(),
+        "distance_travelled_km": car.distance_travelled(),
+        "range": (car.soh() - car.soc()) * 400.0, // maximum the car can ever go is 400km
+        "SoC": (car.soc() * 100.0) as u8,
         "speed": car.speed(),
-        "distance_travelled": car.speed() / 3600.0,
-        "fuel_level": car.fuel_level() * 40.0,
-        "gear": car.gear(),
-        "rpm": car.rpm(),
-        "accelerator": car.accelerator_position(),
-        "brake": car.brake_position(),
-        "clutch": car.clutch_position(),
-        "hand_brake": car.hand_brake()
     });
     let data = Payload {
         stream: "device_shadow".to_string(),
@@ -264,5 +246,15 @@ async fn forward_device_shadow(tx: &Sender<Event>, car: &Car, sequence: u32) {
         timestamp: clock() as u64,
         payload,
     };
+    tx.send_async(Event::Data(dbg!(data))).await.unwrap();
+}
+
+async fn forward_session(tx: &Sender<Event>, start: u128, sequence: u32) {
+    let payload = json!({
+        "start_time": start,
+        "end_time": SystemTime::UNIX_EPOCH.elapsed().unwrap().as_millis(),
+    });
+    let data =
+        Payload { stream: "sessions".to_string(), sequence, timestamp: clock() as u64, payload };
     tx.send_async(Event::Data(data)).await.unwrap();
 }

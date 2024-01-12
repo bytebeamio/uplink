@@ -102,7 +102,7 @@ pub async fn start(
 
     match config.profile {
         SimulatorProfile::Default => spawn_data_simulators(device, tx.clone()),
-        SimulatorProfile::IceDriver => {
+        SimulatorProfile::EvDriver => {
             spawn(ice_driver::simulate(device, tx.clone()));
         }
     }

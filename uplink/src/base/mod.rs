@@ -128,7 +128,7 @@ pub struct Stats {
 pub enum SimulatorProfile {
     #[default]
     Default,
-    IceDriver,
+    EvDriver,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
