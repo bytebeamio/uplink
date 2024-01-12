@@ -220,12 +220,18 @@ impl Default for DeviceShadowConfig {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct LogReaderConfig {
     pub path: String,
     pub stream_name: String,
     pub log_template: String,
     pub timestamp_template: String,
+    #[serde(default = "default_true")]
+    pub multi_line: bool
 }
 
 #[derive(Clone, Debug, Deserialize)]
