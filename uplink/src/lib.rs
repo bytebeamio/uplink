@@ -112,7 +112,8 @@ pub mod config {
 
     [stream_metrics]
     enabled = false
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
+    bridge_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
+    serializer_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_stream_metrics/jsonarray"
     blacklist = []
     timeout = 10
 
@@ -172,7 +173,12 @@ pub mod config {
         }
 
         replace_topic_placeholders(&mut config.action_status.topic, tenant_id, device_id);
-        replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.stream_metrics.bridge_topic, tenant_id, device_id);
+        replace_topic_placeholders(
+            &mut config.stream_metrics.serializer_topic,
+            tenant_id,
+            device_id,
+        );
         replace_topic_placeholders(&mut config.serializer_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.mqtt_metrics.topic, tenant_id, device_id);
 
