@@ -236,7 +236,7 @@ async fn forward_device_shadow(tx: &Sender<Event>, car: &Car, sequence: u32) {
         "Status": car.get_status(),
         "efficiency": car.distance_travelled() / car.energy_consumed(),
         "distance_travelled_km": car.distance_travelled(),
-        "range": (car.soh() - car.soc()) * 400.0, // maximum the car can ever go is 400km
+        "range": ((car.soh() - car.soc()) * 400.0) as u16, // maximum the car can ever go is 400km
         "SoC": (car.soc() * 100.0) as u8,
         "speed": car.speed(),
     });
@@ -246,7 +246,7 @@ async fn forward_device_shadow(tx: &Sender<Event>, car: &Car, sequence: u32) {
         timestamp: clock() as u64,
         payload,
     };
-    tx.send_async(Event::Data(dbg!(data))).await.unwrap();
+    tx.send_async(Event::Data(data)).await.unwrap();
 }
 
 async fn forward_session(tx: &Sender<Event>, start: u128, sequence: u32) {
