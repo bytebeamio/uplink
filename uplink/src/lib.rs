@@ -130,6 +130,7 @@ pub mod config {
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     buf_size = 1
     flush_period = 2
+    priority = 255 # highest priority for quick delivery of action status info to platform
 
     [streams.device_shadow]
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"

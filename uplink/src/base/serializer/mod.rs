@@ -1,6 +1,6 @@
 mod metrics;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::{self, Write};
 use std::time::Instant;
 use std::{sync::Arc, time::Duration};
@@ -134,14 +134,14 @@ impl MqttClient for AsyncClient {
 }
 
 struct StorageHandler {
-    map: HashMap<Arc<StreamConfig>, Storage>,
+    map: BTreeMap<Arc<StreamConfig>, Storage>,
     // Stream being read from
     read_stream: Option<Arc<StreamConfig>>,
 }
 
 impl StorageHandler {
     fn new(config: Arc<Config>) -> Result<Self, Error> {
-        let mut map = HashMap::with_capacity(2 * config.streams.len());
+        let mut map = BTreeMap::new();
         for (stream_name, stream_config) in config.streams.iter() {
             let mut storage =
                 Storage::new(&stream_config.topic, stream_config.persistence.max_file_size);
@@ -870,6 +870,7 @@ impl CtrlTx {
 #[cfg(test)]
 mod test {
     use serde_json::Value;
+    use tokio::spawn;
 
     use std::collections::HashMap;
     use std::time::Duration;
@@ -971,23 +972,17 @@ mod test {
     }
 
     impl MockCollector {
-        fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
-            MockCollector {
-                stream: Stream::new(
-                    "hello",
-                    StreamConfig {
-                        topic: "hello/world".to_string(),
-                        buf_size: 1,
-                        ..Default::default()
-                    },
-                    data_tx,
-                ),
-            }
+        fn new(
+            stream_name: &str,
+            stream_config: StreamConfig,
+            data_tx: flume::Sender<Box<dyn Package>>,
+        ) -> MockCollector {
+            MockCollector { stream: Stream::new(stream_name, stream_config, data_tx) }
         }
 
         fn send(&mut self, i: u32) -> Result<(), Error> {
             let payload = Payload {
-                stream: "hello".to_owned(),
+                stream: Default::default(),
                 sequence: i,
                 timestamp: 0,
                 payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,
@@ -1010,7 +1005,11 @@ mod test {
             net_rx.recv().unwrap();
         });
 
-        let mut collector = MockCollector::new(data_tx);
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         std::thread::spawn(move || {
             for i in 1..3 {
                 collector.send(i).unwrap();
@@ -1064,7 +1063,11 @@ mod test {
             net_rx.recv().unwrap();
         });
 
-        let mut collector = MockCollector::new(data_tx);
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Faster collector, send data every 5s
         std::thread::spawn(move || {
             for i in 1..10 {
@@ -1092,7 +1095,11 @@ mod test {
         let config = Arc::new(default_config());
         let (mut serializer, data_tx, _) = defaults(config);
 
-        let mut collector = MockCollector::new(data_tx);
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Faster collector, send data every 5s
         std::thread::spawn(move || {
             for i in 1..10 {
@@ -1149,7 +1156,11 @@ mod test {
             .entry(Arc::new(Default::default()))
             .or_insert(Storage::new("hello/world", 1024));
 
-        let mut collector = MockCollector::new(data_tx);
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Run a collector practically once
         std::thread::spawn(move || {
             for i in 2..6 {
@@ -1204,7 +1215,11 @@ mod test {
             }))
             .or_insert(Storage::new("hello/world", 1024));
 
-        let mut collector = MockCollector::new(data_tx);
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Run a collector
         std::thread::spawn(move || {
             for i in 2..6 {
@@ -1228,6 +1243,149 @@ mod test {
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
             }
             s => unreachable!("Unexpected status: {:?}", s),
+        }
+    }
+
+    #[tokio::test]
+    // Ensures that the data of streams are removed on the basis of preference
+    async fn preferential_send_on_network() {
+        let mut config = default_config();
+        config.stream_metrics.timeout = Duration::from_secs(1000);
+        config.streams.extend([
+            (
+                "one".to_owned(),
+                StreamConfig { topic: "topic/one".to_string(), priority: 1, ..Default::default() },
+            ),
+            (
+                "two".to_owned(),
+                StreamConfig { topic: "topic/two".to_string(), priority: 2, ..Default::default() },
+            ),
+            (
+                "top".to_owned(),
+                StreamConfig {
+                    topic: "topic/top".to_string(),
+                    priority: u8::MAX,
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let config = Arc::new(config);
+
+        let (mut serializer, _data_tx, req_rx) = defaults(config.clone());
+
+        let publish = |topic: String, i: u32| Publish {
+            dup: false,
+            qos: QoS::AtMostOnce,
+            retain: false,
+            topic,
+            pkid: 0,
+            payload: Bytes::from(i.to_string()),
+        };
+
+        let mut one = serializer
+            .storage_handler
+            .map
+            .entry(Arc::new(StreamConfig {
+                topic: "topic/one".to_string(),
+                priority: 1,
+                ..Default::default()
+            }))
+            .or_insert_with(|| unreachable!());
+        write_to_disk(publish("topic/one".to_string(), 1), &mut one).unwrap();
+        write_to_disk(publish("topic/one".to_string(), 10), &mut one).unwrap();
+
+        let top = serializer
+            .storage_handler
+            .map
+            .entry(Arc::new(StreamConfig {
+                topic: "topic/top".to_string(),
+                priority: u8::MAX,
+                ..Default::default()
+            }))
+            .or_insert_with(|| unreachable!());
+        write_to_disk(publish("topic/top".to_string(), 100), top).unwrap();
+        write_to_disk(publish("topic/top".to_string(), 1000), top).unwrap();
+
+        let two = serializer
+            .storage_handler
+            .map
+            .entry(Arc::new(StreamConfig {
+                topic: "topic/two".to_string(),
+                priority: 2,
+                ..Default::default()
+            }))
+            .or_insert_with(|| unreachable!());
+        write_to_disk(publish("topic/two".to_string(), 3), two).unwrap();
+
+        let mut default = serializer
+            .storage_handler
+            .map
+            .entry(Arc::new(StreamConfig {
+                topic: "topic/default".to_string(),
+                priority: 0,
+                ..Default::default()
+            }))
+            .or_insert(Storage::new("topic/default", 1024));
+        write_to_disk(publish("topic/default".to_string(), 0), &mut default).unwrap();
+        write_to_disk(publish("topic/default".to_string(), 2), &mut default).unwrap();
+
+        // run serializer in the background
+        spawn(async { serializer.start().await.unwrap() });
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/top");
+                assert_eq!(payload, "100");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/top");
+                assert_eq!(payload, "1000");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/two");
+                assert_eq!(payload, "3");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/one");
+                assert_eq!(payload, "1");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/one");
+                assert_eq!(payload, "10");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/default");
+                assert_eq!(payload, "0");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/default");
+                assert_eq!(payload, "2");
+            }
+            _ => unreachable!(),
         }
     }
 }
