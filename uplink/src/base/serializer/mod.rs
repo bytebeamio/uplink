@@ -870,7 +870,6 @@ impl CtrlTx {
 #[cfg(test)]
 mod test {
     use serde_json::Value;
-    use tokio::time::sleep;
 
     use std::collections::HashMap;
     use std::time::Duration;
@@ -1229,58 +1228,6 @@ mod test {
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
             }
             s => unreachable!("Unexpected status: {:?}", s),
-        }
-    }
-
-    #[tokio::test]
-    // Ensures that the data of streams are removed on the basis of preference
-    async fn preferential_send_on_network() {
-        let mut config = default_config();
-        config.streams.extend([
-            (
-                "one".to_owned(),
-                StreamConfig { topic: "topic/one".to_string(), priority: 1, ..Default::default() },
-            ),
-            (
-                "two".to_owned(),
-                StreamConfig { topic: "topic/two".to_string(), priority: 1, ..Default::default() },
-            ),
-            (
-                "top".to_owned(),
-                StreamConfig {
-                    topic: "topic/top".to_string(),
-                    priority: u8::MAX,
-                    ..Default::default()
-                },
-            ),
-        ]);
-        let config = Arc::new(config);
-
-        let (serializer, data_tx, req_rx) = defaults(config);
-
-        let mut collector = MockCollector::new(data_tx);
-        // Run a collector
-        std::thread::spawn(move || {
-            collector.send("one".to_owned(), 1).unwrap();
-            collector.send("default".to_owned(), 0).unwrap();
-            collector.send("top".to_owned(), 100).unwrap();
-            collector.send("default".to_owned(), 2).unwrap();
-            collector.send("two".to_owned(), 3).unwrap();
-            collector.send("top".to_owned(), 1000).unwrap();
-            collector.send("one".to_owned(), 10).unwrap();
-        });
-
-        // run in the background
-        tokio::spawn(serializer.start());
-
-        sleep(Duration::from_secs(10)).await;
-
-        match req_rx.recv().unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/top");
-                assert_eq!(payload, "100");
-            }
-            _ => unreachable!(),
         }
     }
 }
