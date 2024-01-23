@@ -1,6 +1,6 @@
 mod metrics;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::{self, Write};
 use std::time::Instant;
 use std::{sync::Arc, time::Duration};
@@ -134,14 +134,14 @@ impl MqttClient for AsyncClient {
 }
 
 struct StorageHandler {
-    map: HashMap<Arc<StreamConfig>, Storage>,
+    map: BTreeMap<Arc<StreamConfig>, Storage>,
     // Stream being read from
     read_stream: Option<Arc<StreamConfig>>,
 }
 
 impl StorageHandler {
     fn new(config: Arc<Config>) -> Result<Self, Error> {
-        let mut map = HashMap::with_capacity(2 * config.streams.len());
+        let mut map = BTreeMap::new();
         for (stream_name, stream_config) in config.streams.iter() {
             let mut storage =
                 Storage::new(&stream_config.topic, stream_config.persistence.max_file_size);
@@ -870,6 +870,7 @@ impl CtrlTx {
 #[cfg(test)]
 mod test {
     use serde_json::Value;
+    use tokio::time::sleep;
 
     use std::collections::HashMap;
     use std::time::Duration;
@@ -985,9 +986,9 @@ mod test {
             }
         }
 
-        fn send(&mut self, i: u32) -> Result<(), Error> {
+        fn send(&mut self, stream: String, i: u32) -> Result<(), Error> {
             let payload = Payload {
-                stream: "hello".to_owned(),
+                stream,
                 sequence: i,
                 timestamp: 0,
                 payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,
@@ -1013,7 +1014,7 @@ mod test {
         let mut collector = MockCollector::new(data_tx);
         std::thread::spawn(move || {
             for i in 1..3 {
-                collector.send(i).unwrap();
+                collector.send("hello".to_owned(), i).unwrap();
             }
         });
 
@@ -1068,7 +1069,7 @@ mod test {
         // Faster collector, send data every 5s
         std::thread::spawn(move || {
             for i in 1..10 {
-                collector.send(i).unwrap();
+                collector.send("hello".to_owned(), i).unwrap();
                 std::thread::sleep(Duration::from_secs(3));
             }
         });
@@ -1096,7 +1097,7 @@ mod test {
         // Faster collector, send data every 5s
         std::thread::spawn(move || {
             for i in 1..10 {
-                collector.send(i).unwrap();
+                collector.send("hello".to_owned(), i).unwrap();
                 std::thread::sleep(Duration::from_secs(3));
             }
         });
@@ -1153,7 +1154,7 @@ mod test {
         // Run a collector practically once
         std::thread::spawn(move || {
             for i in 2..6 {
-                collector.send(i).unwrap();
+                collector.send("hello".to_owned(), i).unwrap();
                 std::thread::sleep(Duration::from_secs(100));
             }
         });
@@ -1208,7 +1209,7 @@ mod test {
         // Run a collector
         std::thread::spawn(move || {
             for i in 2..6 {
-                collector.send(i).unwrap();
+                collector.send("hello".to_owned(), i).unwrap();
                 std::thread::sleep(Duration::from_secs(10));
             }
         });
@@ -1228,6 +1229,58 @@ mod test {
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
             }
             s => unreachable!("Unexpected status: {:?}", s),
+        }
+    }
+
+    #[tokio::test]
+    // Ensures that the data of streams are removed on the basis of preference
+    async fn preferential_send_on_network() {
+        let mut config = default_config();
+        config.streams.extend([
+            (
+                "one".to_owned(),
+                StreamConfig { topic: "topic/one".to_string(), priority: 1, ..Default::default() },
+            ),
+            (
+                "two".to_owned(),
+                StreamConfig { topic: "topic/two".to_string(), priority: 1, ..Default::default() },
+            ),
+            (
+                "top".to_owned(),
+                StreamConfig {
+                    topic: "topic/top".to_string(),
+                    priority: u8::MAX,
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let config = Arc::new(config);
+
+        let (serializer, data_tx, req_rx) = defaults(config);
+
+        let mut collector = MockCollector::new(data_tx);
+        // Run a collector
+        std::thread::spawn(move || {
+            collector.send("one".to_owned(), 1).unwrap();
+            collector.send("default".to_owned(), 0).unwrap();
+            collector.send("top".to_owned(), 100).unwrap();
+            collector.send("default".to_owned(), 2).unwrap();
+            collector.send("two".to_owned(), 3).unwrap();
+            collector.send("top".to_owned(), 1000).unwrap();
+            collector.send("one".to_owned(), 10).unwrap();
+        });
+
+        // run in the background
+        tokio::spawn(serializer.start());
+
+        sleep(Duration::from_secs(10)).await;
+
+        match req_rx.recv().unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/top");
+                assert_eq!(payload, "100");
+            }
+            _ => unreachable!(),
         }
     }
 }

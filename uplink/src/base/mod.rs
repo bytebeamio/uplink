@@ -1,5 +1,5 @@
+use std::cmp::Ordering;
 use std::env::current_dir;
-use std::hash::Hash;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
@@ -64,7 +64,7 @@ pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq, PartialOrd)]
 pub enum Compression {
     #[default]
     Disabled,
@@ -72,7 +72,7 @@ pub enum Compression {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct StreamConfig {
     pub topic: String,
     #[serde(default = "max_buf_size")]
@@ -86,6 +86,8 @@ pub struct StreamConfig {
     pub compression: Compression,
     #[serde(default)]
     pub persistence: Persistence,
+    #[serde(default)]
+    pub priority: u8,
 }
 
 impl Default for StreamConfig {
@@ -96,23 +98,27 @@ impl Default for StreamConfig {
             flush_period: default_timeout(),
             compression: Compression::Disabled,
             persistence: Persistence::default(),
+            priority: 0,
         }
     }
 }
 
-impl Hash for StreamConfig {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.topic.hash(state)
+impl Ord for StreamConfig {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.priority.cmp(&other.priority), self.topic.cmp(&other.topic)) {
+            (Ordering::Equal, o) => o,
+            (o, _) => o.reverse(),
+        }
     }
 }
 
-impl PartialEq for StreamConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.topic == other.topic
+impl PartialOrd for StreamConfig {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, PartialOrd)]
 pub struct Persistence {
     #[serde(default = "default_file_size")]
     pub max_file_size: usize,
