@@ -67,6 +67,7 @@ topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray
 persistence = { max_file_size = 0 }
 
 [simulator]
+profile = "EvDriver"
 gps_paths = "./paths"
 actions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }]
 
@@ -83,7 +84,7 @@ download_auth_config() {
     echo "Downloading config: $url"
     mkdir -p devices
     curl --location $url \
-        --header 'x-bytebeam-tenant: demo' \
+        --header "x-bytebeam-tenant: $BYTEBEAM_TENANT" \
         --header "x-bytebeam-api-key: $BYTEBEAM_API_KEY" > devices/device_$id.json
 }
 

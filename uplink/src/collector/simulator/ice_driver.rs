@@ -6,13 +6,15 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::Serialize;
 use serde_json::json;
 use tokio::{spawn, time::interval};
-use vd_lib::{Car, HandBrake};
+use vd_lib::{Ev, HandBrake};
 
 use super::{
     data::{DeviceData, Gps},
     Event, Payload,
 };
 
+const TOTAL_CAPACITY: f64 = 85.0;
+const MAX_RANGE: f64 = 105.0;
 const RADIUS_EARTH: f64 = 6371.0;
 const UPDATE_INTERVAL: u64 = 1;
 
@@ -126,10 +128,12 @@ pub async fn simulate(device: DeviceData, tx: Sender<Event>) {
     let mut rng = StdRng::from_entropy();
     let charge = rng.gen_range(0.4..1.0);
     let health = rng.gen_range(0.9..1.0);
-    let mut car = Car::new(charge, health);
-    car.turn_key(true);
-    car.set_handbrake_position(HandBrake::Disengaged);
-    car.set_accelerator_position(0.5);
+    let cycles = rng.gen_range(20..100) as usize;
+    let mut ev = Ev::new(charge, health, cycles);
+    ev.turn_key(true);
+    ev.set_handbrake_position(HandBrake::Disengaged);
+    ev.set_accelerator_position(0.5);
+    ev.start_running();
 
     let mut interval = interval(Duration::from_secs(UPDATE_INTERVAL));
     let mut charging = None;
@@ -138,21 +142,24 @@ pub async fn simulate(device: DeviceData, tx: Sender<Event>) {
     let mut stopping = false;
 
     loop {
-        car.update();
-        speed_tx.send_async(car.speed()).await.unwrap();
+        ev.update(&mut rng);
+        speed_tx.send_async(ev.speed()).await.unwrap();
         sequence += 1;
-        forward_device_shadow(&tx, &car, sequence).await;
+        forward_device_shadow(&tx, &ev, sequence).await;
+        forward_cell_voltages(&tx, &ev, sequence).await;
+        forward_fet_status(&tx, &ev, sequence).await;
         interval.tick().await;
 
         // Turn off for very infrequently
-        if car.speed() == 0.0 && car.soc() > 0.25 && stopping {
+        if ev.speed() == 0.0 && ev.soc() > 0.25 && stopping {
             stopping = false;
-            car.set_handbrake_position(HandBrake::Full);
-            car.set_brake_position(0.0);
-            car.turn_key(false);
+            ev.stop();
+            ev.set_handbrake_position(HandBrake::Full);
+            ev.set_brake_position(0.0);
+            ev.turn_key(false);
 
             stopped = Some(
-                // Time during which car is stationary: between 5-100 minutes
+                // Time during which ev is stationary: between 5-100 minutes
                 Instant::now() + Duration::from_secs_f32(300.0 + 0.0 * rng.gen_range(0.0..95.0)),
             );
             if let Some(start) = session_start.take() {
@@ -163,28 +170,28 @@ pub async fn simulate(device: DeviceData, tx: Sender<Event>) {
         if let Some(till) = stopped {
             if till < Instant::now() {
                 stopped.take();
-                car.turn_key(true);
+                ev.turn_key(true);
                 session_start = Some(clock());
             }
             continue;
         }
 
         // Stop for charging when low battery or very infrequently to end a session
-        if (car.soc() < 0.25 || rng.gen_bool(0.0005)) && car.speed() != 0.0 {
-            car.set_brake_position(rng.gen_range(0.3..0.9));
+        if (ev.soc() < 0.25 || rng.gen_bool(0.0005)) && ev.speed() != 0.0 {
+            ev.set_brake_position(rng.gen_range(0.3..0.9));
             stopping = true;
             continue;
         }
         // Start charging
-        if car.soc() < 0.25 && car.speed() == 0.0 && charging.is_none() {
-            car.set_handbrake_position(HandBrake::Full);
-            car.set_brake_position(0.0);
+        if ev.soc() < 0.25 && ev.speed() == 0.0 && charging.is_none() {
+            ev.set_handbrake_position(HandBrake::Full);
+            ev.set_brake_position(0.0);
             if rng.gen_bool(0.5) {
-                car.turn_key(false);
+                ev.turn_key(false);
             }
-            car.set_status("Charging");
+            ev.start_charging();
             charging = Some(
-                // Time during which car is stationary at the charging point: between 7.5-17.5 minutes
+                // Time during which ev is stationary at the charging point: between 7.5-17.5 minutes
                 Instant::now() + Duration::from_secs_f32(300.0 + 60.0 * rng.gen_range(2.5..12.5)),
             );
         }
@@ -192,34 +199,34 @@ pub async fn simulate(device: DeviceData, tx: Sender<Event>) {
         if let Some(till) = charging {
             if till < Instant::now() {
                 charging.take();
-                if !car.ignition() {
-                    car.turn_key(true);
-                    car.set_status("Running");
+                if !ev.ignition() {
+                    ev.turn_key(true);
+                    ev.start_running();
                 }
             }
-            car.charge(rng.gen_range(0.01..0.05));
+            ev.charge(rng.gen_range(0.01..0.05));
             continue;
         }
 
         // very few times, press the brake to slow down, else remove
-        if rng.gen_bool(0.05) || car.brake_position() > 0.5 {
-            car.set_brake_position(rng.gen_range(0.3..1.0));
+        if rng.gen_bool(0.05) || ev.brake_position() > 0.5 {
+            ev.set_brake_position(rng.gen_range(0.3..1.0));
             continue;
         } else {
-            car.set_brake_position(0.0);
+            ev.set_brake_position(0.0);
         }
 
         // even fewer times, engage hand brake to slow down instantly, or else do the opposite
         if rng.gen_bool(0.005) {
-            if rng.gen_bool(0.25) || car.hand_brake() == &HandBrake::Half {
-                car.set_handbrake_position(HandBrake::Full);
+            if rng.gen_bool(0.25) || ev.hand_brake() == &HandBrake::Half {
+                ev.set_handbrake_position(HandBrake::Full);
                 continue;
             } else {
-                car.set_handbrake_position(HandBrake::Half);
+                ev.set_handbrake_position(HandBrake::Half);
             }
-        } else if car.hand_brake() != &HandBrake::Disengaged {
-            car.set_handbrake_position(
-                if rng.gen_bool(0.25) || car.hand_brake() == &HandBrake::Full {
+        } else if ev.hand_brake() != &HandBrake::Disengaged {
+            ev.set_handbrake_position(
+                if rng.gen_bool(0.25) || ev.hand_brake() == &HandBrake::Full {
                     HandBrake::Half
                 } else {
                     HandBrake::Disengaged
@@ -227,18 +234,25 @@ pub async fn simulate(device: DeviceData, tx: Sender<Event>) {
             );
         }
 
-        car.set_accelerator_position(rng.gen_range(0.25..1.0));
+        ev.set_accelerator_position(rng.gen_range(0.25..1.0));
     }
 }
 
-async fn forward_device_shadow(tx: &Sender<Event>, car: &Car, sequence: u32) {
+async fn forward_device_shadow(tx: &Sender<Event>, ev: &Ev, sequence: u32) {
     let payload = json!({
-        "Status": car.get_status(),
-        "efficiency": car.distance_travelled() / car.energy_consumed(),
-        "distance_travelled_km": car.distance_travelled(),
-        "range": ((car.soh() - car.soc()) * 400.0) as u16, // maximum the car can ever go is 400km
-        "SoC": (car.soc() * 100.0) as u8,
-        "speed": car.speed(),
+        "Status": ev.get_status(),
+        "efficiency": ev.distance_travelled() / ev.energy_consumed(),
+        "distance_travelled_km": ev.distance_travelled(),
+        "range": ((ev.soh() - ev.soc()) * MAX_RANGE) as u16, // maximum the ev can ever go is 400km
+        "SoC": (ev.soc() * 100.0) as u8,
+        "speed": ev.speed(),
+        "total_capacity": TOTAL_CAPACITY,
+        "discharge_cycles": ev.get_discharge_cycles(),
+        "remaining_capacity": ev.soc() * TOTAL_CAPACITY,
+        "current": ev.get_current(),
+        "voltage": ev.get_voltage(),
+        "production_date": "26 January 2024",
+        "name": "L126012024",
     });
     let data = Payload {
         stream: "device_shadow".to_string(),
@@ -246,6 +260,32 @@ async fn forward_device_shadow(tx: &Sender<Event>, car: &Car, sequence: u32) {
         timestamp: clock() as u64,
         payload,
     };
+    tx.send_async(Event::Data(data)).await.unwrap();
+}
+
+async fn forward_cell_voltages(tx: &Sender<Event>, ev: &Ev, sequence: u32) {
+    for (i, cell) in ev.get_cell_stats().enumerate() {
+        let payload = serde_json::to_value(cell).unwrap();
+        let data = Payload {
+            stream: format!("battery_cell_{i}"),
+            sequence,
+            timestamp: clock() as u64,
+            payload,
+        };
+
+        tx.send_async(Event::Data(data)).await.unwrap();
+    }
+}
+
+async fn forward_fet_status(tx: &Sender<Event>, ev: &Ev, sequence: u32) {
+    let payload = serde_json::to_value(ev.get_fet_control_status()).unwrap();
+    let data = Payload {
+        stream: format!("fet_control_status"),
+        sequence,
+        timestamp: clock() as u64,
+        payload,
+    };
+
     tx.send_async(Event::Data(data)).await.unwrap();
 }
 
