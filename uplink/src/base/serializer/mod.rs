@@ -794,7 +794,7 @@ fn check_and_flush_metrics(
     metrics.set_disk_utilized(disk_utilized);
 
     // Send pending metrics. This signifies state change
-    while let Some(metrics) = pending.get(0) {
+    while let Some(metrics) = pending.front() {
         match metrics {
             SerializerMetrics::Main(metrics) => {
                 // Always send pending metrics. They represent state changes
