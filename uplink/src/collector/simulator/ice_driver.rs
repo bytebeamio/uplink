@@ -264,8 +264,9 @@ async fn forward_device_shadow(tx: &Sender<Event>, ev: &Ev, sequence: u32) {
 }
 
 async fn forward_cell_voltages(tx: &Sender<Event>, ev: &Ev, sequence: u32) {
-    for (i, cell) in ev.get_cell_stats().enumerate() {
+    for (mut i, cell) in ev.get_cell_stats().enumerate() {
         let payload = serde_json::to_value(cell).unwrap();
+        i += 1;
         let data = Payload {
             stream: format!("battery_cell_{i}"),
             sequence,
