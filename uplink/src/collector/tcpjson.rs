@@ -10,9 +10,9 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::io;
 
-use crate::base::bridge::BridgeTx;
-use crate::base::AppConfig;
-use crate::{Action, ActionResponse, Payload};
+use crate::bridge::BridgeTx;
+use crate::config::AppConfig;
+use base::{Action, ActionResponse, CollectorTx, Payload};
 
 #[derive(Error, Debug)]
 pub enum Error {

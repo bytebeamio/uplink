@@ -6,8 +6,8 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::{io::BufReader, time::Duration};
 
-use crate::Action;
-use crate::{base::bridge::BridgeTx, ActionResponse, Payload};
+use crate::bridge::BridgeTx;
+use base::{Action, ActionResponse, CollectorTx, Payload};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

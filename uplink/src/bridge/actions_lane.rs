@@ -11,8 +11,8 @@ use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration}
 
 use super::streams::Streams;
 use super::{ActionBridgeShutdown, Package, StreamMetrics};
-use crate::base::ActionRoute;
-use crate::{Action, ActionResponse, Config};
+use crate::config::{ActionRoute, Config};
+use base::{Action, ActionResponse};
 
 const TUNSHELL_ACTION: &str = "launch_shell";
 
@@ -463,10 +463,7 @@ mod tests {
     use flume::{bounded, Receiver, Sender};
     use tokio::{runtime::Runtime, select};
 
-    use crate::{
-        base::{ActionRoute, StreamConfig, StreamMetricsConfig},
-        Action, ActionResponse, Config,
-    };
+    use crate::config::{StreamConfig, StreamMetricsConfig};
 
     use super::*;
 

@@ -1,3 +1,4 @@
+use base::CollectorTx;
 use flume::{Receiver, RecvError, SendError};
 use log::{debug, error, info};
 use thiserror::Error;
@@ -6,8 +7,8 @@ use tokio::process::{Child, Command};
 use tokio::select;
 use tokio::time::timeout_at;
 
-use crate::base::bridge::BridgeTx;
-use crate::{Action, ActionResponse, Package};
+use crate::{bridge::BridgeTx, Package};
+use base::{Action, ActionResponse};
 
 use std::io;
 use std::process::Stdio;

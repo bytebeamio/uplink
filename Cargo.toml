@@ -4,9 +4,10 @@ serial = { git = "https://github.com/bytebeamio/serial-rs", branch = "android_fi
 [workspace]
 resolver = "2"
 members = [
-    "uplink",
+    "base",
     "storage",
     "tools/utils",
+    "uplink",
 ]
 exclude = [
     "tools/deserialize-backup",
@@ -16,6 +17,7 @@ exclude = [
 ]
 
 [workspace.dependencies]
+async-trait = "0.1"
 bytes = "1"
 flume = "0.10"
 futures-util = "0.3"

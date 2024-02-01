@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 
-use crate::{base::bridge::BridgeTx, Action, ActionResponse};
+use crate::bridge::BridgeTx;
+use base::{Action, ActionResponse, CollectorTx};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
-use crate::{Payload, Point};
-
-use super::clock;
+use crate::{clock, Payload, Point};
 
 /// On the Bytebeam platform, an Action is how beamd and through it,
 /// the end-user, can communicate the tasks they want to perform on

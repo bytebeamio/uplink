@@ -5,6 +5,7 @@ authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2021"
 
 [dependencies]
+base = { path = "../base" }
 bytes = { workspace = true }
 flume = { workspace = true }
 rumqttc = { workspace = true }
@@ -23,7 +24,7 @@ config = { version = "0.13.2", default-features = false, features = ["toml", "js
 structopt = "0.3"
 
 # serializer
-async-trait = "0.1"
+async-trait = { workspace = true }
 lz4_flex = "0.10"
 pretty-bytes = "0.2.2"
 storage = { path = "../storage" }

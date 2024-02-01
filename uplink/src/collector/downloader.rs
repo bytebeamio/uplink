@@ -66,9 +66,8 @@ use std::{
 };
 use std::{io::Write, path::PathBuf};
 
-use crate::base::bridge::BridgeTx;
-use crate::base::DownloaderConfig;
-use crate::{Action, ActionResponse, Config};
+use crate::config::{Config, DownloaderConfig};
+use base::{Action, ActionResponse, CollectorTx};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -96,7 +95,7 @@ pub struct FileDownloader {
     config: DownloaderConfig,
     actions_rx: Receiver<Action>,
     action_id: String,
-    bridge_tx: BridgeTx,
+    bridge_tx: Box<dyn CollectorTx>,
     client: Client,
     sequence: u32,
 }
@@ -106,7 +105,7 @@ impl FileDownloader {
     pub fn new(
         config: Arc<Config>,
         actions_rx: Receiver<Action>,
-        bridge_tx: BridgeTx,
+        bridge_tx: impl CollectorTx,
     ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
@@ -127,7 +126,7 @@ impl FileDownloader {
             config: config.downloader.clone(),
             actions_rx,
             client,
-            bridge_tx,
+            bridge_tx: Box::new(bridge_tx),
             sequence: 0,
             action_id: String::default(),
         })
@@ -412,11 +411,13 @@ mod test {
 
     use std::{collections::HashMap, time::Duration};
 
-    use super::*;
-    use crate::base::{
-        bridge::{DataTx, StatusTx},
-        ActionRoute, DownloaderConfig, MqttConfig,
+    use crate::{
+        bridge::{BridgeTx, DataTx, StatusTx},
+        config::MqttConfig,
+        ActionRoute,
     };
+
+    use super::*;
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 

@@ -3,7 +3,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_with::{serde_as, DurationSeconds};
 
-use crate::base::clock;
+use base::clock;
 
 /// Metrics information relating to the operation of the `Serializer`, all values are reset on metrics flush
 #[derive(Debug, Serialize, Clone)]

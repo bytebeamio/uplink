@@ -14,11 +14,9 @@ use storage::Storage;
 use thiserror::Error;
 use tokio::{select, time::interval};
 
-use crate::base::Compression;
+use crate::config::{default_file_size, Compression, StreamConfig};
 use crate::{Config, Package};
 pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
-
-use super::{default_file_size, StreamConfig};
 
 const METRICS_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -876,9 +874,9 @@ mod test {
     use std::time::Duration;
 
     use super::*;
-    use crate::base::bridge::stream::Stream;
-    use crate::base::MqttConfig;
-    use crate::Payload;
+    use crate::bridge::stream::Stream;
+    use crate::config::MqttConfig;
+    use base::Payload;
 
     #[derive(Clone)]
     pub struct MockClient {
@@ -964,7 +962,7 @@ mod test {
         #[error("Serde error {0}")]
         Serde(#[from] serde_json::Error),
         #[error("Stream error {0}")]
-        Base(#[from] crate::base::bridge::stream::Error),
+        Base(#[from] crate::bridge::stream::Error),
     }
 
     struct MockCollector {

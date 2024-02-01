@@ -1,12 +1,13 @@
 use std::{fmt::Debug, mem, sync::Arc, time::Duration};
 
+use base::Point;
 use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::Serialize;
 
-use crate::base::StreamConfig;
+use crate::config::StreamConfig;
 
-use super::{Package, Point, StreamMetrics};
+use super::{Package, StreamMetrics};
 
 /// Signals status of stream buffer
 #[derive(Debug)]

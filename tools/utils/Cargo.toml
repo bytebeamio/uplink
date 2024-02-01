@@ -20,6 +20,7 @@ name = "wait_and_send"
 path = "src/wait_and_send.rs"
 
 [dependencies]
+base = { path = "../../base" }
 flume = { workspace = true }
 futures-util = { workspace = true }
 serde = { workspace = true }
@@ -27,4 +28,3 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
-uplink = { path = "../../uplink" }

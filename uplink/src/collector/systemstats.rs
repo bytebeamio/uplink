@@ -8,13 +8,8 @@ use tokio::time::Instant;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use crate::{
-    base::{
-        bridge::{BridgeTx, Payload},
-        clock,
-    },
-    Config,
-};
+use crate::Config;
+use base::{clock, CollectorTx, Payload};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -464,12 +459,12 @@ pub struct StatCollector {
     /// Uplink configuration.
     config: Arc<Config>,
     /// Handle to send stats as payload onto bridge
-    bridge_tx: BridgeTx,
+    bridge_tx: Box<dyn CollectorTx>,
 }
 
 impl StatCollector {
     /// Create and initialize a stat collector
-    pub fn new(config: Arc<Config>, bridge_tx: BridgeTx) -> Self {
+    pub fn new(config: Arc<Config>, bridge_tx: impl CollectorTx) -> Self {
         let mut sys = sysinfo::System::new();
         sys.refresh_disks_list();
         sys.refresh_networks_list();
@@ -511,7 +506,7 @@ impl StatCollector {
             networks,
             processors,
             components,
-            bridge_tx,
+            bridge_tx: Box::new(bridge_tx),
         }
     }
 

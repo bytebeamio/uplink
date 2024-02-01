@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::time::Instant;
 
-use crate::base::clock;
+use base::clock;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct StreamMetrics {

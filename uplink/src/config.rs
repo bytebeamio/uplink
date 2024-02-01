@@ -1,28 +1,17 @@
 use std::cmp::Ordering;
 use std::env::current_dir;
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
-use tokio::join;
 
+use crate::bridge::stream::MAX_BUFFER_SIZE;
 #[cfg(target_os = "linux")]
 use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(target_os = "android")]
 use crate::collector::logcat::LogcatConfig;
-
-use self::bridge::stream::MAX_BUFFER_SIZE;
-use self::bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
-use self::mqtt::CtrlTx as MqttCtrlTx;
-use self::serializer::CtrlTx as SerializerCtrlTx;
-
-pub mod actions;
-pub mod bridge;
-pub mod monitor;
-pub mod mqtt;
-pub mod serializer;
 
 pub const DEFAULT_TIMEOUT: u64 = 60;
 
@@ -36,7 +25,7 @@ fn max_buf_size() -> usize {
     MAX_BUFFER_SIZE
 }
 
-fn default_file_size() -> usize {
+pub fn default_file_size() -> usize {
     10485760 // 10MB
 }
 
@@ -58,10 +47,6 @@ fn default_tcpapps() -> HashMap<String, AppConfig> {
     apps.insert("main".to_string(), AppConfig { port: 5050, actions: vec![] });
 
     apps
-}
-
-pub fn clock() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq, PartialOrd)]
@@ -289,26 +274,4 @@ pub struct Config {
     pub logging: Option<JournalCtlConfig>,
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
-}
-
-/// Send control messages to the various components in uplink. Currently this is
-/// used only to trigger uplink shutdown. Shutdown signals are sent to all
-/// components simultaneously with a join.
-#[derive(Debug, Clone)]
-pub struct CtrlTx {
-    pub actions_lane: ActionsLaneCtrlTx,
-    pub data_lane: DataLaneCtrlTx,
-    pub mqtt: MqttCtrlTx,
-    pub serializer: SerializerCtrlTx,
-}
-
-impl CtrlTx {
-    pub async fn trigger_shutdown(&self) {
-        join!(
-            self.actions_lane.trigger_shutdown(),
-            self.data_lane.trigger_shutdown(),
-            self.mqtt.trigger_shutdown(),
-            self.serializer.trigger_shutdown()
-        );
-    }
 }

@@ -1,6 +1,5 @@
+use base::{CollectorTx, Payload};
 use flume::{Receiver, Sender};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use std::{fmt::Debug, sync::Arc};
 
@@ -16,16 +15,10 @@ pub use actions_lane::{CtrlTx as ActionsLaneCtrlTx, StatusTx};
 use data_lane::DataBridge;
 pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
-use super::StreamConfig;
-use crate::base::ActionRoute;
-use crate::{Action, ActionResponse, Config};
+use crate::config::{ActionRoute, Config, StreamConfig};
+use base::{Action, ActionResponse};
 pub use metrics::StreamMetrics;
-
-pub trait Point: Send + Debug + Serialize + 'static {
-    fn stream_name(&self) -> &str;
-    fn sequence(&self) -> u32;
-    fn timestamp(&self) -> u64;
-}
+pub use stream::MAX_BUFFER_SIZE;
 
 pub trait Package: Send + Debug {
     fn stream_config(&self) -> Arc<StreamConfig>;
@@ -40,33 +33,6 @@ pub trait Package: Send + Debug {
         self.len() == 0
     }
 }
-
-// TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
-// TODO which cloud will double deserialize (Batch 1st and messages next)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Payload {
-    #[serde(skip_serializing)]
-    pub stream: String,
-    pub sequence: u32,
-    pub timestamp: u64,
-    #[serde(flatten)]
-    pub payload: Value,
-}
-
-impl Point for Payload {
-    fn stream_name(&self) -> &str {
-        &self.stream
-    }
-
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-}
-
 /// Commands that can be used to remotely trigger action_lane shutdown
 pub(crate) struct ActionBridgeShutdown;
 
@@ -124,16 +90,17 @@ pub struct BridgeTx {
     pub status_tx: StatusTx,
 }
 
-impl BridgeTx {
-    pub async fn send_payload(&self, payload: Payload) {
+#[async_trait::async_trait]
+impl CollectorTx for BridgeTx {
+    async fn send_payload(&self, payload: Payload) {
         self.data_tx.send_payload(payload).await
     }
 
-    pub fn send_payload_sync(&self, payload: Payload) {
+    fn send_payload_sync(&self, payload: Payload) {
         self.data_tx.send_payload_sync(payload)
     }
 
-    pub async fn send_action_response(&self, response: ActionResponse) {
+    async fn send_action_response(&self, response: ActionResponse) {
         self.status_tx.send_action_response(response).await
     }
 }

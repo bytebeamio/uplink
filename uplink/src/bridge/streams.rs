@@ -4,12 +4,12 @@ use std::sync::Arc;
 use flume::Sender;
 use log::{error, info, trace};
 
-use super::stream::{self, StreamStatus};
-use super::{Point, StreamMetrics};
-use crate::base::StreamConfig;
-use crate::{Config, Package, Stream};
-
 use super::delaymap::DelayMap;
+use super::stream::{self, StreamStatus};
+use super::StreamMetrics;
+use crate::config::StreamConfig;
+use crate::{Config, Package, Stream};
+use base::Point;
 
 pub struct Streams<T> {
     config: Arc<Config>,

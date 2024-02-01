@@ -1,6 +1,3 @@
-use crate::base::bridge::{BridgeTx, Payload};
-use crate::base::SimulatorConfig;
-use crate::{Action, ActionResponse};
 use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
 use flume::{bounded, Receiver, Sender};
 use log::{error, info};
@@ -11,6 +8,9 @@ use tokio::{select, spawn};
 
 use std::time::Duration;
 use std::{fs, io, sync::Arc};
+
+use crate::config::SimulatorConfig;
+use base::{Action, ActionResponse, CollectorTx, Payload};
 
 mod data;
 
@@ -29,35 +29,32 @@ pub enum Error {
     Json(#[from] serde_json::error::Error),
 }
 
-impl ActionResponse {
-    pub async fn simulate(action: Action, tx: Sender<Event>) {
-        let action_id = action.action_id;
-        info!("Generating action events for action: {action_id}");
-        let mut sequence = 0;
-        let mut interval = interval(Duration::from_secs(1));
+pub async fn simulate_action(action: Action, tx: Sender<Event>) {
+    let action_id = action.action_id;
+    info!("Generating action events for action: {action_id}");
+    let mut sequence = 0;
+    let mut interval = interval(Duration::from_secs(1));
 
-        // Action response, 10% completion per second
-        for i in 1..10 {
-            let progress = i * 10 + rand::thread_rng().gen_range(0..10);
-            sequence += 1;
-            let response = ActionResponse::progress(&action_id, "in_progress", progress)
-                .set_sequence(sequence);
-            if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
-                error!("{e}");
-                break;
-            }
-
-            interval.tick().await;
-        }
-
+    // Action response, 10% completion per second
+    for i in 1..10 {
+        let progress = i * 10 + rand::thread_rng().gen_range(0..10);
         sequence += 1;
         let response =
-            ActionResponse::progress(&action_id, "Completed", 100).set_sequence(sequence);
+            ActionResponse::progress(&action_id, "in_progress", progress).set_sequence(sequence);
         if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
             error!("{e}");
+            break;
         }
-        info!("Successfully sent all action responses");
+
+        interval.tick().await;
     }
+
+    sequence += 1;
+    let response = ActionResponse::progress(&action_id, "Completed", 100).set_sequence(sequence);
+    if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
+        error!("{e}");
+    }
+    info!("Successfully sent all action responses");
 }
 
 pub fn read_gps_path(paths_dir: &str) -> Arc<Vec<Gps>> {
@@ -91,7 +88,7 @@ pub fn spawn_data_simulators(device: DeviceData, tx: Sender<Event>) {
 #[tokio::main(flavor = "current_thread")]
 pub async fn start(
     config: SimulatorConfig,
-    bridge_tx: BridgeTx,
+    bridge_tx: impl CollectorTx,
     actions_rx: Option<Receiver<Action>>,
 ) -> Result<(), Error> {
     let path = read_gps_path(&config.gps_paths);
@@ -105,7 +102,7 @@ pub async fn start(
             select! {
                 action = actions_rx.recv_async() => {
                     let action = action?;
-                    spawn(ActionResponse::simulate(action,  tx.clone()));
+                    spawn(simulate_action(action,  tx.clone()));
                 }
                 event = rx.recv_async() => {
                     match event {

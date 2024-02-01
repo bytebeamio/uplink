@@ -3,9 +3,8 @@ use std::time::Duration;
 use log::{error, trace};
 use serde::Serialize;
 
-use crate::base::DeviceShadowConfig;
-use crate::base::{bridge::BridgeTx, clock};
-use crate::Payload;
+use crate::config::DeviceShadowConfig;
+use base::{clock, CollectorTx, Payload};
 
 pub const UPLINK_VERSION: &str = env!("VERGEN_BUILD_SEMVER");
 
@@ -17,16 +16,16 @@ struct State {
 
 pub struct DeviceShadow {
     config: DeviceShadowConfig,
-    bridge: BridgeTx,
+    bridge: Box<dyn CollectorTx>,
     sequence: u32,
     state: State,
 }
 
 impl DeviceShadow {
-    pub fn new(config: DeviceShadowConfig, bridge: BridgeTx) -> Self {
+    pub fn new(config: DeviceShadowConfig, bridge: impl CollectorTx) -> Self {
         Self {
             config,
-            bridge,
+            bridge: Box::new(bridge),
             sequence: 0,
             state: State { uplink_version: UPLINK_VERSION.to_owned(), latency: 1000000 },
         }

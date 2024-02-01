@@ -7,8 +7,8 @@ use tokio::select;
 use tokio::time::timeout_at;
 
 use super::downloader::DownloadFile;
-use crate::base::bridge::BridgeTx;
-use crate::{Action, ActionResponse, Package};
+use crate::{bridge::BridgeTx, Package};
+use base::{Action, ActionResponse, CollectorTx};
 
 use std::io;
 use std::path::PathBuf;
@@ -150,7 +150,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        base::bridge::{DataTx, StatusTx},
+        bridge::{DataTx, StatusTx},
         Action,
     };
 

@@ -1,3 +1,4 @@
+use base::Action;
 use futures_util::SinkExt;
 use serde::{Deserialize, Serialize};
 use std::thread::sleep;
@@ -5,7 +6,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec};
-use uplink::Action;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Response {
