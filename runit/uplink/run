@@ -1,3 +1,57 @@
 #!/bin/sh
 
+# Directory and file path
+DIR="/usr/share/bytebeam/uplink/auth"
+FILE="$DIR/device.json"
+
+# Provision API URL
+BYTEBEAM_PROVISION_API='https://monitor.bytebeam.io/api/v1/devices/provision?dedup=true'
+# monitor is tenant name
+BYTEBEAM_TENANT="monitor"
+
+# Get API Key from environment variable
+BYTEBEAM_API_KEY="${BYTEBEAM_API_KEY:-}"
+
+# Check if BYTEBEAM_API_KEY is not set
+if [ -z "$BYTEBEAM_API_KEY" ]; then
+    echo "BYTEBEAM_API_KEY environment variable is not set. Exiting."
+    exit 1
+fi
+
+# Get CLUSTER from environment variable, default to 'clust' if not set
+CLUSTER="${CLUSTER:-}"
+
+# Get APPLICATION from environment variable, default to 'app' if not set
+APPLICATION="${APPLICATION:-$HOSTNAME}"
+
+# Check if the directory does not exist
+if [ ! -d "$DIR" ]; then
+    mkdir -p "$DIR"
+    echo "Directory '$DIR' created."
+else
+    echo "Directory '$DIR' already exists."
+fi
+
+# Check if the file does not exist
+if [ ! -f "$FILE" ]; then
+    echo "Fetching and saving data from API to $FILE..."
+
+    # Fetch data from API and save to file
+    curl -s -X POST "${BYTEBEAM_PROVISION_API}" \
+         --header "x-bytebeam-tenant: ${BYTEBEAM_TENANT}" \
+         --header "x-bytebeam-api-key: ${BYTEBEAM_API_KEY}" \
+         --header 'Content-Type: application/json' \
+         --data '{"metadata": {"cluster": "'$CLUSTER'","application": "'$APPLICATION'"}}' \
+         -o "$FILE"
+
+    if [ $? -eq 0 ]; then
+        echo "Data successfully saved to $FILE"
+    else
+        echo "Failed to fetch data from API"
+    fi
+else
+    echo "File $FILE already exists."
+fi
+
+# Once provisioning is done, start uplink
 exec uplink -a /usr/share/bytebeam/uplink/auth/device.json -c /usr/share/bytebeam/uplink/config/config.toml 
