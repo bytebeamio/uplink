@@ -1,0 +1,22 @@
+[package]
+name = "simulator"
+version = "0.1.0"
+edition = "2021"
+authors = ["Devdutt Shenoi <devdutt@bytebeam.io>"]
+
+[dependencies]
+async-trait = { workspace = true }
+base = { path = "../../base", features = ["serialize_stream"] }
+fake = { version = "2.5.0", features = ["derive"] }
+flume = { workspace = true }
+futures-util = { workspace = true }
+log = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+simplelog = "0.12.0"
+structopt = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }

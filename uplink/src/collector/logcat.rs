@@ -222,7 +222,7 @@ impl Logcat {
         self.kill_switch = Arc::new(Mutex::new(true));
         let kill_switch = self.kill_switch.clone();
 
-        let bridge = self.bridge.clone();
+        let mut bridge = self.bridge.clone();
 
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_micros(1_000_000));

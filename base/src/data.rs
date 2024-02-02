@@ -7,7 +7,7 @@ use crate::Point;
 // TODO which cloud will double deserialize (Batch 1st and messages next)
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
-    #[serde(skip_serializing)]
+    #[cfg_attr(features = "serialize_stream", serde(skip_serializing))]
     pub stream: String,
     pub sequence: u32,
     pub timestamp: u64,

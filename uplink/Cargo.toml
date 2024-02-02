@@ -21,7 +21,7 @@ tokio-util = { workspace = true }
 anyhow = "1"
 axum = "0.6"
 config = { version = "0.13.2", default-features = false, features = ["toml", "json"] }
-structopt = "0.3"
+structopt = { workspace = true }
 
 # serializer
 async-trait = { workspace = true }
@@ -40,8 +40,7 @@ tracing-subscriber = { version="=0.3.14", features=["env-filter"] }
 tokio-compat-02 = "0.2.0"
 tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch" }
 # simulator
-fake = { version = "2.5.0", features = ["derive"] }
-rand = { workspace = true }
+simulator = { path = "../collectors/simulator", optional = true }
 # downloader
 fs2 = "0.4"
 futures-util = { workspace = true }
@@ -55,6 +54,10 @@ lazy_static = "1.4.0"
 tar = "0.4"
 # device_shadow
 surge-ping = "0.8"
+
+[features]
+default = ["collectors"]
+collectors = ["simulator"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 time = "0.3"

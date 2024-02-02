@@ -1,16 +1,16 @@
 use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
-use flume::{bounded, Receiver, Sender};
+use flume::{bounded, Sender};
 use log::{error, info};
 use rand::Rng;
 use thiserror::Error;
 use tokio::time::interval;
 use tokio::{select, spawn};
 
+use std::path::PathBuf;
 use std::time::Duration;
 use std::{fs, io, sync::Arc};
 
-use crate::config::SimulatorConfig;
-use base::{Action, ActionResponse, CollectorTx, Payload};
+use base::{Action, ActionResponse, CollectorRx, CollectorTx, Payload};
 
 mod data;
 
@@ -57,11 +57,13 @@ pub async fn simulate_action(action: Action, tx: Sender<Event>) {
     info!("Successfully sent all action responses");
 }
 
-pub fn read_gps_path(paths_dir: &str) -> Arc<Vec<Gps>> {
+pub fn read_gps_path(paths_dir: PathBuf) -> Arc<Vec<Gps>> {
     let i = rand::thread_rng().gen_range(0..10);
-    let file_name: String = format!("{}/path{}.json", paths_dir, i);
+    let mut file = paths_dir.clone();
+    let file_name = format!("path{}.json", i);
+    file.push(file_name);
 
-    let contents = fs::read_to_string(file_name).expect("Oops, failed ot read path");
+    let contents = fs::read_to_string(file).expect("Oops, failed ot read path");
 
     let parsed: Vec<Gps> = serde_json::from_str(&contents).unwrap();
 
@@ -85,24 +87,22 @@ pub fn spawn_data_simulators(device: DeviceData, tx: Sender<Event>) {
     spawn(DeviceShadow::simulate(tx));
 }
 
-#[tokio::main(flavor = "current_thread")]
 pub async fn start(
-    config: SimulatorConfig,
-    bridge_tx: impl CollectorTx,
-    actions_rx: Option<Receiver<Action>>,
+    gps_paths: PathBuf,
+    mut bridge_tx: impl CollectorTx,
+    mut actions_rx: Option<impl CollectorRx>,
 ) -> Result<(), Error> {
-    let path = read_gps_path(&config.gps_paths);
+    let path = read_gps_path(gps_paths);
     let device = new_device_data(path);
 
     let (tx, rx) = bounded(10);
     spawn_data_simulators(device, tx.clone());
 
     loop {
-        if let Some(actions_rx) = actions_rx.as_ref() {
+        if let Some(actions_rx) = actions_rx.as_mut() {
             select! {
-                action = actions_rx.recv_async() => {
-                    let action = action?;
-                    spawn(simulate_action(action,  tx.clone()));
+                action = actions_rx.recv_action() => {
+                    spawn(simulate_action(action.unwrap(),  tx.clone()));
                 }
                 event = rx.recv_async() => {
                     match event {

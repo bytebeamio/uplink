@@ -1,5 +1,5 @@
-use base::{CollectorTx, Payload};
-use flume::{Receiver, Sender};
+use base::{CollectorRx, CollectorTx, Payload};
+use flume::{bounded, Receiver, Sender};
 
 use std::{fmt::Debug, sync::Arc};
 
@@ -67,20 +67,21 @@ impl Bridge {
         (self.actions.ctrl_tx(), self.data.ctrl_tx())
     }
 
-    pub fn register_action_route(
-        &mut self,
-        route: ActionRoute,
-        actions_tx: Sender<Action>,
-    ) -> Result<(), Error> {
-        self.actions.register_action_route(route, actions_tx)
+    pub fn register_action_route(&mut self, route: ActionRoute) -> Result<ActionsRx, Error> {
+        let (actions_tx, actions_rx) = bounded(1);
+        self.actions.register_action_route(route, actions_tx)?;
+
+        Ok(ActionsRx { actions_rx })
     }
 
     pub fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item = R>>(
         &mut self,
         routes: V,
-        actions_tx: Sender<Action>,
-    ) -> Result<(), Error> {
-        self.actions.register_action_routes(routes, actions_tx)
+    ) -> Result<ActionsRx, Error> {
+        let (actions_tx, actions_rx) = bounded(1);
+        self.actions.register_action_routes(routes, actions_tx)?;
+
+        Ok(ActionsRx { actions_rx })
     }
 }
 
@@ -92,15 +93,27 @@ pub struct BridgeTx {
 
 #[async_trait::async_trait]
 impl CollectorTx for BridgeTx {
-    async fn send_payload(&self, payload: Payload) {
+    async fn send_payload(&mut self, payload: Payload) {
         self.data_tx.send_payload(payload).await
     }
 
-    fn send_payload_sync(&self, payload: Payload) {
+    fn send_payload_sync(&mut self, payload: Payload) {
         self.data_tx.send_payload_sync(payload)
     }
 
-    async fn send_action_response(&self, response: ActionResponse) {
+    async fn send_action_response(&mut self, response: ActionResponse) {
         self.status_tx.send_action_response(response).await
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionsRx {
+    pub actions_rx: Receiver<Action>,
+}
+
+#[async_trait::async_trait]
+impl CollectorRx for ActionsRx {
+    async fn recv_action(&mut self) -> Option<Action> {
+        self.actions_rx.recv_async().await.ok()
     }
 }

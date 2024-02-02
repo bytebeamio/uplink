@@ -34,7 +34,7 @@ impl OTAInstaller {
     }
 
     #[tokio::main]
-    pub async fn start(&self) {
+    pub async fn start(&mut self) {
         while let Ok(action) = self.actions_rx.recv_async().await {
             if let Err(e) = self.extractor(&action) {
                 error!("Error extracting tarball: {e}");
@@ -49,7 +49,7 @@ impl OTAInstaller {
         }
     }
 
-    async fn forward_action_error(&self, action: Action, error: Error) {
+    async fn forward_action_error(&mut self, action: Action, error: Error) {
         let status = ActionResponse::failure(&action.action_id, error.to_string());
         self.bridge_tx.send_action_response(status).await
     }

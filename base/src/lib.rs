@@ -20,7 +20,13 @@ pub trait Point: Send + Debug + Serialize + 'static {
 
 #[async_trait::async_trait]
 pub trait CollectorTx: Send + 'static {
-    async fn send_action_response(&self, status: ActionResponse);
-    async fn send_payload(&self, payload: Payload);
-    fn send_payload_sync(&self, payload: Payload);
+    async fn send_action_response(&mut self, status: ActionResponse);
+    async fn send_payload(&mut self, payload: Payload);
+    fn send_payload_sync(&mut self, payload: Payload);
+}
+
+
+#[async_trait::async_trait]
+pub trait CollectorRx: Send + 'static {
+    async fn recv_action(&mut self) -> Option<Action>;
 }

@@ -1,26 +1,25 @@
 mod console;
 
-use std::sync::Arc;
-use std::time::Duration;
+#[cfg(feature = "simulator")]
+use std::path::PathBuf;
+use std::{fs, sync::Arc, time::Duration};
 
 use anyhow::Error;
 use config::{Environment, File, FileFormat};
-use flume::bounded;
 use log::info;
-use std::fs;
 use structopt::StructOpt;
 use tokio::time::sleep;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
 use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
 use tracing_subscriber::{EnvFilter, Registry};
-use uplink::bridge::MAX_BUFFER_SIZE;
+use uplink::bridge::{ActionsRx, MAX_BUFFER_SIZE};
 
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
 use uplink::config::{AppConfig, StreamConfig};
-use uplink::{simulator, spawn_named_thread, Config, TcpJson, Uplink};
+use uplink::{spawn_named_thread, Config, TcpJson, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
     let level = match commandline.verbose {
@@ -129,24 +128,24 @@ fn main() -> Result<(), Error> {
     let mut bridge = uplink.configure_bridge();
     uplink.spawn_builtins(&mut bridge)?;
 
+    #[cfg(feature = "simulator")]
     let bridge_tx = bridge.bridge_tx();
 
     let mut tcpapps = vec![];
     for (app, cfg) in config.tcpapps.clone() {
         let mut route_rx = None;
         if !cfg.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&cfg.actions, actions_tx)?;
+            let ActionsRx { actions_rx } = bridge.register_action_routes(&cfg.actions)?;
             route_rx = Some(actions_rx)
         }
         tcpapps.push(TcpJson::new(app, cfg, route_rx, bridge.bridge_tx()));
     }
 
+    #[cfg(feature = "simulator")]
     let simulator_actions = config.simulator.as_ref().and_then(|cfg| {
         let mut route_rx = None;
         if !cfg.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&cfg.actions, actions_tx).unwrap();
+            let actions_rx = bridge.register_action_routes(&cfg.actions).unwrap();
             route_rx = Some(actions_rx)
         }
 
@@ -155,9 +154,19 @@ fn main() -> Result<(), Error> {
 
     let ctrl_tx = uplink.spawn(bridge)?;
 
-    if let Some(config) = config.simulator.clone() {
+    #[cfg(feature = "simulator")]
+    if let Some(config) = &config.simulator {
+        let gps_paths = PathBuf::from(&config.gps_paths);
         spawn_named_thread("Simulator", || {
-            simulator::start(config, bridge_tx, simulator_actions).unwrap();
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .thread_name("tcpjson")
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                simulator::start(gps_paths, bridge_tx, simulator_actions).await.unwrap();
+            });
         });
     }
 

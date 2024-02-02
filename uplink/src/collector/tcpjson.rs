@@ -71,7 +71,7 @@ impl TcpJson {
                 handle.abort();
             }
 
-            let tcpjson = self.clone();
+            let mut tcpjson = self.clone();
             handle = Some(spawn(async move {
                 if let Err(e) = tcpjson.collect(framed).await {
                     error!("TcpJson failed. app = {}, Error = {e}", tcpjson.name);
@@ -80,8 +80,8 @@ impl TcpJson {
         }
     }
 
-    async fn collect(&self, mut client: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
-        if let Some(actions_rx) = self.actions_rx.as_ref() {
+    async fn collect(&mut self, mut client: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
+        if let Some(actions_rx) = self.actions_rx.clone() {
             loop {
                 select! {
                     line = client.next() => {
@@ -113,7 +113,7 @@ impl TcpJson {
         }
     }
 
-    async fn handle_incoming_line(&self, line: String) -> Result<(), Error> {
+    async fn handle_incoming_line(&mut self, line: String) -> Result<(), Error> {
         debug!("{}: Received line = {:?}", self.name, line);
         let data = serde_json::from_str::<Payload>(&line)?;
 

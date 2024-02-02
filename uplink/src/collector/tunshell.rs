@@ -51,7 +51,7 @@ impl TunshellClient {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) {
         while let Ok(action) = self.actions_rx.recv_async().await {
-            let session = self.clone();
+            let mut session = self.clone();
             //TODO(RT): Findout why this is spawned. We want to send other action's with shell?
             tokio::spawn(async move {
                 if let Err(e) = session.session(&action).await {
@@ -63,7 +63,7 @@ impl TunshellClient {
         }
     }
 
-    async fn session(&self, action: &Action) -> Result<(), Error> {
+    async fn session(&mut self, action: &Action) -> Result<(), Error> {
         let action_id = action.action_id.clone();
 
         // println!("{:?}", keys);
