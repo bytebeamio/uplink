@@ -1,5 +1,6 @@
 use std::{fs::File, path::PathBuf};
 
+use flume::Receiver;
 use log::{debug, error, warn};
 use tar::Archive;
 use tokio::process::Command;
@@ -22,22 +23,18 @@ pub enum Error {
 
 pub struct OTAInstaller {
     config: InstallerConfig,
+    actions_rx: Receiver<Action>,
     bridge_tx: BridgeTx,
 }
 
 impl OTAInstaller {
-    pub fn new(config: InstallerConfig, bridge_tx: BridgeTx) -> Self {
-        Self { config, bridge_tx }
+    pub fn new(config: InstallerConfig, actions_rx: Receiver<Action>, bridge_tx: BridgeTx) -> Self {
+        Self { config, actions_rx, bridge_tx }
     }
 
     #[tokio::main]
     pub async fn start(&self) {
-        let actions_rx = match self.bridge_tx.register_action_routes(&self.config.actions).await {
-            Some(r) => r,
-            _ => return,
-        };
-
-        while let Ok(action) = actions_rx.recv_async().await {
+        while let Ok(action) = self.actions_rx.recv_async().await {
             if let Err(e) = self.extractor(&action) {
                 error!("Error extracting tarball: {e}");
                 self.forward_action_error(action, e).await;
@@ -60,7 +57,7 @@ impl OTAInstaller {
         let info: DownloadFile = serde_json::from_str(&action.payload)?;
         let path = info.download_path.ok_or(Error::MissingPath)?;
 
-        debug!("Extracting tar from:{path}; to: {}", self.config.path);
+        debug!("Extracting tar from:{}; to: {}", path.display(), self.config.path);
         let dst = PathBuf::from(&self.config.path);
         if dst.exists() {
             warn!("Cleaning up {}", &self.config.path);

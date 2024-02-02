@@ -1,3 +1,4 @@
+use flume::Receiver;
 use serde::{Deserialize, Serialize};
 
 use std::io::BufRead;
@@ -5,7 +6,8 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::{io::BufReader, time::Duration};
 
-use crate::{base::bridge::BridgeTx, ActionResponse, ActionRoute, Payload};
+use crate::Action;
+use crate::{base::bridge::BridgeTx, ActionResponse, Payload};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -95,12 +97,14 @@ impl LogEntry {
         // Convert from microseconds to milliseconds
         let timestamp = self.log_timestamp.parse::<u64>()? / 1000;
 
-        Ok(Payload { stream: "logs".to_string(), device_id: None, sequence, timestamp, payload })
+        Ok(Payload { stream: "logs".to_string(), sequence, timestamp, payload })
     }
 }
 
 pub struct JournalCtl {
+    config: JournalCtlConfig,
     kill_switch: Arc<Mutex<bool>>,
+    actions_rx: Receiver<Action>,
     bridge: BridgeTx,
 }
 
@@ -112,28 +116,20 @@ impl Drop for JournalCtl {
 }
 
 impl JournalCtl {
-    pub fn new(bridge: BridgeTx) -> Self {
+    pub fn new(config: JournalCtlConfig, actions_rx: Receiver<Action>, bridge: BridgeTx) -> Self {
         let kill_switch = Arc::new(Mutex::new(true));
 
-        Self { kill_switch, bridge }
+        Self { config, kill_switch, actions_rx, bridge }
     }
 
     /// Starts a journalctl instance on a linux system which reports to the logs stream for a given device+project id,
     /// that logcat instance is killed when this object is dropped. On any other system, it's a noop.
     #[tokio::main(flavor = "current_thread")]
-    pub async fn start(mut self, config: JournalCtlConfig) -> Result<(), Error> {
-        self.spawn_logger(config).await;
-
-        let log_rx = self
-            .bridge
-            .register_action_route(ActionRoute {
-                name: "journalctl_config".to_string(),
-                timeout: 10,
-            })
-            .await;
+    pub async fn start(mut self) -> Result<(), Error> {
+        self.spawn_logger(self.config.clone()).await;
 
         loop {
-            let action = log_rx.recv()?;
+            let action = self.actions_rx.recv()?;
             let mut config = serde_json::from_str::<JournalCtlConfig>(action.payload.as_str())?;
             config.tags.retain(|tag| !tag.is_empty());
             config.units.retain(|unit| !unit.is_empty());

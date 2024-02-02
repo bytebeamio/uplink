@@ -43,19 +43,24 @@
 //! [`name`]: Action#structfield.name
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
-use base::Compression;
+use base::CtrlTx;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
+#[cfg(target_os = "linux")]
+use collector::journalctl::JournalCtl;
+#[cfg(target_os = "android")]
+use collector::logcat::Logcat;
 use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
-use collector::tunshell::TunshellSession;
+use collector::tunshell::TunshellClient;
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
@@ -105,14 +110,10 @@ pub mod config {
     keep_alive = 30
     network_timeout = 30
 
-    # Downloader config
-    [downloader]
-    actions = []
-    path = "/var/tmp/ota-file"
-
     [stream_metrics]
     enabled = false
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
+    bridge_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
+    serializer_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_stream_metrics/jsonarray"
     blacklist = []
     timeout = 10
 
@@ -127,7 +128,9 @@ pub mod config {
 
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
+    buf_size = 1
     flush_period = 2
+    priority = 255 # highest priority for quick delivery of action status info to platform
 
     [streams.device_shadow]
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
@@ -171,7 +174,12 @@ pub mod config {
         }
 
         replace_topic_placeholders(&mut config.action_status.topic, tenant_id, device_id);
-        replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.stream_metrics.bridge_topic, tenant_id, device_id);
+        replace_topic_placeholders(
+            &mut config.stream_metrics.serializer_topic,
+            tenant_id,
+            device_id,
+        );
         replace_topic_placeholders(&mut config.serializer_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.mqtt_metrics.topic, tenant_id, device_id);
 
@@ -222,15 +230,6 @@ pub mod config {
         replace_topic_placeholders(&mut device_action_topic, tenant_id, device_id);
         config.actions_subscription = device_action_topic;
 
-        // Add topics to be subscribed to for simulation purposes, if in simulator mode
-        if let Some(sim_cfg) = &mut config.simulator {
-            for n in 1..=sim_cfg.num_devices {
-                let mut topic = action_topic_template.to_string();
-                replace_topic_placeholders(&mut topic, tenant_id, &n.to_string());
-                sim_cfg.actions_subscriptions.push(topic);
-            }
-        }
-
         Ok(config)
     }
 
@@ -269,12 +268,20 @@ pub mod config {
 }
 
 pub use base::actions::{Action, ActionResponse};
-use base::bridge::{Bridge, BridgeTx, Package, Payload, Point, StreamMetrics};
+use base::bridge::{Bridge, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
 pub use collector::{simulator, tcpjson::TcpJson};
 pub use storage::Storage;
+
+/// Spawn a named thread to run the function f on
+pub fn spawn_named_thread<F>(name: &str, f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    thread::Builder::new().name(name.to_string()).spawn(f).unwrap();
+}
 
 pub struct Uplink {
     config: Arc<Config>,
@@ -282,7 +289,6 @@ pub struct Uplink {
     action_tx: Sender<Action>,
     data_rx: Receiver<Box<dyn Package>>,
     data_tx: Sender<Box<dyn Package>>,
-    action_status: Stream<ActionResponse>,
     stream_metrics_tx: Sender<StreamMetrics>,
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
@@ -299,21 +305,12 @@ impl Uplink {
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
         let (shutdown_tx, shutdown_rx) = bounded(1);
 
-        let action_status_topic = &config.action_status.topic;
-        let action_status = Stream::new(
-            "action_status",
-            action_status_topic,
-            1,
-            data_tx.clone(),
-            Compression::Disabled,
-        );
         Ok(Uplink {
             config,
             action_rx,
             action_tx,
             data_rx,
             data_tx,
-            action_status,
             stream_metrics_tx,
             stream_metrics_rx,
             serializer_metrics_tx,
@@ -323,37 +320,23 @@ impl Uplink {
         })
     }
 
-    pub fn spawn(&mut self) -> Result<BridgeTx, Error> {
-        let config = self.config.clone();
-        let mut bridge = Bridge::new(
+    pub fn configure_bridge(&mut self) -> Bridge {
+        Bridge::new(
             self.config.clone(),
             self.data_tx.clone(),
             self.stream_metrics_tx(),
             self.action_rx.clone(),
-            self.action_status(),
             self.shutdown_tx.clone(),
-        );
+        )
+    }
 
-        let bridge_tx = bridge.tx();
+    pub fn spawn(&mut self, bridge: Bridge) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
-
-        // Bridge thread to batch data and redicet actions
-        thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("bridge")
-                .enable_time()
-                .build()
-                .unwrap();
-
-            rt.block_on(async move {
-                if let Err(e) = bridge.start().await {
-                    error!("Bridge stopped!! Error = {:?}", e);
-                }
-            })
-        });
+        let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
 
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
         let mqtt_client = mqtt.client();
+        let ctrl_mqtt = mqtt.ctrl_tx();
 
         let serializer = Serializer::new(
             self.config.clone(),
@@ -361,15 +344,12 @@ impl Uplink {
             mqtt_client.clone(),
             self.serializer_metrics_tx(),
         )?;
+        let ctrl_serializer = serializer.ctrl_tx();
 
         // Serializer thread to handle network conditions state machine
         // and send data to mqtt thread
-        thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("serializer")
-                .enable_time()
-                .build()
-                .unwrap();
+        spawn_named_thread("Serializer", || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
             rt.block_on(async {
                 if let Err(e) = serializer.start().await {
@@ -379,9 +359,8 @@ impl Uplink {
         });
 
         // Mqtt thread to receive actions and send data
-        thread::spawn(|| {
+        spawn_named_thread("Mqttio", || {
             let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("mqttio")
                 .enable_time()
                 .enable_io()
                 .build()
@@ -389,60 +368,6 @@ impl Uplink {
 
             rt.block_on(async {
                 mqtt.start().await;
-            })
-        });
-
-        let tunshell_session = TunshellSession::new(config.clone(), false, bridge_tx.clone());
-        thread::spawn(move || tunshell_session.start());
-
-        let file_downloader = FileDownloader::new(config.clone(), bridge_tx.clone())?;
-        thread::spawn(move || file_downloader.start());
-
-        let device_shadow = DeviceShadow::new(config.device_shadow.clone(), bridge_tx.clone());
-        thread::spawn(move || device_shadow.start());
-
-        if let Some(config) = &config.ota_installer {
-            let ota_installer = OTAInstaller::new(config.clone(), bridge_tx.clone());
-            thread::spawn(move || ota_installer.start());
-        }
-
-        #[cfg(target_os = "linux")]
-        if let Some(config) = &config.logging {
-            let logger = collector::journalctl::JournalCtl::new(bridge_tx.clone());
-            let config = config.clone();
-            thread::spawn(move || logger.start(config));
-        }
-
-        #[cfg(target_os = "android")]
-        if let Some(config) = &config.logging {
-            let logger = collector::logcat::Logcat::new(bridge_tx.clone());
-            let config = config.clone();
-            thread::spawn(move || logger.start(config));
-        }
-
-        if config.system_stats.enabled {
-            let stat_collector = StatCollector::new(config.clone(), bridge_tx.clone());
-            thread::spawn(move || stat_collector.start());
-        }
-
-        let process_handler = ProcessHandler::new(bridge_tx.clone());
-        let processes = config.processes.clone();
-        thread::spawn(move || process_handler.start(processes));
-
-        let script_runner = ScriptRunner::new(bridge_tx.clone());
-        let routes: Vec<ActionRoute> = config.script_runner.clone();
-        thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("script_runner")
-                .enable_io()
-                .enable_time()
-                .build()
-                .unwrap();
-
-            rt.block_on(async move {
-                if let Err(e) = script_runner.start(routes).await {
-                    error!("Monitor stopped!! Error = {:?}", e);
-                }
             })
         });
 
@@ -455,12 +380,8 @@ impl Uplink {
         );
 
         // Metrics monitor thread
-        thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .thread_name("monitor")
-                .enable_time()
-                .build()
-                .unwrap();
+        spawn_named_thread("Monitor", || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
             rt.block_on(async move {
                 if let Err(e) = monitor.start().await {
@@ -469,7 +390,127 @@ impl Uplink {
             })
         });
 
-        Ok(bridge_tx)
+        let Bridge { data: mut data_lane, actions: mut actions_lane, .. } = bridge;
+
+        // Bridge thread to direct actions
+        spawn_named_thread("Bridge actions_lane", || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+
+            rt.block_on(async move {
+                if let Err(e) = actions_lane.start().await {
+                    error!("Actions lane stopped!! Error = {:?}", e);
+                }
+            })
+        });
+
+        // Bridge thread to batch and forward data
+        spawn_named_thread("Bridge data_lane", || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+
+            rt.block_on(async move {
+                if let Err(e) = data_lane.start().await {
+                    error!("Data lane stopped!! Error = {:?}", e);
+                }
+            })
+        });
+
+        Ok(CtrlTx {
+            actions_lane: ctrl_actions_lane,
+            data_lane: ctrl_data_lane,
+            mqtt: ctrl_mqtt,
+            serializer: ctrl_serializer,
+        })
+    }
+
+    pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
+        let bridge_tx = bridge.bridge_tx();
+
+        let route =
+            ActionRoute { name: "launch_shell".to_owned(), timeout: Duration::from_secs(10) };
+        let (actions_tx, actions_rx) = bounded(1);
+        bridge.register_action_route(route, actions_tx)?;
+        let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
+        spawn_named_thread("Tunshell Client", move || tunshell_client.start());
+
+        if !self.config.downloader.actions.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&self.config.downloader.actions, actions_tx)?;
+            let file_downloader =
+                FileDownloader::new(self.config.clone(), actions_rx, bridge_tx.clone())?;
+            spawn_named_thread("File Downloader", || file_downloader.start());
+        }
+
+        let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
+        spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
+
+        if !self.config.ota_installer.actions.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&self.config.ota_installer.actions, actions_tx)?;
+            let ota_installer =
+                OTAInstaller::new(self.config.ota_installer.clone(), actions_rx, bridge_tx.clone());
+            spawn_named_thread("OTA Installer", move || ota_installer.start());
+        }
+
+        #[cfg(target_os = "linux")]
+        if let Some(config) = self.config.logging.clone() {
+            let route = ActionRoute {
+                name: "journalctl_config".to_string(),
+                timeout: Duration::from_secs(10),
+            };
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_route(route, actions_tx)?;
+            let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
+            spawn_named_thread("Logger", || {
+                if let Err(e) = logger.start() {
+                    error!("Logger stopped!! Error = {:?}", e);
+                }
+            });
+        }
+
+        #[cfg(target_os = "android")]
+        if let Some(config) = self.config.logging.clone() {
+            let route = ActionRoute {
+                name: "journalctl_config".to_string(),
+                timeout: Duration::from_secs(10),
+            };
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_route(route, actions_tx)?;
+            let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
+            spawn_named_thread("Logger", || {
+                if let Err(e) = logger.start() {
+                    error!("Logger stopped!! Error = {:?}", e);
+                }
+            });
+        }
+
+        if self.config.system_stats.enabled {
+            let stat_collector = StatCollector::new(self.config.clone(), bridge_tx.clone());
+            spawn_named_thread("Stat Collector", || stat_collector.start());
+        };
+
+        if !self.config.processes.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&self.config.processes, actions_tx)?;
+            let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
+            spawn_named_thread("Process Handler", || {
+                if let Err(e) = process_handler.start() {
+                    error!("Process handler stopped!! Error = {:?}", e);
+                }
+            });
+        }
+
+        if !self.config.script_runner.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&self.config.script_runner, actions_tx)?;
+            let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
+            spawn_named_thread("Script Runner", || {
+                if let Err(e) = script_runner.start() {
+                    error!("Script runner stopped!! Error = {:?}", e);
+                }
+            });
+        }
+
+        Ok(())
     }
 
     pub fn bridge_action_rx(&self) -> Receiver<Action> {
@@ -486,10 +527,6 @@ impl Uplink {
 
     pub fn serializer_metrics_tx(&self) -> Sender<SerializerMetrics> {
         self.serializer_metrics_tx.clone()
-    }
-
-    pub fn action_status(&self) -> Stream<ActionResponse> {
-        self.action_status.clone()
     }
 
     pub async fn resolve_on_shutdown(&self) -> Result<(), RecvError> {

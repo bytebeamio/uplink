@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use tokio::time::Instant;
 
 use crate::{Payload, Point};
 
@@ -10,8 +10,6 @@ use super::clock;
 /// said device, in this case, uplink.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
-    #[serde(skip)]
-    pub device_id: Option<String>,
     // action id
     #[serde(alias = "id")]
     pub action_id: String,
@@ -21,14 +19,15 @@ pub struct Action {
     pub name: String,
     // action payload. json. can be args/payload. depends on the invoked command
     pub payload: String,
+    // Instant at which action must be timedout
+    #[serde(skip)]
+    pub deadline: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionResponse {
     #[serde(alias = "id")]
     pub action_id: String,
-    #[serde(skip)]
-    pub device_id: Option<String>,
     // sequence number
     pub sequence: u32,
     // timestamp
@@ -49,7 +48,6 @@ impl ActionResponse {
 
         ActionResponse {
             action_id: id.to_owned(),
-            device_id: None,
             sequence: 0,
             timestamp,
             state: state.to_owned(),
@@ -99,34 +97,17 @@ impl ActionResponse {
         self
     }
 
-    pub fn as_payload(&self) -> Payload {
-        Payload::from(self)
-    }
-
     pub fn from_payload(payload: &Payload) -> Result<Self, serde_json::Error> {
         let intermediate = serde_json::to_value(payload)?;
         serde_json::from_value(intermediate)
     }
 }
 
-impl From<&ActionResponse> for Payload {
-    fn from(resp: &ActionResponse) -> Self {
-        Self {
-            stream: "action_status".to_owned(),
-            device_id: resp.device_id.to_owned(),
-            sequence: resp.sequence,
-            timestamp: resp.timestamp,
-            payload: json!({
-                "id": resp.action_id,
-                "state": resp.state,
-                "progress": resp.progress,
-                "errors": resp.errors
-            }),
-        }
-    }
-}
-
 impl Point for ActionResponse {
+    fn stream_name(&self) -> &str {
+        "action_status"
+    }
+
     fn sequence(&self) -> u32 {
         self.sequence
     }

@@ -1,9 +1,12 @@
+use std::cmp::Ordering;
 use std::env::current_dir;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DurationSeconds};
+use tokio::join;
 
 #[cfg(target_os = "linux")]
 use crate::collector::journalctl::JournalCtlConfig;
@@ -11,6 +14,9 @@ use crate::collector::journalctl::JournalCtlConfig;
 use crate::collector::logcat::LogcatConfig;
 
 use self::bridge::stream::MAX_BUFFER_SIZE;
+use self::bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
+use self::mqtt::CtrlTx as MqttCtrlTx;
+use self::serializer::CtrlTx as SerializerCtrlTx;
 
 pub mod actions;
 pub mod bridge;
@@ -21,8 +27,8 @@ pub mod serializer;
 pub const DEFAULT_TIMEOUT: u64 = 60;
 
 #[inline]
-fn default_timeout() -> u64 {
-    DEFAULT_TIMEOUT
+fn default_timeout() -> Duration {
+    Duration::from_secs(DEFAULT_TIMEOUT)
 }
 
 #[inline]
@@ -40,6 +46,12 @@ fn default_persistence_path() -> PathBuf {
     path
 }
 
+fn default_download_path() -> PathBuf {
+    let mut path = current_dir().expect("Couldn't figure out current directory");
+    path.push(".downloads");
+    path
+}
+
 // Automatically assigns port 5050 for default main app, if left unconfigured
 fn default_tcpapps() -> HashMap<String, AppConfig> {
     let mut apps = HashMap::new();
@@ -52,26 +64,30 @@ pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq, PartialOrd)]
 pub enum Compression {
     #[default]
     Disabled,
     Lz4,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct StreamConfig {
     pub topic: String,
     #[serde(default = "max_buf_size")]
     pub buf_size: usize,
     #[serde(default = "default_timeout")]
+    #[serde_as(as = "DurationSeconds<u64>")]
     /// Duration(in seconds) that bridge collector waits from
     /// receiving first element, before the stream gets flushed.
-    pub flush_period: u64,
+    pub flush_period: Duration,
     #[serde(default)]
     pub compression: Compression,
     #[serde(default)]
     pub persistence: Persistence,
+    #[serde(default)]
+    pub priority: u8,
 }
 
 impl Default for StreamConfig {
@@ -82,11 +98,27 @@ impl Default for StreamConfig {
             flush_period: default_timeout(),
             compression: Compression::Disabled,
             persistence: Persistence::default(),
+            priority: 0,
         }
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl Ord for StreamConfig {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.priority.cmp(&other.priority), self.topic.cmp(&other.topic)) {
+            (Ordering::Equal, o) => o,
+            (o, _) => o.reverse(),
+        }
+    }
+}
+
+impl PartialOrd for StreamConfig {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, PartialOrd)]
 pub struct Persistence {
     #[serde(default = "default_file_size")]
     pub max_file_size: usize,
@@ -117,44 +149,50 @@ pub struct Stats {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct SimulatorConfig {
-    /// number of devices to be simulated
-    pub num_devices: u32,
     /// path to directory containing files with gps paths to be used in simulation
     pub gps_paths: String,
     /// actions that are to be routed to simulator
     pub actions: Vec<ActionRoute>,
-    #[serde(skip)]
-    pub actions_subscriptions: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DownloaderConfig {
-    pub path: String,
-    #[serde(default)]
+    #[serde(default = "default_download_path")]
+    pub path: PathBuf,
     pub actions: Vec<ActionRoute>,
+}
+
+impl Default for DownloaderConfig {
+    fn default() -> Self {
+        Self { path: default_download_path(), actions: vec![] }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct InstallerConfig {
     pub path: String,
-    #[serde(default)]
     pub actions: Vec<ActionRoute>,
     pub uplink_port: u16,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamMetricsConfig {
     pub enabled: bool,
-    pub topic: String,
+    pub bridge_topic: String,
+    pub serializer_topic: String,
     pub blacklist: Vec<String>,
-    pub timeout: u64,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout: Duration,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SerializerMetricsConfig {
     pub enabled: bool,
     pub topic: String,
-    pub timeout: u64,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout: Duration,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -184,11 +222,13 @@ pub struct MqttConfig {
     pub network_timeout: u64,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ActionRoute {
     pub name: String,
     #[serde(default = "default_timeout")]
-    pub timeout: u64,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout: Duration,
 }
 
 impl From<&ActionRoute> for ActionRoute {
@@ -233,10 +273,12 @@ pub struct Config {
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
+    #[serde(default)]
     pub downloader: DownloaderConfig,
     pub system_stats: Stats,
     pub simulator: Option<SimulatorConfig>,
-    pub ota_installer: Option<InstallerConfig>,
+    #[serde(default)]
+    pub ota_installer: InstallerConfig,
     #[serde(default)]
     pub device_shadow: DeviceShadowConfig,
     #[serde(default)]
@@ -247,4 +289,26 @@ pub struct Config {
     pub logging: Option<JournalCtlConfig>,
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
+}
+
+/// Send control messages to the various components in uplink. Currently this is
+/// used only to trigger uplink shutdown. Shutdown signals are sent to all
+/// components simultaneously with a join.
+#[derive(Debug, Clone)]
+pub struct CtrlTx {
+    pub actions_lane: ActionsLaneCtrlTx,
+    pub data_lane: DataLaneCtrlTx,
+    pub mqtt: MqttCtrlTx,
+    pub serializer: SerializerCtrlTx,
+}
+
+impl CtrlTx {
+    pub async fn trigger_shutdown(&self) {
+        join!(
+            self.actions_lane.trigger_shutdown(),
+            self.data_lane.trigger_shutdown(),
+            self.mqtt.trigger_shutdown(),
+            self.serializer.trigger_shutdown()
+        );
+    }
 }

@@ -5,9 +5,9 @@ use flume::{Receiver, RecvError};
 use rumqttc::{AsyncClient, ClientError, QoS, Request};
 use tokio::select;
 
-use crate::base::bridge::StreamMetrics;
 use crate::Config;
 
+use super::bridge::StreamMetrics;
 use super::mqtt::MqttMetrics;
 use super::serializer::SerializerMetrics;
 
@@ -38,8 +38,10 @@ impl Monitor {
 
     pub async fn start(&self) -> Result<(), Error> {
         let stream_metrics_config = self.config.stream_metrics.clone();
-        let stream_metrics_topic = stream_metrics_config.topic;
-        let mut stream_metrics = Vec::with_capacity(10);
+        let bridge_stream_metrics_topic = stream_metrics_config.bridge_topic;
+        let mut bridge_stream_metrics = Vec::with_capacity(10);
+        let serializer_stream_metrics_topic = stream_metrics_config.serializer_topic;
+        let mut serializer_stream_metrics = Vec::with_capacity(10);
 
         let serializer_metrics_config = self.config.serializer_metrics.clone();
         let serializer_metrics_topic = serializer_metrics_config.topic;
@@ -58,18 +60,31 @@ impl Monitor {
                         continue;
                     }
 
-                    stream_metrics.push(o);
-                    let v = serde_json::to_string(&stream_metrics).unwrap();
+                    bridge_stream_metrics.push(o);
+                    let v = serde_json::to_string(&bridge_stream_metrics).unwrap();
 
-                    stream_metrics.clear();
-                    self.client.publish(&stream_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
+                    bridge_stream_metrics.clear();
+                    self.client.publish(&bridge_stream_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                 }
                 o = self.serializer_metrics_rx.recv_async() => {
                     let o = o?;
-                    serializer_metrics.push(o);
-                    let v = serde_json::to_string(&serializer_metrics).unwrap();
-                    serializer_metrics.clear();
-                    self.client.publish(&serializer_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
+                    match o {
+                        SerializerMetrics::Main(o) => {
+                            serializer_metrics.push(o);
+                            let v = serde_json::to_string(&serializer_metrics).unwrap();
+                            serializer_metrics.clear();
+                            self.client.publish(&serializer_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
+                        }
+                        SerializerMetrics::Stream(o) => {
+                            if stream_metrics_config.blacklist.contains(&o.stream) {
+                                continue;
+                            }
+                            serializer_stream_metrics.push(o);
+                            let v = serde_json::to_string(&serializer_stream_metrics).unwrap();
+                            serializer_stream_metrics.clear();
+                            self.client.publish(&serializer_stream_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
+                        }
+                    }
                 }
                 o = self.mqtt_metrics_rx.recv_async() => {
                     let o = o?;

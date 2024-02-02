@@ -86,7 +86,6 @@ impl From<&System> for Payload {
 
         Payload {
             stream: "uplink_system_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -142,6 +141,7 @@ impl Network {
     /// Update metrics values for network usage over time
     fn update(&mut self, data: &NetworkData, timestamp: u64, sequence: u32) {
         let update_period = self.timer.elapsed().as_secs_f64();
+        // TODO: check if these calculations are correct
         self.incoming_data_rate = data.total_received() as f64 / update_period;
         self.outgoing_data_rate = data.total_transmitted() as f64 / update_period;
         self.timestamp = timestamp;
@@ -156,7 +156,6 @@ impl From<&mut Network> for Payload {
 
         Payload {
             stream: "uplink_network_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -218,7 +217,6 @@ impl From<&mut Disk> for Payload {
 
         Payload {
             stream: "uplink_disk_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -276,7 +274,6 @@ impl From<&mut Processor> for Payload {
 
         Payload {
             stream: "uplink_processor_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -330,7 +327,6 @@ impl From<&mut Component> for Payload {
 
         Payload {
             stream: "uplink_component_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -409,7 +405,6 @@ impl From<&mut Process> for Payload {
 
         Payload {
             stream: "uplink_process_stats".to_owned(),
-            device_id: None,
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -618,7 +613,7 @@ impl StatCollector {
         self.sys.refresh_processes();
         let timestamp = clock() as u64;
         for (&id, p) in self.sys.processes() {
-            let name = p.cmd().get(0).map(|s| s.to_string()).unwrap_or(p.name().to_string());
+            let name = p.cmd().first().map(|s| s.to_string()).unwrap_or(p.name().to_string());
 
             if self.config.system_stats.process_names.contains(&name) {
                 let payload = self.processes.push(id.as_u32(), p, name, timestamp);

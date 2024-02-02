@@ -1,10 +1,10 @@
 mod console;
 
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use anyhow::Error;
+use flume::bounded;
 use log::info;
 use structopt::StructOpt;
 use tokio::time::sleep;
@@ -18,7 +18,7 @@ pub type ReloadHandle =
 
 use uplink::base::AppConfig;
 use uplink::config::{get_configs, initialize, CommandLine};
-use uplink::{simulator, Config, TcpJson, Uplink};
+use uplink::{simulator, spawn_named_thread, Config, TcpJson, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
     let level = match commandline.verbose {
@@ -32,7 +32,7 @@ fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
         match commandline.modules.clone().into_iter().reduce(|e, acc| format!("{e}={level},{acc}"))
         {
             Some(f) => format!("{f}={level}"),
-            _ => format!("uplink={level},disk={level}"),
+            _ => format!("uplink={level},storage={level}"),
         };
 
     let builder = tracing_subscriber::fmt()
@@ -87,12 +87,18 @@ fn banner(commandline: &CommandLine, config: &Arc<Config>) {
     println!("    max_inflight_messages: {}", config.mqtt.max_inflight);
     println!("    keep_alive_timeout: {}", config.mqtt.keep_alive);
 
-    println!(
-        "    downloader:\n\tpath: {}\n\tactions: {:?}",
-        config.downloader.path, config.downloader.actions
-    );
-    if let Some(installer) = &config.ota_installer {
-        println!("    installer:\n\tpath: {}\n\tactions: {:?}", installer.path, installer.actions);
+    if !config.downloader.actions.is_empty() {
+        println!(
+            "    downloader:\n\tpath: \"{}\"\n\tactions: {:?}",
+            config.downloader.path.display(),
+            config.downloader.actions
+        );
+    }
+    if !config.ota_installer.actions.is_empty() {
+        println!(
+            "    installer:\n\tpath: {}\n\tactions: {:?}",
+            config.ota_installer.path, config.ota_installer.actions
+        );
     }
     if config.system_stats.enabled {
         println!("    processes: {:?}", config.system_stats.process_names);
@@ -118,19 +124,45 @@ fn main() -> Result<(), Error> {
     banner(&commandline, &config);
 
     let mut uplink = Uplink::new(config.clone())?;
-    let bridge = uplink.spawn()?;
+    let mut bridge = uplink.configure_bridge();
+    uplink.spawn_builtins(&mut bridge)?;
+
+    let bridge_tx = bridge.bridge_tx();
+
+    let mut tcpapps = vec![];
+    for (app, cfg) in config.tcpapps.clone() {
+        let mut route_rx = None;
+        if !cfg.actions.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&cfg.actions, actions_tx)?;
+            route_rx = Some(actions_rx)
+        }
+        tcpapps.push(TcpJson::new(app, cfg, route_rx, bridge.bridge_tx()));
+    }
+
+    let simulator_actions = config.simulator.as_ref().and_then(|cfg| {
+        let mut route_rx = None;
+        if !cfg.actions.is_empty() {
+            let (actions_tx, actions_rx) = bounded(1);
+            bridge.register_action_routes(&cfg.actions, actions_tx).unwrap();
+            route_rx = Some(actions_rx)
+        }
+
+        route_rx
+    });
+
+    let ctrl_tx = uplink.spawn(bridge)?;
 
     if let Some(config) = config.simulator.clone() {
-        let bridge = bridge.clone();
-        thread::spawn(move || {
-            simulator::start(bridge, &config).unwrap();
+        spawn_named_thread("Simulator", || {
+            simulator::start(config, bridge_tx, simulator_actions).unwrap();
         });
     }
 
     if config.console.enabled {
         let port = config.console.port;
-        let bridge_handle = bridge.clone();
-        thread::spawn(move || console::start(port, reload_handle, bridge_handle));
+        let ctrl_tx = ctrl_tx.clone();
+        spawn_named_thread("Uplink Console", move || console::start(port, reload_handle, ctrl_tx));
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -141,10 +173,9 @@ fn main() -> Result<(), Error> {
         .unwrap();
 
     rt.block_on(async {
-        for (app, cfg) in config.tcpapps.iter() {
-            let tcpjson = TcpJson::new(app.to_owned(), cfg.clone(), bridge.clone()).await;
+        for app in tcpapps {
             tokio::task::spawn(async move {
-                if let Err(e) = tcpjson.start().await {
+                if let Err(e) = app.start().await {
                     error!("App failed. Error = {:?}", e);
                 }
             });
@@ -160,7 +191,7 @@ fn main() -> Result<(), Error> {
             // Handle a shutdown signal from POSIX
             while let Some(signal) = signals.next().await {
                 match signal {
-                    SIGTERM | SIGINT | SIGQUIT => bridge.trigger_shutdown().await,
+                    SIGTERM | SIGINT | SIGQUIT => ctrl_tx.trigger_shutdown().await,
                     s => error!("Couldn't handle signal: {s}"),
                 }
             }
@@ -169,7 +200,7 @@ fn main() -> Result<(), Error> {
         uplink.resolve_on_shutdown().await.unwrap();
         info!("Uplink shutting down...");
         // NOTE: wait 5s to allow serializer to write to network/disk
-        sleep(Duration::from_secs(5)).await;
+        sleep(Duration::from_secs(10)).await;
     });
 
     Ok(())

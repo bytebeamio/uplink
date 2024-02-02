@@ -1,4 +1,4 @@
-use flume::{Receiver, RecvError, SendError};
+use flume::{Receiver, RecvError};
 use futures_util::SinkExt;
 use log::{debug, error, info};
 use thiserror::Error;
@@ -20,16 +20,12 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Receiver error {0}")]
     Recv(#[from] RecvError),
-    #[error("Sender error {0}")]
-    Send(#[from] SendError<ActionResponse>),
     #[error("Stream done")]
     StreamDone,
     #[error("Lines codec error {0}")]
     Codec(#[from] LinesCodecError),
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
-    #[error("Couldn't fill stream")]
-    Stream(#[from] crate::base::bridge::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -43,9 +39,12 @@ pub struct TcpJson {
 }
 
 impl TcpJson {
-    pub async fn new(name: String, config: AppConfig, bridge: BridgeTx) -> TcpJson {
-        let actions_rx = bridge.register_action_routes(&config.actions).await;
-
+    pub fn new(
+        name: String,
+        config: AppConfig,
+        actions_rx: Option<Receiver<Action>>,
+        bridge: BridgeTx,
+    ) -> TcpJson {
         // Note: We can register `TcpJson` itself as an app to direct actions to it
         TcpJson { name, config, bridge, actions_rx }
     }

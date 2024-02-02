@@ -6,27 +6,21 @@ start_devices() {
     kill_devices;
     mkdir -p devices
 
-    echo "Starting uplink and simulator"
+    echo "Starting uplink with simulator"
     devices=($(seq $start $stop))
     first=${devices[0]}
     rest=${devices[@]:1}
-    printf -v port "5%04d" $first
     download_auth_config $first
-    create_uplink_config $first $port
+    create_uplink_config $first
     start_uplink 1 $first "-vv" "devices/uplink_$first.log"
-
-    sleep 1
-    start_simulator 1 $first $port "-vv" "devices/simulator_$first.log"
 
     for id in $rest
     do 
-        printf -v port "5%04d" $id
-        download_auth_config $id
-        create_uplink_config $id $port
-        start_uplink 0 $id
-
         sleep 1
-        start_simulator 0 $id $port
+
+        download_auth_config $id
+        create_uplink_config $id
+        start_uplink 0 $id
     done
     echo DONE
 
@@ -39,18 +33,41 @@ start_devices() {
 
 create_uplink_config() {
     id=${1:?"Missing id"}
-    port=${2:?"Missing port number"}
     printf "$(cat << EOF
 processes = [] 
 action_redirections = { send_file = \"load_file\", update_firmware = \"install_firmware\" }
+persistence_path = \"/var/tmp/persistence/$id\"
 
 [persistence]
-path = \"/var/tmp/persistence/$id\"
 max_file_size = 104857600
 max_file_count = 3
 
-[tcpapps.1]
-port = $port
+[streams.gps]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/gps/jsonarray"
+persistence = { max_file_size = 0 }
+
+[streams.bms]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/bms/jsonarray"
+persistence = { max_file_size = 0 }
+
+[streams.imu]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/imu/jsonarray"
+persistence = { max_file_size = 0 }
+
+[streams.motor]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/motor/jsonarray"
+persistence = { max_file_size = 0 }
+
+[streams.peripheral_state]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/peripheral_state/jsonarray"
+persistence = { max_file_size = 0 }
+
+[streams.device_shadow]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
+persistence = { max_file_size = 0 }
+
+[simulator]
+gps_paths = "./paths"
 actions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }]
 
 [downloader]
@@ -66,7 +83,7 @@ download_auth_config() {
     echo "Downloading config: $url"
     mkdir -p devices
     curl --location $url \
-        --header 'x-bytebeam-tenant: demo' \
+        --header "x-bytebeam-tenant: $BYTEBEAM_TENANT_ID" \
         --header "x-bytebeam-api-key: $BYTEBEAM_API_KEY" > devices/device_$id.json
 }
 
@@ -86,14 +103,6 @@ start_uplink() {
     cmd="uplink -a devices/device_$2.json -c devices/device_$2.toml"
     run $1 "$cmd" "$3" "$4"
     echo $! >> "devices/$2.pid"
-}
-
-start_simulator() {
-    id=${2:?"Missing id"}
-    port=${3:?"Missing port number"}
-    cmd="simulator -p $port -g ./paths"
-    run $1 "$cmd" "$4" "$5"
-    # simulator runs only as long as associated uplink instance runs and need not be tracked
 }
 
 kill_devices() {
