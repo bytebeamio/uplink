@@ -69,7 +69,7 @@ impl ProcessHandler {
                     };
 
                     debug!("Action status: {:?}", status);
-                    self.bridge_tx.send_action_response(status).await;
+                    self.bridge_tx.send_action_response(status).await.unwrap();
                  }
                  status = child.wait() => {
                     info!("Action done!! Status = {:?}", status);

@@ -1,17 +1,13 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
-use base::{Action, ActionResponse, CollectorRx, CollectorTx, Payload};
-use futures_util::{
-    stream::{SplitSink, SplitStream},
-    SinkExt, StreamExt,
-};
+use collectors::{simulator, ActionsRx, DataTx};
+use futures_util::StreamExt;
 use log::LevelFilter;
 use simplelog::{
     ColorChoice, CombinedLogger, ConfigBuilder, LevelPadding, TermLogger, TerminalMode,
 };
-use simulator::Error;
 use structopt::StructOpt;
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, time::sleep};
 use tokio_util::codec::{Framed, LinesCodec};
 
 #[derive(StructOpt, Debug)]
@@ -28,47 +24,22 @@ pub struct CommandLine {
     pub verbose: u8,
 }
 
-struct DataTx {
-    data_tx: SplitSink<Framed<TcpStream, LinesCodec>, String>,
-}
-
-#[async_trait::async_trait]
-impl CollectorTx for DataTx {
-    async fn send_action_response(&mut self, response: ActionResponse) {
-        self.data_tx.send(serde_json::to_string(&response).unwrap()).await.unwrap()
-    }
-
-    async fn send_payload(&mut self, payload: Payload) {
-        self.data_tx.send(serde_json::to_string(&payload).unwrap()).await.unwrap()
-    }
-
-    fn send_payload_sync(&mut self, _: Payload) {
-        unimplemented!();
-    }
-}
-
-struct ActionsRx {
-    actions_rx: SplitStream<Framed<TcpStream, LinesCodec>>,
-}
-
-#[async_trait::async_trait]
-impl CollectorRx for ActionsRx {
-    async fn recv_action(&mut self) -> Option<Action> {
-        let line = self.actions_rx.next().await.unwrap().unwrap();
-        serde_json::from_str(&line).unwrap()
-    }
-}
-
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() {
     let commandline = init();
-
     let addr = format!("localhost:{}", commandline.port);
-    let stream = TcpStream::connect(addr).await?;
-    let (data_tx, actions_rx) = Framed::new(stream, LinesCodec::new()).split();
-    let bridge_tx = DataTx { data_tx };
-    let actions_rx = Some(ActionsRx { actions_rx });
-    simulator::start(commandline.paths, bridge_tx, actions_rx).await
+    loop {
+        let Ok(stream) = TcpStream::connect(&addr).await else {
+            sleep(Duration::from_secs(1)).await;
+            continue;
+        };
+        let (data_tx, actions_rx) = Framed::new(stream, LinesCodec::new()).split();
+        let bridge_tx = DataTx { data_tx };
+        let actions_rx = Some(ActionsRx { actions_rx });
+        if let Ok(_) = simulator::start(commandline.paths.clone(), bridge_tx, actions_rx).await {
+            break;
+        }
+    }
 }
 
 fn init() -> CommandLine {

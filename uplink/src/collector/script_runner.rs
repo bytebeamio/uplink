@@ -140,7 +140,7 @@ impl ScriptRunner {
     async fn forward_status(&mut self, status: ActionResponse) {
         self.sequence += 1;
         let status = status.set_sequence(self.sequence);
-        self.bridge_tx.send_action_response(status).await;
+        self.bridge_tx.send_action_response(status).await.unwrap();
     }
 }
 

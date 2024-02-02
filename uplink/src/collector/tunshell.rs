@@ -57,7 +57,7 @@ impl TunshellClient {
                 if let Err(e) = session.session(&action).await {
                     error!("{}", e.to_string());
                     let status = ActionResponse::failure(&action.action_id, e.to_string());
-                    session.bridge.send_action_response(status).await;
+                    session.bridge.send_action_response(status).await.unwrap();
                 }
             });
         }
@@ -71,7 +71,7 @@ impl TunshellClient {
         let mut client = Client::new(self.config(keys), HostShell::new().unwrap());
 
         let response = ActionResponse::progress(&action_id, "ShellSpawned", 90);
-        self.bridge.send_action_response(response).await;
+        self.bridge.send_action_response(response).await.unwrap();
 
         let status = client.start_session().compat().await?;
         if status != 0 {

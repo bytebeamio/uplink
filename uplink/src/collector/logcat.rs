@@ -186,7 +186,7 @@ impl Logcat {
             self.spawn_logger(config).await;
 
             let response = ActionResponse::success(&action.action_id);
-            self.bridge.send_action_response(response).await;
+            self.bridge.send_action_response(response).await.unwrap();
         }
     }
 
@@ -264,7 +264,7 @@ impl Logcat {
                     }
                 };
                 log::trace!("Log entry {:?}", payload);
-                bridge.send_payload_sync(payload);
+                bridge.send_payload_sync(payload).unwrap();
                 log_index += 1;
             }
         });

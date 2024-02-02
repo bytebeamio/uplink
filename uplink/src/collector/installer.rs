@@ -51,7 +51,7 @@ impl OTAInstaller {
 
     async fn forward_action_error(&mut self, action: Action, error: Error) {
         let status = ActionResponse::failure(&action.action_id, error.to_string());
-        self.bridge_tx.send_action_response(status).await
+        self.bridge_tx.send_action_response(status).await.unwrap()
     }
 
     fn extractor(&self, action: &Action) -> Result<(), Error> {

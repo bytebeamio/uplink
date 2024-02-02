@@ -119,12 +119,12 @@ impl TcpJson {
 
         if data.stream == "action_status" {
             let response = ActionResponse::from_payload(&data)?;
-            self.bridge.send_action_response(response).await;
+            self.bridge.send_action_response(response).await.unwrap();
 
             return Ok(());
         }
 
-        self.bridge.send_payload(data).await;
+        self.bridge.send_payload(data).await.unwrap();
 
         Ok(())
     }

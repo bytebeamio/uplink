@@ -547,7 +547,7 @@ impl StatCollector {
         self.sys.refresh_memory();
         let timestamp = clock() as u64;
         let payload = self.system.push(&self.sys, timestamp);
-        self.bridge_tx.send_payload_sync(payload);
+        self.bridge_tx.send_payload_sync(payload).unwrap();
 
         Ok(())
     }
@@ -558,7 +558,7 @@ impl StatCollector {
         let timestamp = clock() as u64;
         for disk_data in self.sys.disks() {
             let payload = self.disks.push(disk_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            self.bridge_tx.send_payload_sync(payload).unwrap();
         }
 
         Ok(())
@@ -570,7 +570,7 @@ impl StatCollector {
         let timestamp = clock() as u64;
         for (net_name, net_data) in self.sys.networks() {
             let payload = self.networks.push(net_name.to_owned(), net_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            self.bridge_tx.send_payload_sync(payload).unwrap();
         }
 
         Ok(())
@@ -582,7 +582,7 @@ impl StatCollector {
         let timestamp = clock() as u64;
         for proc_data in self.sys.cpus().iter() {
             let payload = self.processors.push(proc_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            self.bridge_tx.send_payload_sync(payload).unwrap();
         }
 
         Ok(())
@@ -594,7 +594,7 @@ impl StatCollector {
         let timestamp = clock() as u64;
         for comp_data in self.sys.components().iter() {
             let payload = self.components.push(comp_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            self.bridge_tx.send_payload_sync(payload).unwrap();
         }
 
         Ok(())
@@ -612,7 +612,7 @@ impl StatCollector {
 
             if self.config.system_stats.process_names.contains(&name) {
                 let payload = self.processes.push(id.as_u32(), p, name, timestamp);
-                self.bridge_tx.send_payload_sync(payload);
+                self.bridge_tx.send_payload_sync(payload).unwrap();
             }
         }
 

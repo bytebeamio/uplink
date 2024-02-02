@@ -165,7 +165,7 @@ fn main() -> Result<(), Error> {
                 .build()
                 .unwrap();
             rt.block_on(async {
-                simulator::start(gps_paths, bridge_tx, simulator_actions).await.unwrap();
+                collectors::simulator::start(gps_paths, bridge_tx, simulator_actions).await.unwrap();
             });
         });
     }

@@ -1,32 +1,28 @@
-use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
+use std::{fs, path::PathBuf, sync::Arc, time::Duration};
+
+use base::{Action, ActionResponse, CollectorRx, CollectorTx, Payload};
 use flume::{bounded, Sender};
 use log::{error, info};
 use rand::Rng;
-use thiserror::Error;
-use tokio::time::interval;
-use tokio::{select, spawn};
+use tokio::{select, spawn, time::interval};
 
-use std::path::PathBuf;
-use std::time::Duration;
-use std::{fs, io, sync::Arc};
-
-use base::{Action, ActionResponse, CollectorRx, CollectorTx, Payload};
+use self::data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
 
 mod data;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Io error {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Recv error {0}")]
+    Recv(#[from] flume::RecvError),
+    #[error("Disconnected")]
+    Disconnected,
+}
 
 pub enum Event {
     Data(Payload),
     ActionResponse(ActionResponse),
-}
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Io error {0}")]
-    Io(#[from] io::Error),
-    #[error("Recv error {0}")]
-    Recv(#[from] flume::RecvError),
-    #[error("Serde error {0}")]
-    Json(#[from] serde_json::error::Error),
 }
 
 pub async fn simulate_action(action: Action, tx: Sender<Event>) {
@@ -102,12 +98,13 @@ pub async fn start(
         if let Some(actions_rx) = actions_rx.as_mut() {
             select! {
                 action = actions_rx.recv_action() => {
-                    spawn(simulate_action(action.unwrap(),  tx.clone()));
+                    let action = action.map_err(|_| Error::Disconnected)?;
+                    spawn(simulate_action(action,  tx.clone()));
                 }
                 event = rx.recv_async() => {
                     match event {
-                        Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
-                        Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
+                        Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await.map_err(|_| Error::Disconnected)?,
+                        Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await.map_err(|_| Error::Disconnected)?,
                         Err(_) => {
                             error!("All generators have stopped!");
                             return Ok(())
@@ -117,8 +114,12 @@ pub async fn start(
             }
         } else {
             match rx.recv_async().await {
-                Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
-                Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
+                Ok(Event::ActionResponse(status)) => {
+                    bridge_tx.send_action_response(status).await.map_err(|_| Error::Disconnected)?
+                }
+                Ok(Event::Data(payload)) => {
+                    bridge_tx.send_payload(payload).await.map_err(|_| Error::Disconnected)?
+                }
                 Err(_) => {
                     error!("All generators have stopped!");
                     return Ok(());

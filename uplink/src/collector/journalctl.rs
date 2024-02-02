@@ -135,14 +135,14 @@ impl JournalCtl {
             config.units.retain(|unit| !unit.is_empty());
             if config.tags.is_empty() && config.units.is_empty() {
                 let response = ActionResponse::failure(&action.action_id, "No targets to log for");
-                self.bridge.send_action_response(response).await;
+                self.bridge.send_action_response(response).await.unwrap();
                 continue;
             }
 
             self.spawn_logger(config).await;
 
             let response = ActionResponse::success(&action.action_id);
-            self.bridge.send_action_response(response).await;
+            self.bridge.send_action_response(response).await.unwrap();
         }
     }
 
@@ -225,7 +225,7 @@ impl JournalCtl {
                     }
                 };
                 log::trace!("Log entry {:?}", payload);
-                bridge.send_payload_sync(payload);
+                bridge.send_payload_sync(payload).unwrap();
                 log_index += 1;
             }
         });

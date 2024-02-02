@@ -40,7 +40,7 @@ tracing-subscriber = { version="=0.3.14", features=["env-filter"] }
 tokio-compat-02 = "0.2.0"
 tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch" }
 # simulator
-simulator = { path = "../collectors/simulator", optional = true }
+collectors = { path = "../collectors", optional = true }
 # downloader
 fs2 = "0.4"
 futures-util = { workspace = true }
@@ -56,8 +56,8 @@ tar = "0.4"
 surge-ping = "0.8"
 
 [features]
-default = ["collectors"]
-collectors = ["simulator"]
+default = ["collectors/simulator"]
+simulator = ["collectors/simulator"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 time = "0.3"

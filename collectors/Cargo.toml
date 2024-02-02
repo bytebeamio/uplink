@@ -1,0 +1,33 @@
+[package]
+name = "collectors"
+version = "0.1.0"
+edition = "2021"
+authors = ["Devdutt Shenoi <devdutt@bytebeam.io>"]
+
+[dependencies]
+async-trait = { workspace = true }
+base = { path = "../base", features = ["serialize_stream"] }
+flume = { workspace = true }
+futures-util = { workspace = true, features = ["sink"] }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+simplelog = "0.12.0"
+structopt = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net", "macros"] }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+
+# simulator
+fake = { version = "2.5.0", features = ["derive"] }
+rand = { workspace = true }
+
+[features]
+default = ["simulator"]
+simulator = []
+
+[[bin]]
+name = "simulator"
+path = "bin/simulator.rs"
+required-features = ["simulator"]

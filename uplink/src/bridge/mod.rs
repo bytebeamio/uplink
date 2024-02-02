@@ -93,16 +93,22 @@ pub struct BridgeTx {
 
 #[async_trait::async_trait]
 impl CollectorTx for BridgeTx {
-    async fn send_payload(&mut self, payload: Payload) {
-        self.data_tx.send_payload(payload).await
+    async fn send_payload(&mut self, payload: Payload) -> Result<(), ()> {
+        self.data_tx.send_payload(payload).await;
+
+        Ok(())
     }
 
-    fn send_payload_sync(&mut self, payload: Payload) {
-        self.data_tx.send_payload_sync(payload)
+    fn send_payload_sync(&mut self, payload: Payload) -> Result<(), ()> {
+        self.data_tx.send_payload_sync(payload);
+
+        Ok(())
     }
 
-    async fn send_action_response(&mut self, response: ActionResponse) {
-        self.status_tx.send_action_response(response).await
+    async fn send_action_response(&mut self, response: ActionResponse) -> Result<(), ()> {
+        self.status_tx.send_action_response(response).await;
+
+        Ok(())
     }
 }
 
@@ -113,7 +119,7 @@ pub struct ActionsRx {
 
 #[async_trait::async_trait]
 impl CollectorRx for ActionsRx {
-    async fn recv_action(&mut self) -> Option<Action> {
-        self.actions_rx.recv_async().await.ok()
+    async fn recv_action(&mut self) -> Result<Action, ()> {
+        self.actions_rx.recv_async().await.map_err(|_| ())
     }
 }

@@ -169,7 +169,7 @@ impl FileDownloader {
     async fn forward_error(&mut self, err: Error) {
         let status =
             ActionResponse::failure(&self.action_id, err.to_string()).set_sequence(self.sequence());
-        self.bridge_tx.send_action_response(status).await;
+        self.bridge_tx.send_action_response(status).await.unwrap();
     }
 
     // A download must be retried with Range header when HTTP/reqwest errors are faced
@@ -200,7 +200,7 @@ impl FileDownloader {
         // Update action status for process initiated
         let status = ActionResponse::progress(&self.action_id, "Downloading", 0);
         let status = status.set_sequence(self.sequence());
-        self.bridge_tx.send_action_response(status).await;
+        self.bridge_tx.send_action_response(status).await.unwrap();
 
         // Ensure that directory for downloading file into, exists
         let mut download_path = self.config.path.clone();
@@ -255,7 +255,7 @@ impl FileDownloader {
 
         let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
         let status = status.set_sequence(self.sequence());
-        self.bridge_tx.send_action_response(status).await;
+        self.bridge_tx.send_action_response(status).await.unwrap();
 
         Ok(())
     }
@@ -328,7 +328,7 @@ impl FileDownloader {
                 //TODO: let response = self.response.progress(percentage);??
                 let status = ActionResponse::progress(&self.action_id, "Downloading", percentage);
                 let status = status.set_sequence(self.sequence());
-                self.bridge_tx.send_action_response(status).await;
+                self.bridge_tx.send_action_response(status).await.unwrap();
             }
         }
 

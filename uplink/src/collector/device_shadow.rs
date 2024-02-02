@@ -73,7 +73,7 @@ impl DeviceShadow {
                     continue;
                 }
             };
-            self.bridge.send_payload(payload).await;
+            self.bridge.send_payload(payload).await.unwrap();
         }
     }
 }
