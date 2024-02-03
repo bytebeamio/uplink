@@ -374,8 +374,10 @@ impl DownloadFile {
     fn verify_checksum(&self) -> Result<(), Error> {
         let Some(checksum) = &self.checksum else { return Ok(()) };
         let path = self.download_path.as_ref().expect("Downloader didn't set \"download_path\"");
-        let file = File::open(path)?;
-        let hash = compute_md5(file)?;
+        let mut file = File::open(path)?;
+        let mut hasher = Md5::new();
+        io::copy(&mut file, &mut hasher)?;
+        let hash = hasher.finalize().to_vec();
 
         if checksum != &hex::encode(hash) {
             return Err(Error::BadChecksum);
@@ -383,14 +385,6 @@ impl DownloadFile {
 
         Ok(())
     }
-}
-
-pub fn compute_md5(mut file: File) -> Result<Vec<u8>, Error> {
-    let mut hasher = Md5::new();
-    io::copy(&mut file, &mut hasher)?;
-    let hash = hasher.finalize().to_vec();
-
-    Ok(hash)
 }
 
 // A temporary structure to help us retry downloads
