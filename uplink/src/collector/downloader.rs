@@ -52,8 +52,8 @@ use flume::Receiver;
 use futures_util::{Future, StreamExt};
 use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
-use md5::{Digest, Md5};
 use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identity, Response};
+use rsa::sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use tokio::time::{timeout_at, Instant};
 
@@ -375,7 +375,7 @@ impl DownloadFile {
         let Some(checksum) = &self.checksum else { return Ok(()) };
         let path = self.download_path.as_ref().expect("Downloader didn't set \"download_path\"");
         let mut file = File::open(path)?;
-        let mut hasher = Md5::new();
+        let mut hasher = Sha256::new();
         io::copy(&mut file, &mut hasher)?;
         let hash = hasher.finalize().to_vec();
 

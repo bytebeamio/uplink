@@ -42,12 +42,12 @@ tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch =
 fake = { version = "2.5.0", features = ["derive"] }
 rand = { workspace = true }
 # downloader
-hex = "0.4"
-md-5 = "0.10"
 fs2 = "0.4"
 futures-util = { workspace = true }
+hex = "0.4"
 human_bytes = "0.4"
 reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
+rsa = { version = "0.9.6", features = ["sha2"] }
 # systemstats
 sysinfo = "0.26"
 # logcat
