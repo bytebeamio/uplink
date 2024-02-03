@@ -372,14 +372,13 @@ impl DownloadFile {
     }
 
     fn verify_checksum(&self) -> Result<(), Error> {
+        let Some(checksum) = &self.checksum else { return Ok(()) };
         let path = self.download_path.as_ref().expect("Downloader didn't set \"download_path\"");
         let file = File::open(path)?;
         let hash = compute_md5(file)?;
 
-        if let Some(c) = &self.checksum {
-            if c != &hex::encode(hash) {
-                return Err(Error::BadChecksum);
-            }
+        if checksum != &hex::encode(hash) {
+            return Err(Error::BadChecksum);
         }
 
         Ok(())
