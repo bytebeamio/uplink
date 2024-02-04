@@ -470,14 +470,10 @@ mod test {
         (BridgeTx { data_tx, status_tx }, status_rx)
     }
 
-    #[test]
-    // Test file downloading capabilities of FileDownloader by downloading the uplink logo from GitHub
-    fn download_file() {
-        // Ensure path exists
-        std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
-        // Prepare config
+    // Prepare config
+    fn test_config(test_name: &str) -> Config {
         let mut path = PathBuf::from(DOWNLOAD_DIR);
-        path.push("uplink-test");
+        path.push(test_name);
         let downloader_cfg = DownloaderConfig {
             actions: vec![ActionRoute {
                 name: "firmware_update".to_owned(),
@@ -485,7 +481,16 @@ mod test {
             }],
             path,
         };
-        let config = config(downloader_cfg.clone());
+        config(downloader_cfg.clone())
+    }
+
+    #[test]
+    // Test file downloading capabilities of FileDownloader by downloading the uplink logo from GitHub
+    fn download_file() {
+        // Ensure path exists
+        std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
+        let config = test_config("download_file");
+        let mut downloader_path = config.downloader.path.clone();
         let (bridge_tx, status_rx) = create_bridge();
 
         // Create channels to forward and push actions on
@@ -504,10 +509,9 @@ mod test {
             checksum: None,
         };
         let mut expected_forward = download_update.clone();
-        let mut path = downloader_cfg.path;
-        path.push("firmware_update");
-        path.push("test.txt");
-        expected_forward.download_path = Some(path);
+        downloader_path.push("firmware_update");
+        downloader_path.push("test.txt");
+        expected_forward.download_path = Some(downloader_path);
         let download_action = Action {
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
@@ -547,17 +551,7 @@ mod test {
     fn checksum_of_file() {
         // Ensure path exists
         std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
-        // Prepare config
-        let mut path = PathBuf::from(DOWNLOAD_DIR);
-        path.push("uplink-test");
-        let downloader_cfg = DownloaderConfig {
-            actions: vec![ActionRoute {
-                name: "firmware_update".to_owned(),
-                timeout: Duration::from_secs(10),
-            }],
-            path,
-        };
-        let config = config(downloader_cfg.clone());
+        let config = test_config("file_checksum");
         let (bridge_tx, status_rx) = create_bridge();
 
         // Create channels to forward and push action_status on
@@ -575,7 +569,9 @@ mod test {
             content_length: 296658,
             file_name: "logo.png".to_string(),
             download_path: None,
-            checksum: Some("34b0aa8725dd29cf7f8757a625b07cc8".to_string()),
+            checksum: Some(
+                "e22d4a7cf60ad13bf885c6d84af2f884f0c044faf0ee40b2e3c81896b226b2fc".to_string(),
+            ),
         };
         let correct_action = Action {
             action_id: "1".to_string(),
