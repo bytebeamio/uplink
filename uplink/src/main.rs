@@ -1,5 +1,6 @@
 mod console;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -80,10 +81,10 @@ pub struct CommandLine {
     pub commit_date: String,
     /// config file
     #[structopt(short = "c", help = "Config file")]
-    pub config: Option<String>,
+    pub config: Option<PathBuf>,
     /// config file
     #[structopt(short = "a", help = "Authentication file")]
-    pub auth: String,
+    pub auth: PathBuf,
     /// log level (v: info, vv: debug, vvv: trace)
     #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
     pub verbose: u8,
@@ -97,13 +98,13 @@ impl CommandLine {
     /// like bike id and data version
     fn get_configs(&self) -> Result<Config, anyhow::Error> {
         let read_file_contents = |path| std::fs::read_to_string(path).ok();
-        let auth = read_file_contents(&self.auth)
-            .ok_or_else(|| Error::msg(format!("Auth file not found at \"{}\"", self.auth)))?;
+        let auth = read_file_contents(&self.auth).ok_or_else(|| {
+            Error::msg(format!("Auth file not found at \"{}\"", self.auth.display()))
+        })?;
         let config = match &self.config {
-            Some(path) => Some(
-                read_file_contents(path)
-                    .ok_or_else(|| Error::msg(format!("Config file not found at \"{}\"", path)))?,
-            ),
+            Some(path) => Some(read_file_contents(path).ok_or_else(|| {
+                Error::msg(format!("Config file not found at \"{}\"", path.display()))
+            })?),
             None => None,
         };
 
