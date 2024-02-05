@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Error;
+use config::{Environment, File, FileFormat};
 use flume::bounded;
 use log::info;
 use structopt::StructOpt;
@@ -16,97 +17,264 @@ use tracing_subscriber::{EnvFilter, Registry};
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
-use uplink::base::AppConfig;
-use uplink::config::{get_configs, initialize, CommandLine};
+use uplink::config::{AppConfig, StreamConfig, MAX_BUFFER_SIZE};
 use uplink::{simulator, spawn_named_thread, Config, TcpJson, Uplink};
 
-fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
-    let level = match commandline.verbose {
-        0 => "warn",
-        1 => "info",
-        2 => "debug",
-        _ => "trace",
-    };
-
-    let levels =
-        match commandline.modules.clone().into_iter().reduce(|e, acc| format!("{e}={level},{acc}"))
-        {
-            Some(f) => format!("{f}={level}"),
-            _ => format!("uplink={level},storage={level}"),
-        };
-
-    let builder = tracing_subscriber::fmt()
-        .pretty()
-        .with_line_number(false)
-        .with_file(false)
-        .with_thread_ids(false)
-        .with_thread_names(false)
-        .with_env_filter(levels)
-        .with_filter_reloading();
-
-    let reload_handle = builder.reload_handle();
-
-    builder.try_init().expect("initialized subscriber succesfully");
-
-    reload_handle
+#[derive(Debug, thiserror::Error)]
+pub enum ReadFileError {
+    #[error("Auth file not found at {0}")]
+    Auth(String),
+    #[error("Config file not found at {0}")]
+    Config(String),
 }
 
-fn banner(commandline: &CommandLine, config: &Arc<Config>) {
-    const B: &str = r#"
-    ░█░▒█░▄▀▀▄░█░░░▀░░█▀▀▄░█░▄
-    ░█░▒█░█▄▄█░█░░░█▀░█░▒█░█▀▄
-    ░░▀▀▀░█░░░░▀▀░▀▀▀░▀░░▀░▀░▀
-    "#;
+const DEFAULT_CONFIG: &str = r#"    
+    [mqtt]
+    max_packet_size = 256000
+    max_inflight = 100
+    keep_alive = 30
+    network_timeout = 30
 
-    println!("{B}");
-    println!("    version: {}", commandline.version);
-    println!("    profile: {}", commandline.profile);
-    println!("    commit_sha: {}", commandline.commit_sha);
-    println!("    commit_date: {}", commandline.commit_date);
-    println!("    project_id: {}", config.project_id);
-    println!("    device_id: {}", config.device_id);
-    println!("    remote: {}:{}", config.broker, config.port);
-    println!("    persistence_path: {}", config.persistence_path.display());
-    if !config.action_redirections.is_empty() {
-        println!("    action redirections:");
-        for (action, redirection) in config.action_redirections.iter() {
-            println!("        {action} -> {redirection}");
-        }
-    }
-    if !config.tcpapps.is_empty() {
-        println!("    tcp applications:");
-        for (app, AppConfig { port, actions }) in config.tcpapps.iter() {
-            println!("        name: {app:?}");
-            println!("        port: {port}");
-            println!("        actions: {actions:?}");
-            println!("        @");
-        }
-    }
-    println!("    secure_transport: {}", config.authentication.is_some());
-    println!("    max_packet_size: {}", config.mqtt.max_packet_size);
-    println!("    max_inflight_messages: {}", config.mqtt.max_inflight);
-    println!("    keep_alive_timeout: {}", config.mqtt.keep_alive);
+    [stream_metrics]
+    enabled = false
+    bridge_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
+    serializer_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_stream_metrics/jsonarray"
+    blacklist = []
+    timeout = 10
 
-    if !config.downloader.actions.is_empty() {
-        println!(
-            "    downloader:\n\tpath: \"{}\"\n\tactions: {:?}",
-            config.downloader.path.display(),
-            config.downloader.actions
-        );
+    [serializer_metrics]
+    enabled = false
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_metrics/jsonarray"
+    timeout = 10
+
+    [mqtt_metrics]
+    enabled = true
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_mqtt_metrics/jsonarray"
+
+    [action_status]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
+    buf_size = 1
+    flush_period = 2
+    priority = 255 # highest priority for quick delivery of action status info to platform
+
+    [streams.device_shadow]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
+    flush_period = 5
+
+    [streams.logs]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+    buf_size = 32
+
+    [system_stats]
+    enabled = true
+    process_names = ["uplink"]
+    update_period = 30
+"#;
+
+#[derive(StructOpt, Debug)]
+#[structopt(name = "uplink", about = "collect, batch, compress, publish")]
+pub struct CommandLine {
+    /// Binary version
+    #[structopt(skip = env ! ("VERGEN_BUILD_SEMVER"))]
+    pub version: String,
+    /// Build profile
+    #[structopt(skip = env ! ("VERGEN_CARGO_PROFILE"))]
+    pub profile: String,
+    /// Commit SHA
+    #[structopt(skip = env ! ("VERGEN_GIT_SHA"))]
+    pub commit_sha: String,
+    /// Commit SHA
+    #[structopt(skip = env ! ("VERGEN_GIT_COMMIT_TIMESTAMP"))]
+    pub commit_date: String,
+    /// config file
+    #[structopt(short = "c", help = "Config file")]
+    pub config: Option<String>,
+    /// config file
+    #[structopt(short = "a", help = "Authentication file")]
+    pub auth: String,
+    /// log level (v: info, vv: debug, vvv: trace)
+    #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
+    pub verbose: u8,
+    /// list of modules to log
+    #[structopt(short = "m", long = "modules")]
+    pub modules: Vec<String>,
+}
+
+impl CommandLine {
+    /// Reads config file to generate config struct and replaces places holders
+    /// like bike id and data version
+    fn get_configs(&self) -> Result<Config, anyhow::Error> {
+        let read_file_contents = |path| std::fs::read_to_string(path).ok();
+        let auth = read_file_contents(&self.auth)
+            .ok_or_else(|| ReadFileError::Auth(self.auth.to_string()))?;
+        let config = match &self.config {
+            Some(path) => Some(
+                read_file_contents(path).ok_or_else(|| ReadFileError::Config(path.to_string()))?,
+            ),
+            None => None,
+        };
+
+        let config = config::Config::builder()
+            .add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml))
+            .add_source(File::from_str(&config.unwrap_or_default(), FileFormat::Toml))
+            .add_source(File::from_str(&auth, FileFormat::Json))
+            .add_source(Environment::default())
+            .build()?;
+
+        let mut config: Config = config.try_deserialize()?;
+
+        // Create directory at persistence_path if it doesn't already exist
+        std::fs::create_dir_all(&config.persistence_path).map_err(|_| {
+            anyhow::Error::msg(format!(
+                "Permission denied for creating persistence directory at \"{}\"",
+                config.persistence_path.display()
+            ))
+        })?;
+
+        // replace placeholders with device/tenant ID
+        let tenant_id = config.project_id.trim();
+        let device_id = config.device_id.trim();
+
+        // Replace placeholders in topic strings with configured values for tenant_id and device_id
+        // e.g. for tenant_id: "demo"; device_id: "123"
+        // "/tenants/{tenant_id}/devices/{device_id}/events/stream/jsonarry" ~> "/tenants/demo/devices/123/events/stream/jsonarry"
+        let replace_topic_placeholders = |topic: &mut String| {
+            *topic = topic.replace("{tenant_id}", tenant_id).replace("{device_id}", device_id);
+        };
+
+        for config in config.streams.values_mut() {
+            replace_topic_placeholders(&mut config.topic);
+        }
+
+        replace_topic_placeholders(&mut config.action_status.topic);
+        replace_topic_placeholders(&mut config.stream_metrics.bridge_topic);
+        replace_topic_placeholders(&mut config.stream_metrics.serializer_topic);
+        replace_topic_placeholders(&mut config.serializer_metrics.topic);
+        replace_topic_placeholders(&mut config.mqtt_metrics.topic);
+
+        if config.system_stats.enabled {
+            for stream_name in [
+                "uplink_disk_stats",
+                "uplink_network_stats",
+                "uplink_processor_stats",
+                "uplink_process_stats",
+                "uplink_component_stats",
+                "uplink_system_stats",
+            ] {
+                config.stream_metrics.blacklist.push(stream_name.to_owned());
+                let stream_config = StreamConfig {
+                    topic: format!(
+                        "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
+                    ),
+                    buf_size: config.system_stats.stream_size.unwrap_or(MAX_BUFFER_SIZE),
+                    ..Default::default()
+                };
+                config.streams.insert(stream_name.to_owned(), stream_config);
+            }
+        }
+
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+            let stream_config =
+                config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
+                    topic: format!(
+                        "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+                    ),
+                    buf_size: 32,
+                    ..Default::default()
+                });
+            stream_config.buf_size = buf_size;
+        }
+
+        config.actions_subscription = format!("/tenants/{tenant_id}/devices/{device_id}/actions");
+
+        Ok(config)
     }
-    if !config.ota_installer.actions.is_empty() {
-        println!(
-            "    installer:\n\tpath: {}\n\tactions: {:?}",
-            config.ota_installer.path, config.ota_installer.actions
-        );
+
+    fn initialize_logging(&self) -> ReloadHandle {
+        let level = match self.verbose {
+            0 => "warn",
+            1 => "info",
+            2 => "debug",
+            _ => "trace",
+        };
+
+        let levels =
+            match self.modules.clone().into_iter().reduce(|e, acc| format!("{e}={level},{acc}")) {
+                Some(f) => format!("{f}={level}"),
+                _ => format!("uplink={level},storage={level}"),
+            };
+
+        let builder = tracing_subscriber::fmt()
+            .pretty()
+            .with_line_number(false)
+            .with_file(false)
+            .with_thread_ids(false)
+            .with_thread_names(false)
+            .with_env_filter(levels)
+            .with_filter_reloading();
+
+        let reload_handle = builder.reload_handle();
+
+        builder.try_init().expect("initialized subscriber succesfully");
+
+        reload_handle
     }
-    if config.system_stats.enabled {
-        println!("    processes: {:?}", config.system_stats.process_names);
+
+    fn banner(&self, config: &Config) {
+        const B: &str = r#"
+        ░█░▒█░▄▀▀▄░█░░░▀░░█▀▀▄░█░▄
+        ░█░▒█░█▄▄█░█░░░█▀░█░▒█░█▀▄
+        ░░▀▀▀░█░░░░▀▀░▀▀▀░▀░░▀░▀░▀
+        "#;
+
+        println!("{B}");
+        println!("    version: {}", self.version);
+        println!("    profile: {}", self.profile);
+        println!("    commit_sha: {}", self.commit_sha);
+        println!("    commit_date: {}", self.commit_date);
+        println!("    project_id: {}", config.project_id);
+        println!("    device_id: {}", config.device_id);
+        println!("    remote: {}:{}", config.broker, config.port);
+        println!("    persistence_path: {}", config.persistence_path.display());
+        if !config.action_redirections.is_empty() {
+            println!("    action redirections:");
+            for (action, redirection) in config.action_redirections.iter() {
+                println!("\t{action} -> {redirection}");
+            }
+        }
+        if !config.tcpapps.is_empty() {
+            println!("    tcp applications:");
+            for (app, AppConfig { port, actions }) in config.tcpapps.iter() {
+                println!("\tname: {app:?}\n\tport: {port}\n\tactions: {actions:?}\n\t@");
+            }
+        }
+        println!("    secure_transport: {}", config.authentication.is_some());
+        println!("    max_packet_size: {}", config.mqtt.max_packet_size);
+        println!("    max_inflight_messages: {}", config.mqtt.max_inflight);
+        println!("    keep_alive_timeout: {}", config.mqtt.keep_alive);
+
+        if !config.downloader.actions.is_empty() {
+            println!(
+                "    downloader:\n\tpath: \"{}\"\n\tactions: {:?}",
+                config.downloader.path.display(),
+                config.downloader.actions
+            );
+        }
+        if !config.ota_installer.actions.is_empty() {
+            println!(
+                "    installer:\n\tpath: {}\n\tactions: {:?}",
+                config.ota_installer.path, config.ota_installer.actions
+            );
+        }
+        if config.system_stats.enabled {
+            println!("    processes: {:?}", config.system_stats.process_names);
+        }
+        if config.console.enabled {
+            println!("    console: http://localhost:{}", config.console.port);
+        }
+        println!("\n");
     }
-    if config.console.enabled {
-        println!("    console: http://localhost:{}", config.console.port);
-    }
-    println!("\n");
 }
 
 fn main() -> Result<(), Error> {
@@ -116,13 +284,11 @@ fn main() -> Result<(), Error> {
     }
 
     let commandline: CommandLine = StructOpt::from_args();
-    let reload_handle = initialize_logging(&commandline);
+    let reload_handle = commandline.initialize_logging();
+    let config = commandline.get_configs()?;
+    commandline.banner(&config);
 
-    let (auth, config) = get_configs(&commandline)?;
-    let config = Arc::new(initialize(&auth, &config.unwrap_or_default())?);
-
-    banner(&commandline, &config);
-
+    let config = Arc::new(config);
     let mut uplink = Uplink::new(config.clone())?;
     let mut bridge = uplink.configure_bridge();
     uplink.spawn_builtins(&mut bridge)?;

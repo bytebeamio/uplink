@@ -14,11 +14,9 @@ use storage::Storage;
 use thiserror::Error;
 use tokio::{select, time::interval};
 
-use crate::base::Compression;
+use crate::config::{default_file_size, Compression, StreamConfig};
 use crate::{Config, Package};
 pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
-
-use super::{default_file_size, StreamConfig};
 
 const METRICS_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -877,7 +875,7 @@ mod test {
 
     use super::*;
     use crate::base::bridge::stream::Stream;
-    use crate::base::MqttConfig;
+    use crate::config::MqttConfig;
     use crate::Payload;
 
     #[derive(Clone)]

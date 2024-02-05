@@ -16,8 +16,7 @@ pub use actions_lane::{CtrlTx as ActionsLaneCtrlTx, StatusTx};
 use data_lane::DataBridge;
 pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
-use super::StreamConfig;
-use crate::base::ActionRoute;
+use crate::config::{ActionRoute, StreamConfig};
 use crate::{Action, ActionResponse, Config};
 pub use metrics::StreamMetrics;
 

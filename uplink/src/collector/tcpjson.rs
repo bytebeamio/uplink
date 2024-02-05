@@ -11,7 +11,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use std::io;
 
 use crate::base::bridge::BridgeTx;
-use crate::base::AppConfig;
+use crate::config::AppConfig;
 use crate::{Action, ActionResponse, Payload};
 
 #[derive(Error, Debug)]
