@@ -46,9 +46,19 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Error;
+use flume::{bounded, Receiver, RecvError, Sender};
+use log::error;
 
-use base::bridge::stream::Stream;
+pub mod base;
+pub mod collector;
+pub mod config;
+
+use self::config::{ActionRoute, Config};
+pub use base::actions::{Action, ActionResponse};
+use base::bridge::{stream::Stream, Bridge, Package, Payload, Point, StreamMetrics};
 use base::monitor::Monitor;
+use base::mqtt::Mqtt;
+use base::serializer::{Serializer, SerializerMetrics};
 use base::CtrlTx;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
@@ -61,20 +71,7 @@ use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
-use flume::{bounded, Receiver, RecvError, Sender};
-use log::error;
-
-pub mod base;
-pub mod collector;
-pub mod config;
-
-pub use base::actions::{Action, ActionResponse};
-use base::bridge::{Bridge, Package, Payload, Point, StreamMetrics};
-use base::mqtt::Mqtt;
-use base::serializer::{Serializer, SerializerMetrics};
 pub use collector::{simulator, tcpjson::TcpJson};
-use config::ActionRoute;
-pub use config::Config;
 pub use storage::Storage;
 
 /// Spawn a named thread to run the function f on

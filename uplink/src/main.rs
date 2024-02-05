@@ -17,8 +17,8 @@ use tracing_subscriber::{EnvFilter, Registry};
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
-use uplink::config::{AppConfig, StreamConfig, MAX_BUFFER_SIZE};
-use uplink::{simulator, spawn_named_thread, Config, TcpJson, Uplink};
+use uplink::config::{AppConfig, Config, StreamConfig, MAX_BUFFER_SIZE};
+use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReadFileError {
