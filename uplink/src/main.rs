@@ -20,14 +20,6 @@ pub type ReloadHandle =
 use uplink::config::{AppConfig, Config, StreamConfig, MAX_BUFFER_SIZE};
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
-#[derive(Debug, thiserror::Error)]
-pub enum ReadFileError {
-    #[error("Auth file not found at {0}")]
-    Auth(String),
-    #[error("Config file not found at {0}")]
-    Config(String),
-}
-
 const DEFAULT_CONFIG: &str = r#"    
     [mqtt]
     max_packet_size = 256000
@@ -106,10 +98,11 @@ impl CommandLine {
     fn get_configs(&self) -> Result<Config, anyhow::Error> {
         let read_file_contents = |path| std::fs::read_to_string(path).ok();
         let auth = read_file_contents(&self.auth)
-            .ok_or_else(|| ReadFileError::Auth(self.auth.to_string()))?;
+            .ok_or_else(|| Error::msg(format!("Auth file not found at \"{}\"", self.auth)))?;
         let config = match &self.config {
             Some(path) => Some(
-                read_file_contents(path).ok_or_else(|| ReadFileError::Config(path.to_string()))?,
+                read_file_contents(path)
+                    .ok_or_else(|| Error::msg(format!("Config file not found at \"{}\"", path)))?,
             ),
             None => None,
         };
@@ -125,7 +118,7 @@ impl CommandLine {
 
         // Create directory at persistence_path if it doesn't already exist
         std::fs::create_dir_all(&config.persistence_path).map_err(|_| {
-            anyhow::Error::msg(format!(
+            Error::msg(format!(
                 "Permission denied for creating persistence directory at \"{}\"",
                 config.persistence_path.display()
             ))
