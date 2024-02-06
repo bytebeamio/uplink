@@ -17,7 +17,7 @@ pub type ReloadHandle =
 
 use uplink::base::AppConfig;
 use uplink::config::{get_configs, initialize, CommandLine};
-use uplink::{simulator, spawn_named_thread, Config, TcpJson, Uplink};
+use uplink::{spawn_named_thread, Config, Simulator, TcpJson, Uplink};
 
 fn initialize_logging(commandline: &CommandLine) -> ReloadHandle {
     let level = match commandline.verbose {
@@ -139,21 +139,21 @@ fn main() -> Result<(), Error> {
         tcpapps.push(TcpJson::new(app, cfg, route_rx, bridge.bridge_tx()));
     }
 
-    let simulator_actions = match &config.simulator {
-        Some(cfg) if !cfg.actions.is_empty() => {
+    if let Some(cfg) = &config.simulator {
+        let route_rx = if !cfg.actions.is_empty() {
             let actions_rx = bridge.register_action_routes(&cfg.actions)?;
             Some(actions_rx)
-        }
-        _ => None,
-    };
+        } else {
+            None
+        };
 
-    let ctrl_tx = uplink.spawn(bridge)?;
-
-    if let Some(config) = config.simulator.clone() {
+        let simulator = Simulator::new(cfg.clone(), bridge_tx, route_rx);
         spawn_named_thread("Simulator", || {
-            simulator::start(config, bridge_tx, simulator_actions).unwrap();
+            simulator.start().unwrap();
         });
     }
+
+    let ctrl_tx = uplink.spawn(bridge)?;
 
     if config.console.enabled {
         let port = config.console.port;

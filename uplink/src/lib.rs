@@ -272,7 +272,7 @@ use base::bridge::{Bridge, Package, Payload, Point, StreamMetrics};
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 pub use base::{ActionRoute, Config};
-pub use collector::{simulator, tcpjson::TcpJson};
+pub use collector::{simulator::Simulator, tcpjson::TcpJson};
 pub use storage::Storage;
 
 /// Spawn a named thread to run the function f on

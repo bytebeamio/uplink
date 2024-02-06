@@ -30,38 +30,44 @@ pub enum Error {
     Json(#[from] serde_json::error::Error),
 }
 
-impl ActionResponse {
-    pub async fn simulate(action: Action, tx: Sender<Event>) {
-        let action_id = action.action_id;
-        info!("Generating action events for action: {action_id}");
-        let mut sequence = 0;
-        let mut interval = interval(Duration::from_secs(1));
+async fn simulate_action(action: Action, tx: Sender<Event>) {
+    let action_id = action.action_id;
+    info!("Generating action events for action: {action_id}");
+    let mut sequence = 0;
+    let mut interval = interval(Duration::from_secs(1));
 
-        // Action response, 10% completion per second
-        for i in 1..10 {
-            let progress = i * 10 + rand::thread_rng().gen_range(0..10);
-            sequence += 1;
-            let response = ActionResponse::progress(&action_id, "in_progress", progress)
-                .set_sequence(sequence);
-            if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
-                error!("{e}");
-                break;
-            }
-
-            interval.tick().await;
-        }
-
+    // Action response, 10% completion per second
+    for i in 1..10 {
+        let progress = i * 10 + rand::thread_rng().gen_range(0..10);
         sequence += 1;
         let response =
-            ActionResponse::progress(&action_id, "Completed", 100).set_sequence(sequence);
+            ActionResponse::progress(&action_id, "in_progress", progress).set_sequence(sequence);
         if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
             error!("{e}");
+            break;
         }
-        info!("Successfully sent all action responses");
+
+        interval.tick().await;
     }
+
+    sequence += 1;
+    let response = ActionResponse::progress(&action_id, "Completed", 100).set_sequence(sequence);
+    if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
+        error!("{e}");
+    }
+    info!("Successfully sent all action responses");
 }
 
-pub fn read_gps_path(paths_dir: &PathBuf) -> Arc<Vec<Gps>> {
+fn spawn_data_simulators(device: DeviceData, tx: Sender<Event>) {
+    spawn(Gps::simulate(tx.clone(), device));
+    spawn(Bms::simulate(tx.clone()));
+    spawn(Imu::simulate(tx.clone()));
+    spawn(Motor::simulate(tx.clone()));
+    spawn(PeripheralState::simulate(tx.clone()));
+    spawn(DeviceShadow::simulate(tx));
+}
+
+fn read_gps_path(paths_dir: &PathBuf) -> Arc<Vec<Gps>> {
     let i = rand::thread_rng().gen_range(0..10);
 
     let mut file_path = paths_dir.clone();
@@ -76,7 +82,7 @@ pub fn read_gps_path(paths_dir: &PathBuf) -> Arc<Vec<Gps>> {
     Arc::new(parsed)
 }
 
-pub fn new_device_data(path: Arc<Vec<Gps>>) -> DeviceData {
+fn new_device_data(path: Arc<Vec<Gps>>) -> DeviceData {
     let mut rng = rand::thread_rng();
 
     let path_index = rng.gen_range(0..path.len()) as u32;
@@ -84,52 +90,57 @@ pub fn new_device_data(path: Arc<Vec<Gps>>) -> DeviceData {
     DeviceData { path, path_offset: path_index }
 }
 
-pub fn spawn_data_simulators(device: DeviceData, tx: Sender<Event>) {
-    spawn(Gps::simulate(tx.clone(), device));
-    spawn(Bms::simulate(tx.clone()));
-    spawn(Imu::simulate(tx.clone()));
-    spawn(Motor::simulate(tx.clone()));
-    spawn(PeripheralState::simulate(tx.clone()));
-    spawn(DeviceShadow::simulate(tx));
-}
-
-#[tokio::main(flavor = "current_thread")]
-pub async fn start(
-    config: SimulatorConfig,
+pub struct Simulator {
+    device: DeviceData,
     bridge_tx: BridgeTx,
     actions_rx: Option<Receiver<Action>>,
-) -> Result<(), Error> {
-    let path = read_gps_path(&config.gps_paths);
-    let device = new_device_data(path);
+}
 
-    let (tx, rx) = bounded(10);
-    spawn_data_simulators(device, tx.clone());
+impl Simulator {
+    pub fn new(
+        config: SimulatorConfig,
+        bridge_tx: BridgeTx,
+        actions_rx: Option<Receiver<Action>>,
+    ) -> Self {
+        let path = read_gps_path(&config.gps_paths);
+        let device = new_device_data(path);
 
-    loop {
-        if let Some(actions_rx) = actions_rx.as_ref() {
-            select! {
-                action = actions_rx.recv_async() => {
-                    let action = action?;
-                    spawn(ActionResponse::simulate(action,  tx.clone()));
+        Self { device, bridge_tx, actions_rx }
+    }
+
+    #[tokio::main(flavor = "current_thread")]
+    pub async fn start(self) -> Result<(), Error> {
+        let (tx, rx) = bounded(10);
+        spawn_data_simulators(self.device, tx.clone());
+
+        loop {
+            if let Some(actions_rx) = self.actions_rx.as_ref() {
+                select! {
+                    action = actions_rx.recv_async() => {
+                        let action = action?;
+                        spawn(simulate_action(action,  tx.clone()));
+                    }
+                    event = rx.recv_async() => {
+                        match event {
+                            Ok(Event::ActionResponse(status)) => self.bridge_tx.send_action_response(status).await,
+                            Ok(Event::Data(payload)) => self.bridge_tx.send_payload(payload).await,
+                            Err(_) => {
+                                error!("All generators have stopped!");
+                                return Ok(())
+                            }
+                        };
+                    }
                 }
-                event = rx.recv_async() => {
-                    match event {
-                        Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
-                        Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
-                        Err(_) => {
-                            error!("All generators have stopped!");
-                            return Ok(())
-                        }
-                    };
-                }
-            }
-        } else {
-            match rx.recv_async().await {
-                Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
-                Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
-                Err(_) => {
-                    error!("All generators have stopped!");
-                    return Ok(());
+            } else {
+                match rx.recv_async().await {
+                    Ok(Event::ActionResponse(status)) => {
+                        self.bridge_tx.send_action_response(status).await
+                    }
+                    Ok(Event::Data(payload)) => self.bridge_tx.send_payload(payload).await,
+                    Err(_) => {
+                        error!("All generators have stopped!");
+                        return Ok(());
+                    }
                 }
             }
         }
