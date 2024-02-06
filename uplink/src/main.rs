@@ -130,11 +130,12 @@ fn main() -> Result<(), Error> {
 
     let mut tcpapps = vec![];
     for (app, cfg) in config.tcpapps.clone() {
-        let mut route_rx = None;
-        if !cfg.actions.is_empty() {
+        let route_rx = if !cfg.actions.is_empty() {
             let actions_rx = bridge.register_action_routes(&cfg.actions)?;
-            route_rx = Some(actions_rx)
-        }
+            Some(actions_rx)
+        } else {
+            None
+        };
         tcpapps.push(TcpJson::new(app, cfg, route_rx, bridge.bridge_tx()));
     }
 
