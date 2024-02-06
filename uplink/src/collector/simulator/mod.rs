@@ -9,6 +9,7 @@ use thiserror::Error;
 use tokio::time::interval;
 use tokio::{select, spawn};
 
+use std::path::PathBuf;
 use std::time::Duration;
 use std::{fs, io, sync::Arc};
 
@@ -60,11 +61,15 @@ impl ActionResponse {
     }
 }
 
-pub fn read_gps_path(paths_dir: &str) -> Arc<Vec<Gps>> {
+pub fn read_gps_path(paths_dir: &PathBuf) -> Arc<Vec<Gps>> {
     let i = rand::thread_rng().gen_range(0..10);
-    let file_name: String = format!("{}/path{}.json", paths_dir, i);
 
-    let contents = fs::read_to_string(file_name).expect("Oops, failed ot read path");
+    let mut file_path = paths_dir.clone();
+    let file_name = format!("path{i}.json");
+    file_path.push(file_name);
+
+    let contents = fs::read_to_string(&file_path)
+        .expect(&format!("Oops, failed to read path: {}", file_path.display()));
 
     let parsed: Vec<Gps> = serde_json::from_str(&contents).unwrap();
 
