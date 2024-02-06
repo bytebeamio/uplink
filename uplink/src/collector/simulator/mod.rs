@@ -1,7 +1,3 @@
-use crate::base::bridge::{BridgeTx, Payload};
-use crate::base::SimulatorConfig;
-use crate::{Action, ActionResponse};
-use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
 use flume::{bounded, Receiver, Sender};
 use log::{error, info};
 use rand::Rng;
@@ -12,6 +8,12 @@ use tokio::{select, spawn};
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{fs, io, sync::Arc};
+
+use crate::base::bridge::{BridgeTx, Payload};
+use crate::base::SimulatorConfig;
+use crate::{Action, ActionResponse};
+
+use self::data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
 
 mod data;
 
