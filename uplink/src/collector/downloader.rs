@@ -414,7 +414,7 @@ mod test {
 
     use super::*;
     use crate::base::{
-        bridge::{ActionsBridgeTx, DataBridgeTx},
+        bridge::{DataTx, StatusTx},
         ActionRoute, DownloaderConfig, MqttConfig,
     };
 
@@ -433,14 +433,12 @@ mod test {
     }
 
     fn create_bridge() -> (BridgeTx, Receiver<ActionResponse>) {
-        let (data_tx, _) = flume::bounded(2);
-        let (status_tx, status_rx) = flume::bounded(2);
-        let (shutdown_handle, _) = bounded(1);
-        let data = DataBridgeTx { data_tx, shutdown_handle };
-        let (shutdown_handle, _) = bounded(1);
-        let actions = ActionsBridgeTx { status_tx, shutdown_handle };
+        let (inner, _) = bounded(2);
+        let data_tx = DataTx { inner };
+        let (inner, status_rx) = bounded(2);
+        let status_tx = StatusTx { inner };
 
-        (BridgeTx { data, actions }, status_rx)
+        (BridgeTx { data_tx, status_tx }, status_rx)
     }
 
     #[test]

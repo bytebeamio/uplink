@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::env::current_dir;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -5,6 +6,7 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
+use tokio::join;
 
 #[cfg(target_os = "linux")]
 use crate::collector::journalctl::JournalCtlConfig;
@@ -12,6 +14,9 @@ use crate::collector::journalctl::JournalCtlConfig;
 use crate::collector::logcat::LogcatConfig;
 
 use self::bridge::stream::MAX_BUFFER_SIZE;
+use self::bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
+use self::mqtt::CtrlTx as MqttCtrlTx;
+use self::serializer::CtrlTx as SerializerCtrlTx;
 
 pub mod actions;
 pub mod bridge;
@@ -59,7 +64,7 @@ pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq, PartialOrd)]
 pub enum Compression {
     #[default]
     Disabled,
@@ -67,7 +72,7 @@ pub enum Compression {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct StreamConfig {
     pub topic: String,
     #[serde(default = "max_buf_size")]
@@ -81,6 +86,8 @@ pub struct StreamConfig {
     pub compression: Compression,
     #[serde(default)]
     pub persistence: Persistence,
+    #[serde(default)]
+    pub priority: u8,
 }
 
 impl Default for StreamConfig {
@@ -91,11 +98,27 @@ impl Default for StreamConfig {
             flush_period: default_timeout(),
             compression: Compression::Disabled,
             persistence: Persistence::default(),
+            priority: 0,
         }
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl Ord for StreamConfig {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.priority.cmp(&other.priority), self.topic.cmp(&other.topic)) {
+            (Ordering::Equal, o) => o,
+            (o, _) => o.reverse(),
+        }
+    }
+}
+
+impl PartialOrd for StreamConfig {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, PartialOrd)]
 pub struct Persistence {
     #[serde(default = "default_file_size")]
     pub max_file_size: usize,
@@ -156,7 +179,8 @@ pub struct InstallerConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct StreamMetricsConfig {
     pub enabled: bool,
-    pub topic: String,
+    pub bridge_topic: String,
+    pub serializer_topic: String,
     pub blacklist: Vec<String>,
     #[serde_as(as = "DurationSeconds<u64>")]
     pub timeout: Duration,
@@ -265,4 +289,26 @@ pub struct Config {
     pub logging: Option<JournalCtlConfig>,
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
+}
+
+/// Send control messages to the various components in uplink. Currently this is
+/// used only to trigger uplink shutdown. Shutdown signals are sent to all
+/// components simultaneously with a join.
+#[derive(Debug, Clone)]
+pub struct CtrlTx {
+    pub actions_lane: ActionsLaneCtrlTx,
+    pub data_lane: DataLaneCtrlTx,
+    pub mqtt: MqttCtrlTx,
+    pub serializer: SerializerCtrlTx,
+}
+
+impl CtrlTx {
+    pub async fn trigger_shutdown(&self) {
+        join!(
+            self.actions_lane.trigger_shutdown(),
+            self.data_lane.trigger_shutdown(),
+            self.mqtt.trigger_shutdown(),
+            self.serializer.trigger_shutdown()
+        );
+    }
 }

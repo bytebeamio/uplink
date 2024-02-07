@@ -44,8 +44,14 @@ impl DataBridge {
         Self { data_tx, data_rx, config, streams, ctrl_rx, ctrl_tx }
     }
 
-    pub fn tx(&self) -> DataBridgeTx {
-        DataBridgeTx { data_tx: self.data_tx.clone(), shutdown_handle: self.ctrl_tx.clone() }
+    /// Handle to send data points from source application
+    pub fn data_tx(&self) -> DataTx {
+        DataTx { inner: self.data_tx.clone() }
+    }
+
+    /// Handle to send data lane control message
+    pub fn ctrl_tx(&self) -> CtrlTx {
+        CtrlTx { inner: self.ctrl_tx.clone() }
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
@@ -81,23 +87,31 @@ impl DataBridge {
     }
 }
 
+/// Handle for apps to send action status to bridge
 #[derive(Debug, Clone)]
-pub struct DataBridgeTx {
-    // Handle for apps to send action status to bridge
-    pub(crate) data_tx: Sender<Payload>,
-    pub(crate) shutdown_handle: Sender<DataBridgeShutdown>,
+pub struct DataTx {
+    pub(crate) inner: Sender<Payload>,
 }
 
-impl DataBridgeTx {
+impl DataTx {
     pub async fn send_payload(&self, payload: Payload) {
-        self.data_tx.send_async(payload).await.unwrap()
+        self.inner.send_async(payload).await.unwrap()
     }
 
     pub fn send_payload_sync(&self, payload: Payload) {
-        self.data_tx.send(payload).unwrap()
+        self.inner.send(payload).unwrap()
     }
+}
 
+/// Handle to send control messages to data lane
+#[derive(Debug, Clone)]
+pub struct CtrlTx {
+    pub(crate) inner: Sender<DataBridgeShutdown>,
+}
+
+impl CtrlTx {
+    /// Triggers shutdown of `bridge::data_lane`
     pub async fn trigger_shutdown(&self) {
-        self.shutdown_handle.send_async(DataBridgeShutdown).await.unwrap()
+        self.inner.send_async(DataBridgeShutdown).await.unwrap()
     }
 }

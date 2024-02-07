@@ -1,25 +1,39 @@
+use futures_util::SinkExt;
 use log::error;
-use serde::Serialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use sysinfo::{
     ComponentExt, CpuExt, DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, SystemExt,
 };
-use tokio::time::Instant;
+use tokio::{net::TcpStream, time::interval};
+use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
-
-use crate::{
-    base::{
-        bridge::{BridgeTx, Payload},
-        clock,
-    },
-    Config,
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] std::io::Error),
+    #[error("Lines codec error {0}")]
+    Codec(#[from] LinesCodecError),
+    #[error("Serde error {0}")]
+    Json(#[from] serde_json::error::Error),
+}
+
+#[derive(Debug, Serialize)]
+pub struct Payload {
+    pub stream: String,
+    pub sequence: u32,
+    pub timestamp: u64,
+    #[serde(flatten)]
+    pub payload: Value,
+}
+
+fn clock() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
 }
 
 type Pid = u32;
@@ -85,7 +99,7 @@ impl From<&System> for Payload {
         } = value;
 
         Payload {
-            stream: "uplink_system_stats".to_owned(),
+            stream: "uplink".to_owned(),
             sequence: *sequence,
             timestamp: *timestamp,
             payload: json!({
@@ -444,6 +458,12 @@ impl ProcessStats {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct Config {
+    pub process_names: Vec<String>,
+    pub update_period: u64,
+}
+
 /// Collects and forward system information such as kernel version, memory and disk space usage,
 /// information regarding running processes, network and processor usage, etc to an IoT platform.
 pub struct StatCollector {
@@ -461,15 +481,15 @@ pub struct StatCollector {
     disks: DiskStats,
     /// Temperature information from individual components.
     components: ComponentStats,
-    /// Uplink configuration.
-    config: Arc<Config>,
-    /// Handle to send stats as payload onto bridge
-    bridge_tx: BridgeTx,
+    /// System stats configuration.
+    config: Config,
+    /// Handle to.send stats as payload onto bridge
+    client: Framed<TcpStream, LinesCodec>,
 }
 
 impl StatCollector {
     /// Create and initialize a stat collector
-    pub fn new(config: Arc<Config>, bridge_tx: BridgeTx) -> Self {
+    pub fn new(config: Config, client: Framed<TcpStream, LinesCodec>) -> Self {
         let mut sys = sysinfo::System::new();
         sys.refresh_disks_list();
         sys.refresh_networks_list();
@@ -511,95 +531,84 @@ impl StatCollector {
             networks,
             processors,
             components,
-            bridge_tx,
+            client,
         }
     }
 
     /// Stat collector execution loop, sleeps for the duation of `config.stats.update_period` in seconds.
-    /// Update system information values and increment sequence numbers, while sending to specific data streams.
-    pub fn start(mut self) {
+    /// Update system information values and increment sequence numbers, while.sending to specific data streams.
+    pub async fn start(mut self) -> Result<(), Error> {
+        let mut interval = interval(Duration::from_secs(self.config.update_period));
         loop {
-            std::thread::sleep(Duration::from_secs(self.config.system_stats.update_period));
+            interval.tick().await;
 
-            if let Err(e) = self.update_memory_stats() {
-                error!("Error refreshing system memory statistics: {}", e);
-            }
-
-            if let Err(e) = self.update_disk_stats() {
-                error!("Error refreshing disk statistics: {}", e);
-            }
-
-            if let Err(e) = self.update_network_stats() {
-                error!("Error refreshing network statistics: {}", e);
-            }
-
-            if let Err(e) = self.update_cpu_stats() {
-                error!("Error refreshing CPU statistics: {}", e);
-            }
-
-            if let Err(e) = self.update_component_stats() {
-                error!("Error refreshing component statistics: {}", e);
-            }
-
-            if let Err(e) = self.update_process_stats() {
-                error!("Error refreshing process statistics: {}", e);
-            }
+            self.update_memory_stats().await?;
+            self.update_disk_stats().await?;
+            self.update_network_stats().await?;
+            self.update_cpu_stats().await?;
+            self.update_component_stats().await?;
+            self.update_process_stats().await?;
         }
     }
 
     // Refresh memory stats
-    fn update_memory_stats(&mut self) -> Result<(), Error> {
+    async fn update_memory_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_memory();
-        let timestamp = clock() as u64;
+        let timestamp = clock();
         let payload = self.system.push(&self.sys, timestamp);
-        self.bridge_tx.send_payload_sync(payload);
+        let payload = serde_json::to_string(&payload)?;
+        self.client.send(payload).await?;
 
         Ok(())
     }
 
     // Refresh disk stats
-    fn update_disk_stats(&mut self) -> Result<(), Error> {
+    async fn update_disk_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_disks();
-        let timestamp = clock() as u64;
+        let timestamp = clock();
         for disk_data in self.sys.disks() {
             let payload = self.disks.push(disk_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            let payload = serde_json::to_string(&payload)?;
+            self.client.send(payload).await?;
         }
 
         Ok(())
     }
 
     // Refresh network byte rate stats
-    fn update_network_stats(&mut self) -> Result<(), Error> {
+    async fn update_network_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_networks();
-        let timestamp = clock() as u64;
+        let timestamp = clock();
         for (net_name, net_data) in self.sys.networks() {
             let payload = self.networks.push(net_name.to_owned(), net_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            let payload = serde_json::to_string(&payload)?;
+            self.client.send(payload).await?;
         }
 
         Ok(())
     }
 
     // Refresh processor stats
-    fn update_cpu_stats(&mut self) -> Result<(), Error> {
+    async fn update_cpu_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_cpu();
-        let timestamp = clock() as u64;
+        let timestamp = clock();
         for proc_data in self.sys.cpus().iter() {
             let payload = self.processors.push(proc_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            let payload = serde_json::to_string(&payload)?;
+            self.client.send(payload).await?;
         }
 
         Ok(())
     }
 
     // Refresh component stats
-    fn update_component_stats(&mut self) -> Result<(), Error> {
+    async fn update_component_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_components();
-        let timestamp = clock() as u64;
+        let timestamp = clock();
         for comp_data in self.sys.components().iter() {
             let payload = self.components.push(comp_data, timestamp);
-            self.bridge_tx.send_payload_sync(payload);
+            let payload = serde_json::to_string(&payload)?;
+            self.client.send(payload).await?;
         }
 
         Ok(())
@@ -609,15 +618,16 @@ impl StatCollector {
     // NOTE: This can be further optimized by storing pids of interested processes
     // at init and only collecting process information for them instead of iterating
     // over all running processes as is being done now.
-    fn update_process_stats(&mut self) -> Result<(), Error> {
+    async fn update_process_stats(&mut self) -> Result<(), Error> {
         self.sys.refresh_processes();
-        let timestamp = clock() as u64;
+        let timestamp = clock();
         for (&id, p) in self.sys.processes() {
-            let name = p.cmd().first().map(|s| s.to_string()).unwrap_or(p.name().to_string());
+            let name = p.cmd().get(0).map(|s| s.to_string()).unwrap_or(p.name().to_string());
 
-            if self.config.system_stats.process_names.contains(&name) {
+            if self.config.process_names.contains(&name) {
                 let payload = self.processes.push(id.as_u32(), p, name, timestamp);
-                self.bridge_tx.send_payload_sync(payload);
+                let payload = serde_json::to_string(&payload)?;
+                self.client.send(payload).await?;
             }
         }
 

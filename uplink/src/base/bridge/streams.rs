@@ -4,7 +4,7 @@ use std::sync::Arc;
 use flume::Sender;
 use log::{error, info, trace};
 
-use super::stream::{self, StreamStatus, MAX_BUFFER_SIZE};
+use super::stream::{Error, StreamStatus, MAX_BUFFER_SIZE};
 use super::{Point, StreamMetrics};
 use crate::base::StreamConfig;
 use crate::{Config, Package, Stream};
@@ -41,7 +41,7 @@ impl<T: Point> Streams<T> {
 
     pub fn config_streams(&mut self, streams_config: HashMap<String, StreamConfig>) {
         for (name, stream) in streams_config {
-            let stream = Stream::with_config(&name, &stream, self.data_tx.clone());
+            let stream = Stream::new(&name, stream, self.data_tx.clone());
             self.map.insert(name.to_owned(), stream);
         }
     }
@@ -61,7 +61,6 @@ impl<T: Point> Streams<T> {
                     &stream_name,
                     &self.config.project_id,
                     &self.config.device_id,
-                    self.max_buf_size,
                     self.data_tx.clone(),
                     &self.topic_template,
                 );
@@ -70,7 +69,7 @@ impl<T: Point> Streams<T> {
             }
         };
 
-        let max_stream_size = stream.max_buffer_size;
+        let max_stream_size = stream.config.buf_size;
         let state = match stream.fill(data).await {
             Ok(s) => s,
             Err(e) => {
@@ -105,7 +104,7 @@ impl<T: Point> Streams<T> {
     }
 
     // Flush stream/partitions that timeout
-    pub async fn flush_stream(&mut self, stream: &str) -> Result<(), stream::Error> {
+    pub async fn flush_stream(&mut self, stream: &str) -> Result<(), Error> {
         let stream = self.map.get_mut(stream).unwrap();
         stream.flush().await?;
         Ok(())

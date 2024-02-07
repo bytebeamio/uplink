@@ -25,6 +25,7 @@ RUN source $HOME/.cargo/env
 
 COPY uplink/ /usr/share/bytebeam/uplink/uplink
 COPY storage/ /usr/share/bytebeam/uplink/storage
+COPY tools/utils /usr/share/bytebeam/uplink/tools/utils
 COPY Cargo.* /usr/share/bytebeam/uplink/
 COPY .git/ /usr/share/bytebeam/uplink/.git
 

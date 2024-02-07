@@ -1,11 +1,12 @@
 mod metrics;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::{self, Write};
+use std::time::Instant;
 use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use flume::{Receiver, RecvError, Sender};
+use flume::{bounded, Receiver, RecvError, Sender};
 use log::{debug, error, info, trace};
 use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
@@ -15,9 +16,9 @@ use tokio::{select, time::interval};
 
 use crate::base::Compression;
 use crate::{Config, Package};
-pub use metrics::SerializerMetrics;
+pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
 
-use super::default_file_size;
+use super::{default_file_size, StreamConfig};
 
 const METRICS_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -58,14 +59,17 @@ pub enum Error {
     EmptyStorage,
     #[error("Permission denied while accessing persistence directory \"{0}\"")]
     Persistence(String),
+    #[error("Serializer has shutdown after handling crash")]
+    Shutdown,
 }
 
 #[derive(Debug, PartialEq)]
 enum Status {
     Normal,
-    SlowEventloop(Publish),
+    SlowEventloop(Publish, Arc<StreamConfig>),
     EventLoopReady,
-    EventLoopCrash(Publish),
+    EventLoopCrash(Publish, Arc<StreamConfig>),
+    Shutdown,
 }
 
 /// Description of an interface that the [`Serializer`] expects to be provided by the MQTT client to publish the serialized data with.
@@ -92,8 +96,8 @@ pub trait MqttClient: Clone {
         payload: V,
     ) -> Result<(), MqttError>
     where
-        S: Into<String>,
-        V: Into<Vec<u8>>;
+        S: Into<String> + Send,
+        V: Into<Vec<u8>> + Send;
 }
 
 #[async_trait::async_trait]
@@ -130,14 +134,14 @@ impl MqttClient for AsyncClient {
 }
 
 struct StorageHandler {
-    map: HashMap<String, Storage>,
+    map: BTreeMap<Arc<StreamConfig>, Storage>,
     // Stream being read from
-    read_stream: Option<String>,
+    read_stream: Option<Arc<StreamConfig>>,
 }
 
 impl StorageHandler {
     fn new(config: Arc<Config>) -> Result<Self, Error> {
-        let mut map = HashMap::with_capacity(2 * config.streams.len());
+        let mut map = BTreeMap::new();
         for (stream_name, stream_config) in config.streams.iter() {
             let mut storage =
                 Storage::new(&stream_config.topic, stream_config.persistence.max_file_size);
@@ -155,26 +159,28 @@ impl StorageHandler {
                     path.display()
                 );
             }
-            map.insert(stream_config.topic.clone(), storage);
+            map.insert(Arc::new(stream_config.clone()), storage);
         }
 
         Ok(Self { map, read_stream: None })
     }
 
-    fn select(&mut self, topic: &str) -> &mut Storage {
-        self.map.entry(topic.to_owned()).or_insert_with(|| Storage::new(topic, default_file_size()))
+    fn select(&mut self, stream: &Arc<StreamConfig>) -> &mut Storage {
+        self.map
+            .entry(stream.to_owned())
+            .or_insert_with(|| Storage::new(&stream.topic, default_file_size()))
     }
 
-    fn next(&mut self, metrics: &mut SerializerMetrics) -> Option<&mut Storage> {
+    fn next(&mut self, metrics: &mut Metrics) -> Option<(&Arc<StreamConfig>, &mut Storage)> {
         let storages = self.map.iter_mut();
 
-        for (stream_name, storage) in storages {
+        for (stream, storage) in storages {
             match (storage.reload_on_eof(), &mut self.read_stream) {
                 // Done reading all pending files for a persisted stream
                 (Ok(true), Some(curr_stream)) => {
-                    if curr_stream == stream_name {
+                    if curr_stream == stream {
                         self.read_stream.take();
-                        debug!("Completed reading from: {stream_name}");
+                        debug!("Completed reading from: {}", stream.topic);
                     }
 
                     continue;
@@ -183,12 +189,12 @@ impl StorageHandler {
                 (Ok(true), _) => continue,
                 // Reading from a newly loaded non-empty persisted stream
                 (Ok(false), None) => {
-                    debug!("Reading from: {stream_name}");
-                    self.read_stream = Some(stream_name.to_owned());
-                    return Some(storage);
+                    debug!("Reading from: {}", stream.topic);
+                    self.read_stream = Some(stream.to_owned());
+                    return Some((stream, storage));
                 }
                 // Continuing to read from persisted stream loaded earlier
-                (Ok(false), _) => return Some(storage),
+                (Ok(false), _) => return Some((stream, storage)),
                 // Reload again on encountering a corrupted file
                 (Err(e), _) => {
                     metrics.increment_errors();
@@ -200,6 +206,19 @@ impl StorageHandler {
         }
 
         None
+    }
+
+    fn flush_all(&mut self) {
+        for (stream_config, storage) in self.map.iter_mut() {
+            match storage.flush() {
+                Ok(_) => trace!("Force flushed stream = {} onto disk", stream_config.topic),
+                Err(storage::Error::NoWrites) => {}
+                Err(e) => error!(
+                    "Error when force flushing storage = {}; error = {e}",
+                    stream_config.topic
+                ),
+            }
+        }
     }
 }
 
@@ -238,9 +257,12 @@ impl StorageHandler {
 ///                        │Serializer::slow(publish)◄───────────────────────────┤SlowEventloop(publish)│
 ///                        └-------------------------┘                           └──────────────────────┘
 ///                         Write to storage,                                     Slow network encountered
-///                         but continue trying to publish                                                              
+///                         but continue trying to publish
 ///
 ///```
+///
+/// NOTE: Shutdown mode and crash mode are only different in how they get triggered,
+/// but should be considered as interchangeable in the above diagram.
 /// [`start()`]: Serializer::start
 /// [`try_publish()`]: AsyncClient::try_publish
 /// [`publish()`]: AsyncClient::publish
@@ -249,9 +271,13 @@ pub struct Serializer<C: MqttClient> {
     collector_rx: Receiver<Box<dyn Package>>,
     client: C,
     storage_handler: StorageHandler,
-    metrics: SerializerMetrics,
+    metrics: Metrics,
     metrics_tx: Sender<SerializerMetrics>,
     pending_metrics: VecDeque<SerializerMetrics>,
+    stream_metrics: HashMap<String, StreamMetrics>,
+    /// Control handles
+    ctrl_rx: Receiver<SerializerShutdown>,
+    ctrl_tx: Sender<SerializerShutdown>,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -264,21 +290,57 @@ impl<C: MqttClient> Serializer<C> {
         metrics_tx: Sender<SerializerMetrics>,
     ) -> Result<Serializer<C>, Error> {
         let storage_handler = StorageHandler::new(config.clone())?;
+        let (ctrl_tx, ctrl_rx) = bounded(1);
 
         Ok(Serializer {
             config,
             collector_rx,
             client,
             storage_handler,
-            metrics: SerializerMetrics::new("catchup"),
+            metrics: Metrics::new("catchup"),
+            stream_metrics: HashMap::new(),
             metrics_tx,
             pending_metrics: VecDeque::with_capacity(3),
+            ctrl_tx,
+            ctrl_rx,
         })
     }
 
+    pub fn ctrl_tx(&self) -> CtrlTx {
+        CtrlTx { inner: self.ctrl_tx.clone() }
+    }
+
+    /// Write all data received, from here-on, to disk only, shutdown serializer
+    /// after handling all data payloads.
+    fn shutdown(&mut self) -> Result<(), Error> {
+        debug!("Forced into shutdown mode, writing all incoming data to persistence.");
+
+        loop {
+            // Collect remaining data packets and write to disk
+            // NOTE: wait 2s to allow bridge to shutdown and flush leftover data.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let Ok(data) = self.collector_rx.recv_deadline(deadline) else {
+                self.storage_handler.flush_all();
+                return Ok(());
+            };
+            let stream_config = data.stream_config();
+            let publish = construct_publish(data, &mut self.stream_metrics)?;
+            let storage = self.storage_handler.select(&stream_config);
+            match write_to_disk(publish, storage) {
+                Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
+                Ok(_) => {}
+                Err(e) => error!("Shutdown: write error = {:?}", e),
+            }
+        }
+    }
+
     /// Write all data received, from here-on, to disk only.
-    async fn crash(&mut self, publish: Publish) -> Result<Status, Error> {
-        let storage = self.storage_handler.select(&publish.topic);
+    async fn crash(
+        &mut self,
+        publish: Publish,
+        stream: Arc<StreamConfig>,
+    ) -> Result<Status, Error> {
+        let storage = self.storage_handler.select(&stream);
         // Write failed publish to disk first, metrics don't matter
         match write_to_disk(publish, storage) {
             Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
@@ -289,8 +351,8 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
-            let publish = construct_publish(data)?;
-            let storage = self.storage_handler.select(&publish.topic);
+            let publish = construct_publish(data, &mut self.stream_metrics)?;
+            let storage = self.storage_handler.select(&stream);
             match write_to_disk(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
@@ -301,7 +363,7 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Write new data to disk until back pressure due to slow n/w is resolved
     // TODO: Handle errors. Don't return errors
-    async fn slow(&mut self, publish: Publish) -> Result<Status, Error> {
+    async fn slow(&mut self, publish: Publish, stream: Arc<StreamConfig>) -> Result<Status, Error> {
         let mut interval = interval(METRICS_INTERVAL);
         // Reactlabs setup processes logs generated by uplink
         info!("Switching to slow eventloop mode!!");
@@ -317,8 +379,9 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    let publish = construct_publish(data)?;
-                    let storage = self.storage_handler.select(&publish.topic);
+                    let stream = data.stream_config();
+                    let publish = construct_publish(data, &mut self.stream_metrics)?;
+                    let storage = self.storage_handler.select(&stream);
                     match write_to_disk(publish, storage) {
                         Ok(Some(deleted)) => {
                             debug!("Lost segment = {deleted}");
@@ -339,14 +402,18 @@ impl<C: MqttClient> Serializer<C> {
                         break Ok(Status::EventLoopReady)
                     }
                     Err(MqttError::Send(Request::Publish(publish))) => {
-                        break Ok(Status::EventLoopCrash(publish));
+                        break Ok(Status::EventLoopCrash(publish, stream));
                     },
                     Err(e) => {
                         unreachable!("Unexpected error: {}", e);
                     }
                 },
                 _ = interval.tick() => {
-                    check_metrics(&mut self.metrics, &self.storage_handler);
+                    check_metrics(&mut self.metrics, &mut self.stream_metrics, &self.storage_handler);
+                }
+                // Transition into crash mode when uplink is shutting down
+                Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
+                    break Ok(Status::Shutdown)
                 }
             }
         };
@@ -354,6 +421,7 @@ impl<C: MqttClient> Serializer<C> {
         save_and_prepare_next_metrics(
             &mut self.pending_metrics,
             &mut self.metrics,
+            &mut self.stream_metrics,
             &self.storage_handler,
         );
         let v = v?;
@@ -374,7 +442,7 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.mqtt.max_packet_size;
         let client = self.client.clone();
 
-        let storage = match self.storage_handler.next(&mut self.metrics) {
+        let (stream, storage) = match self.storage_handler.next(&mut self.metrics) {
             Some(s) => s,
             _ => return Ok(Status::Normal),
         };
@@ -390,6 +458,7 @@ impl<C: MqttClient> Serializer<C> {
                 save_and_prepare_next_metrics(
                     &mut self.pending_metrics,
                     &mut self.metrics,
+                    &mut self.stream_metrics,
                     &self.storage_handler,
                 );
                 return Ok(Status::Normal);
@@ -397,6 +466,7 @@ impl<C: MqttClient> Serializer<C> {
         };
 
         let mut last_publish_payload_size = publish.payload.len();
+        let mut last_publish_stream = stream.clone();
         let send = send_publish(client, publish.topic, publish.payload);
         tokio::pin!(send);
 
@@ -404,8 +474,9 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    let publish = construct_publish(data)?;
-                    let storage = self.storage_handler.select(&publish.topic);
+                    let stream = data.stream_config();
+                    let publish = construct_publish(data, &mut self.stream_metrics)?;
+                    let storage = self.storage_handler.select(&stream);
                     match write_to_disk(publish, storage) {
                         Ok(Some(deleted)) => {
                             debug!("Lost segment = {deleted}");
@@ -427,11 +498,11 @@ impl<C: MqttClient> Serializer<C> {
                     // indefinitely write to disk to not loose data
                     let client = match o {
                         Ok(c) => c,
-                        Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish)),
+                        Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish, last_publish_stream.clone())),
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
-                    let storage = match self.storage_handler.next(&mut self.metrics) {
+                    let (stream, storage) = match self.storage_handler.next(&mut self.metrics) {
                         Some(s) => s,
                         _ => return Ok(Status::Normal),
                     };
@@ -449,11 +520,16 @@ impl<C: MqttClient> Serializer<C> {
 
                     let payload = publish.payload;
                     last_publish_payload_size = payload.len();
+                    last_publish_stream = stream.clone();
                     send.set(send_publish(client, publish.topic, payload));
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
                     let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler);
+                }
+                // Transition into crash mode when uplink is shutting down
+                Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
+                    return Ok(Status::Shutdown)
                 }
             }
         };
@@ -461,10 +537,11 @@ impl<C: MqttClient> Serializer<C> {
         save_and_prepare_next_metrics(
             &mut self.pending_metrics,
             &mut self.metrics,
+            &mut self.stream_metrics,
             &self.storage_handler,
         );
-        let v = v?;
-        Ok(v)
+
+        v
     }
 
     async fn normal(&mut self) -> Result<Status, Error> {
@@ -477,16 +554,17 @@ impl<C: MqttClient> Serializer<C> {
             select! {
                 data = self.collector_rx.recv_async() => {
                     let data = data?;
-                    let publish = construct_publish(data)?;
+                    let stream = data.stream_config();
+                    let publish = construct_publish(data, &mut self.stream_metrics)?;
                     let payload_size = publish.payload.len();
                     debug!("publishing on {} with size = {}", publish.topic, payload_size);
-                    match self.client.try_publish(publish.topic, QoS::AtLeastOnce, false, publish.payload) {
+                    match self.client.try_publish(&stream.topic, QoS::AtLeastOnce, false, publish.payload) {
                         Ok(_) => {
                             self.metrics.add_batch();
                             self.metrics.add_sent_size(payload_size);
                             continue;
                         }
-                        Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish)),
+                        Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish, stream)),
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     }
 
@@ -500,6 +578,10 @@ impl<C: MqttClient> Serializer<C> {
                         debug!("Failed to flush serializer metrics (normal). Error = {}", e);
                     }
                 }
+                // Transition into crash mode when uplink is shutting down
+                Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
+                    return Ok(Status::Shutdown)
+                }
             }
         }
     }
@@ -511,13 +593,20 @@ impl<C: MqttClient> Serializer<C> {
         loop {
             let next_status = match status {
                 Status::Normal => self.normal().await?,
-                Status::SlowEventloop(publish) => self.slow(publish).await?,
+                Status::SlowEventloop(publish, stream) => self.slow(publish, stream).await?,
                 Status::EventLoopReady => self.catchup().await?,
-                Status::EventLoopCrash(publish) => self.crash(publish).await?,
+                Status::EventLoopCrash(publish, stream) => self.crash(publish, stream).await?,
+                Status::Shutdown => break,
             };
 
             status = next_status;
         }
+
+        self.shutdown()?;
+
+        info!("Serializer has handled all pending packets, shutting down");
+
+        Ok(())
     }
 }
 
@@ -540,18 +629,40 @@ fn lz4_compress(payload: &mut Vec<u8>) -> Result<(), Error> {
 }
 
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
-fn construct_publish(data: Box<dyn Package>) -> Result<Publish, Error> {
-    let stream = data.stream().as_ref().to_owned();
+fn construct_publish(
+    data: Box<dyn Package>,
+    stream_metrics: &mut HashMap<String, StreamMetrics>,
+) -> Result<Publish, Error> {
+    let stream_name = data.stream_name().as_ref().to_owned();
+    let stream_config = data.stream_config();
     let point_count = data.len();
     let batch_latency = data.latency();
-    trace!("Data received on stream: {stream}; message count = {point_count}; batching latency = {batch_latency}");
+    trace!("Data received on stream: {stream_name}; message count = {point_count}; batching latency = {batch_latency}");
 
-    let topic = data.topic().to_string();
+    let topic = stream_config.topic.clone();
+
+    let metrics = stream_metrics
+        .entry(stream_name.clone())
+        .or_insert_with(|| StreamMetrics::new(&stream_name));
+
+    let serialization_start = Instant::now();
     let mut payload = data.serialize()?;
+    let serialization_time = serialization_start.elapsed();
+    metrics.add_serialization_time(serialization_time);
 
-    if let Compression::Lz4 = data.compression() {
+    let data_size = payload.len();
+    let mut compressed_data_size = None;
+
+    if let Compression::Lz4 = stream_config.compression {
+        let compression_start = Instant::now();
         lz4_compress(&mut payload)?;
+        let compression_time = compression_start.elapsed();
+        metrics.add_compression_time(compression_time);
+
+        compressed_data_size = Some(payload.len());
     }
+
+    metrics.add_serialized_sizes(data_size, compressed_data_size);
 
     Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
 }
@@ -573,62 +684,93 @@ fn write_to_disk(
     Ok(deleted)
 }
 
-fn check_metrics(metrics: &mut SerializerMetrics, storage_handler: &StorageHandler) {
+fn check_metrics(
+    metrics: &mut Metrics,
+    stream_metrics: &mut HashMap<String, StreamMetrics>,
+    storage_handler: &StorageHandler,
+) {
     use pretty_bytes::converter::convert;
     let mut inmemory_write_size = 0;
     let mut inmemory_read_size = 0;
     let mut file_count = 0;
+    let mut disk_utilized = 0;
 
     for storage in storage_handler.map.values() {
         inmemory_read_size += storage.inmemory_read_size();
         inmemory_write_size += storage.inmemory_write_size();
         file_count += storage.file_count();
+        disk_utilized += storage.disk_utilized();
     }
 
     metrics.set_write_memory(inmemory_write_size);
     metrics.set_read_memory(inmemory_read_size);
     metrics.set_disk_files(file_count);
+    metrics.set_disk_utilized(disk_utilized);
 
     info!(
-        "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
+        "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
         metrics.mode,
         metrics.batches,
         metrics.errors,
         metrics.lost_segments,
         metrics.disk_files,
+        convert(metrics.disk_utilized as f64),
         convert(metrics.write_memory as f64),
         convert(metrics.read_memory as f64),
     );
+
+    for metrics in stream_metrics.values_mut() {
+        metrics.prepare_snapshot();
+        info!(
+            "{:>17}: serialized_data_size = {} compressed_data_size = {} avg_serialization_time = {}us avg_compression_time = {}us",
+            metrics.stream,
+            convert(metrics.serialized_data_size as f64),
+            convert(metrics.compressed_data_size as f64),
+            metrics.avg_serialization_time.as_micros(),
+            metrics.avg_compression_time.as_micros()
+        );
+    }
 }
 
 fn save_and_prepare_next_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
-    metrics: &mut SerializerMetrics,
+    metrics: &mut Metrics,
+    stream_metrics: &mut HashMap<String, StreamMetrics>,
     storage_handler: &StorageHandler,
 ) {
     let mut inmemory_write_size = 0;
     let mut inmemory_read_size = 0;
     let mut file_count = 0;
+    let mut disk_utilized = 0;
 
     for storage in storage_handler.map.values() {
         inmemory_write_size += storage.inmemory_write_size();
         inmemory_read_size += storage.inmemory_read_size();
         file_count += storage.file_count();
+        disk_utilized += storage.disk_utilized();
     }
 
     metrics.set_write_memory(inmemory_write_size);
     metrics.set_read_memory(inmemory_read_size);
     metrics.set_disk_files(file_count);
+    metrics.set_disk_utilized(disk_utilized);
 
-    let m = metrics.clone();
-    pending.push_back(m);
+    let m = Box::new(metrics.clone());
+    pending.push_back(SerializerMetrics::Main(m));
     metrics.prepare_next();
+
+    for metrics in stream_metrics.values_mut() {
+        metrics.prepare_snapshot();
+        let m = Box::new(metrics.clone());
+        pending.push_back(SerializerMetrics::Stream(m));
+        metrics.prepare_next();
+    }
 }
 
 // // Enable actual metrics timers when there is data. This method is called every minute by the bridge
 fn check_and_flush_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
-    metrics: &mut SerializerMetrics,
+    metrics: &mut Metrics,
     metrics_tx: &Sender<SerializerMetrics>,
     storage_handler: &StorageHandler,
 ) -> Result<(), flume::TrySendError<SerializerMetrics>> {
@@ -637,51 +779,89 @@ fn check_and_flush_metrics(
     let mut inmemory_write_size = 0;
     let mut inmemory_read_size = 0;
     let mut file_count = 0;
+    let mut disk_utilized = 0;
 
     for storage in storage_handler.map.values() {
         inmemory_write_size += storage.inmemory_write_size();
         inmemory_read_size += storage.inmemory_read_size();
         file_count += storage.file_count();
+        disk_utilized += storage.disk_utilized();
     }
 
     metrics.set_write_memory(inmemory_write_size);
     metrics.set_read_memory(inmemory_read_size);
     metrics.set_disk_files(file_count);
+    metrics.set_disk_utilized(disk_utilized);
 
     // Send pending metrics. This signifies state change
-    while let Some(metrics) = pending.get(0) {
-        // Always send pending metrics. They represent state changes
-        info!(
-            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
-            metrics.mode,
-            metrics.batches,
-            metrics.errors,
-            metrics.lost_segments,
-            metrics.disk_files,
-            convert(metrics.write_memory as f64),
-            convert(metrics.read_memory as f64),
-        );
-        metrics_tx.try_send(metrics.clone())?;
-        pending.pop_front();
+    while let Some(metrics) = pending.front() {
+        match metrics {
+            SerializerMetrics::Main(metrics) => {
+                // Always send pending metrics. They represent state changes
+                info!(
+                    "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
+                    metrics.mode,
+                    metrics.batches,
+                    metrics.errors,
+                    metrics.lost_segments,
+                    metrics.disk_files,
+                    convert(metrics.disk_utilized as f64),
+                    convert(metrics.write_memory as f64),
+                    convert(metrics.read_memory as f64),
+                );
+                metrics_tx.try_send(SerializerMetrics::Main(metrics.clone()))?;
+                pending.pop_front();
+            }
+            SerializerMetrics::Stream(metrics) => {
+                // Always send pending metrics. They represent state changes
+                info!(
+                    "{:>17}: serialized_data_size = {} compressed_data_size = {} avg_serialization_time = {}us avg_compression_time = {}us",
+                    metrics.stream,
+                    convert(metrics.serialized_data_size as f64),
+                    convert(metrics.compressed_data_size as f64),
+                    metrics.avg_serialization_time.as_micros(),
+                    metrics.avg_compression_time.as_micros()
+                );
+                metrics_tx.try_send(SerializerMetrics::Stream(metrics.clone()))?;
+                pending.pop_front();
+            }
+        }
     }
 
     if metrics.batches() > 0 {
         info!(
-            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} write_memory = {} read_memory = {}",
+            "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
             metrics.mode,
             metrics.batches,
             metrics.errors,
             metrics.lost_segments,
             metrics.disk_files,
+            convert(metrics.disk_utilized as f64),
             convert(metrics.write_memory as f64),
             convert(metrics.read_memory as f64),
         );
 
-        metrics_tx.try_send(metrics.clone())?;
+        metrics_tx.try_send(SerializerMetrics::Main(Box::new(metrics.clone())))?;
         metrics.prepare_next();
     }
 
     Ok(())
+}
+
+/// Command to remotely trigger `Serializer` shutdown
+pub(crate) struct SerializerShutdown;
+
+/// Handle to send control messages to `Serializer`
+#[derive(Debug, Clone)]
+pub struct CtrlTx {
+    pub(crate) inner: Sender<SerializerShutdown>,
+}
+
+impl CtrlTx {
+    /// Triggers shutdown of `Serializer`
+    pub async fn trigger_shutdown(&self) {
+        self.inner.send_async(SerializerShutdown).await.unwrap()
+    }
 }
 
 // TODO(RT): Test cases
@@ -690,6 +870,7 @@ fn check_and_flush_metrics(
 #[cfg(test)]
 mod test {
     use serde_json::Value;
+    use tokio::spawn;
 
     use std::collections::HashMap;
     use std::time::Duration;
@@ -791,15 +972,17 @@ mod test {
     }
 
     impl MockCollector {
-        fn new(data_tx: flume::Sender<Box<dyn Package>>) -> MockCollector {
-            MockCollector {
-                stream: Stream::new("hello", "hello/world", 1, data_tx, Compression::Disabled),
-            }
+        fn new(
+            stream_name: &str,
+            stream_config: StreamConfig,
+            data_tx: flume::Sender<Box<dyn Package>>,
+        ) -> MockCollector {
+            MockCollector { stream: Stream::new(stream_name, stream_config, data_tx) }
         }
 
         fn send(&mut self, i: u32) -> Result<(), Error> {
             let payload = Payload {
-                stream: "hello".to_owned(),
+                stream: Default::default(),
                 sequence: i,
                 timestamp: 0,
                 payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,
@@ -822,7 +1005,11 @@ mod test {
             net_rx.recv().unwrap();
         });
 
-        let mut collector = MockCollector::new(data_tx);
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         std::thread::spawn(move || {
             for i in 1..3 {
                 collector.send(i).unwrap();
@@ -830,7 +1017,7 @@ mod test {
         });
 
         match tokio::runtime::Runtime::new().unwrap().block_on(serializer.normal()).unwrap() {
-            Status::SlowEventloop(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
+            Status::SlowEventloop(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }, _) => {
                 assert_eq!(topic, "hello/world");
                 let recvd: Value = serde_json::from_slice(&payload).unwrap();
                 let obj = &recvd.as_array().unwrap()[0];
@@ -876,7 +1063,11 @@ mod test {
             net_rx.recv().unwrap();
         });
 
-        let mut collector = MockCollector::new(data_tx);
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Faster collector, send data every 5s
         std::thread::spawn(move || {
             for i in 1..10 {
@@ -890,8 +1081,10 @@ mod test {
             QoS::AtLeastOnce,
             "[{{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}}]".as_bytes(),
         );
-        let status =
-            tokio::runtime::Runtime::new().unwrap().block_on(serializer.slow(publish)).unwrap();
+        let status = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(serializer.slow(publish, Arc::new(Default::default())))
+            .unwrap();
 
         assert_eq!(status, Status::EventLoopReady);
     }
@@ -902,7 +1095,11 @@ mod test {
         let config = Arc::new(default_config());
         let (mut serializer, data_tx, _) = defaults(config);
 
-        let mut collector = MockCollector::new(data_tx);
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Faster collector, send data every 5s
         std::thread::spawn(move || {
             for i in 1..10 {
@@ -917,8 +1114,15 @@ mod test {
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
 
-        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.slow(publish)).unwrap() {
-            Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }) => {
+        match tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(serializer.slow(
+                publish,
+                Arc::new(StreamConfig { topic: "hello/world".to_string(), ..Default::default() }),
+            ))
+            .unwrap()
+        {
+            Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }, _) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
@@ -949,10 +1153,14 @@ mod test {
         let mut storage = serializer
             .storage_handler
             .map
-            .entry("hello/world".to_string())
+            .entry(Arc::new(Default::default()))
             .or_insert(Storage::new("hello/world", 1024));
 
-        let mut collector = MockCollector::new(data_tx);
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Run a collector practically once
         std::thread::spawn(move || {
             for i in 2..6 {
@@ -1001,10 +1209,17 @@ mod test {
         let mut storage = serializer
             .storage_handler
             .map
-            .entry("hello/world".to_string())
+            .entry(Arc::new(StreamConfig {
+                topic: "hello/world".to_string(),
+                ..Default::default()
+            }))
             .or_insert(Storage::new("hello/world", 1024));
 
-        let mut collector = MockCollector::new(data_tx);
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Run a collector
         std::thread::spawn(move || {
             for i in 2..6 {
@@ -1022,12 +1237,155 @@ mod test {
         write_to_disk(publish.clone(), &mut storage).unwrap();
 
         match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
-            Status::EventLoopCrash(Publish { topic, payload, .. }) => {
+            Status::EventLoopCrash(Publish { topic, payload, .. }, _) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
                 assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
             }
             s => unreachable!("Unexpected status: {:?}", s),
+        }
+    }
+
+    #[tokio::test]
+    // Ensures that the data of streams are removed on the basis of preference
+    async fn preferential_send_on_network() {
+        let mut config = default_config();
+        config.stream_metrics.timeout = Duration::from_secs(1000);
+        config.streams.extend([
+            (
+                "one".to_owned(),
+                StreamConfig { topic: "topic/one".to_string(), priority: 1, ..Default::default() },
+            ),
+            (
+                "two".to_owned(),
+                StreamConfig { topic: "topic/two".to_string(), priority: 2, ..Default::default() },
+            ),
+            (
+                "top".to_owned(),
+                StreamConfig {
+                    topic: "topic/top".to_string(),
+                    priority: u8::MAX,
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let config = Arc::new(config);
+
+        let (mut serializer, _data_tx, req_rx) = defaults(config.clone());
+
+        let publish = |topic: String, i: u32| Publish {
+            dup: false,
+            qos: QoS::AtMostOnce,
+            retain: false,
+            topic,
+            pkid: 0,
+            payload: Bytes::from(i.to_string()),
+        };
+
+        let mut one = serializer
+            .storage_handler
+            .map
+            .entry(Arc::new(StreamConfig {
+                topic: "topic/one".to_string(),
+                priority: 1,
+                ..Default::default()
+            }))
+            .or_insert_with(|| unreachable!());
+        write_to_disk(publish("topic/one".to_string(), 1), &mut one).unwrap();
+        write_to_disk(publish("topic/one".to_string(), 10), &mut one).unwrap();
+
+        let top = serializer
+            .storage_handler
+            .map
+            .entry(Arc::new(StreamConfig {
+                topic: "topic/top".to_string(),
+                priority: u8::MAX,
+                ..Default::default()
+            }))
+            .or_insert_with(|| unreachable!());
+        write_to_disk(publish("topic/top".to_string(), 100), top).unwrap();
+        write_to_disk(publish("topic/top".to_string(), 1000), top).unwrap();
+
+        let two = serializer
+            .storage_handler
+            .map
+            .entry(Arc::new(StreamConfig {
+                topic: "topic/two".to_string(),
+                priority: 2,
+                ..Default::default()
+            }))
+            .or_insert_with(|| unreachable!());
+        write_to_disk(publish("topic/two".to_string(), 3), two).unwrap();
+
+        let mut default = serializer
+            .storage_handler
+            .map
+            .entry(Arc::new(StreamConfig {
+                topic: "topic/default".to_string(),
+                priority: 0,
+                ..Default::default()
+            }))
+            .or_insert(Storage::new("topic/default", 1024));
+        write_to_disk(publish("topic/default".to_string(), 0), &mut default).unwrap();
+        write_to_disk(publish("topic/default".to_string(), 2), &mut default).unwrap();
+
+        // run serializer in the background
+        spawn(async { serializer.start().await.unwrap() });
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/top");
+                assert_eq!(payload, "100");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/top");
+                assert_eq!(payload, "1000");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/two");
+                assert_eq!(payload, "3");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/one");
+                assert_eq!(payload, "1");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/one");
+                assert_eq!(payload, "10");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/default");
+                assert_eq!(payload, "0");
+            }
+            _ => unreachable!(),
+        }
+
+        match req_rx.recv_async().await.unwrap() {
+            Request::Publish(Publish { topic, payload, .. }) => {
+                assert_eq!(topic, "topic/default");
+                assert_eq!(payload, "2");
+            }
+            _ => unreachable!(),
         }
     }
 }

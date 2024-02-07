@@ -49,6 +49,7 @@ use anyhow::Error;
 
 use base::bridge::stream::Stream;
 use base::monitor::Monitor;
+use base::CtrlTx;
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::FileDownloader;
 use collector::installer::OTAInstaller;
@@ -111,7 +112,8 @@ pub mod config {
 
     [stream_metrics]
     enabled = false
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
+    bridge_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
+    serializer_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_stream_metrics/jsonarray"
     blacklist = []
     timeout = 10
 
@@ -128,6 +130,7 @@ pub mod config {
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     buf_size = 1
     flush_period = 2
+    priority = 255 # highest priority for quick delivery of action status info to platform
 
     [streams.device_shadow]
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
@@ -171,7 +174,12 @@ pub mod config {
         }
 
         replace_topic_placeholders(&mut config.action_status.topic, tenant_id, device_id);
-        replace_topic_placeholders(&mut config.stream_metrics.topic, tenant_id, device_id);
+        replace_topic_placeholders(&mut config.stream_metrics.bridge_topic, tenant_id, device_id);
+        replace_topic_placeholders(
+            &mut config.stream_metrics.serializer_topic,
+            tenant_id,
+            device_id,
+        );
         replace_topic_placeholders(&mut config.serializer_metrics.topic, tenant_id, device_id);
         replace_topic_placeholders(&mut config.mqtt_metrics.topic, tenant_id, device_id);
 
@@ -322,11 +330,13 @@ impl Uplink {
         )
     }
 
-    pub fn spawn(&mut self, bridge: Bridge) -> Result<(), Error> {
+    pub fn spawn(&mut self, bridge: Bridge) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
+        let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
 
         let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
         let mqtt_client = mqtt.client();
+        let ctrl_mqtt = mqtt.ctrl_tx();
 
         let serializer = Serializer::new(
             self.config.clone(),
@@ -334,6 +344,7 @@ impl Uplink {
             mqtt_client.clone(),
             self.serializer_metrics_tx(),
         )?;
+        let ctrl_serializer = serializer.ctrl_tx();
 
         // Serializer thread to handle network conditions state machine
         // and send data to mqtt thread
@@ -379,7 +390,7 @@ impl Uplink {
             })
         });
 
-        let Bridge { data: mut data_lane, actions: mut actions_lane } = bridge;
+        let Bridge { data: mut data_lane, actions: mut actions_lane, .. } = bridge;
 
         // Bridge thread to direct actions
         spawn_named_thread("Bridge actions_lane", || {
@@ -403,22 +414,25 @@ impl Uplink {
             })
         });
 
-        Ok(())
+        Ok(CtrlTx {
+            actions_lane: ctrl_actions_lane,
+            data_lane: ctrl_data_lane,
+            mqtt: ctrl_mqtt,
+            serializer: ctrl_serializer,
+        })
     }
 
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
-        let bridge_tx = bridge.tx();
+        let bridge_tx = bridge.bridge_tx();
 
         let route =
             ActionRoute { name: "launch_shell".to_owned(), timeout: Duration::from_secs(10) };
-        let (actions_tx, actions_rx) = bounded(1);
-        bridge.register_action_route(route, actions_tx)?;
+        let actions_rx = bridge.register_action_route(route)?;
         let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
         spawn_named_thread("Tunshell Client", move || tunshell_client.start());
 
         if !self.config.downloader.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&self.config.downloader.actions, actions_tx)?;
+            let actions_rx = bridge.register_action_routes(&self.config.downloader.actions)?;
             let file_downloader =
                 FileDownloader::new(self.config.clone(), actions_rx, bridge_tx.clone())?;
             spawn_named_thread("File Downloader", || file_downloader.start());
@@ -428,8 +442,7 @@ impl Uplink {
         spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
 
         if !self.config.ota_installer.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&self.config.ota_installer.actions, actions_tx)?;
+            let actions_rx = bridge.register_action_routes(&self.config.ota_installer.actions)?;
             let ota_installer =
                 OTAInstaller::new(self.config.ota_installer.clone(), actions_rx, bridge_tx.clone());
             spawn_named_thread("OTA Installer", move || ota_installer.start());
@@ -441,8 +454,7 @@ impl Uplink {
                 name: "journalctl_config".to_string(),
                 timeout: Duration::from_secs(10),
             };
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_route(route, actions_tx)?;
+            let actions_rx = bridge.register_action_route(route)?;
             let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
             spawn_named_thread("Logger", || {
                 if let Err(e) = logger.start() {
@@ -457,8 +469,7 @@ impl Uplink {
                 name: "journalctl_config".to_string(),
                 timeout: Duration::from_secs(10),
             };
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_route(route, actions_tx)?;
+            let actions_rx = bridge.register_action_route(route)?;
             let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
             spawn_named_thread("Logger", || {
                 if let Err(e) = logger.start() {
@@ -473,8 +484,7 @@ impl Uplink {
         };
 
         if !self.config.processes.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&self.config.processes, actions_tx)?;
+            let actions_rx = bridge.register_action_routes(&self.config.processes)?;
             let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
             spawn_named_thread("Process Handler", || {
                 if let Err(e) = process_handler.start() {
@@ -484,8 +494,7 @@ impl Uplink {
         }
 
         if !self.config.script_runner.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&self.config.script_runner, actions_tx)?;
+            let actions_rx = bridge.register_action_routes(&self.config.script_runner)?;
             let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
             spawn_named_thread("Script Runner", || {
                 if let Err(e) = script_runner.start() {

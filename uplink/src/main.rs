@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Error;
-use flume::bounded;
 use log::info;
 use structopt::StructOpt;
 use tokio::time::sleep;
@@ -127,34 +126,30 @@ fn main() -> Result<(), Error> {
     let mut bridge = uplink.configure_bridge();
     uplink.spawn_builtins(&mut bridge)?;
 
-    let bridge_tx = bridge.tx();
+    let bridge_tx = bridge.bridge_tx();
 
     let mut tcpapps = vec![];
     for (app, cfg) in config.tcpapps.clone() {
-        let mut route_rx = None;
-        if !cfg.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&cfg.actions, actions_tx)?;
-            route_rx = Some(actions_rx)
-        }
-        tcpapps.push(TcpJson::new(app, cfg, route_rx, bridge.tx()));
+        let route_rx = if !cfg.actions.is_empty() {
+            let actions_rx = bridge.register_action_routes(&cfg.actions)?;
+            Some(actions_rx)
+        } else {
+            None
+        };
+        tcpapps.push(TcpJson::new(app, cfg, route_rx, bridge.bridge_tx()));
     }
 
-    let simulator_actions = config.simulator.as_ref().and_then(|cfg| {
-        let mut route_rx = None;
-        if !cfg.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&cfg.actions, actions_tx).unwrap();
-            route_rx = Some(actions_rx)
+    let simulator_actions = match &config.simulator {
+        Some(cfg) if !cfg.actions.is_empty() => {
+            let actions_rx = bridge.register_action_routes(&cfg.actions)?;
+            Some(actions_rx)
         }
+        _ => None,
+    };
 
-        route_rx
-    });
-
-    uplink.spawn(bridge)?;
+    let ctrl_tx = uplink.spawn(bridge)?;
 
     if let Some(config) = config.simulator.clone() {
-        let bridge_tx = bridge_tx.clone();
         spawn_named_thread("Simulator", || {
             simulator::start(config, bridge_tx, simulator_actions).unwrap();
         });
@@ -162,10 +157,8 @@ fn main() -> Result<(), Error> {
 
     if config.console.enabled {
         let port = config.console.port;
-        let bridge_tx = bridge_tx.clone();
-        spawn_named_thread("Uplink Console", move || {
-            console::start(port, reload_handle, bridge_tx)
-        });
+        let ctrl_tx = ctrl_tx.clone();
+        spawn_named_thread("Uplink Console", move || console::start(port, reload_handle, ctrl_tx));
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -194,7 +187,7 @@ fn main() -> Result<(), Error> {
             // Handle a shutdown signal from POSIX
             while let Some(signal) = signals.next().await {
                 match signal {
-                    SIGTERM | SIGINT | SIGQUIT => bridge_tx.trigger_shutdown().await,
+                    SIGTERM | SIGINT | SIGQUIT => ctrl_tx.trigger_shutdown().await,
                     s => error!("Couldn't handle signal: {s}"),
                 }
             }
@@ -203,7 +196,7 @@ fn main() -> Result<(), Error> {
         uplink.resolve_on_shutdown().await.unwrap();
         info!("Uplink shutting down...");
         // NOTE: wait 5s to allow serializer to write to network/disk
-        sleep(Duration::from_secs(5)).await;
+        sleep(Duration::from_secs(10)).await;
     });
 
     Ok(())
