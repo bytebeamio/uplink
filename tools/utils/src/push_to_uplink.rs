@@ -17,7 +17,7 @@ async fn main() {
 
 fn argv_to_payload(pairs: &[String]) -> Value {
     // nlici
-    let stream = pairs.get(0).unwrap();
+    let stream = pairs.first().unwrap();
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
     let kv_count = pairs.len() - 1;
     assert_eq!(kv_count % 2, 0);
