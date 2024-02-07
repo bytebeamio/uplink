@@ -66,7 +66,7 @@ blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 # be collected, batched and forwarded to serializer to then be published onto platform.
 #
 # Required Parameters
-# - buf-size: Number of data points that shall be included in each Publish
+# - batch-size: Number of data points that shall be included in each Publish
 # - topic(optional): topic-filter to which data shall be published. If left
 #   unconfigured, stream will be created dynamically.
 # - flush-period(optional): Duration in seconds after a data point enters the stream
@@ -79,7 +79,7 @@ blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 # - priority(optional, u8): Higher prioirity streams get to push their data
 #   onto the network first.
 #
-# In the following config for the device_shadow stream we set buf_size to 1 and mark
+# In the following config for the device_shadow stream we set batch_size to 1 and mark
 # it as non-persistent. streams are internally constructed as a map of Name -> Config
 [streams.device_shadow]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
@@ -89,7 +89,7 @@ priority = 75
 # Example using compression
 [streams.imu]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/imu/jsonarray/lz4"
-buf_size = 100
+batch_size = 100
 compression = "Lz4"
 priority = 50
 
@@ -107,7 +107,7 @@ priority = 50
 # configuration, we use transient(in-memory) storage to handle network downtime only.
 [streams.gps]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/gps/jsonarray"
-buf_size = 10
+batch_size = 10
 persistence = { max_file_size = 1048576, max_file_count = 10 }
 
 # NOTE: While it is possible to configure persistence to be disabled, including only max_file_count
@@ -115,7 +115,7 @@ persistence = { max_file_size = 1048576, max_file_count = 10 }
 # config values will be default. Configuring only max_file_size is also allowed, without persistance.
 [streams.motor]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/motor/jsonarray/lz4"
-buf_size = 50
+batch_size = 50
 compression = "Lz4"
 persistence = { max_file_count = 3 }
 
