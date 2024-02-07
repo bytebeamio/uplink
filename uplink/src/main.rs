@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use anyhow::Error;
 use config::{Environment, File, FileFormat};
-use flume::bounded;
 use log::info;
 use structopt::StructOpt;
 use tokio::time::sleep;
@@ -291,25 +290,22 @@ fn main() -> Result<(), Error> {
 
     let mut tcpapps = vec![];
     for (app, cfg) in config.tcpapps.clone() {
-        let mut route_rx = None;
-        if !cfg.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&cfg.actions, actions_tx)?;
-            route_rx = Some(actions_rx)
-        }
+        let route_rx = if !cfg.actions.is_empty() {
+            let actions_rx = bridge.register_action_routes(&cfg.actions)?;
+            Some(actions_rx)
+        } else {
+            None
+        };
         tcpapps.push(TcpJson::new(app, cfg, route_rx, bridge.bridge_tx()));
     }
 
-    let simulator_actions = config.simulator.as_ref().and_then(|cfg| {
-        let mut route_rx = None;
-        if !cfg.actions.is_empty() {
-            let (actions_tx, actions_rx) = bounded(1);
-            bridge.register_action_routes(&cfg.actions, actions_tx).unwrap();
-            route_rx = Some(actions_rx)
+    let simulator_actions = match &config.simulator {
+        Some(cfg) if !cfg.actions.is_empty() => {
+            let actions_rx = bridge.register_action_routes(&cfg.actions)?;
+            Some(actions_rx)
         }
-
-        route_rx
-    });
+        _ => None,
+    };
 
     let ctrl_tx = uplink.spawn(bridge)?;
 

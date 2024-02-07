@@ -1,4 +1,4 @@
-use flume::{Receiver, Sender};
+use flume::{bounded, Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -100,20 +100,21 @@ impl Bridge {
         (self.actions.ctrl_tx(), self.data.ctrl_tx())
     }
 
-    pub fn register_action_route(
-        &mut self,
-        route: ActionRoute,
-        actions_tx: Sender<Action>,
-    ) -> Result<(), Error> {
-        self.actions.register_action_route(route, actions_tx)
+    pub fn register_action_route(&mut self, route: ActionRoute) -> Result<Receiver<Action>, Error> {
+        let (actions_tx, actions_rx) = bounded(1);
+        self.actions.register_action_route(route, actions_tx)?;
+
+        Ok(actions_rx)
     }
 
     pub fn register_action_routes<R: Into<ActionRoute>, V: IntoIterator<Item = R>>(
         &mut self,
         routes: V,
-        actions_tx: Sender<Action>,
-    ) -> Result<(), Error> {
-        self.actions.register_action_routes(routes, actions_tx)
+    ) -> Result<Receiver<Action>, Error> {
+        let (actions_tx, actions_rx) = bounded(1);
+        self.actions.register_action_routes(routes, actions_tx)?;
+
+        Ok(actions_rx)
     }
 }
 
