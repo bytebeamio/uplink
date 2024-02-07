@@ -57,7 +57,7 @@ impl<T: Point> Streams<T> {
             }
         };
 
-        let max_stream_size = stream.config.buf_size;
+        let max_stream_size = stream.config.batch_size;
         let state = match stream.fill(data).await {
             Ok(s) => s,
             Err(e) => {

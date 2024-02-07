@@ -1005,7 +1005,7 @@ mod test {
 
         let (stream_name, stream_config) = (
             "hello",
-            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+            StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
         );
         let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         std::thread::spawn(move || {
@@ -1063,7 +1063,7 @@ mod test {
 
         let (stream_name, stream_config) = (
             "hello",
-            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+            StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
         );
         let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Faster collector, send data every 5s
@@ -1095,7 +1095,7 @@ mod test {
 
         let (stream_name, stream_config) = (
             "hello",
-            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+            StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
         );
         let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Faster collector, send data every 5s
@@ -1156,7 +1156,7 @@ mod test {
 
         let (stream_name, stream_config) = (
             "hello",
-            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+            StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
         );
         let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Run a collector practically once
@@ -1215,7 +1215,7 @@ mod test {
 
         let (stream_name, stream_config) = (
             "hello",
-            StreamConfig { topic: "hello/world".to_string(), buf_size: 1, ..Default::default() },
+            StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
         );
         let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Run a collector

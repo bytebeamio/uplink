@@ -17,7 +17,7 @@ use tracing_subscriber::{EnvFilter, Registry};
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
-use uplink::config::{AppConfig, Config, StreamConfig, MAX_BUFFER_SIZE};
+use uplink::config::{AppConfig, Config, StreamConfig, MAX_BATCH_SIZE};
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
 const DEFAULT_CONFIG: &str = r#"    
@@ -45,7 +45,7 @@ const DEFAULT_CONFIG: &str = r#"
 
     [action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
-    buf_size = 1
+    batch_size = 1
     flush_period = 2
     priority = 255 # highest priority for quick delivery of action status info to platform
 
@@ -55,7 +55,7 @@ const DEFAULT_CONFIG: &str = r#"
 
     [streams.logs]
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
-    buf_size = 32
+    batch_size = 32
 
     [system_stats]
     enabled = true
@@ -159,7 +159,7 @@ impl CommandLine {
                     topic: format!(
                         "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
                     ),
-                    buf_size: config.system_stats.stream_size.unwrap_or(MAX_BUFFER_SIZE),
+                    batch_size: config.system_stats.stream_size.unwrap_or(MAX_BATCH_SIZE),
                     ..Default::default()
                 };
                 config.streams.insert(stream_name.to_owned(), stream_config);
@@ -167,16 +167,16 @@ impl CommandLine {
         }
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        if let Some(buf_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+        if let Some(batch_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
             let stream_config =
                 config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
                     topic: format!(
                         "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
                     ),
-                    buf_size: 32,
+                    batch_size: 32,
                     ..Default::default()
                 });
-            stream_config.buf_size = buf_size;
+            stream_config.batch_size = batch_size;
         }
 
         config.actions_subscription = format!("/tenants/{tenant_id}/devices/{device_id}/actions");

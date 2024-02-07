@@ -21,7 +21,7 @@ pub enum Error {
     Send(#[from] SendError<Box<dyn Package>>),
 }
 
-pub const MAX_BUFFER_SIZE: usize = 100;
+pub const MAX_BATCH_SIZE: usize = 100;
 
 #[derive(Debug)]
 pub struct Stream<T> {
@@ -47,7 +47,7 @@ where
         let name = Arc::new(stream_name.into());
         let config = Arc::new(stream_config);
         let buffer = Buffer::new(name.clone(), config.clone());
-        let metrics = StreamMetrics::new(&name, config.buf_size);
+        let metrics = StreamMetrics::new(&name, config.batch_size);
 
         Stream { name, config, last_sequence: 0, last_timestamp: 0, buffer, tx, metrics }
     }
@@ -93,8 +93,8 @@ where
         self.last_sequence = current_sequence;
         self.last_timestamp = current_timestamp;
 
-        // if max_buffer_size is breached, flush
-        let buf = if self.buffer.buffer.len() >= self.config.buf_size {
+        // if max_bATCH_size is breached, flush
+        let buf = if self.buffer.buffer.len() >= self.config.batch_size {
             self.metrics.add_batch();
             Some(self.take_buffer())
         } else {
@@ -133,7 +133,7 @@ where
         self.len() == 0
     }
 
-    /// Fill buffer with data and trigger async channel send on breaching max_buf_size.
+    /// Fill buffer with data and trigger async channel send on breaching max_batch_size.
     /// Returns [`StreamStatus`].
     pub async fn fill(&mut self, data: T) -> Result<StreamStatus, Error> {
         if let Some(buf) = self.add(data)? {
@@ -150,7 +150,7 @@ where
     }
 
     #[cfg(test)]
-    /// Push data into buffer and trigger sync channel send on max_buf_size.
+    /// Push data into buffer and trigger sync channel send on max_batch_size.
     /// Returns [`StreamStatus`].
     pub fn push(&mut self, data: T) -> Result<StreamStatus, Error> {
         if let Some(buf) = self.add(data)? {
@@ -187,7 +187,7 @@ pub struct Buffer<T> {
 impl<T> Buffer<T> {
     pub fn new(stream_name: Arc<String>, stream_config: Arc<StreamConfig>) -> Buffer<T> {
         Buffer {
-            buffer: Vec::with_capacity(stream_config.buf_size),
+            buffer: Vec::with_capacity(stream_config.batch_size),
             stream_name,
             stream_config,
             anomalies: String::with_capacity(100),
@@ -262,7 +262,7 @@ impl<T> Clone for Stream<T> {
             last_sequence: 0,
             last_timestamp: 0,
             buffer: Buffer::new(self.buffer.stream_name.clone(), self.buffer.stream_config.clone()),
-            metrics: StreamMetrics::new(&self.name, self.config.buf_size),
+            metrics: StreamMetrics::new(&self.name, self.config.batch_size),
             tx: self.tx.clone(),
         }
     }

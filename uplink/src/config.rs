@@ -7,7 +7,7 @@ use std::{collections::HashMap, fmt::Debug};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
 
-pub use crate::base::bridge::stream::MAX_BUFFER_SIZE;
+pub use crate::base::bridge::stream::MAX_BATCH_SIZE;
 #[cfg(target_os = "linux")]
 use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(target_os = "android")]
@@ -21,8 +21,8 @@ fn default_timeout() -> Duration {
 }
 
 #[inline]
-fn max_buf_size() -> usize {
-    MAX_BUFFER_SIZE
+fn max_batch_size() -> usize {
+    MAX_BATCH_SIZE
 }
 
 pub fn default_file_size() -> usize {
@@ -60,8 +60,8 @@ pub enum Compression {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct StreamConfig {
     pub topic: String,
-    #[serde(default = "max_buf_size")]
-    pub buf_size: usize,
+    #[serde(default = "max_batch_size")]
+    pub batch_size: usize,
     #[serde(default = "default_timeout")]
     #[serde_as(as = "DurationSeconds<u64>")]
     /// Duration(in seconds) that bridge collector waits from
@@ -79,7 +79,7 @@ impl Default for StreamConfig {
     fn default() -> Self {
         Self {
             topic: "".to_string(),
-            buf_size: MAX_BUFFER_SIZE,
+            batch_size: MAX_BATCH_SIZE,
             flush_period: default_timeout(),
             compression: Compression::Disabled,
             persistence: Persistence::default(),
