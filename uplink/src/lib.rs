@@ -143,7 +143,7 @@ pub mod config {
     [system_stats]
     enabled = true
     process_names = ["uplink"]
-    update_period = 30
+    update_period = 29
 "#;
 
     /// Reads config file to generate config struct and replaces places holders
@@ -155,7 +155,7 @@ pub mod config {
             .add_source(File::from_str(auth_config, FileFormat::Json))
             .add_source(Environment::default())
             .build()?;
-
+        
         let mut config: Config = config.try_deserialize()?;
 
         // Create directory at persistence_path if it doesn't already exist

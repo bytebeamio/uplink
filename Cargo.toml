@@ -6,13 +6,13 @@ resolver = "2"
 members = [
     "uplink",
     "storage",
-    "tools/utils",
 ]
 exclude = [
     "tools/deserialize-backup",
     "tools/simulator",
     "tools/system-stats",
     "tools/tunshell",
+    "tools/utils",
 ]
 
 [workspace.dependencies]
