@@ -44,8 +44,10 @@ rand = { workspace = true }
 # downloader
 fs2 = "0.4"
 futures-util = { workspace = true }
+hex = "0.4"
 human_bytes = "0.4"
 reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
+rsa = { version = "0.9.6", features = ["sha2"] }
 # systemstats
 sysinfo = "0.26"
 # logcat

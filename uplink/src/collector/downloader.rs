@@ -53,10 +53,12 @@ use futures_util::{Future, StreamExt};
 use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identity, Response};
+use rsa::sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use tokio::time::{timeout_at, Instant};
 
 use std::fs::{metadata, remove_dir_all, File};
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(unix)]
@@ -84,6 +86,8 @@ pub enum Error {
     FilePathMissing,
     #[error("Download failed, content length zero")]
     EmptyFile,
+    #[error("Downloaded file has unexpected checksum")]
+    BadChecksum,
     #[error("Disk space is insufficient: {0}")]
     InsufficientDisk(String),
 }
@@ -251,10 +255,12 @@ impl FileDownloader {
         self.continuous_retry(&url, download).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
-        update.download_path = Some(file_path.clone());
-        action.payload = serde_json::to_string(&update)?;
+        update.insert_path(file_path.clone());
+        update.verify_checksum()?;
 
+        action.payload = serde_json::to_string(&update)?;
         let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
+
         let status = status.set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
 
@@ -356,6 +362,29 @@ pub struct DownloadFile {
     file_name: String,
     /// Path to location in fs where file will be stored
     pub download_path: Option<PathBuf>,
+    /// Checksum that can be used to verify download was successful
+    pub checksum: Option<String>,
+}
+
+impl DownloadFile {
+    fn insert_path(&mut self, download_path: PathBuf) {
+        self.download_path = Some(download_path);
+    }
+
+    fn verify_checksum(&self) -> Result<(), Error> {
+        let Some(checksum) = &self.checksum else { return Ok(()) };
+        let path = self.download_path.as_ref().expect("Downloader didn't set \"download_path\"");
+        let mut file = File::open(path)?;
+        let mut hasher = Sha256::new();
+        io::copy(&mut file, &mut hasher)?;
+        let hash = hasher.finalize().to_vec();
+
+        if checksum != &hex::encode(hash) {
+            return Err(Error::BadChecksum);
+        }
+
+        Ok(())
+    }
 }
 
 // A temporary structure to help us retry downloads
@@ -441,14 +470,10 @@ mod test {
         (BridgeTx { data_tx, status_tx }, status_rx)
     }
 
-    #[test]
-    // Test file downloading capabilities of FileDownloader by downloading the uplink logo from GitHub
-    fn download_file() {
-        // Ensure path exists
-        std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
-        // Prepare config
+    // Prepare config
+    fn test_config(test_name: &str) -> Config {
         let mut path = PathBuf::from(DOWNLOAD_DIR);
-        path.push("uplink-test");
+        path.push(test_name);
         let downloader_cfg = DownloaderConfig {
             actions: vec![ActionRoute {
                 name: "firmware_update".to_owned(),
@@ -456,7 +481,16 @@ mod test {
             }],
             path,
         };
-        let config = config(downloader_cfg.clone());
+        config(downloader_cfg.clone())
+    }
+
+    #[test]
+    // Test file downloading capabilities of FileDownloader by downloading the uplink logo from GitHub
+    fn download_file() {
+        // Ensure path exists
+        std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
+        let config = test_config("download_file");
+        let mut downloader_path = config.downloader.path.clone();
         let (bridge_tx, status_rx) = create_bridge();
 
         // Create channels to forward and push actions on
@@ -472,12 +506,12 @@ mod test {
             content_length: 296658,
             file_name: "test.txt".to_string(),
             download_path: None,
+            checksum: None,
         };
         let mut expected_forward = download_update.clone();
-        let mut path = downloader_cfg.path;
-        path.push("firmware_update");
-        path.push("test.txt");
-        expected_forward.download_path = Some(path);
+        downloader_path.push("firmware_update");
+        downloader_path.push("test.txt");
+        expected_forward.download_path = Some(downloader_path);
         let download_action = Action {
             action_id: "1".to_string(),
             kind: "firmware_update".to_string(),
@@ -508,7 +542,102 @@ mod test {
                 let fwd = serde_json::from_str(&fwd_action.payload).unwrap();
                 assert_eq!(expected_forward, fwd);
                 break;
-            } else if status.is_failed() {
+            }
+        }
+    }
+
+    #[test]
+    // Once a file is downloaded FileDownloader must check it's checksum value against what is provided
+    fn checksum_of_file() {
+        // Ensure path exists
+        std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
+        let config = test_config("file_checksum");
+        let (bridge_tx, status_rx) = create_bridge();
+
+        // Create channels to forward and push action_status on
+        let (download_tx, download_rx) = bounded(1);
+        let downloader = FileDownloader::new(Arc::new(config), download_rx, bridge_tx).unwrap();
+
+        // Start FileDownloader in separate thread
+        std::thread::spawn(|| downloader.start());
+
+        std::thread::sleep(Duration::from_millis(10));
+
+        // Correct firmware update action
+        let correct_update = DownloadFile {
+            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
+            content_length: 296658,
+            file_name: "logo.png".to_string(),
+            download_path: None,
+            checksum: Some(
+                "e22d4a7cf60ad13bf885c6d84af2f884f0c044faf0ee40b2e3c81896b226b2fc".to_string(),
+            ),
+        };
+        let correct_action = Action {
+            action_id: "1".to_string(),
+            kind: "firmware_update".to_string(),
+            name: "firmware_update".to_string(),
+            payload: json!(correct_update).to_string(),
+            deadline: Some(Instant::now() + Duration::from_secs(100)),
+        };
+
+        // Send the correct action to FileDownloader
+        download_tx.try_send(correct_action).unwrap();
+
+        // Collect action_status and ensure it is as expected
+        let status = status_rx.recv().unwrap();
+        assert_eq!(status.state, "Downloading");
+        let mut progress = 0;
+
+        // Collect and ensure forwarded action contains expected info
+        loop {
+            let status = status_rx.recv().unwrap();
+
+            assert!(progress <= status.progress);
+            progress = status.progress;
+
+            if status.is_done() {
+                if status.state != "Downloaded" {
+                    panic!("unexpected status={status:?}")
+                }
+                break;
+            }
+        }
+
+        // Wrong firmware update action
+        let wrong_update = DownloadFile {
+            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
+            content_length: 296658,
+            file_name: "logo.png".to_string(),
+            download_path: None,
+            checksum: Some("abcd1234efgh5678".to_string()),
+        };
+        let wrong_action = Action {
+            action_id: "1".to_string(),
+            kind: "firmware_update".to_string(),
+            name: "firmware_update".to_string(),
+            payload: json!(wrong_update).to_string(),
+            deadline: Some(Instant::now() + Duration::from_secs(100)),
+        };
+
+        // Send the wrong action to FileDownloader
+        download_tx.try_send(wrong_action).unwrap();
+
+        // Collect action_status and ensure it is as expected
+        let status = status_rx.recv().unwrap();
+        assert_eq!(status.state, "Downloading");
+        let mut progress = 0;
+
+        // Collect and ensure forwarded action contains expected info
+        loop {
+            let status = status_rx.recv().unwrap();
+
+            assert!(progress <= status.progress);
+            progress = status.progress;
+
+            if status.is_done() {
+                assert!(status.is_failed());
+                assert_eq!(status.errors, vec!["Downloaded file has unexpected checksum"]);
                 break;
             }
         }
