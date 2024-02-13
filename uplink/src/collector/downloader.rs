@@ -377,7 +377,7 @@ impl DownloadFile {
         let mut file = File::open(path)?;
         let mut hasher = Sha256::new();
         io::copy(&mut file, &mut hasher)?;
-        let hash = hasher.finalize().to_vec();
+        let hash = hasher.finalize();
 
         if checksum != &hex::encode(hash) {
             return Err(Error::BadChecksum);
