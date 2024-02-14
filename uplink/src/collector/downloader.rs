@@ -54,6 +54,7 @@ use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
 use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identity, Response};
 use rsa::sha2::{Digest, Sha256};
+use rsa::{Pkcs1v15Sign, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 use tokio::time::{timeout_at, Instant};
 
@@ -90,6 +91,10 @@ pub enum Error {
     BadChecksum,
     #[error("Disk space is insufficient: {0}")]
     InsufficientDisk(String),
+    #[error("Hex decode: {0}")]
+    Hex(#[from] hex::FromHexError),
+    #[error("Signature verification")]
+    BadSignature,
 }
 
 /// This struct contains the necessary components to download and store file as notified by a download file
@@ -103,6 +108,7 @@ pub struct FileDownloader {
     bridge_tx: BridgeTx,
     client: Client,
     sequence: u32,
+    public_keys: Vec<RsaPublicKey>,
 }
 
 impl FileDownloader {
@@ -134,6 +140,8 @@ impl FileDownloader {
             bridge_tx,
             sequence: 0,
             action_id: String::default(),
+            // TODO: extract public keys from config
+            public_keys: vec![],
         })
     }
 
@@ -256,7 +264,7 @@ impl FileDownloader {
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         update.insert_path(file_path.clone());
-        update.verify_checksum()?;
+        update.verify(&self.public_keys)?;
 
         action.payload = serde_json::to_string(&update)?;
         let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
@@ -364,6 +372,8 @@ pub struct DownloadFile {
     pub download_path: Option<PathBuf>,
     /// Checksum that can be used to verify download was successful
     pub checksum: Option<String>,
+    /// Signature that can be used to verify uploader of downloaded file
+    pub signature: Option<String>,
 }
 
 impl DownloadFile {
@@ -371,7 +381,8 @@ impl DownloadFile {
         self.download_path = Some(download_path);
     }
 
-    fn verify_checksum(&self) -> Result<(), Error> {
+    /// Verifies file against provided checksum and signature
+    fn verify(&self, public_keys: &[RsaPublicKey]) -> Result<(), Error> {
         let Some(checksum) = &self.checksum else { return Ok(()) };
         let path = self.download_path.as_ref().expect("Downloader didn't set \"download_path\"");
         let mut file = File::open(path)?;
@@ -381,6 +392,17 @@ impl DownloadFile {
 
         if checksum != &hex::encode(hash) {
             return Err(Error::BadChecksum);
+        }
+
+        let Some(signature) = &self.signature else {return Ok(())};
+        let signature = hex::decode(signature)?;
+
+        // If any key verifies the signaure, return Ok(()), else Err(Signature).
+        if !public_keys
+            .iter()
+            .any(|key| key.verify(Pkcs1v15Sign::new::<Sha256>(), &hash, &signature).is_ok())
+        {
+            return Err(Error::BadSignature);
         }
 
         Ok(())
