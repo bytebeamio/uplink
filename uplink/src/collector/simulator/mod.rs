@@ -16,7 +16,7 @@ mod data;
 
 pub enum Event {
     Data(Payload),
-    ActionResponse(ActionResponse),
+    ActionResponse(Box<ActionResponse>),
 }
 
 #[derive(Error, Debug)]
@@ -42,7 +42,7 @@ impl ActionResponse {
             sequence += 1;
             let response = ActionResponse::progress(&action_id, "in_progress", progress)
                 .set_sequence(sequence);
-            if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
+            if let Err(e) = tx.send_async(Event::ActionResponse(Box::new(response))).await {
                 error!("{e}");
                 break;
             }
@@ -53,7 +53,7 @@ impl ActionResponse {
         sequence += 1;
         let response =
             ActionResponse::progress(&action_id, "Completed", 100).set_sequence(sequence);
-        if let Err(e) = tx.send_async(Event::ActionResponse(response)).await {
+        if let Err(e) = tx.send_async(Event::ActionResponse(Box::new(response))).await {
             error!("{e}");
         }
         info!("Successfully sent all action responses");
@@ -109,7 +109,7 @@ pub async fn start(
                 }
                 event = rx.recv_async() => {
                     match event {
-                        Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
+                        Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(*status).await,
                         Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
                         Err(_) => {
                             error!("All generators have stopped!");
@@ -120,7 +120,7 @@ pub async fn start(
             }
         } else {
             match rx.recv_async().await {
-                Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(status).await,
+                Ok(Event::ActionResponse(status)) => bridge_tx.send_action_response(*status).await,
                 Ok(Event::Data(payload)) => bridge_tx.send_payload(payload).await,
                 Err(_) => {
                     error!("All generators have stopped!");

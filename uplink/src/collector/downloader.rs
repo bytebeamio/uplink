@@ -518,6 +518,7 @@ mod test {
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
             deadline: Some(Instant::now() + Duration::from_secs(60)),
+            on_new_topic: false,
         };
 
         std::thread::sleep(Duration::from_millis(10));

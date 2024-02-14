@@ -22,12 +22,19 @@ pub struct Action {
     // Instant at which action must be timedout
     #[serde(skip)]
     pub deadline: Option<Instant>,
+    // Marker that action was received through newer action topic and must be responded to on similarly named topic
+    #[serde(skip)]
+    pub on_new_topic: bool,
 }
+
+const DEFAULT_RESPONSE_STREAM: &str = "action_status";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionResponse {
     #[serde(alias = "id")]
     pub action_id: String,
+    #[serde(skip)]
+    pub action_name: Option<String>,
     // sequence number
     pub sequence: u32,
     // timestamp
@@ -48,6 +55,7 @@ impl ActionResponse {
 
         ActionResponse {
             action_id: id.to_owned(),
+            action_name: None,
             sequence: 0,
             timestamp,
             state: state.to_owned(),
@@ -67,6 +75,13 @@ impl ActionResponse {
 
     pub fn is_done(&self) -> bool {
         self.progress == 100
+    }
+
+    // Associate with the action to send on new topic
+    pub fn with_action(&mut self, action: &Action) {
+        if action.action_id == self.action_id && action.on_new_topic {
+            self.action_name = Some(action.name.clone())
+        }
     }
 
     pub fn progress(id: &str, state: &str, progress: u8) -> Self {
@@ -105,7 +120,7 @@ impl ActionResponse {
 
 impl Point for ActionResponse {
     fn stream_name(&self) -> &str {
-        "action_status"
+        self.action_name.as_deref().unwrap_or(DEFAULT_RESPONSE_STREAM)
     }
 
     fn sequence(&self) -> u32 {

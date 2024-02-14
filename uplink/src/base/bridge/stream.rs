@@ -55,19 +55,23 @@ where
 
     pub fn dynamic(
         stream_name: impl Into<String>,
-        project_id: impl Into<String>,
+        tenant_id: impl Into<String>,
         device_id: impl Into<String>,
         tx: Sender<Box<dyn Package>>,
+        topic_template: &str,
     ) -> Stream<T> {
         let stream_name = stream_name.into();
-        let project_id = project_id.into();
+        let tenant_id = tenant_id.into();
         let device_id = device_id.into();
 
-        let topic =
-            format!("/tenants/{project_id}/devices/{device_id}/events/{stream_name}/jsonarray");
-        let config = StreamConfig { topic, ..Default::default() };
+        // e.g. "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
+        let topic = topic_template
+            .replace("{tenant_id}", &tenant_id)
+            .replace("{device_id}", &device_id)
+            .replace("{stream_name}", &stream_name);
+        let stream_config = StreamConfig { topic, ..Default::default() };
 
-        Stream::new(stream_name, config, tx)
+        Stream::new(stream_name, stream_config, tx)
     }
 
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
