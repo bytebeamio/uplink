@@ -3,7 +3,7 @@ use std::time::Duration;
 use log::{error, trace};
 use serde::Serialize;
 
-use crate::base::DeviceShadowConfig;
+use crate::config::DeviceShadowConfig;
 use crate::base::{bridge::BridgeTx, clock};
 use crate::Payload;
 
