@@ -233,6 +233,12 @@ impl Default for DeviceShadowConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct PreconditionCheckerConfig {
+    pub path: PathBuf,
+    pub actions: Vec<ActionRoute>,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
@@ -274,4 +280,5 @@ pub struct Config {
     pub logging: Option<JournalCtlConfig>,
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
+    pub precondition_checks: Option<PreconditionCheckerConfig>,
 }
