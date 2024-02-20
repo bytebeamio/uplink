@@ -59,6 +59,8 @@ impl PreconditionChecker {
 
     // Fails if there isn't enough space to download and/or install update
     // NOTE: both download and installation could happen in the same partition
+    // TODO: this should be significantly simplified once we move to using `expected-free-space`
+    // comparison instead of making assumptions about what the user might want.
     fn check_disk_size(&self, preconditions: Preconditions) -> Result<(), Error> {
         let Some(mut required_free_space) = preconditions.uncompressed_length else {
             return Ok(())
