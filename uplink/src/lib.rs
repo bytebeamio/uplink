@@ -67,6 +67,7 @@ use collector::installer::OTAInstaller;
 use collector::journalctl::JournalCtl;
 #[cfg(target_os = "android")]
 use collector::logcat::Logcat;
+use collector::preconditions::PreconditionChecker;
 use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
@@ -294,12 +295,18 @@ impl Uplink {
 
         if !self.config.script_runner.is_empty() {
             let actions_rx = bridge.register_action_routes(&self.config.script_runner)?;
-            let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
+            let script_runner = ScriptRunner::new(actions_rx, bridge_tx.clone());
             spawn_named_thread("Script Runner", || {
                 if let Err(e) = script_runner.start() {
                     error!("Script runner stopped!! Error = {:?}", e);
                 }
             });
+        }
+
+        if let Some(checker_config) = &self.config.precondition_checks {
+            let actions_rx = bridge.register_action_routes(&checker_config.actions)?;
+            let checker = PreconditionChecker::new(self.config.clone(), actions_rx, bridge_tx);
+            spawn_named_thread("Logger", || checker.start());
         }
 
         Ok(())

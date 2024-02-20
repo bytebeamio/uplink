@@ -5,6 +5,7 @@ pub mod installer;
 pub mod journalctl;
 #[cfg(target_os = "android")]
 pub mod logcat;
+pub mod preconditions;
 pub mod process;
 pub mod script_runner;
 pub mod simulator;
