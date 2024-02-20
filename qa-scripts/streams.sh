@@ -15,7 +15,7 @@ flush_period = 2
 
 [streams.imu]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/imu/jsonarray"
-buf_size = 10
+batch_size = 10
 EOF
 )" > devices/streams.toml
 docker cp devices/streams.toml simulator:/usr/share/bytebeam/uplink/devices/streams.toml

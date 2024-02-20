@@ -13,7 +13,7 @@ use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(target_os = "android")]
 use crate::collector::logcat::LogcatConfig;
 
-use self::bridge::stream::MAX_BUFFER_SIZE;
+use self::bridge::stream::MAX_BATCH_SIZE;
 use self::bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
 use self::mqtt::CtrlTx as MqttCtrlTx;
 use self::serializer::CtrlTx as SerializerCtrlTx;
@@ -32,8 +32,8 @@ fn default_timeout() -> Duration {
 }
 
 #[inline]
-fn max_buf_size() -> usize {
-    MAX_BUFFER_SIZE
+fn max_batch_size() -> usize {
+    MAX_BATCH_SIZE
 }
 
 fn default_file_size() -> usize {
@@ -75,8 +75,8 @@ pub enum Compression {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct StreamConfig {
     pub topic: String,
-    #[serde(default = "max_buf_size")]
-    pub buf_size: usize,
+    #[serde(default = "max_batch_size", alias = "buf_size")]
+    pub batch_size: usize,
     #[serde(default = "default_timeout")]
     #[serde_as(as = "DurationSeconds<u64>")]
     /// Duration(in seconds) that bridge collector waits from
@@ -94,7 +94,7 @@ impl Default for StreamConfig {
     fn default() -> Self {
         Self {
             topic: "".to_string(),
-            buf_size: MAX_BUFFER_SIZE,
+            batch_size: MAX_BATCH_SIZE,
             flush_period: default_timeout(),
             compression: Compression::Disabled,
             persistence: Persistence::default(),
