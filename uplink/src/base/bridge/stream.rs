@@ -4,8 +4,8 @@ use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::Serialize;
 
-use crate::config::StreamConfig;
 use super::{Package, Point, StreamMetrics};
+use crate::config::StreamConfig;
 
 /// Signals status of stream buffer
 #[derive(Debug)]
