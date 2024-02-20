@@ -19,7 +19,7 @@ pub enum Error {
 pub struct Preconditions {
     #[serde(alias = "content-length")]
     content_length: usize,
-    #[serde(alias = "uncompressed-length")]
+    #[serde(alias = "uncompressed-size")]
     uncompressed_length: usize,
 }
 
