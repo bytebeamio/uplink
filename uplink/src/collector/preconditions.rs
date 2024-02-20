@@ -20,7 +20,7 @@ pub struct Preconditions {
     #[serde(alias = "content-length")]
     content_length: usize,
     #[serde(alias = "uncompressed-size")]
-    uncompressed_length: usize,
+    uncompressed_length: Option<usize>,
 }
 
 pub struct PreconditionChecker {
@@ -60,9 +60,11 @@ impl PreconditionChecker {
     // Fails if there isn't enough space to download and/or install update
     // NOTE: both download and installation could happen in the same partition
     fn check_disk_size(&self, preconditions: Preconditions) -> Result<(), Error> {
+        let Some(mut required_free_space) = preconditions.uncompressed_length else {
+            return Ok(())
+        };
         let disk_free_space =
             fs2::free_space(&self.config.precondition_checks.as_ref().unwrap().path)? as usize;
-        let mut required_free_space = preconditions.uncompressed_length;
 
         // Check if download and installation paths are on the same partition, if yes add download file size to required
         if metadata(&self.config.downloader.path)?.dev()
