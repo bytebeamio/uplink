@@ -141,9 +141,9 @@ impl Network {
     /// Update metrics values for network usage over time
     fn update(&mut self, data: &NetworkData, timestamp: u64, sequence: u32) {
         let update_period = self.timer.elapsed().as_secs_f64();
-        // TODO: check if these calculations are correct
-        self.incoming_data_rate = data.total_received() as f64 / update_period;
-        self.outgoing_data_rate = data.total_transmitted() as f64 / update_period;
+        self.timer = Instant::now();
+        self.incoming_data_rate = data.received() as f64 / update_period;
+        self.outgoing_data_rate = data.transmitted() as f64 / update_period;
         self.timestamp = timestamp;
         self.sequence = sequence;
     }
@@ -473,6 +473,7 @@ impl StatCollector {
         let mut sys = sysinfo::System::new();
         sys.refresh_disks_list();
         sys.refresh_networks_list();
+        sys.refresh_networks();
         sys.refresh_memory();
         sys.refresh_cpu();
         sys.refresh_components();
@@ -571,12 +572,12 @@ impl StatCollector {
 
     // Refresh network byte rate stats
     fn update_network_stats(&mut self) -> Result<(), Error> {
-        self.sys.refresh_networks();
         let timestamp = clock() as u64;
         for (net_name, net_data) in self.sys.networks() {
             let payload = self.networks.push(net_name.to_owned(), net_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
         }
+        self.sys.refresh_networks();
 
         Ok(())
     }

@@ -68,9 +68,7 @@ use std::{
 };
 use std::{io::Write, path::PathBuf};
 
-use crate::base::bridge::BridgeTx;
-use crate::base::DownloaderConfig;
-use crate::{Action, ActionResponse, Config};
+use crate::{base::bridge::BridgeTx, config::DownloaderConfig, Action, ActionResponse, Config};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -442,9 +440,9 @@ mod test {
     use std::{collections::HashMap, time::Duration};
 
     use super::*;
-    use crate::base::{
-        bridge::{DataTx, StatusTx},
-        ActionRoute, DownloaderConfig, MqttConfig,
+    use crate::{
+        base::bridge::{DataTx, StatusTx},
+        config::{ActionRoute, DownloaderConfig, MqttConfig},
     };
 
     const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
