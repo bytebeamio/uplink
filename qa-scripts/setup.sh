@@ -22,6 +22,7 @@ docker run --name simulator \
                 --add-host "$CONSOLED_DOMAIN:$NOXIOUS_IP" \
                 --add-host "firmware.$CONSOLED_DOMAIN:$NOXIOUS_IP" \
                 -e CONSOLED_DOMAIN=$CONSOLED_DOMAIN \
+                -e BYTEBEAM_TENANT_ID=$BYTEBEAM_TENANT_ID \
                 -e BYTEBEAM_API_KEY=$BYTEBEAM_API_KEY \
                 -it bytebeamio/simulator
 
