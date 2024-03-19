@@ -13,8 +13,6 @@ pub struct Action {
     // action id
     #[serde(alias = "id")]
     pub action_id: String,
-    // determines if action is a process
-    pub kind: String,
     // action name
     pub name: String,
     // action payload. json. can be args/payload. depends on the invoked command
