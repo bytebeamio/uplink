@@ -185,7 +185,13 @@ impl FileDownloader {
         loop {
             match self.download(req, &mut download).await {
                 Ok(_) => break,
-                Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
+                Err(Error::Reqwest(e)) => {
+                    let status = ActionResponse::progress(&self.action_id, "Download Failed", 0)
+                        .set_sequence(self.sequence())
+                        .add_error(e.to_string());
+                    self.bridge_tx.send_action_response(status).await;
+                    error!("Download failed: {e}");
+                }
                 Err(e) => return Err(e),
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
