@@ -185,7 +185,7 @@ impl FileDownloader {
         loop {
             match self.download(req, &mut download).await {
                 Ok(_) => break,
-                Err(Error::Reqwest(e)) => error!("Download failed: {e}"),
+                Err(Error::Reqwest(e)) if !e.is_status() => error!("Download failed: {e}"),
                 Err(e) => return Err(e),
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
