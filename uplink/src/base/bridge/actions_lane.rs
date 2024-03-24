@@ -1,6 +1,5 @@
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info, warn};
-use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio::time::{self, interval, Instant, Sleep};
 
@@ -254,7 +253,7 @@ impl ActionsBridge {
         path.push("current_action");
 
         if path.is_file() {
-            let current_action = CurrentAction::read_from_disk(path)?;
+            let current_action = CurrentAction::read_from_disk(path, &self)?;
             info!("Loading saved action from persistence; action_id: {}", current_action.id);
             self.current_action = Some(current_action)
         }
@@ -262,12 +261,13 @@ impl ActionsBridge {
         Ok(())
     }
 
+    fn get_route(&self, name: &str) -> Result<&ActionRouter, Error> {
+        self.action_routes.get(name).ok_or_else(|| Error::NoRoute(name.to_owned()))
+    }
+
     /// Handle received actions
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
-        let route = self
-            .action_routes
-            .get(&action.name)
-            .ok_or_else(|| Error::NoRoute(action.name.clone()))?;
+        let route = self.get_route(&action.name)?;
 
         let deadline = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
         // current action left unchanged in case of new tunshell action
@@ -369,13 +369,6 @@ impl ActionsBridge {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct SaveAction {
-    pub id: String,
-    pub action: Action,
-    pub timeout: Duration,
-}
-
 struct CurrentAction {
     pub id: String,
     pub action: Action,
@@ -392,24 +385,21 @@ impl CurrentAction {
     }
 
     pub fn write_to_disk(self, path: PathBuf) -> Result<(), Error> {
-        let timeout = self.timeout.as_ref().deadline() - Instant::now();
-        let save_action = SaveAction { id: self.id, action: self.action, timeout };
-        let json = serde_json::to_string(&save_action)?;
+        let json = serde_json::to_string(&self.action)?;
         fs::write(path, json)?;
 
         Ok(())
     }
 
-    pub fn read_from_disk(path: PathBuf) -> Result<Self, Error> {
+    pub fn read_from_disk(path: PathBuf, actions_bridge: &ActionsBridge) -> Result<Self, Error> {
         let read = fs::read(&path)?;
-        let json: SaveAction = serde_json::from_slice(&read)?;
+        let action: Action = serde_json::from_slice(&read)?;
         fs::remove_file(path)?;
 
-        Ok(CurrentAction {
-            id: json.id,
-            action: json.action,
-            timeout: Box::pin(time::sleep(json.timeout)),
-        })
+        let action_route = actions_bridge.get_route(&action.name)?;
+        let deadline = Instant::now() + action_route.duration;
+
+        Ok(CurrentAction::new(action, deadline))
     }
 }
 
