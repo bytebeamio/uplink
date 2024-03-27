@@ -61,7 +61,7 @@ use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 use base::CtrlTx;
 use collector::device_shadow::DeviceShadow;
-use collector::downloader::FileDownloader;
+use collector::downloader::{CtrlTx as DownloaderCtrlTx, FileDownloader};
 use collector::installer::OTAInstaller;
 #[cfg(target_os = "linux")]
 use collector::journalctl::JournalCtl;
@@ -130,7 +130,7 @@ impl Uplink {
         )
     }
 
-    pub fn spawn(&mut self, bridge: Bridge) -> Result<CtrlTx, Error> {
+    pub fn spawn(&mut self, mut bridge: Bridge) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
         let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
 
@@ -145,6 +145,17 @@ impl Uplink {
             self.serializer_metrics_tx(),
         )?;
         let ctrl_serializer = serializer.ctrl_tx();
+
+        let (ctrl_tx, ctrl_rx) = bounded(1);
+        let ctrl_downloader = DownloaderCtrlTx { inner: ctrl_tx };
+
+        // Downloader thread if configured
+        if !self.config.downloader.actions.is_empty() {
+            let actions_rx = bridge.register_action_routes(&self.config.downloader.actions)?;
+            let file_downloader =
+                FileDownloader::new(self.config.clone(), actions_rx, bridge.bridge_tx(), ctrl_rx)?;
+            spawn_named_thread("File Downloader", || file_downloader.start());
+        }
 
         // Serializer thread to handle network conditions state machine
         // and send data to mqtt thread
@@ -219,6 +230,7 @@ impl Uplink {
             data_lane: ctrl_data_lane,
             mqtt: ctrl_mqtt,
             serializer: ctrl_serializer,
+            downloader: ctrl_downloader,
         })
     }
 
@@ -230,13 +242,6 @@ impl Uplink {
         let actions_rx = bridge.register_action_route(route)?;
         let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
         spawn_named_thread("Tunshell Client", move || tunshell_client.start());
-
-        if !self.config.downloader.actions.is_empty() {
-            let actions_rx = bridge.register_action_routes(&self.config.downloader.actions)?;
-            let file_downloader =
-                FileDownloader::new(self.config.clone(), actions_rx, bridge_tx.clone())?;
-            spawn_named_thread("File Downloader", || file_downloader.start());
-        }
 
         let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
         spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
