@@ -229,6 +229,15 @@ impl FileDownloader {
             }
         }
 
+        state.current.meta.verify_checksum()?;
+        info!("Firmware downloaded successfully");
+
+        let mut action = state.current.action;
+        action.payload = serde_json::to_string(&state.current.meta)?;
+        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action))
+            .set_sequence(self.sequence());
+        self.bridge_tx.send_action_response(status).await;
+
         Ok(())
     }
 
@@ -261,15 +270,6 @@ impl FileDownloader {
                 }
             }
         }
-
-        state.current.meta.verify_checksum()?;
-        info!("Firmware downloaded successfully");
-
-        let mut action = state.current.action.clone();
-        action.payload = serde_json::to_string(&state.current.meta)?;
-        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action))
-            .set_sequence(self.sequence());
-        self.bridge_tx.send_action_response(status).await;
 
         Ok(())
     }
