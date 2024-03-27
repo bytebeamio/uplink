@@ -161,7 +161,7 @@ impl FileDownloader {
             };
             self.action_id = action.action_id.clone();
 
-            let download = match DownloadState::prepare(action, &self.config).await {
+            let state = match DownloadState::prepare(action, &self.config).await {
                 Ok(d) => d,
                 Err(e) => {
                     self.forward_error(e).await;
@@ -172,7 +172,7 @@ impl FileDownloader {
             // Update action status for process initiated
             self.forward_progress(0).await;
 
-            if let Err(e) = self.download(download).await {
+            if let Err(e) = self.download(state).await {
                 self.forward_error(e).await;
             }
         }
@@ -180,7 +180,7 @@ impl FileDownloader {
 
     // reloads a download if it wasn't completed during the previous run of uplink
     async fn reload(&mut self) {
-        let download = match DownloadState::load(&self.config) {
+        let state = match DownloadState::load(&self.config) {
             Ok(s) => s,
             Err(Error::NoSave) => return,
             Err(e) => {
@@ -189,7 +189,7 @@ impl FileDownloader {
             }
         };
 
-        if let Err(e) = self.download(download).await {
+        if let Err(e) = self.download(state).await {
             self.forward_error(e).await;
         }
     }
@@ -209,12 +209,12 @@ impl FileDownloader {
     }
 
     // Accepts `DownloadState`, sets a timeout for the action, saves action for restart
-    async fn download(&mut self, mut download: DownloadState) -> Result<(), Error> {
+    async fn download(&mut self, mut state: DownloadState) -> Result<(), Error> {
         let shutdown_rx = self.shutdown_rx.clone();
-        let deadline = *download.current.action.deadline.as_ref().unwrap();
+        let deadline = *state.current.action.deadline.as_ref().unwrap();
 
         select! {
-            o = timeout_at(deadline, self.continuous_retry(&mut download)) => {
+            o = timeout_at(deadline, self.continuous_retry(&mut state)) => {
                 // NOTE: if download has timedout don't do anything
                 match o {
                     Ok(r) => r?,
@@ -223,7 +223,7 @@ impl FileDownloader {
             }
 
             _ = shutdown_rx.recv_async() => {
-                if let Err(e) = download.save(&self.config) {
+                if let Err(e) = state.save(&self.config) {
                     error!("Error saving current_download: {e}");
                 }
             }
@@ -233,10 +233,10 @@ impl FileDownloader {
     }
 
     // A download must be retried with Range header when HTTP/reqwest errors are faced
-    async fn continuous_retry(&mut self, download: &mut DownloadState) -> Result<(), Error> {
+    async fn continuous_retry(&mut self, state: &mut DownloadState) -> Result<(), Error> {
         'outer: loop {
-            let mut req = self.client.get(download.url());
-            if let Some(range) = download.retry_range() {
+            let mut req = self.client.get(state.url());
+            if let Some(range) = state.retry_range() {
                 req = req.header("Range", &range);
                 warn!("Retrying download; Continuing to download file from: {range}");
             }
@@ -256,17 +256,17 @@ impl FileDownloader {
                         continue 'outer;
                     }
                 };
-                if let Some(percentage) = download.write_bytes(&chunk)? {
+                if let Some(percentage) = state.write_bytes(&chunk)? {
                     self.forward_progress(percentage).await;
                 }
             }
         }
 
-        download.current.meta.verify_checksum()?;
+        state.current.meta.verify_checksum()?;
         info!("Firmware downloaded successfully");
 
-        let mut action = download.current.action.clone();
-        action.payload = serde_json::to_string(&download.current.meta)?;
+        let mut action = state.current.action.clone();
+        action.payload = serde_json::to_string(&state.current.meta)?;
         let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action))
             .set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
