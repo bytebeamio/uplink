@@ -512,7 +512,6 @@ mod test {
         expected_forward.download_path = Some(downloader_path);
         let download_action = Action {
             action_id: "1".to_string(),
-            kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
             deadline: Some(Instant::now() + Duration::from_secs(60)),
@@ -573,7 +572,6 @@ mod test {
         };
         let correct_action = Action {
             action_id: "1".to_string(),
-            kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(correct_update).to_string(),
             deadline: Some(Instant::now() + Duration::from_secs(100)),
@@ -612,7 +610,6 @@ mod test {
         };
         let wrong_action = Action {
             action_id: "1".to_string(),
-            kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(wrong_update).to_string(),
             deadline: Some(Instant::now() + Duration::from_secs(100)),
