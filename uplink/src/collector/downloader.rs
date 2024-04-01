@@ -185,7 +185,7 @@ impl FileDownloader {
         loop {
             match self.download(req, &mut download).await {
                 Ok(_) => break,
-                Err(Error::Reqwest(e)) => {
+                Err(Error::Reqwest(e)) if !e.is_status() => {
                     let status = ActionResponse::progress(&self.action_id, "Download Failed", 0)
                         .set_sequence(self.sequence())
                         .add_error(e.to_string());
