@@ -233,7 +233,7 @@ impl FileDownloader {
             u => u,
         };
 
-        self.check_disk_size(&update)?;
+        check_disk_size(&self.config, &update)?;
 
         let url = update.url.clone();
 
@@ -267,20 +267,6 @@ impl FileDownloader {
 
         let status = status.set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
-
-        Ok(())
-    }
-
-    fn check_disk_size(&mut self, download: &DownloadFile) -> Result<(), Error> {
-        let disk_free_space = fs2::free_space(&self.config.path)? as usize;
-
-        let req_size = human_bytes(download.content_length as f64);
-        let free_size = human_bytes(disk_free_space as f64);
-        debug!("Download requires {req_size}; Disk free space is {free_size}");
-
-        if download.content_length > disk_free_space {
-            return Err(Error::InsufficientDisk(free_size));
-        }
 
         Ok(())
     }
@@ -348,6 +334,20 @@ fn create_file(download_path: &PathBuf, file_name: &str) -> Result<(File, PathBu
     file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666))?;
 
     Ok((file, file_path))
+}
+
+fn check_disk_size(config: &DownloaderConfig, download: &DownloadFile) -> Result<(), Error> {
+    let disk_free_space = fs2::free_space(&config.path)? as usize;
+
+    let req_size = human_bytes(download.content_length as f64);
+    let free_size = human_bytes(disk_free_space as f64);
+    debug!("Download requires {req_size}; Disk free space is {free_size}");
+
+    if download.content_length > disk_free_space {
+        return Err(Error::InsufficientDisk(free_size));
+    }
+
+    Ok(())
 }
 
 /// Expected JSON format of data contained in the [`payload`] of a download file [`Action`]
