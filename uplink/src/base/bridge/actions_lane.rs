@@ -560,7 +560,6 @@ mod tests {
 
         let action_1 = Action {
             action_id: "1".to_string(),
-            kind: "test".to_string(),
             name: "route_1".to_string(),
             payload: "test".to_string(),
             deadline: None,
@@ -584,7 +583,6 @@ mod tests {
 
         let action_2 = Action {
             action_id: "2".to_string(),
-            kind: "test".to_string(),
             name: "route_2".to_string(),
             payload: "test".to_string(),
             deadline: None,
@@ -628,7 +626,6 @@ mod tests {
 
         let action_1 = Action {
             action_id: "1".to_string(),
-            kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
@@ -643,7 +640,6 @@ mod tests {
 
         let action_2 = Action {
             action_id: "2".to_string(),
-            kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
@@ -684,7 +680,6 @@ mod tests {
 
         let action = Action {
             action_id: "1".to_string(),
-            kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
@@ -749,7 +744,6 @@ mod tests {
 
         let action = Action {
             action_id: "1".to_string(),
-            kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
@@ -819,7 +813,6 @@ mod tests {
 
         let action = Action {
             action_id: "1".to_string(),
-            kind: "tunshell".to_string(),
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
             deadline: None,
@@ -830,7 +823,6 @@ mod tests {
 
         let action = Action {
             action_id: "2".to_string(),
-            kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
@@ -910,7 +902,6 @@ mod tests {
 
         let action = Action {
             action_id: "1".to_string(),
-            kind: "test".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
@@ -921,7 +912,6 @@ mod tests {
 
         let action = Action {
             action_id: "2".to_string(),
-            kind: "tunshell".to_string(),
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
             deadline: None,

@@ -176,7 +176,6 @@ mod tests {
         actions_tx
             .send(Action {
                 action_id: "1".to_string(),
-                kind: "1".to_string(),
                 name: "test".to_string(),
                 payload: "".to_string(),
                 deadline: None,
@@ -200,7 +199,6 @@ mod tests {
         actions_tx
             .send(Action {
                 action_id: "1".to_string(),
-                kind: "1".to_string(),
                 name: "test".to_string(),
                 payload: "{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}"
                     .to_string(),

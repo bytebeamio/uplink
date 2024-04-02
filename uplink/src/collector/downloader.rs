@@ -203,8 +203,8 @@ impl FileDownloader {
 
     // Forward progress as action response to bridge
     async fn forward_progress(&mut self, progress: u8) {
-        let status = ActionResponse::progress(&self.action_id, "Downloading", progress);
-        let status = status.set_sequence(self.sequence());
+        let status = ActionResponse::progress(&self.action_id, "Downloading", progress)
+            .set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
     }
 
@@ -214,13 +214,11 @@ impl FileDownloader {
         let deadline = *state.current.action.deadline.as_ref().unwrap();
 
         select! {
-            o = timeout_at(deadline, self.continuous_retry(&mut state)) => {
-                // NOTE: if download has timedout don't do anything
-                match o {
-                    Ok(r) => r?,
-                    Err(_) => error!("Last download has timedout"),
-                }
-            }
+            // NOTE: if download has timedout don't do anything
+            o = timeout_at(deadline, self.continuous_retry(&mut state)) => match o {
+                Ok(r) => r?,
+                Err(_) => error!("Last download has timedout"),
+            },
 
             _ = shutdown_rx.recv_async() => {
                 if let Err(e) = state.save(&self.config) {
@@ -259,11 +257,17 @@ impl FileDownloader {
                 };
                 let chunk = match item {
                     Ok(c) => c,
-                    Err(e) => {
+                    Err(e) if !e.is_status() => {
+                        let status =
+                            ActionResponse::progress(&self.action_id, "Download Failed", 0)
+                                .set_sequence(self.sequence())
+                                .add_error(e.to_string());
+                        self.bridge_tx.send_action_response(status).await;
                         error!("Download failed: {e}");
                         tokio::time::sleep(Duration::from_secs(1)).await;
                         continue 'outer;
                     }
+                    Err(e) => return Err(Error::Reqwest(e)),
                 };
                 if let Some(percentage) = state.write_bytes(&chunk)? {
                     self.forward_progress(percentage).await;
@@ -607,7 +611,6 @@ mod test {
         expected_forward.download_path = Some(downloader_path);
         let download_action = Action {
             action_id: "1".to_string(),
-            kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
             deadline: Some(Instant::now() + Duration::from_secs(60)),
@@ -670,7 +673,6 @@ mod test {
         };
         let correct_action = Action {
             action_id: "1".to_string(),
-            kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(correct_update).to_string(),
             deadline: Some(Instant::now() + Duration::from_secs(100)),
@@ -709,7 +711,6 @@ mod test {
         };
         let wrong_action = Action {
             action_id: "1".to_string(),
-            kind: "firmware_update".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(wrong_update).to_string(),
             deadline: Some(Instant::now() + Duration::from_secs(100)),
