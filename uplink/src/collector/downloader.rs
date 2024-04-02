@@ -216,7 +216,7 @@ impl FileDownloader {
         download_path.push(&action.name);
 
         #[cfg(unix)]
-        self.create_dirs_with_perms(
+        create_dirs_with_perms(
             download_path.as_path(),
             std::os::unix::fs::PermissionsExt::from_mode(0o777),
         )?;
@@ -238,7 +238,7 @@ impl FileDownloader {
         let url = update.url.clone();
 
         // Create file to actually download into
-        let (file, file_path) = self.create_file(&download_path, &update.file_name)?;
+        let (file, file_path) = create_file(&download_path, &update.file_name)?;
 
         // Retry downloading upto 3 times in case of connectivity issues
         // TODO: Error out for 1XX/3XX responses
@@ -285,44 +285,6 @@ impl FileDownloader {
         Ok(())
     }
 
-    #[cfg(unix)]
-    /// Custom create_dir_all which sets permissions on each created directory, only works on unix
-    fn create_dirs_with_perms(&self, path: &Path, perms: Permissions) -> std::io::Result<()> {
-        let mut current_path = PathBuf::new();
-
-        for component in path.components() {
-            current_path.push(component);
-
-            if !current_path.exists() {
-                create_dir(&current_path)?;
-                set_permissions(&current_path, perms.clone())?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Creates file to download into
-    fn create_file(
-        &self,
-        download_path: &PathBuf,
-        file_name: &str,
-    ) -> Result<(File, PathBuf), Error> {
-        let mut file_path = download_path.to_owned();
-        file_path.push(file_name);
-        // NOTE: if file_path is occupied by a directory due to previous working of uplink, remove it
-        if let Ok(f) = metadata(&file_path) {
-            if f.is_dir() {
-                remove_dir_all(&file_path)?;
-            }
-        }
-        let file = File::create(&file_path)?;
-        #[cfg(unix)]
-        file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666))?;
-
-        Ok((file, file_path))
-    }
-
     /// Downloads from server and stores into file
     async fn download(
         &mut self,
@@ -352,6 +314,40 @@ impl FileDownloader {
         self.sequence += 1;
         self.sequence
     }
+}
+
+#[cfg(unix)]
+/// Custom create_dir_all which sets permissions on each created directory, only works on unix
+fn create_dirs_with_perms(path: &Path, perms: Permissions) -> std::io::Result<()> {
+    let mut current_path = PathBuf::new();
+
+    for component in path.components() {
+        current_path.push(component);
+
+        if !current_path.exists() {
+            create_dir(&current_path)?;
+            set_permissions(&current_path, perms.clone())?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Creates file to download into
+fn create_file(download_path: &PathBuf, file_name: &str) -> Result<(File, PathBuf), Error> {
+    let mut file_path = download_path.to_owned();
+    file_path.push(file_name);
+    // NOTE: if file_path is occupied by a directory due to previous working of uplink, remove it
+    if let Ok(f) = metadata(&file_path) {
+        if f.is_dir() {
+            remove_dir_all(&file_path)?;
+        }
+    }
+    let file = File::create(&file_path)?;
+    #[cfg(unix)]
+    file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666))?;
+
+    Ok((file, file_path))
 }
 
 /// Expected JSON format of data contained in the [`payload`] of a download file [`Action`]
