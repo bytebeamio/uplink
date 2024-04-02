@@ -160,9 +160,8 @@ impl FileDownloader {
                 }
             };
             self.action_id = action.action_id.clone();
-
-            let state = match DownloadState::prepare(action, &self.config).await {
-                Ok(d) => d,
+            let mut state = match DownloadState::new(action, &self.config) {
+                Ok(s) => s,
                 Err(e) => {
                     self.forward_error(e).await;
                     continue;
@@ -170,17 +169,25 @@ impl FileDownloader {
             };
 
             // Update action status for process initiated
-            self.forward_progress(0).await;
+            let status = ActionResponse::progress(&self.action_id, "Downloading", 0)
+                .set_sequence(self.sequence());
+            self.bridge_tx.send_action_response(status).await;
 
-            if let Err(e) = self.download(state).await {
-                self.forward_error(e).await;
+            if let Err(e) = self.download(&mut state).await {
+                self.forward_error(e).await
             }
+
+            // Forward updated action as part of response
+            let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
+            let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action))
+                .set_sequence(self.sequence());
+            self.bridge_tx.send_action_response(status).await;
         }
     }
 
     // reloads a download if it wasn't completed during the previous run of uplink
     async fn reload(&mut self) {
-        let state = match DownloadState::load(&self.config) {
+        let mut state = match DownloadState::load(&self.config) {
             Ok(s) => s,
             Err(Error::NoSave) => return,
             Err(e) => {
@@ -189,34 +196,30 @@ impl FileDownloader {
             }
         };
         self.action_id = state.current.action.action_id.clone();
-        
-        if let Err(e) = self.download(state).await {
+
+        if let Err(e) = self.download(&mut state).await {
             self.forward_error(e).await;
         }
-    }
 
-    // Forward errors as action response to bridge
-    async fn forward_error(&mut self, err: Error) {
-        let status =
-            ActionResponse::failure(&self.action_id, err.to_string()).set_sequence(self.sequence());
-        self.bridge_tx.send_action_response(status).await;
-    }
-
-    // Forward progress as action response to bridge
-    async fn forward_progress(&mut self, progress: u8) {
-        let status = ActionResponse::progress(&self.action_id, "Downloading", progress)
+        // Forward updated action as part of response
+        let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
+        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action))
             .set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
     }
-
-    // Accepts `DownloadState`, sets a timeout for the action, saves action for restart
-    async fn download(&mut self, mut state: DownloadState) -> Result<(), Error> {
+    // Accepts `DownloadState`, sets a timeout for the action
+    async fn download(&mut self, state: &mut DownloadState) -> Result<(), Error> {
         let shutdown_rx = self.shutdown_rx.clone();
-        let deadline = *state.current.action.deadline.as_ref().unwrap();
-
+        let deadline = match &state.current.action.deadline {
+            Some(d) => *d,
+            _ => {
+                error!("Unconfigured deadline: {}", state.current.action.name);
+                return Ok(());
+            }
+        };
         select! {
-            // NOTE: if download has timedout don't do anything
-            o = timeout_at(deadline, self.continuous_retry(&mut state)) => match o {
+            // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
+            o = timeout_at(deadline, self.continuous_retry(state)) => match o {
                 Ok(r) => r?,
                 Err(_) => error!("Last download has timedout"),
             },
@@ -226,16 +229,12 @@ impl FileDownloader {
                     error!("Error saving current_download: {e}");
                 }
             }
+
         }
 
         state.current.meta.verify_checksum()?;
-        info!("Firmware downloaded successfully");
-
-        let mut action = state.current.action;
-        action.payload = serde_json::to_string(&state.current.meta)?;
-        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action))
-            .set_sequence(self.sequence());
-        self.bridge_tx.send_action_response(status).await;
+        // Update Action payload with `download_path`, i.e. downloaded file's location in fs
+        state.current.action.payload = serde_json::to_string(&state.current.meta)?;
 
         Ok(())
     }
@@ -243,21 +242,18 @@ impl FileDownloader {
     // A download must be retried with Range header when HTTP/reqwest errors are faced
     async fn continuous_retry(&mut self, state: &mut DownloadState) -> Result<(), Error> {
         'outer: loop {
-            let mut req = self.client.get(state.url());
+            let mut req = self.client.get(&state.current.meta.url);
             if let Some(range) = state.retry_range() {
-                req = req.header("Range", &range);
                 warn!("Retrying download; Continuing to download file from: {range}");
+                req = req.header("Range", range);
             }
-
             let mut stream = req.send().await?.error_for_status()?.bytes_stream();
+
             // Download and store to disk by streaming as chunks
-            loop {
-                let item = match stream.next().await {
-                    Some(item) => item,
-                    _ => break 'outer, // NOTE: because of https://rust-lang.github.io/rust-clippy/master/index.html#/never_loop
-                };
+            while let Some(item) = stream.next().await {
                 let chunk = match item {
                     Ok(c) => c,
+                    // Retry non-status errors
                     Err(e) if !e.is_status() => {
                         let status =
                             ActionResponse::progress(&self.action_id, "Download Failed", 0)
@@ -265,38 +261,38 @@ impl FileDownloader {
                                 .add_error(e.to_string());
                         self.bridge_tx.send_action_response(status).await;
                         error!("Download failed: {e}");
+                        // Retry after wait
                         tokio::time::sleep(Duration::from_secs(1)).await;
                         continue 'outer;
                     }
-                    Err(e) => return Err(Error::Reqwest(e)),
+                    Err(e) => return Err(e.into()),
                 };
                 if let Some(percentage) = state.write_bytes(&chunk)? {
-                    self.forward_progress(percentage).await;
+                    let status =
+                        ActionResponse::progress(&self.action_id, "Downloading", percentage);
+                    let status = status.set_sequence(self.sequence());
+                    self.bridge_tx.send_action_response(status).await;
                 }
             }
+
+            info!("Firmware downloaded successfully");
+            break;
         }
 
         Ok(())
+    }
+
+    // Forward errors as action response to bridge
+    async fn forward_error(&mut self, err: Error) {
+        let status =
+            ActionResponse::failure(&self.action_id, err.to_string()).set_sequence(self.sequence());
+        self.bridge_tx.send_action_response(status).await;
     }
 
     fn sequence(&mut self) -> u32 {
         self.sequence += 1;
         self.sequence
     }
-}
-
-fn check_disk_size(download: &DownloadFile, config: &DownloaderConfig) -> Result<(), Error> {
-    let disk_free_space = fs2::free_space(&config.path)? as usize;
-
-    let req_size = human_bytes(download.content_length as f64);
-    let free_size = human_bytes(disk_free_space as f64);
-    debug!("Download requires {req_size}; Disk free space is {free_size}");
-
-    if download.content_length > disk_free_space {
-        return Err(Error::InsufficientDisk(free_size));
-    }
-
-    Ok(())
 }
 
 #[cfg(unix)]
@@ -311,6 +307,37 @@ fn create_dirs_with_perms(path: &Path, perms: Permissions) -> std::io::Result<()
             create_dir(&current_path)?;
             set_permissions(&current_path, perms.clone())?;
         }
+    }
+
+    Ok(())
+}
+
+/// Creates file to download into
+fn create_file(download_path: &PathBuf, file_name: &str) -> Result<(File, PathBuf), Error> {
+    let mut file_path = download_path.to_owned();
+    file_path.push(file_name);
+    // NOTE: if file_path is occupied by a directory due to previous working of uplink, remove it
+    if let Ok(f) = metadata(&file_path) {
+        if f.is_dir() {
+            remove_dir_all(&file_path)?;
+        }
+    }
+    let file = File::create(&file_path)?;
+    #[cfg(unix)]
+    file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666))?;
+
+    Ok((file, file_path))
+}
+
+fn check_disk_size(config: &DownloaderConfig, download: &DownloadFile) -> Result<(), Error> {
+    let disk_free_space = fs2::free_space(&config.path)? as usize;
+
+    let req_size = human_bytes(download.content_length as f64);
+    let free_size = human_bytes(disk_free_space as f64);
+    debug!("Download requires {req_size}; Disk free space is {free_size}");
+
+    if download.content_length > disk_free_space {
+        return Err(Error::InsufficientDisk(free_size));
     }
 
     Ok(())
@@ -420,19 +447,19 @@ impl DownloadState {
         Some(format!("bytes={}-{}", self.bytes_written, self.current.meta.content_length))
     }
 
-    async fn prepare(action: Action, config: &DownloaderConfig) -> Result<Self, Error> {
+    fn new(action: Action, config: &DownloaderConfig) -> Result<Self, Error> {
         // Ensure that directory for downloading file into, exists
-        let mut download_path = config.path.clone();
-        download_path.push(&action.name);
+        let mut path = config.path.clone();
+        path.push(&action.name);
 
         #[cfg(unix)]
         create_dirs_with_perms(
-            download_path.as_path(),
+            path.as_path(),
             std::os::unix::fs::PermissionsExt::from_mode(0o777),
         )?;
 
         #[cfg(not(unix))]
-        std::fs::create_dir_all(&download_path)?;
+        std::fs::create_dir_all(&path)?;
 
         // Extract url information from action payload
         let mut meta = match serde_json::from_str::<DownloadFile>(&action.payload)? {
@@ -443,27 +470,17 @@ impl DownloadState {
             u => u,
         };
 
-        check_disk_size(&meta, config)?;
+        check_disk_size(config, &meta)?;
+
+        let url = meta.url.clone();
 
         // Create file to actually download into
-        let mut file_path = download_path.to_owned();
-        file_path.push(&meta.file_name);
-
-        // NOTE: if file_path is occupied by a directory due to previous working of uplink, remove it
-        if let Ok(f) = metadata(&file_path) {
-            if f.is_dir() {
-                remove_dir_all(&file_path)?;
-            }
-        }
-        let file = File::create(&file_path)?;
-        #[cfg(unix)]
-        file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666))?;
-
+        let (file, file_path) = create_file(&path, &meta.file_name)?;
         // Retry downloading upto 3 times in case of connectivity issues
         // TODO: Error out for 1XX/3XX responses
         info!(
             "Downloading from {} into {}; size = {}",
-            meta.url,
+            url,
             file_path.display(),
             human_bytes(meta.content_length as f64)
         );
@@ -507,10 +524,6 @@ impl DownloadState {
 
             Ok(None)
         }
-    }
-
-    fn url(&self) -> &str {
-        &self.current.meta.url
     }
 }
 
