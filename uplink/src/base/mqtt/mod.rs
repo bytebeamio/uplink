@@ -169,19 +169,26 @@ impl Mqtt {
                     match event {
                         Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
                             info!("Connected to broker. Session present = {}", connack.session_present);
-                            let subscription = self.config.actions_subscription.clone();
-                            let client = self.client();
+                            // Subscribe to both old and new action topics:
+                            // - /tenants/{tenant_id}/devices/{device_id}/actions
+                            // - /tenants/{tenant_id}/devices/{device_id}/actions/+
+                            let base_topic = self.config.actions_subscription.clone();
+                            let on_new_topic = format!("{base_topic}/+");
+                            let subscriptions = vec![base_topic, on_new_topic];
 
                             self.metrics.add_connection();
 
-                            // This can potentially block when client from other threads
-                            // have already filled the channel due to bad network. So we spawn
-                            task::spawn(async move {
-                                match client.subscribe(&subscription, QoS::AtLeastOnce).await {
-                                    Ok(..) => info!("Subscribe -> {:?}", subscription),
-                                    Err(e) => error!("Failed to send subscription. Error = {:?}", e),
-                                }
-                            });
+                            for subscription in subscriptions {
+                                let client = self.client();
+                                // This can potentially block when client from other threads
+                                // have already filled the channel due to bad network. So we spawn
+                                task::spawn(async move {
+                                    match client.subscribe(&subscription, QoS::AtLeastOnce).await {
+                                        Ok(..) => info!("Subscribe -> {:?}", subscription),
+                                        Err(e) => error!("Failed to send subscription. Error = {:?}", e),
+                                    }
+                                });
+                            }
                         }
                         Ok(Event::Incoming(Incoming::Publish(p))) => {
                             self.metrics.add_action();
@@ -238,12 +245,18 @@ impl Mqtt {
     }
 
     fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
-        if self.config.actions_subscription != publish.topic {
+        if !publish.topic.starts_with(&self.config.actions_subscription) {
             error!("Unsolicited publish on {}", publish.topic);
             return Ok(());
         }
 
-        let action: Action = serde_json::from_slice(&publish.payload)?;
+        let mut action: Action = serde_json::from_slice(&publish.payload)?;
+
+        if self.config.actions_subscription != publish.topic {
+            // Set a marker in recevied action for later use
+            action.on_new_topic = true;
+        }
+
         info!("Action = {:?}", action);
         self.native_actions_tx.try_send(action)?;
 

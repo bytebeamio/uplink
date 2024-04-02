@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio::time::{self, interval, Instant, Sleep};
 
-use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
@@ -57,7 +56,7 @@ pub struct ActionsBridge {
     action_redirections: HashMap<String, String>,
     /// Current action that is being processed
     current_action: Option<CurrentAction>,
-    parallel_actions: HashSet<String>,
+    parallel_actions: HashMap<String, Action>,
     ctrl_rx: Receiver<ActionBridgeShutdown>,
     ctrl_tx: Sender<ActionBridgeShutdown>,
     shutdown_handle: Sender<()>,
@@ -82,8 +81,11 @@ impl ActionsBridge {
         }
         action_status.batch_size = 1;
         streams_config.insert("action_status".to_owned(), action_status);
-        let mut streams = Streams::new(config.clone(), package_tx, metrics_tx);
+        let topic_template =
+            "/tenants/{tenant_id}/devices/{device_id}/action_status/{stream_name}".to_string();
+        let mut streams = Streams::new(config.clone(), package_tx, metrics_tx, topic_template);
         streams.config_streams(streams_config);
+        streams.max_buf_size = 1;
 
         Self {
             status_tx,
@@ -94,7 +96,7 @@ impl ActionsBridge {
             action_routes: HashMap::with_capacity(10),
             action_redirections,
             current_action: None,
-            parallel_actions: HashSet::new(),
+            parallel_actions: HashMap::new(),
             shutdown_handle,
             ctrl_rx,
             ctrl_tx,
@@ -272,7 +274,7 @@ impl ActionsBridge {
         let deadline = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
         // current action left unchanged in case of new tunshell action
         if action.name == TUNSHELL_ACTION {
-            self.parallel_actions.insert(action.action_id);
+            self.parallel_actions.insert(action.action_id.clone(), action);
             return Ok(());
         }
 
@@ -282,7 +284,7 @@ impl ActionsBridge {
     }
 
     async fn forward_action_response(&mut self, mut response: ActionResponse) {
-        if self.parallel_actions.contains(&response.action_id) {
+        if self.parallel_actions.contains_key(&response.action_id) {
             self.forward_parallel_action_response(response).await;
 
             return;
@@ -302,6 +304,8 @@ impl ActionsBridge {
         }
 
         info!("Action response = {:?}", response);
+        let action = &inflight_action.action;
+        response.with_action(action);
         self.streams.forward(response.clone()).await;
 
         if response.is_completed() || response.is_failed() {
@@ -321,7 +325,8 @@ impl ActionsBridge {
             if let Err(RedirectionError(action)) = self.redirect_action(action).await {
                 // NOTE: send success reponse for actions that don't have redirections configured
                 warn!("Action redirection is not configured for: {:?}", action);
-                let response = ActionResponse::success(&action.action_id);
+                let mut response = ActionResponse::success(&action.action_id);
+                response.with_action(&action);
                 self.streams.forward(response).await;
 
                 self.clear_current_action();
@@ -353,17 +358,19 @@ impl ActionsBridge {
         Ok(())
     }
 
-    async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
+    async fn forward_parallel_action_response(&mut self, mut response: ActionResponse) {
         info!("Action response = {:?}", response);
+        let action = self.parallel_actions.get(&response.action_id).unwrap();
+        response.with_action(action);
         if response.is_completed() || response.is_failed() {
             self.parallel_actions.remove(&response.action_id);
         }
-
         self.streams.forward(response).await;
     }
 
     async fn forward_action_error(&mut self, action: Action, error: Error) {
-        let response = ActionResponse::failure(&action.action_id, error.to_string());
+        let mut response = ActionResponse::failure(&action.action_id, error.to_string());
+        response.with_action(&action);
 
         self.streams.forward(response).await;
     }
@@ -563,6 +570,7 @@ mod tests {
             name: "route_1".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            on_new_topic: false,
         };
         actions_tx.send(action_1).unwrap();
 
@@ -586,6 +594,7 @@ mod tests {
             name: "route_2".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            on_new_topic: false,
         };
         actions_tx.send(action_2).unwrap();
 
@@ -629,6 +638,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            on_new_topic: false,
         };
         actions_tx.send(action_1).unwrap();
 
@@ -643,6 +653,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            on_new_topic: false,
         };
         actions_tx.send(action_2).unwrap();
 
@@ -683,6 +694,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            on_new_topic: false,
         };
         actions_tx.send(action).unwrap();
 
@@ -747,6 +759,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            on_new_topic: false,
         };
         actions_tx.send(action).unwrap();
 
@@ -816,6 +829,7 @@ mod tests {
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            on_new_topic: false,
         };
         actions_tx.send(action).unwrap();
 
@@ -826,6 +840,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            on_new_topic: false,
         };
         actions_tx.send(action).unwrap();
 
@@ -905,6 +920,7 @@ mod tests {
             name: "test".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            on_new_topic: false,
         };
         actions_tx.send(action).unwrap();
 
@@ -915,6 +931,7 @@ mod tests {
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
             deadline: None,
+            on_new_topic: false,
         };
         actions_tx.send(action).unwrap();
 

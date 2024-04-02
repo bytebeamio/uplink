@@ -179,6 +179,7 @@ mod tests {
                 name: "test".to_string(),
                 payload: "".to_string(),
                 deadline: None,
+                on_new_topic: false,
             })
             .unwrap();
 
@@ -203,6 +204,7 @@ mod tests {
                 payload: "{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}"
                     .to_string(),
                 deadline: None,
+                on_new_topic: false,
             })
             .unwrap();
 
