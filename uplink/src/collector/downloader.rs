@@ -176,14 +176,10 @@ impl FileDownloader {
     }
 
     // A download must be retried with Range header when HTTP/reqwest errors are faced
-    async fn continuous_retry(
-        &mut self,
-        url: &str,
-        mut download: DownloadState,
-    ) -> Result<(), Error> {
-        let mut req = self.client.get(url).send();
+    async fn continuous_retry(&mut self, state: &mut DownloadState) -> Result<(), Error> {
+        let mut req = self.client.get(&state.meta.url).send();
         loop {
-            match self.download(req, &mut download).await {
+            match self.download(req, state).await {
                 Ok(_) => break,
                 Err(Error::Reqwest(e)) if !e.is_status() => {
                     let status = ActionResponse::progress(&self.action_id, "Download Failed", 0)
@@ -196,76 +192,31 @@ impl FileDownloader {
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
 
-            let range = download.retry_range();
+            let range = state.retry_range();
             warn!("Retrying download; Continuing to download file from: {range}");
-            req = self.client.get(url).header("Range", range).send();
+            req = self.client.get(&state.meta.url).header("Range", range).send();
         }
 
         Ok(())
     }
 
     // Accepts a download `Action` and performs necessary data extraction to actually download the file
-    async fn run(&mut self, mut action: Action) -> Result<(), Error> {
+    async fn run(&mut self, action: Action) -> Result<(), Error> {
         // Update action status for process initiated
         let status = ActionResponse::progress(&self.action_id, "Downloading", 0);
         let status = status.set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
 
-        // Ensure that directory for downloading file into, exists
-        let mut download_path = self.config.path.clone();
-        download_path.push(&action.name);
-
-        #[cfg(unix)]
-        create_dirs_with_perms(
-            download_path.as_path(),
-            std::os::unix::fs::PermissionsExt::from_mode(0o777),
-        )?;
-
-        #[cfg(not(unix))]
-        std::fs::create_dir_all(&download_path)?;
-
-        // Extract url information from action payload
-        let mut update = match serde_json::from_str::<DownloadFile>(&action.payload)? {
-            DownloadFile { file_name, .. } if file_name.is_empty() => {
-                return Err(Error::EmptyFileName)
-            }
-            DownloadFile { content_length: 0, .. } => return Err(Error::EmptyFile),
-            u => u,
-        };
-
-        check_disk_size(&self.config, &update)?;
-
-        let url = update.url.clone();
-
-        // Create file to actually download into
-        let (file, file_path) = create_file(&download_path, &update.file_name)?;
-
-        // Retry downloading upto 3 times in case of connectivity issues
-        // TODO: Error out for 1XX/3XX responses
-        info!(
-            "Downloading from {} into {}; size = {}",
-            url,
-            file_path.display(),
-            human_bytes(update.content_length as f64)
-        );
-        let download = DownloadState {
-            file,
-            bytes_written: 0,
-            bytes_downloaded: 0,
-            percentage_downloaded: 0,
-            content_length: update.content_length,
-            start_instant: Instant::now(),
-        };
-        self.continuous_retry(&url, download).await?;
+        let mut state = DownloadState::new(action, &self.config)?;
+        self.continuous_retry(&mut state).await?;
 
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
-        update.insert_path(file_path.clone());
-        update.verify_checksum()?;
+        let DownloadState { meta, mut action, .. } = state;
+        meta.verify_checksum()?;
+        action.payload = serde_json::to_string(&meta)?;
 
-        action.payload = serde_json::to_string(&update)?;
-        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
-
-        let status = status.set_sequence(self.sequence());
+        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action))
+            .set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
 
         Ok(())
@@ -367,10 +318,6 @@ pub struct DownloadFile {
 }
 
 impl DownloadFile {
-    fn insert_path(&mut self, download_path: PathBuf) {
-        self.download_path = Some(download_path);
-    }
-
     fn verify_checksum(&self) -> Result<(), Error> {
         let Some(checksum) = &self.checksum else { return Ok(()) };
         let path = self.download_path.as_ref().expect("Downloader didn't set \"download_path\"");
@@ -390,23 +337,74 @@ impl DownloadFile {
 // A temporary structure to help us retry downloads
 // that failed after partial completion.
 struct DownloadState {
+    action: Action,
+    meta: DownloadFile,
     file: File,
     bytes_written: usize,
     bytes_downloaded: usize,
     percentage_downloaded: u8,
-    content_length: usize,
     start_instant: Instant,
 }
 
 impl DownloadState {
+    fn new(action: Action, config: &DownloaderConfig) -> Result<Self, Error> {
+        // Ensure that directory for downloading file into, exists
+        let mut path = config.path.clone();
+        path.push(&action.name);
+
+        #[cfg(unix)]
+        create_dirs_with_perms(
+            path.as_path(),
+            std::os::unix::fs::PermissionsExt::from_mode(0o777),
+        )?;
+
+        #[cfg(not(unix))]
+        std::fs::create_dir_all(&path)?;
+
+        // Extract url information from action payload
+        let mut meta = match serde_json::from_str::<DownloadFile>(&action.payload)? {
+            DownloadFile { file_name, .. } if file_name.is_empty() => {
+                return Err(Error::EmptyFileName)
+            }
+            DownloadFile { content_length: 0, .. } => return Err(Error::EmptyFile),
+            u => u,
+        };
+
+        check_disk_size(config, &meta)?;
+
+        let url = meta.url.clone();
+
+        // Create file to actually download into
+        let (file, file_path) = create_file(&path, &meta.file_name)?;
+        // Retry downloading upto 3 times in case of connectivity issues
+        // TODO: Error out for 1XX/3XX responses
+        info!(
+            "Downloading from {} into {}; size = {}",
+            url,
+            file_path.display(),
+            human_bytes(meta.content_length as f64)
+        );
+        meta.download_path = Some(file_path);
+
+        Ok(DownloadState {
+            action,
+            meta,
+            file,
+            bytes_written: 0,
+            bytes_downloaded: 0,
+            percentage_downloaded: 0,
+            start_instant: Instant::now(),
+        })
+    }
+
     fn write_bytes(&mut self, buf: &[u8]) -> Result<Option<u8>, Error> {
         self.bytes_downloaded += buf.len();
         self.file.write_all(buf)?;
         self.bytes_written = self.bytes_downloaded;
-        let size = human_bytes(self.content_length as f64);
+        let size = human_bytes(self.meta.content_length as f64);
 
         // Calculate percentage on the basis of content_length
-        let factor = self.bytes_downloaded as f32 / self.content_length as f32;
+        let factor = self.bytes_downloaded as f32 / self.meta.content_length as f32;
         let percentage = (99.99 * factor) as u8;
 
         // NOTE: ensure lesser frequency of action responses, once every percentage points
@@ -430,7 +428,7 @@ impl DownloadState {
     }
 
     fn retry_range(&self) -> String {
-        format!("bytes={}-{}", self.bytes_written, self.content_length)
+        format!("bytes={}-{}", self.bytes_written, self.meta.content_length)
     }
 }
 
