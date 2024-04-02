@@ -49,10 +49,10 @@
 
 use bytes::BytesMut;
 use flume::Receiver;
-use futures_util::{Future, StreamExt};
+use futures_util::StreamExt;
 use human_bytes::human_bytes;
 use log::{debug, error, info, trace, warn};
-use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identity, Response};
+use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identity};
 use rsa::sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use tokio::time::{timeout_at, Instant};
@@ -177,24 +177,43 @@ impl FileDownloader {
 
     // A download must be retried with Range header when HTTP/reqwest errors are faced
     async fn continuous_retry(&mut self, state: &mut DownloadState) -> Result<(), Error> {
-        let mut req = self.client.get(&state.meta.url).send();
-        loop {
-            match self.download(req, state).await {
-                Ok(_) => break,
-                Err(Error::Reqwest(e)) if !e.is_status() => {
-                    let status = ActionResponse::progress(&self.action_id, "Download Failed", 0)
-                        .set_sequence(self.sequence())
-                        .add_error(e.to_string());
-                    self.bridge_tx.send_action_response(status).await;
-                    error!("Download failed: {e}");
-                }
-                Err(e) => return Err(e),
+        'outer: loop {
+            let mut req = self.client.get(&state.meta.url);
+            if let Some(range) = state.retry_range() {
+                warn!("Retrying download; Continuing to download file from: {range}");
+                req = self.client.get(&state.meta.url).header("Range", range);
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            let mut stream = req.send().await?.error_for_status()?.bytes_stream();
 
-            let range = state.retry_range();
-            warn!("Retrying download; Continuing to download file from: {range}");
-            req = self.client.get(&state.meta.url).header("Range", range).send();
+            // Download and store to disk by streaming as chunks
+            while let Some(item) = stream.next().await {
+                let chunk = match item {
+                    Ok(c) => c,
+                    Err(e) if !e.is_status() => {
+                        let status =
+                            ActionResponse::progress(&self.action_id, "Download Failed", 0)
+                                .set_sequence(self.sequence())
+                                .add_error(e.to_string());
+                        self.bridge_tx.send_action_response(status).await;
+                        error!("Download failed: {e}");
+                        // Retry after wait
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        continue 'outer;
+                    }
+                    Err(e) => return Err(e.into()),
+                };
+                if let Some(percentage) = state.write_bytes(&chunk)? {
+                    //TODO: Simplify progress by reusing action_id and state
+                    //TODO: let response = self.response.progress(percentage);??
+                    let status =
+                        ActionResponse::progress(&self.action_id, "Downloading", percentage);
+                    let status = status.set_sequence(self.sequence());
+                    self.bridge_tx.send_action_response(status).await;
+                }
+            }
+
+            info!("Firmware downloaded successfully");
+            break;
         }
 
         Ok(())
@@ -218,31 +237,6 @@ impl FileDownloader {
         let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action))
             .set_sequence(self.sequence());
         self.bridge_tx.send_action_response(status).await;
-
-        Ok(())
-    }
-
-    /// Downloads from server and stores into file
-    async fn download(
-        &mut self,
-        req: impl Future<Output = Result<Response, ReqwestError>>,
-        download: &mut DownloadState,
-    ) -> Result<(), Error> {
-        let mut stream = req.await?.error_for_status()?.bytes_stream();
-
-        // Download and store to disk by streaming as chunks
-        while let Some(item) = stream.next().await {
-            let chunk = item?;
-            if let Some(percentage) = download.write_bytes(&chunk)? {
-                //TODO: Simplify progress by reusing action_id and state
-                //TODO: let response = self.response.progress(percentage);??
-                let status = ActionResponse::progress(&self.action_id, "Downloading", percentage);
-                let status = status.set_sequence(self.sequence());
-                self.bridge_tx.send_action_response(status).await;
-            }
-        }
-
-        info!("Firmware downloaded successfully");
 
         Ok(())
     }
@@ -427,8 +421,12 @@ impl DownloadState {
         }
     }
 
-    fn retry_range(&self) -> String {
-        format!("bytes={}-{}", self.bytes_written, self.meta.content_length)
+    fn retry_range(&self) -> Option<String> {
+        if self.bytes_written == self.meta.content_length {
+            return None;
+        }
+
+        Some(format!("bytes={}-{}", self.bytes_written, self.meta.content_length))
     }
 }
 
