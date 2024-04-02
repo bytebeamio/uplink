@@ -188,7 +188,8 @@ impl FileDownloader {
                 return;
             }
         };
-
+        self.action_id = state.current.action.action_id.clone();
+        
         if let Err(e) = self.download(state).await {
             self.forward_error(e).await;
         }
