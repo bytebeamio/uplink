@@ -18,7 +18,7 @@ pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
 use uplink::config::{AppConfig, Config, StreamConfig, MAX_BATCH_SIZE};
-use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
+use uplink::{/*simulator,*/ spawn_named_thread, /*TcpJson,*/ Uplink};
 
 const DEFAULT_CONFIG: &str = r#"    
     [mqtt]
@@ -166,18 +166,18 @@ impl CommandLine {
             }
         }
 
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        if let Some(batch_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
-            let stream_config =
-                config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
-                    topic: format!(
-                        "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
-                    ),
-                    batch_size: 32,
-                    ..Default::default()
-                });
-            stream_config.batch_size = batch_size;
-        }
+        // #[cfg(any(target_os = "linux", target_os = "android"))]
+        // if let Some(batch_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+        //     let stream_config =
+        //         config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
+        //             topic: format!(
+        //                 "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+        //             ),
+        //             batch_size: 32,
+        //             ..Default::default()
+        //         });
+        //     stream_config.batch_size = batch_size;
+        // }
 
         config.actions_subscription = format!("/tenants/{tenant_id}/devices/{device_id}/actions");
 
@@ -298,38 +298,38 @@ fn main() -> Result<(), Error> {
 
     let config = Arc::new(config);
     let mut uplink = Uplink::new(config.clone())?;
-    let mut bridge = uplink.configure_bridge();
-    uplink.spawn_builtins(&mut bridge)?;
+    let bridge = uplink.configure_bridge();
+    // uplink.spawn_builtins(&mut bridge)?;
 
-    let bridge_tx = bridge.bridge_tx();
+    // let bridge_tx = bridge.bridge_tx();
 
-    let mut tcpapps = vec![];
-    for (app, cfg) in config.tcpapps.clone() {
-        let route_rx = if !cfg.actions.is_empty() {
-            let actions_rx = bridge.register_action_routes(&cfg.actions)?;
-            Some(actions_rx)
-        } else {
-            None
-        };
-        tcpapps.push(TcpJson::new(app, cfg, route_rx, bridge.bridge_tx()));
-    }
+    // let mut tcpapps = vec![];
+    // for (app, cfg) in config.tcpapps.clone() {
+    //     let route_rx = if !cfg.actions.is_empty() {
+    //         let actions_rx = bridge.register_action_routes(&cfg.actions)?;
+    //         Some(actions_rx)
+    //     } else {
+    //         None
+    //     };
+    //     tcpapps.push(TcpJson::new(app, cfg, route_rx, bridge.bridge_tx()));
+    // }
 
-    let simulator_actions = match &config.simulator {
-        Some(cfg) if !cfg.actions.is_empty() => {
-            let actions_rx = bridge.register_action_routes(&cfg.actions)?;
-            Some(actions_rx)
-        }
-        _ => None,
-    };
+    // let simulator_actions = match &config.simulator {
+    //     Some(cfg) if !cfg.actions.is_empty() => {
+    //         let actions_rx = bridge.register_action_routes(&cfg.actions)?;
+    //         Some(actions_rx)
+    //     }
+    //     _ => None,
+    // };
 
     let downloader_disable = Arc::new(Mutex::new(false));
     let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone())?;
 
-    if let Some(config) = config.simulator.clone() {
-        spawn_named_thread("Simulator", || {
-            simulator::start(config, bridge_tx, simulator_actions).unwrap();
-        });
-    }
+    // if let Some(config) = config.simulator.clone() {
+    //     spawn_named_thread("Simulator", || {
+    //         simulator::start(config, bridge_tx, simulator_actions).unwrap();
+    //     });
+    // }
 
     if config.console.enabled {
         let port = config.console.port;
@@ -347,13 +347,13 @@ fn main() -> Result<(), Error> {
         .unwrap();
 
     rt.block_on(async {
-        for app in tcpapps {
-            tokio::task::spawn(async move {
-                if let Err(e) = app.start().await {
-                    error!("App failed. Error = {:?}", e);
-                }
-            });
-        }
+        // for app in tcpapps {
+        //     tokio::task::spawn(async move {
+        //         if let Err(e) = app.start().await {
+        //             error!("App failed. Error = {:?}", e);
+        //         }
+        //     });
+        // }
 
         #[cfg(unix)]
         tokio::spawn(async move {

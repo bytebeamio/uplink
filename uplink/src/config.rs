@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
 
 pub use crate::base::bridge::stream::MAX_BATCH_SIZE;
-#[cfg(target_os = "linux")]
-use crate::collector::journalctl::JournalCtlConfig;
-#[cfg(target_os = "android")]
-use crate::collector::logcat::LogcatConfig;
+// #[cfg(target_os = "linux")]
+// use crate::collector::journalctl::JournalCtlConfig;
+// #[cfg(target_os = "android")]
+// use crate::collector::logcat::LogcatConfig;
 
 pub const DEFAULT_TIMEOUT: u64 = 60;
 
@@ -279,9 +279,9 @@ pub struct Config {
     pub action_redirections: HashMap<String, String>,
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
-    #[cfg(target_os = "linux")]
-    pub logging: Option<JournalCtlConfig>,
-    #[cfg(target_os = "android")]
-    pub logging: Option<LogcatConfig>,
+    // #[cfg(target_os = "linux")]
+    // pub logging: Option<JournalCtlConfig>,
+    // #[cfg(target_os = "android")]
+    // pub logging: Option<LogcatConfig>,
     pub precondition_checks: Option<PreconditionCheckerConfig>,
 }
