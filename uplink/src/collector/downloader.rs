@@ -175,7 +175,7 @@ impl FileDownloader {
         error!("Downloader thread stopped");
     }
 
-    // reloads a download if it wasn't completed during the previous run of uplink
+    // Loads a download left uncompleted during the previous run of uplink and continues it
     async fn reload(&mut self) {
         let mut state = match DownloadState::load(&self.config) {
             Ok(s) => s,
