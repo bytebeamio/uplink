@@ -228,18 +228,19 @@ impl FileDownloader {
                 return Err(Error::Cancelled);
             },
 
-            // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
-            o = timeout_at(deadline, self.continuous_retry(state)) => match o {
-                Ok(r) => r?,
-                Err(_) => error!("Last download has timedout"),
-            },
-
             _ = shutdown_rx.recv_async() => {
                 if let Err(e) = state.save(&self.config) {
                     error!("Error saving current_download: {e}");
                 }
-            }
 
+                return Ok(());
+            },
+
+            // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
+            o = timeout_at(deadline, self.continuous_retry(state)) => match o {
+                Ok(r) => r?,
+                Err(_) => error!("Last download has timedout"),
+            }
         }
 
         state.current.meta.verify_checksum()?;
