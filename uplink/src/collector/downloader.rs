@@ -94,6 +94,8 @@ pub enum Error {
     BadSave,
     #[error("Save file doesn't exist")]
     NoSave,
+    #[error("Download has been cancelled")]
+    Cancelled,
 }
 
 /// This struct contains the necessary components to download and store file as notified by a download file
@@ -222,6 +224,8 @@ impl FileDownloader {
 
                 trace!("Deleting partially downloaded file: {cancellation:?}");
                 state.clean()?;
+
+                return Err(Error::Cancelled);
             },
 
             // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries

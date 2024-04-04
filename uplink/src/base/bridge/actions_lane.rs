@@ -354,7 +354,12 @@ impl ActionsBridge {
         self.streams.forward(response.clone()).await;
 
         if response.is_completed() || response.is_failed() {
-            self.clear_current_action();
+            if let Some(CurrentAction { cancelled_by: Some(cancel_action), .. }) =
+                self.current_action.take()
+            {
+                let response = ActionResponse::success(&cancel_action.action_id);
+                self.streams.forward(response).await;
+            }
             return;
         }
 
