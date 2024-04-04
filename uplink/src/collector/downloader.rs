@@ -148,14 +148,7 @@ impl FileDownloader {
         self.reload().await;
 
         info!("Downloader thread is ready to receive download actions");
-        loop {
-            let action = match self.actions_rx.recv_async().await {
-                Ok(a) => a,
-                Err(e) => {
-                    error!("Downloader thread had to stop: {e}");
-                    break;
-                }
-            };
+        while let Ok(action) = self.actions_rx.recv_async().await {
             self.action_id = action.action_id.clone();
             let mut state = match DownloadState::new(action, &self.config) {
                 Ok(s) => s,
@@ -178,6 +171,8 @@ impl FileDownloader {
             let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
             self.bridge_tx.send_action_response(status).await;
         }
+
+        error!("Downloader thread stopped");
     }
 
     // reloads a download if it wasn't completed during the previous run of uplink
