@@ -269,16 +269,15 @@ impl ActionsBridge {
             .get(&action.name)
             .expect("Action shouldn't be in execution if it can't be routed!");
 
-        if !route.is_cancellable() {
-            // Ensure that action redirections for the action are turned off,
-            // action will be cancelled on next attempt to redirect
-            self.current_action.as_mut().unwrap().cancelled_by = Some(action);
+        // Ensure that action redirections for the action are turned off,
+        // action will be cancelled on next attempt to redirect
+        self.current_action.as_mut().unwrap().cancelled_by = Some(action.clone());
 
-            return Ok(());
-        }
-
-        if let Err(e) = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver) {
-            self.forward_action_error(action, e).await;
+        if route.is_cancellable() {
+            if let Err(e) = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)
+            {
+                self.forward_action_error(action, e).await;
+            }
         }
 
         Ok(())
