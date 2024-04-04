@@ -237,8 +237,11 @@ impl Uplink {
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
         let bridge_tx = bridge.bridge_tx();
 
-        let route =
-            ActionRoute { name: "launch_shell".to_owned(), timeout: Duration::from_secs(10) };
+        let route = ActionRoute {
+            name: "launch_shell".to_owned(),
+            timeout: Duration::from_secs(10),
+            cancellable: false,
+        };
         let actions_rx = bridge.register_action_route(route)?;
         let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
         spawn_named_thread("Tunshell Client", move || tunshell_client.start());
@@ -258,6 +261,7 @@ impl Uplink {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
                 timeout: Duration::from_secs(10),
+                cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
             let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
@@ -273,6 +277,7 @@ impl Uplink {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
                 timeout: Duration::from_secs(10),
+                cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
             let logger = Logcat::new(config, actions_rx, bridge_tx.clone());

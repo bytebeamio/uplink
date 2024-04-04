@@ -594,6 +594,7 @@ mod test {
             actions: vec![ActionRoute {
                 name: "firmware_update".to_owned(),
                 timeout: Duration::from_secs(10),
+                cancellable: true,
             }],
             path,
         };
