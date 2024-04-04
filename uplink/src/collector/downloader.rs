@@ -69,6 +69,7 @@ use std::{
 };
 use std::{io::Write, path::PathBuf};
 
+use crate::base::actions::Cancellation;
 use crate::{base::bridge::BridgeTx, config::DownloaderConfig, Action, ActionResponse, Config};
 
 #[derive(thiserror::Error, Debug)]
@@ -207,6 +208,22 @@ impl FileDownloader {
             }
         };
         select! {
+            Ok(action) = self.actions_rx.recv_async() => {
+                if action.name != "cancel-action" {
+                    warn!("Unexpected action: {action:?}");
+                    unreachable!("Only cancel-action should be sent to downloader while it is handling another downlaod!!");
+                }
+
+                let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
+                if cancellation.action_id != self.action_id {
+                    warn!("Unexpected action: {action:?}");
+                    unreachable!("Cancel actions meant for current action only should be sent to downloader!!");
+                }
+
+                trace!("Deleting partially downloaded file: {cancellation:?}");
+                state.clean()?;
+            },
+
             // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
             o = timeout_at(deadline, self.continuous_retry(state)) => match o {
                 Ok(r) => r?,
@@ -229,7 +246,7 @@ impl FileDownloader {
     }
 
     // A download must be retried with Range header when HTTP/reqwest errors are faced
-    async fn continuous_retry(&mut self, state: &mut DownloadState) -> Result<(), Error> {
+    async fn continuous_retry(&self, state: &mut DownloadState) -> Result<(), Error> {
         'outer: loop {
             let mut req = self.client.get(&state.current.meta.url);
             if let Some(range) = state.retry_range() {
@@ -438,6 +455,7 @@ impl DownloadState {
         // Calculate deadline based on written time left
         current.action.deadline = current.time_left.map(|t| Instant::now() + t);
 
+        // Unwrap is ok here as it is expected to be set for actions once received
         let file = File::open(current.meta.download_path.as_ref().unwrap())?;
         let bytes_written = file.metadata()?.len() as usize;
 
@@ -465,6 +483,14 @@ impl DownloadState {
         let mut path = config.path.clone();
         path.push("current_download");
         write(path, json)?;
+
+        Ok(())
+    }
+
+    /// Deletes contents of file
+    fn clean(&self) -> Result<(), Error> {
+        // Unwrap is ok here as it is expected to be set for actions once received
+        remove_file(self.current.meta.download_path.as_ref().unwrap())?;
 
         Ok(())
     }

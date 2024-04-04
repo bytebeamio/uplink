@@ -114,3 +114,9 @@ impl Point for ActionResponse {
         self.timestamp
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct Cancellation {
+    pub action_id: String,
+    pub name: String,
+}
