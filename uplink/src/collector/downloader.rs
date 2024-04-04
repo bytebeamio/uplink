@@ -381,6 +381,55 @@ struct DownloadState {
 }
 
 impl DownloadState {
+    fn new(action: Action, config: &DownloaderConfig) -> Result<Self, Error> {
+        // Ensure that directory for downloading file into, exists
+        let mut path = config.path.clone();
+        path.push(&action.name);
+
+        #[cfg(unix)]
+        create_dirs_with_perms(
+            path.as_path(),
+            std::os::unix::fs::PermissionsExt::from_mode(0o777),
+        )?;
+
+        #[cfg(not(unix))]
+        std::fs::create_dir_all(&path)?;
+
+        // Extract url information from action payload
+        let mut meta = match serde_json::from_str::<DownloadFile>(&action.payload)? {
+            DownloadFile { file_name, .. } if file_name.is_empty() => {
+                return Err(Error::EmptyFileName)
+            }
+            DownloadFile { content_length: 0, .. } => return Err(Error::EmptyFile),
+            u => u,
+        };
+
+        check_disk_size(config, &meta)?;
+
+        let url = meta.url.clone();
+
+        // Create file to actually download into
+        let (file, file_path) = create_file(&path, &meta.file_name)?;
+        // Retry downloading upto 3 times in case of connectivity issues
+        // TODO: Error out for 1XX/3XX responses
+        info!(
+            "Downloading from {} into {}; size = {}",
+            url,
+            file_path.display(),
+            human_bytes(meta.content_length as f64)
+        );
+        meta.download_path = Some(file_path);
+        let current = CurrentDownload { action, meta, time_left: None };
+
+        Ok(Self {
+            current,
+            file,
+            bytes_written: 0,
+            percentage_downloaded: 0,
+            start: Instant::now(),
+        })
+    }
+
     fn load(config: &DownloaderConfig) -> Result<Self, Error> {
         let mut path = config.path.clone();
         path.push("current_download");
@@ -431,55 +480,6 @@ impl DownloadState {
         }
 
         Some(format!("bytes={}-{}", self.bytes_written, self.current.meta.content_length))
-    }
-
-    fn new(action: Action, config: &DownloaderConfig) -> Result<Self, Error> {
-        // Ensure that directory for downloading file into, exists
-        let mut path = config.path.clone();
-        path.push(&action.name);
-
-        #[cfg(unix)]
-        create_dirs_with_perms(
-            path.as_path(),
-            std::os::unix::fs::PermissionsExt::from_mode(0o777),
-        )?;
-
-        #[cfg(not(unix))]
-        std::fs::create_dir_all(&path)?;
-
-        // Extract url information from action payload
-        let mut meta = match serde_json::from_str::<DownloadFile>(&action.payload)? {
-            DownloadFile { file_name, .. } if file_name.is_empty() => {
-                return Err(Error::EmptyFileName)
-            }
-            DownloadFile { content_length: 0, .. } => return Err(Error::EmptyFile),
-            u => u,
-        };
-
-        check_disk_size(config, &meta)?;
-
-        let url = meta.url.clone();
-
-        // Create file to actually download into
-        let (file, file_path) = create_file(&path, &meta.file_name)?;
-        // Retry downloading upto 3 times in case of connectivity issues
-        // TODO: Error out for 1XX/3XX responses
-        info!(
-            "Downloading from {} into {}; size = {}",
-            url,
-            file_path.display(),
-            human_bytes(meta.content_length as f64)
-        );
-        meta.download_path = Some(file_path);
-        let current = CurrentDownload { action, meta, time_left: None };
-
-        Ok(Self {
-            current,
-            file,
-            bytes_written: 0,
-            percentage_downloaded: 0,
-            start: Instant::now(),
-        })
     }
 
     fn write_bytes(&mut self, buf: &[u8]) -> Result<Option<u8>, Error> {
