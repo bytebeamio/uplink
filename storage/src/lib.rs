@@ -1,5 +1,5 @@
 use bytes::{Buf, BufMut, BytesMut};
-use log::{self, debug, error, info, warn};
+use log::{debug, error, info, warn};
 use seahash::hash;
 
 use std::collections::VecDeque;
@@ -268,7 +268,7 @@ impl<'a> PersistenceFile<'a> {
     /// Write contents of buffer from memory onto the persistence file in disk
     pub fn write(&mut self, buf: &mut BytesMut) -> Result<(), Error> {
         let path = self.path();
-        let mut file = OpenOptions::new().write(true).create(true).open(path)?;
+        let mut file = OpenOptions::new().write(true).create(true).truncate(true).open(path)?;
 
         let hash = hash(&buf[..]);
         file.write_all(&hash.to_be_bytes())?;

@@ -45,7 +45,6 @@ Actions are messages that uplink expects to receive from the broker and is execu
 ```js
 {
     "action_id": "...",
-    "kind": "...",
     "name": "...",
     "payload": "..."
 }
@@ -121,7 +120,6 @@ Once enabled, Actions with the following JSON will trigger uplink to download th
 ```js
 {
     "action_id": "...",
-    "kind": "process",
     "name": "update_firmware",
     "payload": "{
         \"url\": \"https://example.com/file\",
@@ -133,7 +131,6 @@ Once downloded, the payload JSON is updated with the file's on device path, as s
 ```js
 {
     "action_id": "...",
-    "kind": "process",
     "name": "update_firmware",
     "payload": "{
         \"url\": \"https://example.com/file\",
@@ -148,7 +145,6 @@ With the help of tunshell, uplink allows you to remotely connect to a device she
 ```js
 {
     "action_id": "...",
-    "kind": "...",
     "name": "tunshell",
     "payload": "{
         \"session\": \"...\",

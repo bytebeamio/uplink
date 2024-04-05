@@ -24,7 +24,6 @@ struct Config {
 #[derive(Serialize)]
 struct Action {
     id: String,
-    kind: String,
     name: String,
     payload: String,
 }
@@ -69,7 +68,6 @@ fn main() {
     let action = Action {
         id: "tunshell".to_string(),
         name: "launch_shell".to_string(),
-        kind: "launch_shell".to_string(),
         payload: serde_json::to_string(&Keys {
             session: target_key,
             relay: "eu.relay.tunshell.com".to_string(),

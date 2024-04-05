@@ -6,7 +6,7 @@ use std::time::Instant;
 use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use flume::{bounded, Receiver, RecvError, Sender};
+use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info, trace};
 use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
@@ -771,7 +771,7 @@ fn check_and_flush_metrics(
     metrics: &mut Metrics,
     metrics_tx: &Sender<SerializerMetrics>,
     storage_handler: &StorageHandler,
-) -> Result<(), flume::TrySendError<SerializerMetrics>> {
+) -> Result<(), TrySendError<SerializerMetrics>> {
     use pretty_bytes::converter::convert;
 
     let mut inmemory_write_size = 0;
@@ -870,17 +870,16 @@ mod test {
     use serde_json::Value;
     use tokio::spawn;
 
-    use std::collections::HashMap;
-    use std::time::Duration;
+    use crate::{
+        base::bridge::{stream::Stream, Payload},
+        config::MqttConfig,
+    };
 
     use super::*;
-    use crate::base::bridge::stream::Stream;
-    use crate::config::MqttConfig;
-    use crate::Payload;
 
     #[derive(Clone)]
     pub struct MockClient {
-        pub net_tx: flume::Sender<Request>,
+        pub net_tx: Sender<Request>,
     }
 
     #[async_trait::async_trait]
@@ -948,10 +947,10 @@ mod test {
 
     fn defaults(
         config: Arc<Config>,
-    ) -> (Serializer<MockClient>, flume::Sender<Box<dyn Package>>, Receiver<Request>) {
-        let (data_tx, data_rx) = flume::bounded(1);
-        let (net_tx, net_rx) = flume::bounded(1);
-        let (metrics_tx, _metrics_rx) = flume::bounded(1);
+    ) -> (Serializer<MockClient>, Sender<Box<dyn Package>>, Receiver<Request>) {
+        let (data_tx, data_rx) = bounded(1);
+        let (net_tx, net_rx) = bounded(1);
+        let (metrics_tx, _metrics_rx) = bounded(1);
         let client = MockClient { net_tx };
 
         (Serializer::new(config, data_rx, client, metrics_tx).unwrap(), data_tx, net_rx)
@@ -973,7 +972,7 @@ mod test {
         fn new(
             stream_name: &str,
             stream_config: StreamConfig,
-            data_tx: flume::Sender<Box<dyn Package>>,
+            data_tx: Sender<Box<dyn Package>>,
         ) -> MockCollector {
             MockCollector { stream: Stream::new(stream_name, stream_config, data_tx) }
         }

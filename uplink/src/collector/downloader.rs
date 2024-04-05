@@ -152,7 +152,7 @@ impl FileDownloader {
 
         info!("Downloader thread is ready to receive download actions");
         while let Ok(action) = self.actions_rx.recv_async().await {
-            self.action_id = action.action_id.clone();
+            action.action_id.clone_into(&mut self.action_id);
             let mut state = match DownloadState::new(action, &self.config) {
                 Ok(s) => s,
                 Err(e) => {
@@ -166,7 +166,8 @@ impl FileDownloader {
             self.bridge_tx.send_action_response(status).await;
 
             if let Err(e) = self.download(&mut state).await {
-                self.forward_error(e).await
+                self.forward_error(e).await;
+                continue;
             }
 
             // Forward updated action as part of response
@@ -188,10 +189,11 @@ impl FileDownloader {
                 return;
             }
         };
-        self.action_id = state.current.action.action_id.clone();
+        state.current.action.action_id.clone_into(&mut self.action_id);
 
         if let Err(e) = self.download(&mut state).await {
             self.forward_error(e).await;
+            return;
         }
 
         // Forward updated action as part of response
@@ -199,6 +201,7 @@ impl FileDownloader {
         let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
         self.bridge_tx.send_action_response(status).await;
     }
+
     // Accepts `DownloadState`, sets a timeout for the action
     async fn download(&mut self, state: &mut DownloadState) -> Result<(), Error> {
         let shutdown_rx = self.shutdown_rx.clone();
@@ -228,7 +231,7 @@ impl FileDownloader {
                 return Err(Error::Cancelled);
             },
 
-            _ = shutdown_rx.recv_async() => {
+            Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
                 if let Err(e) = state.save(&self.config) {
                     error!("Error saving current_download: {e}");
                 }
@@ -557,18 +560,18 @@ impl CtrlTx {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use flume::bounded;
     use serde_json::json;
+    use tempdir::TempDir;
 
-    use std::{collections::HashMap, time::Duration};
-
-    use super::*;
     use crate::{
         base::bridge::{DataTx, StatusTx},
-        config::{ActionRoute, DownloaderConfig, MqttConfig},
+        config::{ActionRoute, MqttConfig},
     };
 
-    const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
+    use super::*;
 
     fn config(downloader: DownloaderConfig) -> Config {
         Config {
@@ -592,8 +595,8 @@ mod test {
     }
 
     // Prepare config
-    fn test_config(test_name: &str) -> Config {
-        let mut path = PathBuf::from(DOWNLOAD_DIR);
+    fn test_config(temp_dir: &Path, test_name: &str) -> Config {
+        let mut path = PathBuf::from(temp_dir);
         path.push(test_name);
         let downloader_cfg = DownloaderConfig {
             actions: vec![ActionRoute {
@@ -609,9 +612,8 @@ mod test {
     #[test]
     // Test file downloading capabilities of FileDownloader by downloading the uplink logo from GitHub
     fn download_file() {
-        // Ensure path exists
-        std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
-        let config = test_config("download_file");
+        let temp_dir = TempDir::new("download_file").unwrap();
+        let config = test_config(temp_dir.path(), "download_file");
         let mut downloader_path = config.downloader.path.clone();
         let (bridge_tx, status_rx) = create_bridge();
 
@@ -672,9 +674,8 @@ mod test {
     #[test]
     // Once a file is downloaded FileDownloader must check it's checksum value against what is provided
     fn checksum_of_file() {
-        // Ensure path exists
-        std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
-        let config = test_config("file_checksum");
+        let temp_dir = TempDir::new("file_checksum").unwrap();
+        let config = test_config(temp_dir.path(), "file_checksum");
         let (bridge_tx, status_rx) = create_bridge();
 
         // Create channels to forward and push action_status on

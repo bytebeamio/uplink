@@ -45,10 +45,7 @@ pub struct System {
 impl System {
     fn init(sys: &sysinfo::System) -> System {
         System {
-            kernel_version: match sys.kernel_version() {
-                Some(kv) => kv,
-                None => String::default(),
-            },
+            kernel_version: sys.kernel_version().unwrap_or_default(),
             total_memory: sys.total_memory(),
             ..Default::default()
         }

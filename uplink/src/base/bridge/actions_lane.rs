@@ -420,7 +420,7 @@ impl ActionsBridge {
             action.name, fwd_name, action.action_id,
         );
 
-        action.name = fwd_name.to_owned();
+        fwd_name.clone_into(&mut action.name);
         self.try_route_action(action.clone())?;
 
         Ok(())
@@ -540,15 +540,9 @@ impl CtrlTx {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
+    use tokio::runtime::Runtime;
 
-    use flume::{bounded, Receiver, Sender};
-    use tokio::{runtime::Runtime, select};
-
-    use crate::{
-        config::{ActionRoute, StreamConfig, StreamMetricsConfig},
-        Action, ActionResponse, Config,
-    };
+    use crate::config::{StreamConfig, StreamMetricsConfig};
 
     use super::*;
 

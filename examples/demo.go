@@ -19,7 +19,6 @@ type ActionStatus struct {
 
 type Action struct {
 	Id      string	`json:"action_id"`
-	Kind    string  `json:"timestamp"`
 	Name    string  `json:"name"`
 	Payload string  `json:"payload"`
 }

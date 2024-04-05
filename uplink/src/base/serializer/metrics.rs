@@ -48,7 +48,7 @@ impl Metrics {
     }
 
     pub fn set_mode(&mut self, name: &str) {
-        self.mode = name.to_owned();
+        name.clone_into(&mut self.mode);
     }
 
     pub fn batches(&self) -> usize {
