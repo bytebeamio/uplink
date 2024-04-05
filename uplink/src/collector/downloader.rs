@@ -163,7 +163,8 @@ impl FileDownloader {
             self.bridge_tx.send_action_response(status).await;
 
             if let Err(e) = self.download(&mut state).await {
-                self.forward_error(e).await
+                self.forward_error(e).await;
+                continue;
             }
 
             // Forward updated action as part of response
@@ -189,6 +190,7 @@ impl FileDownloader {
 
         if let Err(e) = self.download(&mut state).await {
             self.forward_error(e).await;
+            return;
         }
 
         // Forward updated action as part of response
