@@ -529,6 +529,7 @@ impl CtrlTx {
 mod test {
     use flume::bounded;
     use serde_json::json;
+    use tempdir::TempDir;
 
     use std::{collections::HashMap, time::Duration};
 
@@ -537,8 +538,6 @@ mod test {
         base::bridge::{DataTx, StatusTx},
         config::{ActionRoute, DownloaderConfig, MqttConfig},
     };
-
-    const DOWNLOAD_DIR: &str = "/tmp/uplink_test";
 
     fn config(downloader: DownloaderConfig) -> Config {
         Config {
@@ -562,8 +561,8 @@ mod test {
     }
 
     // Prepare config
-    fn test_config(test_name: &str) -> Config {
-        let mut path = PathBuf::from(DOWNLOAD_DIR);
+    fn test_config(temp_dir: &Path, test_name: &str) -> Config {
+        let mut path = PathBuf::from(temp_dir);
         path.push(test_name);
         let downloader_cfg = DownloaderConfig {
             actions: vec![ActionRoute {
@@ -578,9 +577,8 @@ mod test {
     #[test]
     // Test file downloading capabilities of FileDownloader by downloading the uplink logo from GitHub
     fn download_file() {
-        // Ensure path exists
-        std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
-        let config = test_config("download_file");
+        let temp_dir = TempDir::new("download_file").unwrap();
+        let config = test_config(temp_dir.path(), "download_file");
         let mut downloader_path = config.downloader.path.clone();
         let (bridge_tx, status_rx) = create_bridge();
 
@@ -641,9 +639,8 @@ mod test {
     #[test]
     // Once a file is downloaded FileDownloader must check it's checksum value against what is provided
     fn checksum_of_file() {
-        // Ensure path exists
-        std::fs::create_dir_all(DOWNLOAD_DIR).unwrap();
-        let config = test_config("file_checksum");
+        let temp_dir = TempDir::new("file_checksum").unwrap();
+        let config = test_config(temp_dir.path(), "file_checksum");
         let (bridge_tx, status_rx) = create_bridge();
 
         // Create channels to forward and push action_status on
