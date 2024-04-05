@@ -146,20 +146,18 @@ impl ScriptRunner {
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
-
-    use super::*;
-    use crate::{
-        base::bridge::{DataTx, StatusTx},
-        Action,
-    };
+    use std::thread::spawn;
 
     use flume::bounded;
 
+    use crate::base::bridge::{DataTx, StatusTx};
+
+    use super::*;
+
     fn create_bridge() -> (BridgeTx, Receiver<ActionResponse>) {
-        let (inner, _) = flume::bounded(2);
+        let (inner, _) = bounded(2);
         let data_tx = DataTx { inner };
-        let (inner, status_rx) = flume::bounded(2);
+        let (inner, status_rx) = bounded(2);
         let status_tx = StatusTx { inner };
 
         (BridgeTx { data_tx, status_tx }, status_rx)
@@ -171,7 +169,7 @@ mod tests {
 
         let (actions_tx, actions_rx) = bounded(1);
         let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
-        thread::spawn(move || script_runner.start().unwrap());
+        spawn(move || script_runner.start().unwrap());
 
         actions_tx
             .send(Action {
@@ -194,7 +192,7 @@ mod tests {
         let (actions_tx, actions_rx) = bounded(1);
         let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
 
-        thread::spawn(move || script_runner.start().unwrap());
+        spawn(move || script_runner.start().unwrap());
 
         actions_tx
             .send(Action {

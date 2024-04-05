@@ -530,17 +530,18 @@ impl CtrlTx {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use flume::bounded;
     use serde_json::json;
     use tempdir::TempDir;
 
-    use std::{collections::HashMap, time::Duration};
-
-    use super::*;
     use crate::{
         base::bridge::{DataTx, StatusTx},
-        config::{ActionRoute, DownloaderConfig, MqttConfig},
+        config::{ActionRoute, MqttConfig},
     };
+
+    use super::*;
 
     fn config(downloader: DownloaderConfig) -> Config {
         Config {
