@@ -198,6 +198,7 @@ impl FileDownloader {
         let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
         self.bridge_tx.send_action_response(status).await;
     }
+
     // Accepts `DownloadState`, sets a timeout for the action
     async fn download(&mut self, state: &mut DownloadState) -> Result<(), Error> {
         let shutdown_rx = self.shutdown_rx.clone();
@@ -209,7 +210,7 @@ impl FileDownloader {
             }
         };
         select! {
-            _ = shutdown_rx.recv_async() => {
+            Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
                 if let Err(e) = state.save(&self.config) {
                     error!("Error saving current_download: {e}");
                 }
