@@ -75,7 +75,7 @@ impl ScriptRunner {
                             continue;
                         },
                     };
-                    status.action_id = id.to_owned();
+                    id.clone_into(&mut status.action_id);
 
                     debug!("Action status: {:?}", status);
                     self.forward_status(status).await;

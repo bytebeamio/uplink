@@ -340,7 +340,7 @@ impl ActionsBridge {
             action.name, fwd_name, action.action_id,
         );
 
-        action.name = fwd_name.to_owned();
+        fwd_name.clone_into(&mut action.name);
 
         if let Err(e) = self.try_route_action(action.clone()) {
             error!("Failed to route action to app. Error = {:?}", e);

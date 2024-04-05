@@ -63,7 +63,7 @@ impl PreconditionChecker {
     // comparison instead of making assumptions about what the user might want.
     fn check_disk_size(&self, preconditions: Preconditions) -> Result<(), Error> {
         let Some(mut required_free_space) = preconditions.uncompressed_length else {
-            return Ok(())
+            return Ok(());
         };
         let disk_free_space =
             fs2::free_space(&self.config.precondition_checks.as_ref().unwrap().path)? as usize;

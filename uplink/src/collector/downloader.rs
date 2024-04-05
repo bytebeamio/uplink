@@ -149,7 +149,7 @@ impl FileDownloader {
 
         info!("Downloader thread is ready to receive download actions");
         while let Ok(action) = self.actions_rx.recv_async().await {
-            self.action_id = action.action_id.clone();
+            action.action_id.clone_into(&mut self.action_id);
             let mut state = match DownloadState::new(action, &self.config) {
                 Ok(s) => s,
                 Err(e) => {
@@ -186,7 +186,7 @@ impl FileDownloader {
                 return;
             }
         };
-        self.action_id = state.current.action.action_id.clone();
+        state.current.action.action_id.clone_into(&mut self.action_id);
 
         if let Err(e) = self.download(&mut state).await {
             self.forward_error(e).await;
