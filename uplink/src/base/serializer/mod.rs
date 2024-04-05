@@ -324,7 +324,7 @@ impl<C: MqttClient> Serializer<C> {
             let stream_config = data.stream_config();
             let publish = construct_publish(data, &mut self.stream_metrics)?;
             let storage = self.storage_handler.select(&stream_config);
-            match write_to_disk(publish, storage) {
+            match write_to_storage(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
                 Err(e) => error!("Shutdown: write error = {:?}", e),
@@ -340,7 +340,7 @@ impl<C: MqttClient> Serializer<C> {
     ) -> Result<Status, Error> {
         let storage = self.storage_handler.select(&stream);
         // Write failed publish to disk first, metrics don't matter
-        match write_to_disk(publish, storage) {
+        match write_to_storage(publish, storage) {
             Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
             Ok(_) => {}
             Err(e) => error!("Crash loop: write error = {:?}", e),
@@ -351,7 +351,7 @@ impl<C: MqttClient> Serializer<C> {
             let data = self.collector_rx.recv_async().await?;
             let publish = construct_publish(data, &mut self.stream_metrics)?;
             let storage = self.storage_handler.select(&stream);
-            match write_to_disk(publish, storage) {
+            match write_to_storage(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
                 Err(e) => error!("Crash loop: write error = {:?}", e),
@@ -380,7 +380,7 @@ impl<C: MqttClient> Serializer<C> {
                     let stream = data.stream_config();
                     let publish = construct_publish(data, &mut self.stream_metrics)?;
                     let storage = self.storage_handler.select(&stream);
-                    match write_to_disk(publish, storage) {
+                    match write_to_storage(publish, storage) {
                         Ok(Some(deleted)) => {
                             debug!("Lost segment = {deleted}");
                             self.metrics.increment_lost_segments();
@@ -475,7 +475,7 @@ impl<C: MqttClient> Serializer<C> {
                     let stream = data.stream_config();
                     let publish = construct_publish(data, &mut self.stream_metrics)?;
                     let storage = self.storage_handler.select(&stream);
-                    match write_to_disk(publish, storage) {
+                    match write_to_storage(publish, storage) {
                         Ok(Some(deleted)) => {
                             debug!("Lost segment = {deleted}");
                             self.metrics.increment_lost_segments();
@@ -665,10 +665,9 @@ fn construct_publish(
     Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
 }
 
-// Writes the provided publish packet to disk with [Storage], after setting its pkid to 1.
-// Updates serializer metrics with appropriate values on success, if asked to do so.
-// Returns size in memory, size in disk, number of files in disk,
-fn write_to_disk(
+// Writes the provided publish packet to [Storage], after setting its pkid to 1.
+// If the write buffer is full, it is flushed/written onto disk based on config.
+fn write_to_storage(
     mut publish: Publish,
     storage: &mut Storage,
 ) -> Result<Option<u64>, storage::Error> {
@@ -1037,7 +1036,7 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage).unwrap();
+        write_to_storage(publish.clone(), &mut storage).unwrap();
 
         let stored_publish =
             read_from_storage(&mut storage, serializer.config.mqtt.max_packet_size);
@@ -1189,7 +1188,7 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage).unwrap();
+        write_to_storage(publish.clone(), &mut storage).unwrap();
 
         let status =
             tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap();
@@ -1231,7 +1230,7 @@ mod test {
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_disk(publish.clone(), &mut storage).unwrap();
+        write_to_storage(publish.clone(), &mut storage).unwrap();
 
         match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
             Status::EventLoopCrash(Publish { topic, payload, .. }, _) => {
@@ -1288,8 +1287,8 @@ mod test {
                 ..Default::default()
             }))
             .or_insert_with(|| unreachable!());
-        write_to_disk(publish("topic/one".to_string(), 1), &mut one).unwrap();
-        write_to_disk(publish("topic/one".to_string(), 10), &mut one).unwrap();
+        write_to_storage(publish("topic/one".to_string(), 1), &mut one).unwrap();
+        write_to_storage(publish("topic/one".to_string(), 10), &mut one).unwrap();
 
         let top = serializer
             .storage_handler
@@ -1300,8 +1299,8 @@ mod test {
                 ..Default::default()
             }))
             .or_insert_with(|| unreachable!());
-        write_to_disk(publish("topic/top".to_string(), 100), top).unwrap();
-        write_to_disk(publish("topic/top".to_string(), 1000), top).unwrap();
+        write_to_storage(publish("topic/top".to_string(), 100), top).unwrap();
+        write_to_storage(publish("topic/top".to_string(), 1000), top).unwrap();
 
         let two = serializer
             .storage_handler
@@ -1312,7 +1311,7 @@ mod test {
                 ..Default::default()
             }))
             .or_insert_with(|| unreachable!());
-        write_to_disk(publish("topic/two".to_string(), 3), two).unwrap();
+        write_to_storage(publish("topic/two".to_string(), 3), two).unwrap();
 
         let mut default = serializer
             .storage_handler
@@ -1323,8 +1322,8 @@ mod test {
                 ..Default::default()
             }))
             .or_insert(Storage::new("topic/default", 1024));
-        write_to_disk(publish("topic/default".to_string(), 0), &mut default).unwrap();
-        write_to_disk(publish("topic/default".to_string(), 2), &mut default).unwrap();
+        write_to_storage(publish("topic/default".to_string(), 0), &mut default).unwrap();
+        write_to_storage(publish("topic/default".to_string(), 2), &mut default).unwrap();
 
         // run serializer in the background
         spawn(async { serializer.start().await.unwrap() });
