@@ -93,6 +93,8 @@ pub enum Error {
     BadSave,
     #[error("Save file doesn't exist")]
     NoSave,
+    #[error("Download timedout")]
+    Timeout,
 }
 
 /// This struct contains the necessary components to download and store file as notified by a download file
@@ -226,7 +228,7 @@ impl FileDownloader {
                     _ = remove_file(state.current.meta.download_path.as_ref().unwrap());
                     error!("Last download has timedout; file deleted");
 
-                    return Ok(());
+                    return Err(Error::Timeout);
                 },
             }
         }
