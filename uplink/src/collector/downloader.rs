@@ -221,7 +221,13 @@ impl FileDownloader {
             // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
             o = timeout_at(deadline, self.continuous_retry(state)) => match o {
                 Ok(r) => r?,
-                Err(_) => error!("Last download has timedout"),
+                Err(_) => {
+                    // unwrap is safe because download_path is expected to be Some
+                    _ = remove_file(state.current.meta.download_path.as_ref().unwrap());
+                    error!("Last download has timedout; file deleted");
+
+                    return Ok(());
+                },
             }
         }
 
