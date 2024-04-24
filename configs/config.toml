@@ -9,7 +9,7 @@ action_redirections = { "firmware_update" = "install_update", "send_file" = "loa
 
 # Script runner allows users to trigger an action that will run an already downloaded
 # file as described by the download_path field of the JSON payload of a download action.
-script_runner = [{ name = "run_script" }]
+script_runner = [{ name = "run_script", timeout = 10 }]
 
 # Location on disk for persisted streams to write backlogs into, also used to write
 persistence_path = "/tmp/uplink/"
@@ -141,7 +141,7 @@ priority = 255
 # - actions: List of actions names that can trigger the downloader, with configurable timeouts
 # - path: Location in fs where the files are downloaded into
 [downloader]
-actions = [{ name = "update_firmware" }, { name = "send_file" }, { name = "send_script" }]
+actions = [{ name = "update_firmware" }, { name = "send_file", timeout = 10 }, { name = "send_script" }]
 path = "/var/tmp/ota-file"
 
 # Configurations associated with the system stats module of uplink, if enabled

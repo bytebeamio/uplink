@@ -165,18 +165,49 @@ impl ActionsBridge {
                     self.handle_action(action).await;
 
                 }
+
                 response = self.status_rx.recv_async() => {
                     let response = response?;
                     self.forward_action_response(response).await;
                 }
-                _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
-                    let action = self.current_action.take().unwrap();
-                    error!("Timeout waiting for action response. Action ID = {}", action.id);
-                    self.forward_action_error(action.action, Error::ActionTimeout).await;
 
-                    // Remove action because it timedout
-                    self.clear_current_action()
+                _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
+                    let curret_action = self.current_action.as_mut().unwrap();
+                    let action = curret_action.action.clone();
+
+                    let route = self
+                        .action_routes
+                        .get(&action.name)
+                        .expect("Action shouldn't be in execution if it can't be routed!");
+
+                    if !route.is_cancellable() {
+                        // Directly send timeout failure response if handler doesn't allow action cancellation
+                        error!("Timeout waiting for action response. Action ID = {}", action.action_id);
+                        self.forward_action_error(action, Error::ActionTimeout).await;
+
+                        // Remove action because it timedout
+                        self.clear_current_action();
+                        continue;
+                    }
+
+                    let cancellation = Cancellation { action_id: action.action_id.clone(), name: action.name };
+                    let payload = serde_json::to_string(&cancellation)?;
+                    let cancel_action = Action {
+                        action_id: "timeout".to_owned(), // Describes cause of action cancellation. NOTE: Action handler shouldn't expect an integer.
+                        name: "cancel-action".to_owned(),
+                        payload,
+                    };
+                    if route.try_send(cancel_action).is_err() {
+                        error!("Couldn't cancel action ({}) on timeout: {}", action.action_id, Error::UnresponsiveReceiver);
+                        // Remove action anyways
+                        self.clear_current_action();
+                        continue;
+                    }
+
+                    // set timeout to end of time in wait of cancellation response
+                    curret_action.timeout =  Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
                 }
+
                 // Flush streams that timeout
                 Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
                     debug!("Flushing stream = {}", timedout_stream);
@@ -184,12 +215,14 @@ impl ActionsBridge {
                         error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
                     }
                 }
+
                 // Flush all metrics when timed out
                 _ = metrics_timeout.tick() => {
                     if let Err(e) = self.streams.check_and_flush_metrics() {
                         debug!("Failed to flush stream metrics. Error = {}", e);
                     }
                 }
+
                 // Handle a shutdown signal
                 _ = self.ctrl_rx.recv_async() => {
                     if let Err(e) = self.save_current_action() {
@@ -500,9 +533,8 @@ pub struct ActionRouter {
 impl ActionRouter {
     #[allow(clippy::result_large_err)]
     /// Forwards action to the appropriate application and returns the instance in time at which it should be timedout if incomplete
-    pub fn try_send(&self, mut action: Action) -> Result<Instant, TrySendError<Action>> {
+    pub fn try_send(&self, action: Action) -> Result<Instant, TrySendError<Action>> {
         let deadline = Instant::now() + self.duration;
-        action.deadline = Some(deadline);
         self.actions_tx.try_send(action)?;
 
         Ok(deadline)
@@ -646,7 +678,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "route_1".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action_1).unwrap();
 
@@ -669,7 +700,6 @@ mod tests {
             action_id: "2".to_string(),
             name: "route_2".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action_2).unwrap();
 
@@ -716,7 +746,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action_1).unwrap();
 
@@ -730,7 +759,6 @@ mod tests {
             action_id: "2".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action_2).unwrap();
 
@@ -774,7 +802,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 
@@ -845,7 +872,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 
@@ -921,7 +947,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 
@@ -931,7 +956,6 @@ mod tests {
             action_id: "2".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 
@@ -1017,7 +1041,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 
@@ -1027,7 +1050,6 @@ mod tests {
             action_id: "2".to_string(),
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 

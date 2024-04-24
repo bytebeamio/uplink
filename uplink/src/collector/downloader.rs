@@ -56,7 +56,7 @@ use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identit
 use rsa::sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use tokio::select;
-use tokio::time::{timeout_at, Instant};
+use tokio::time::Instant;
 
 use std::fs::{metadata, read, remove_dir_all, remove_file, write, File};
 use std::io;
@@ -94,8 +94,8 @@ pub enum Error {
     BadSave,
     #[error("Save file doesn't exist")]
     NoSave,
-    #[error("Download has been cancelled")]
-    Cancelled,
+    #[error("Download has been cancelled by '{0}'")]
+    Cancelled(String),
 }
 
 /// This struct contains the necessary components to download and store file as notified by a download file
@@ -205,18 +205,14 @@ impl FileDownloader {
     // Accepts `DownloadState`, sets a timeout for the action
     async fn download(&mut self, state: &mut DownloadState) -> Result<(), Error> {
         let shutdown_rx = self.shutdown_rx.clone();
-        let deadline = match &state.current.action.deadline {
-            Some(d) => *d,
-            _ => {
-                error!("Unconfigured deadline: {}", state.current.action.name);
-                return Ok(());
-            }
-        };
         select! {
+            // Wait till download completes
+            o = self.continuous_retry(state) => o?,
+            // Cancel download on receiving cancel action, e.g. on action timeout
             Ok(action) = self.actions_rx.recv_async() => {
                 if action.name != "cancel-action" {
                     warn!("Unexpected action: {action:?}");
-                    unreachable!("Only cancel-action should be sent to downloader while it is handling another downlaod!!");
+                    unreachable!("Only cancel-action should be sent to downloader while it is handling another download!!");
                 }
 
                 let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
@@ -228,7 +224,7 @@ impl FileDownloader {
                 trace!("Deleting partially downloaded file: {cancellation:?}");
                 state.clean()?;
 
-                return Err(Error::Cancelled);
+                return Err(Error::Cancelled(action.action_id));
             },
 
             Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
@@ -238,12 +234,6 @@ impl FileDownloader {
 
                 return Ok(());
             },
-
-            // NOTE: if download has timedout don't do anything, else ensure errors are forwarded after three retries
-            o = timeout_at(deadline, self.continuous_retry(state)) => match o {
-                Ok(r) => r?,
-                Err(_) => error!("Last download has timedout"),
-            }
         }
 
         state.current.meta.verify_checksum()?;
@@ -386,7 +376,6 @@ impl DownloadFile {
 struct CurrentDownload {
     action: Action,
     meta: DownloadFile,
-    time_left: Option<Duration>,
 }
 
 // A temporary structure to help us retry downloads
@@ -439,7 +428,7 @@ impl DownloadState {
             human_bytes(meta.content_length as f64)
         );
         meta.download_path = Some(file_path);
-        let current = CurrentDownload { action, meta, time_left: None };
+        let current = CurrentDownload { action, meta };
 
         Ok(Self {
             current,
@@ -459,9 +448,7 @@ impl DownloadState {
         }
 
         let read = read(&path)?;
-        let mut current: CurrentDownload = serde_json::from_slice(&read)?;
-        // Calculate deadline based on written time left
-        current.action.deadline = current.time_left.map(|t| Instant::now() + t);
+        let current: CurrentDownload = serde_json::from_slice(&read)?;
 
         // Unwrap is ok here as it is expected to be set for actions once received
         let file = File::open(current.meta.download_path.as_ref().unwrap())?;
@@ -483,9 +470,7 @@ impl DownloadState {
             return Ok(());
         }
 
-        let mut current = self.current.clone();
-        // Calculate time left based on deadline
-        current.time_left = current.action.deadline.map(|t| t.duration_since(Instant::now()));
+        let current = self.current.clone();
         let json = serde_json::to_vec(&current)?;
 
         let mut path = config.path.clone();
@@ -642,7 +627,6 @@ mod test {
             action_id: "1".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(download_update).to_string(),
-            deadline: Some(Instant::now() + Duration::from_secs(60)),
         };
 
         std::thread::sleep(Duration::from_millis(10));
@@ -703,7 +687,6 @@ mod test {
             action_id: "1".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(correct_update).to_string(),
-            deadline: Some(Instant::now() + Duration::from_secs(100)),
         };
 
         // Send the correct action to FileDownloader
@@ -741,7 +724,6 @@ mod test {
             action_id: "1".to_string(),
             name: "firmware_update".to_string(),
             payload: json!(wrong_update).to_string(),
-            deadline: Some(Instant::now() + Duration::from_secs(100)),
         };
 
         // Send the wrong action to FileDownloader

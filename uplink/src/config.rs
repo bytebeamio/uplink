@@ -215,6 +215,7 @@ pub struct ActionRoute {
     #[serde_as(as = "DurationSeconds<u64>")]
     pub timeout: Duration,
     // Can the action handler cancel actions mid execution?
+    #[serde(default)]
     pub cancellable: bool,
 }
 

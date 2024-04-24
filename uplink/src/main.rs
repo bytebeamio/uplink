@@ -181,6 +181,21 @@ impl CommandLine {
 
         config.actions_subscription = format!("/tenants/{tenant_id}/devices/{device_id}/actions");
 
+        // downloader actions are cancellable by default
+        for route in config.downloader.actions.iter_mut() {
+            route.cancellable = true;
+        }
+
+        // process actions are cancellable by default
+        for route in config.processes.iter_mut() {
+            route.cancellable = true;
+        }
+
+        // script runner actions are cancellable by default
+        for route in config.script_runner.iter_mut() {
+            route.cancellable = true;
+        }
+
         Ok(config)
     }
 

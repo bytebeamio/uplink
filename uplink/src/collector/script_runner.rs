@@ -1,12 +1,12 @@
 use flume::{Receiver, RecvError, SendError};
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::select;
-use tokio::time::timeout_at;
 
 use super::downloader::DownloadFile;
+use crate::base::actions::Cancellation;
 use crate::base::bridge::BridgeTx;
 use crate::{Action, ActionResponse, Package};
 
@@ -28,6 +28,8 @@ pub enum Error {
     Busy,
     #[error("No stdout in spawned action")]
     NoStdout,
+    #[error("Script has been cancelled: '{0}'")]
+    Cancelled(String),
 }
 
 /// Script runner runs a script downloaded with FileDownloader and handles their output over the action_status stream.
@@ -86,6 +88,23 @@ impl ScriptRunner {
                     self.forward_status(ActionResponse::success(id)).await;
                     break;
                 },
+                // Cancel script run on receiving cancel action, e.g. on action timeout
+                Ok(action) = self.actions_rx.recv_async() => {
+                    if action.name != "cancel-action" {
+                        warn!("Unexpected action: {action:?}");
+                        unreachable!("Only cancel-actions are acceptable!!");
+                    }
+
+                    let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
+                    if cancellation.action_id != id {
+                        warn!("Unexpected action: {action:?}");
+                        unreachable!("Cancel actions meant for current action only are acceptable!!");
+                    }
+
+                    trace!("Cancelling script: '{}'", cancellation.action_id);
+                    let status = ActionResponse::failure(id, Error::Cancelled(action.action_id).to_string());
+                    self.bridge_tx.send_action_response(status).await;
+                },
             }
         }
 
@@ -119,20 +138,9 @@ impl ScriptRunner {
                     continue;
                 }
             };
-            let deadline = match &action.deadline {
-                Some(d) => *d,
-                _ => {
-                    error!("Unconfigured deadline: {}", action.name);
-                    continue;
-                }
-            };
             // Spawn the action and capture its stdout
             let child = self.run(command).await?;
-            if let Ok(o) =
-                timeout_at(deadline, self.spawn_and_capture_stdout(child, &action.action_id)).await
-            {
-                o?
-            }
+            self.spawn_and_capture_stdout(child, &action.action_id).await?
         }
     }
 
@@ -176,7 +184,6 @@ mod tests {
                 action_id: "1".to_string(),
                 name: "test".to_string(),
                 payload: "".to_string(),
-                deadline: None,
             })
             .unwrap();
 
@@ -200,7 +207,6 @@ mod tests {
                 name: "test".to_string(),
                 payload: "{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}"
                     .to_string(),
-                deadline: None,
             })
             .unwrap();
 
