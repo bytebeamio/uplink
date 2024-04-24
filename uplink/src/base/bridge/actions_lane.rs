@@ -540,7 +540,7 @@ impl CtrlTx {
 
 #[cfg(test)]
 mod tests {
-    use tokio::runtime::Runtime;
+    use tokio::{runtime::Runtime, select};
 
     use crate::config::{StreamConfig, StreamMetricsConfig};
 
