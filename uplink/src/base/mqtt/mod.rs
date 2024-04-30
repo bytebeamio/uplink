@@ -12,8 +12,8 @@ use std::path::Path;
 
 use crate::{Action, Config};
 use rumqttc::{
-    read, AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Packet, Publish,
-    QoS, Request, TlsConfiguration, Transport,
+    AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS,
+    Request, TlsConfiguration, Transport,
 };
 use std::sync::Arc;
 
@@ -138,7 +138,7 @@ impl Mqtt {
         let max_packet_size = self.config.mqtt.max_packet_size;
         loop {
             // NOTE: This can fail when packet sizes > max_payload_size in config are written to disk.
-            match read(&mut buf, max_packet_size) {
+            match Packet::read(&mut buf, max_packet_size) {
                 Ok(Packet::Publish(publish)) => {
                     self.eventloop.pending.push_back(Request::Publish(publish))
                 }
