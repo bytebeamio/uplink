@@ -260,6 +260,7 @@ impl FileDownloader {
                 if DOWNLOADER_DISABLED.load(Ordering::Acquire) {
                     // async to ensure download can be cancelled during sleep
                     sleep(Duration::from_secs(1)).await;
+                    continue;
                 }
                 let Some(item) = stream.next().await else { break };
                 let chunk = match item {
