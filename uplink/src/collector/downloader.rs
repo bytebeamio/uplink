@@ -56,10 +56,11 @@ use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identit
 use rsa::sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use tokio::select;
-use tokio::time::{timeout_at, Instant};
+use tokio::time::{sleep, timeout_at, Instant};
 
 use std::fs::{metadata, read, remove_dir_all, remove_file, write, File};
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(unix)]
@@ -70,6 +71,8 @@ use std::{
 use std::{io::Write, path::PathBuf};
 
 use crate::{base::bridge::BridgeTx, config::DownloaderConfig, Action, ActionResponse, Config};
+
+pub static STOP_DOWNLOAD: AtomicBool = AtomicBool::new(false);
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -251,7 +254,12 @@ impl FileDownloader {
             let mut stream = req.send().await?.error_for_status()?.bytes_stream();
 
             // Download and store to disk by streaming as chunks
-            while let Some(item) = stream.next().await {
+            loop {
+                // Checks if downloader is disabled by user or not
+                if STOP_DOWNLOAD.load(Ordering::Acquire) {
+                    sleep(Duration::from_secs(1)).await;
+                }
+                let Some(item) = stream.next().await else { break };
                 let chunk = match item {
                     Ok(c) => c,
                     // Retry non-status errors
