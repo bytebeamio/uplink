@@ -1,6 +1,12 @@
 use std::sync::atomic::Ordering;
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Router};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{post, put},
+    Router,
+};
 use log::info;
 use uplink::{base::CtrlTx, collector::downloader::DOWNLOADER_DISABLED};
 
@@ -20,8 +26,8 @@ pub async fn start(port: u16, reload_handle: ReloadHandle, ctrl_tx: CtrlTx) {
     let app = Router::new()
         .route("/logs", post(reload_loglevel))
         .route("/shutdown", post(shutdown))
-        .route("/disable_downloader", post(disable_downloader))
-        .route("/enable_downloader", post(enable_downloader))
+        .route("/disable_downloader", put(disable_downloader))
+        .route("/enable_downloader", put(enable_downloader))
         .with_state(state);
 
     axum::Server::bind(&address.parse().unwrap()).serve(app.into_make_service()).await.unwrap();
