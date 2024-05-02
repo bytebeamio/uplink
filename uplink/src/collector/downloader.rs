@@ -72,7 +72,8 @@ use std::{io::Write, path::PathBuf};
 
 use crate::{base::bridge::BridgeTx, config::DownloaderConfig, Action, ActionResponse, Config};
 
-pub static STOP_DOWNLOAD: AtomicBool = AtomicBool::new(false);
+// Stops from downloading if true
+pub static DOWNLOADER_DISABLED: AtomicBool = AtomicBool::new(false);
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -256,7 +257,8 @@ impl FileDownloader {
             // Download and store to disk by streaming as chunks
             loop {
                 // Checks if downloader is disabled by user or not
-                if STOP_DOWNLOAD.load(Ordering::Acquire) {
+                if DOWNLOADER_DISABLED.load(Ordering::Acquire) {
+                    // async to ensure download can be cancelled during sleep
                     sleep(Duration::from_secs(1)).await;
                 }
                 let Some(item) = stream.next().await else { break };

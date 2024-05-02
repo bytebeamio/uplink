@@ -1,6 +1,8 @@
+use std::sync::atomic::Ordering;
+
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Router};
 use log::info;
-use uplink::base::CtrlTx;
+use uplink::{base::CtrlTx, collector::downloader::DOWNLOADER_DISABLED};
 
 use crate::ReloadHandle;
 
@@ -18,6 +20,8 @@ pub async fn start(port: u16, reload_handle: ReloadHandle, ctrl_tx: CtrlTx) {
     let app = Router::new()
         .route("/logs", post(reload_loglevel))
         .route("/shutdown", post(shutdown))
+        .route("/disable_downloader", post(disable_downloader))
+        .route("/enable_downloader", post(enable_downloader))
         .with_state(state);
 
     axum::Server::bind(&address.parse().unwrap()).serve(app.into_make_service()).await.unwrap();
@@ -37,4 +41,32 @@ async fn shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
     state.ctrl_tx.trigger_shutdown().await;
 
     StatusCode::OK
+}
+
+// Stops downloader from downloading even if it was already stopped
+async fn disable_downloader() -> impl IntoResponse {
+    info!("Downloader stopped");
+    // Shouldn't panic as always sets to true
+    if DOWNLOADER_DISABLED
+        .fetch_update(Ordering::Release, Ordering::Acquire, |_| Some(true))
+        .unwrap()
+    {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::OK
+    }
+}
+
+// Start downloader back up even if it was already not stopped
+async fn enable_downloader() -> impl IntoResponse {
+    info!("Downloader started");
+    // Shouldn't panic as always sets to true
+    if DOWNLOADER_DISABLED
+        .fetch_update(Ordering::Release, Ordering::Acquire, |_| Some(false))
+        .unwrap()
+    {
+        StatusCode::OK
+    } else {
+        StatusCode::ACCEPTED
+    }
 }
