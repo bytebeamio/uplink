@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use serde::Serialize;
-use serde_with::{serde_as, DurationSeconds};
+use serde_with::{serde_as, DurationSecondsWithFrac};
 
 use crate::base::clock;
 
@@ -113,15 +113,15 @@ pub struct StreamMetrics {
     pub compressed_data_size: usize,
     #[serde(skip)]
     pub serializations: u32,
-    #[serde_as(as = "DurationSeconds<f64>")]
+    #[serde_as(as = "DurationSecondsWithFrac<f64>")]
     pub total_serialization_time: Duration,
-    #[serde_as(as = "DurationSeconds<f64>")]
+    #[serde_as(as = "DurationSecondsWithFrac<f64>")]
     pub avg_serialization_time: Duration,
     #[serde(skip)]
     pub compressions: u32,
-    #[serde_as(as = "DurationSeconds<f64>")]
+    #[serde_as(as = "DurationSecondsWithFrac<f64>")]
     pub total_compression_time: Duration,
-    #[serde_as(as = "DurationSeconds<f64>")]
+    #[serde_as(as = "DurationSecondsWithFrac<f64>")]
     pub avg_compression_time: Duration,
 }
 
