@@ -80,7 +80,9 @@ impl Monitor {
                                 continue;
                             }
                             serializer_stream_metrics.push(o);
+                            dbg!(&serializer_stream_metrics);
                             let v = serde_json::to_string(&serializer_stream_metrics).unwrap();
+                            dbg!(&v);
                             serializer_stream_metrics.clear();
                             self.client.publish(&serializer_stream_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                         }
