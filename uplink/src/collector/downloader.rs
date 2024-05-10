@@ -248,7 +248,15 @@ impl FileDownloader {
                 warn!("Retrying download; Continuing to download file from: {range}");
                 req = req.header("Range", range);
             }
-            let mut stream = req.send().await?.error_for_status()?.bytes_stream();
+            let mut stream = match req.send().await {
+                Ok(s) => s.error_for_status()?.bytes_stream(),
+                Err(e) => {
+                    error!("Download failed: {e}");
+                    // Retry after wait
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue 'outer;
+                }
+            };
 
             // Download and store to disk by streaming as chunks
             while let Some(item) = stream.next().await {
