@@ -450,7 +450,7 @@ impl DownloadState {
         // Calculate deadline based on written time left
         current.action.deadline = current.time_left.map(|t| Instant::now() + t);
 
-        let file = File::open(current.meta.download_path.as_ref().unwrap())?;
+        let file = File::options().append(true).open(current.meta.download_path.as_ref().unwrap())?;
         let bytes_written = file.metadata()?.len() as usize;
 
         remove_file(path)?;
