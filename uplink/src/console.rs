@@ -59,9 +59,11 @@ async fn shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
 async fn disable_downloader(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Downloader stopped");
     // Shouldn't panic as always sets to true
-    if *state.downloader_disable.lock().unwrap() {
+    let mut is_disabled = state.downloader_disable.lock().unwrap();
+    if *is_disabled {
         StatusCode::ACCEPTED
     } else {
+        *is_disabled = true;
         StatusCode::OK
     }
 }
@@ -70,7 +72,9 @@ async fn disable_downloader(State(state): State<StateHandle>) -> impl IntoRespon
 async fn enable_downloader(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Downloader started");
     // Shouldn't panic as always sets to true
+    let mut is_disabled = state.downloader_disable.lock().unwrap();
     if *state.downloader_disable.lock().unwrap() {
+        *is_disabled = false;
         StatusCode::OK
     } else {
         StatusCode::ACCEPTED
