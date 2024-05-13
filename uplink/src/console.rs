@@ -58,7 +58,6 @@ async fn shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
 // Stops downloader from downloading even if it was already stopped
 async fn disable_downloader(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Downloader stopped");
-    // Shouldn't panic as always sets to true
     let mut is_disabled = state.downloader_disable.lock().unwrap();
     if *is_disabled {
         StatusCode::ACCEPTED
@@ -71,7 +70,6 @@ async fn disable_downloader(State(state): State<StateHandle>) -> impl IntoRespon
 // Start downloader back up even if it was already not stopped
 async fn enable_downloader(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Downloader started");
-    // Shouldn't panic as always sets to true
     let mut is_disabled = state.downloader_disable.lock().unwrap();
     if *state.downloader_disable.lock().unwrap() {
         *is_disabled = false;
