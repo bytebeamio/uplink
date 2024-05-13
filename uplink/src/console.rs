@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 
 use axum::{
     extract::State,
@@ -8,7 +8,7 @@ use axum::{
     Router,
 };
 use log::info;
-use uplink::{base::CtrlTx, collector::downloader::DOWNLOADER_DISABLED};
+use uplink::base::CtrlTx;
 
 use crate::ReloadHandle;
 
@@ -16,13 +16,19 @@ use crate::ReloadHandle;
 struct StateHandle {
     reload_handle: ReloadHandle,
     ctrl_tx: CtrlTx,
+    downloader_disable: Arc<Mutex<bool>>,
 }
 
 #[tokio::main]
-pub async fn start(port: u16, reload_handle: ReloadHandle, ctrl_tx: CtrlTx) {
+pub async fn start(
+    port: u16,
+    reload_handle: ReloadHandle,
+    ctrl_tx: CtrlTx,
+    downloader_disable: Arc<Mutex<bool>>,
+) {
     let address = format!("0.0.0.0:{port}");
     info!("Starting uplink console server: {address}");
-    let state = StateHandle { reload_handle, ctrl_tx };
+    let state = StateHandle { reload_handle, ctrl_tx, downloader_disable };
     let app = Router::new()
         .route("/logs", post(reload_loglevel))
         .route("/shutdown", post(shutdown))
@@ -50,13 +56,10 @@ async fn shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
 }
 
 // Stops downloader from downloading even if it was already stopped
-async fn disable_downloader() -> impl IntoResponse {
+async fn disable_downloader(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Downloader stopped");
     // Shouldn't panic as always sets to true
-    if DOWNLOADER_DISABLED
-        .fetch_update(Ordering::Release, Ordering::Acquire, |_| Some(true))
-        .unwrap()
-    {
+    if *state.downloader_disable.lock().unwrap() {
         StatusCode::ACCEPTED
     } else {
         StatusCode::OK
@@ -64,13 +67,10 @@ async fn disable_downloader() -> impl IntoResponse {
 }
 
 // Start downloader back up even if it was already not stopped
-async fn enable_downloader() -> impl IntoResponse {
+async fn enable_downloader(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Downloader started");
     // Shouldn't panic as always sets to true
-    if DOWNLOADER_DISABLED
-        .fetch_update(Ordering::Release, Ordering::Acquire, |_| Some(false))
-        .unwrap()
-    {
+    if *state.downloader_disable.lock().unwrap() {
         StatusCode::OK
     } else {
         StatusCode::ACCEPTED
