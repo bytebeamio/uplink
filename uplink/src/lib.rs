@@ -40,7 +40,7 @@
 //!```
 //! [`port`]: base::AppConfig#structfield.port
 //! [`name`]: Action#structfield.name
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -129,7 +129,11 @@ impl Uplink {
         )
     }
 
-    pub fn spawn(&mut self, mut bridge: Bridge) -> Result<CtrlTx, Error> {
+    pub fn spawn(
+        &mut self,
+        mut bridge: Bridge,
+        downloader_disable: Arc<Mutex<bool>>,
+    ) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
         let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
 
@@ -151,8 +155,13 @@ impl Uplink {
         // Downloader thread if configured
         if !self.config.downloader.actions.is_empty() {
             let actions_rx = bridge.register_action_routes(&self.config.downloader.actions)?;
-            let file_downloader =
-                FileDownloader::new(self.config.clone(), actions_rx, bridge.bridge_tx(), ctrl_rx)?;
+            let file_downloader = FileDownloader::new(
+                self.config.clone(),
+                actions_rx,
+                bridge.bridge_tx(),
+                ctrl_rx,
+                downloader_disable,
+            )?;
             spawn_named_thread("File Downloader", || file_downloader.start());
         }
 

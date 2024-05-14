@@ -56,11 +56,11 @@ use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identit
 use rsa::sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use tokio::select;
-use tokio::time::{timeout_at, Instant};
+use tokio::time::{sleep, timeout_at, Instant};
 
 use std::fs::{metadata, read, remove_dir_all, remove_file, write, File};
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[cfg(unix)]
 use std::{
@@ -108,6 +108,7 @@ pub struct FileDownloader {
     bridge_tx: BridgeTx,
     client: Client,
     shutdown_rx: Receiver<DownloaderShutdown>,
+    disabled: Arc<Mutex<bool>>,
 }
 
 impl FileDownloader {
@@ -117,6 +118,7 @@ impl FileDownloader {
         actions_rx: Receiver<Action>,
         bridge_tx: BridgeTx,
         shutdown_rx: Receiver<DownloaderShutdown>,
+        disabled: Arc<Mutex<bool>>,
     ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
@@ -140,6 +142,7 @@ impl FileDownloader {
             bridge_tx,
             action_id: String::default(),
             shutdown_rx,
+            disabled,
         })
     }
 
@@ -259,7 +262,14 @@ impl FileDownloader {
             };
 
             // Download and store to disk by streaming as chunks
-            while let Some(item) = stream.next().await {
+            loop {
+                // Checks if downloader is disabled by user or not
+                if *self.disabled.lock().unwrap() {
+                    // async to ensure download can be cancelled during sleep
+                    sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                let Some(item) = stream.next().await else { break };
                 let chunk = match item {
                     Ok(c) => c,
                     // Retry non-status errors
@@ -605,8 +615,14 @@ mod test {
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
         let (_, ctrl_rx) = bounded(1);
-        let downloader =
-            FileDownloader::new(Arc::new(config), download_rx, bridge_tx, ctrl_rx).unwrap();
+        let downloader = FileDownloader::new(
+            Arc::new(config),
+            download_rx,
+            bridge_tx,
+            ctrl_rx,
+            Arc::new(Mutex::new(false)),
+        )
+        .unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start());
@@ -666,8 +682,14 @@ mod test {
         // Create channels to forward and push action_status on
         let (download_tx, download_rx) = bounded(1);
         let (_, ctrl_rx) = bounded(1);
-        let downloader =
-            FileDownloader::new(Arc::new(config), download_rx, bridge_tx, ctrl_rx).unwrap();
+        let downloader = FileDownloader::new(
+            Arc::new(config),
+            download_rx,
+            bridge_tx,
+            ctrl_rx,
+            Arc::new(Mutex::new(false)),
+        )
+        .unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start());
