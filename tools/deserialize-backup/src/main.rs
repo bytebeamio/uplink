@@ -122,7 +122,7 @@ fn main() -> Result<(), Error> {
         let path = dir.path();
         let stream_name = dir.path().into_iter().last().unwrap().to_string_lossy().to_string();
         // NOTE: max_file_size and max_file_count should not matter when reading non-destructively
-        let mut storage = storage::Storage::new(&stream, 1048576);
+        let mut storage = storage::Storage::new(&stream_name, 1048576);
         storage.set_persistence(path, 3)?;
         storage.set_non_destructive_read(true);
 
