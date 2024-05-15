@@ -157,7 +157,7 @@ impl ActionsBridge {
                 action = self.actions_rx.recv_async() => {
                     let action = action?;
 
-                    if action.name == "cancel-action" && self.current_action.is_some() {
+                    if action.name == "cancel_action" && self.current_action.is_some() {
                         self.handle_cancellation(action).await?;
                         continue
                     }
@@ -194,7 +194,7 @@ impl ActionsBridge {
                     let payload = serde_json::to_string(&cancellation)?;
                     let cancel_action = Action {
                         action_id: "timeout".to_owned(), // Describes cause of action cancellation. NOTE: Action handler shouldn't expect an integer.
-                        name: "cancel-action".to_owned(),
+                        name: "cancel_action".to_owned(),
                         payload,
                     };
                     if route.try_send(cancel_action).is_err() {
@@ -486,7 +486,7 @@ struct CurrentAction {
     pub id: String,
     pub action: Action,
     pub timeout: Pin<Box<Sleep>>,
-    // cancel-action request
+    // cancel_action request
     pub cancelled_by: Option<Action>,
 }
 
