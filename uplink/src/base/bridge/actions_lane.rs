@@ -299,7 +299,7 @@ impl ActionsBridge {
 
         let route = self
             .action_routes
-            .get(&action.name)
+            .get(&cancellation.name)
             .expect("Action shouldn't be in execution if it can't be routed!");
 
         // Ensure that action redirections for the action are turned off,
