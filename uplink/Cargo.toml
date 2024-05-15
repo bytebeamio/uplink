@@ -1,6 +1,6 @@
 [package]
 name = "uplink"
-version = "2.12.0"
+version = "2.12.1"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2021"
 
@@ -32,7 +32,7 @@ storage = { path = "../storage" }
 log = { workspace = true }
 regex = "1.7.1"
 tracing = { version="0.1", features=["log"] }
-tracing-subscriber = { version="=0.3.14", features=["env-filter"] }
+tracing-subscriber = { version="0.3.18", features=["env-filter"] }
 
 # built-in collectors
 # tunshell

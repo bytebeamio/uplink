@@ -1,7 +1,7 @@
 mod console;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Error;
@@ -322,7 +322,8 @@ fn main() -> Result<(), Error> {
         _ => None,
     };
 
-    let ctrl_tx = uplink.spawn(bridge)?;
+    let downloader_disable = Arc::new(Mutex::new(false));
+    let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone())?;
 
     if let Some(config) = config.simulator.clone() {
         spawn_named_thread("Simulator", || {
@@ -333,7 +334,9 @@ fn main() -> Result<(), Error> {
     if config.console.enabled {
         let port = config.console.port;
         let ctrl_tx = ctrl_tx.clone();
-        spawn_named_thread("Uplink Console", move || console::start(port, reload_handle, ctrl_tx));
+        spawn_named_thread("Uplink Console", move || {
+            console::start(port, reload_handle, ctrl_tx, downloader_disable)
+        });
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()

@@ -431,7 +431,7 @@ mod test {
                 break;
             }
 
-            match read(storage.reader(), 1048).unwrap() {
+            match Packet::read(storage.reader(), 1048).unwrap() {
                 Packet::Publish(p) => publishes.push(p),
                 packet => unreachable!("{:?}", packet),
             }

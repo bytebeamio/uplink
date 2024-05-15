@@ -4,44 +4,43 @@
 //! by [`Mqtt`] and [`Serializer`] respectively. [`Action`]s are received and forwarded by [`Mqtt`] to the [`Bridge`] module, where it is handled
 //! depending on the [`name`], with [`Bridge`] forwarding it to one of many **Action Handlers**, configured with an [`ActionRoute`].
 //!
-//! Some of the action handlers are [`TcpJson`], [`ProcessHandler`], [`FileDownloader`] and [`TunshellSession`]. [`TcpJson`] forwards Actions received
+//! Some of the action handlers are [`TcpJson`], [`ProcessHandler`], [`FileDownloader`] and [`TunshellClient`]. [`TcpJson`] forwards Actions received
 //! from the platform to the application connected to it through the [`port`] and collects response data from these devices, to forward to the platform.
 //! Response data can be of multiple types, of interest to us are [`ActionResponse`]s and data [`Payload`]s, which are forwarded to [`Bridge`] and from
 //! there to the [`Serializer`], where depending on the network, it may be persisted in-memory or on-disk with [`Storage`].
 //!
 //!```text
-//!                                      ┌───────────┐
-//!                                      │MQTT broker│
-//!                                      └────┐▲─────┘
-//!                                           ││
-//!                                    Action ││ ActionResponse
-//!                                           ││ / Data
-//!                                         ┌─▼└─┐
-//!                              ┌──────────┤Mqtt◄─────────┐
-//!                       Action │          └────┘         │ ActionResponse
-//!                              │                         │ / Data
-//!                              │                         │
-//!                           ┌──▼───┐ ActionResponse ┌────┴─────┐   Publish   ┌───────┐
-//!   ┌───────────────────────►Bridge├────────────────►Serializer◄─────────────►Storage|
-//!   │                       └┬─┬┬─┬┘    / Data      └──────────┘   Packets   └───────┘
-//!   │                        │ ││ │
-//!   │                        │ ││ | Action (BridgeTx)
-//!   │        ┌───────────────┘ ││ └────────────────────┐
-//!   │        │           ┌─────┘└───────┐              │
-//!   │  ------│-----------│--------------│--------------│------
-//!   │  '     │           │ Applications │              │     '
-//!   │  '┌────▼───┐   ┌───▼───┐   ┌──────▼───────┐  ┌───▼───┐ '    Action       ┌───────────┐
-//!   │  '│Tunshell│   │Process│   │FileDownloader│  │TcpJson◄───────────────────►Application│
-//!   │  '└────┬───┘   └───┬───┘   └──────┬───────┘  └───┬───┘ '  ActionResponse │ / Device  │
-//!   │  '     │           │              │              │     '    / Data       └───────────┘
-//!   │  ------│-----------│--------------│--------------│------         
-//!   │        │           │              │              │
-//!   └────────┴───────────┴──────────────┴──────────────┘
-//!                   ActionResponse / Data
+//!                              ┌───────────┐
+//!                              │MQTT broker│
+//!                              └────┐▲─────┘
+//!                            Action ││ ActionResponse
+//!                                   ││ / Data
+//!                        Action   ┌─▼└─┐
+//!                    ┌────────────┤Mqtt◄──────────┐ ActionResponse
+//!                    │            └────┘          │ / Data
+//!                    │        ActionResponse ┌────┴─────┐   Publish   ┌───────┐
+//!                    │       ┌───────┬───────►Serializer◄─────────────►Storage│
+//!                    │       │       │ Data  └──────────┘   Packets   └───────┘
+//!             ┌------│-------│-------│-----┐
+//!             '┌─────▼─────┐ │  ┌────┴────┐'
+//! ┌────────────►Action Lane├─┘  │Data Lane◄──────┐
+//! │           '└──┬─┬─┬─┬──┘    └─────────┘'     │
+//! │           '   │ │ │ │  Bridge          '     │
+//! │           └---│-│-│-│------------------┘     │
+//! │               │ │ │ └─────────────────────┐  │
+//! │      ┌────────┘ │ └──────────┐            │  │
+//! │┌-----│----------│------------│------------│--│--┐
+//! │'     │          │Applications│            │  │  '
+//! │'┌────▼───┐ ┌────▼──┐  ┌──────▼───────┐ ┌──▼──┴─┐'   Action       ┌───────────┐
+//! │'│Tunshell│ │Process│  │FileDownloader│ │TcpJson◄─────────────────►Application│
+//! │'└────┬───┘ └───┬───┘  └──────┬───────┘ └───┬───┘' ActionResponse │ / Device  │
+//! │└-----│---------│-------------│-------------│----┘   / Data       └───────────┘
+//! └──────┴─────────┴─────────────┴─────────────┘
+//!                    ActionResponse
 //!```
 //! [`port`]: base::AppConfig#structfield.port
 //! [`name`]: Action#structfield.name
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -130,7 +129,11 @@ impl Uplink {
         )
     }
 
-    pub fn spawn(&mut self, mut bridge: Bridge) -> Result<CtrlTx, Error> {
+    pub fn spawn(
+        &mut self,
+        mut bridge: Bridge,
+        downloader_disable: Arc<Mutex<bool>>,
+    ) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
         let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
 
@@ -152,8 +155,13 @@ impl Uplink {
         // Downloader thread if configured
         if !self.config.downloader.actions.is_empty() {
             let actions_rx = bridge.register_action_routes(&self.config.downloader.actions)?;
-            let file_downloader =
-                FileDownloader::new(self.config.clone(), actions_rx, bridge.bridge_tx(), ctrl_rx)?;
+            let file_downloader = FileDownloader::new(
+                self.config.clone(),
+                actions_rx,
+                bridge.bridge_tx(),
+                ctrl_rx,
+                downloader_disable,
+            )?;
             spawn_named_thread("File Downloader", || file_downloader.start());
         }
 

@@ -56,11 +56,11 @@ use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identit
 use rsa::sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use tokio::select;
-use tokio::time::Instant;
+use tokio::time::{Instant, sleep};
 
 use std::fs::{metadata, read, remove_dir_all, remove_file, write, File};
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[cfg(unix)]
 use std::{
@@ -109,6 +109,7 @@ pub struct FileDownloader {
     bridge_tx: BridgeTx,
     client: Client,
     shutdown_rx: Receiver<DownloaderShutdown>,
+    disabled: Arc<Mutex<bool>>,
 }
 
 impl FileDownloader {
@@ -118,6 +119,7 @@ impl FileDownloader {
         actions_rx: Receiver<Action>,
         bridge_tx: BridgeTx,
         shutdown_rx: Receiver<DownloaderShutdown>,
+        disabled: Arc<Mutex<bool>>,
     ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
@@ -141,6 +143,7 @@ impl FileDownloader {
             bridge_tx,
             action_id: String::default(),
             shutdown_rx,
+            disabled,
         })
     }
 
@@ -242,10 +245,25 @@ impl FileDownloader {
                 warn!("Retrying download; Continuing to download file from: {range}");
                 req = req.header("Range", range);
             }
-            let mut stream = req.send().await?.error_for_status()?.bytes_stream();
+            let mut stream = match req.send().await {
+                Ok(s) => s.error_for_status()?.bytes_stream(),
+                Err(e) => {
+                    error!("Download failed: {e}");
+                    // Retry after wait
+                    sleep(Duration::from_secs(1)).await;
+                    continue 'outer;
+                }
+            };
 
             // Download and store to disk by streaming as chunks
-            while let Some(item) = stream.next().await {
+            loop {
+                // Checks if downloader is disabled by user or not
+                if *self.disabled.lock().unwrap() {
+                    // async to ensure download can be cancelled during sleep
+                    sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                let Some(item) = stream.next().await else { break };
                 let chunk = match item {
                     Ok(c) => c,
                     // Retry non-status errors
@@ -256,7 +274,7 @@ impl FileDownloader {
                         self.bridge_tx.send_action_response(status).await;
                         error!("Download failed: {e}");
                         // Retry after wait
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        sleep(Duration::from_secs(1)).await;
                         continue 'outer;
                     }
                     Err(e) => return Err(e.into()),
@@ -442,7 +460,7 @@ impl DownloadState {
         let current: CurrentDownload = serde_json::from_slice(&read)?;
 
         // Unwrap is ok here as it is expected to be set for actions once received
-        let file = File::open(current.meta.download_path.as_ref().unwrap())?;
+        let file = File::options().append(true).open(current.meta.download_path.as_ref().unwrap())?;
         let bytes_written = file.metadata()?.len() as usize;
 
         remove_file(path)?;
@@ -596,8 +614,14 @@ mod test {
         // Create channels to forward and push actions on
         let (download_tx, download_rx) = bounded(1);
         let (_, ctrl_rx) = bounded(1);
-        let downloader =
-            FileDownloader::new(Arc::new(config), download_rx, bridge_tx, ctrl_rx).unwrap();
+        let downloader = FileDownloader::new(
+            Arc::new(config),
+            download_rx,
+            bridge_tx,
+            ctrl_rx,
+            Arc::new(Mutex::new(false)),
+        )
+        .unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start());
@@ -656,8 +680,14 @@ mod test {
         // Create channels to forward and push action_status on
         let (download_tx, download_rx) = bounded(1);
         let (_, ctrl_rx) = bounded(1);
-        let downloader =
-            FileDownloader::new(Arc::new(config), download_rx, bridge_tx, ctrl_rx).unwrap();
+        let downloader = FileDownloader::new(
+            Arc::new(config),
+            download_rx,
+            bridge_tx,
+            ctrl_rx,
+            Arc::new(Mutex::new(false)),
+        )
+        .unwrap();
 
         // Start FileDownloader in separate thread
         std::thread::spawn(|| downloader.start());
