@@ -285,13 +285,17 @@ impl ActionsBridge {
     /// else marks the current action as cancelled and avoids further redirections
     async fn handle_cancellation(&mut self, action: Action) -> Result<(), Error> {
         let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
-        if cancellation.action_id != self.current_action.as_ref().unwrap().id {
+        let current_action = self
+            .current_action
+            .as_ref()
+            .expect("Actions that are not executing can't be cancelled");
+        if cancellation.action_id != current_action.id {
             warn!("Unexpected cancellation: {cancellation:?}");
             self.forward_action_error(action, Error::UnexpectedCancellation).await;
             return Ok(());
         }
 
-        if cancellation.name != self.current_action.as_ref().unwrap().action.name {
+        if cancellation.name != current_action.action.name {
             warn!("Unexpected cancellation: {cancellation:?}");
             self.forward_action_error(action, Error::CorruptedCancellation).await;
             return Ok(());
