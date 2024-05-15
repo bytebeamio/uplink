@@ -210,16 +210,7 @@ impl FileDownloader {
             o = self.continuous_retry(state) => o?,
             // Cancel download on receiving cancel action, e.g. on action timeout
             Ok(action) = self.actions_rx.recv_async() => {
-                if action.name != "cancel-action" {
-                    warn!("Unexpected action: {action:?}");
-                    unreachable!("Only cancel-action should be sent to downloader while it is handling another download!!");
-                }
-
                 let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
-                if cancellation.action_id != self.action_id {
-                    warn!("Unexpected action: {action:?}");
-                    unreachable!("Cancel actions meant for current action only should be sent to downloader!!");
-                }
 
                 trace!("Deleting partially downloaded file: {cancellation:?}");
                 state.clean()?;

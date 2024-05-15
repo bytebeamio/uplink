@@ -1,5 +1,5 @@
 use flume::{Receiver, RecvError, SendError};
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, info, trace};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
@@ -82,16 +82,7 @@ impl ProcessHandler {
                 },
                 // Cancel process on receiving cancel action, e.g. on action timeout
                 Ok(action) = self.actions_rx.recv_async() => {
-                    if action.name != "cancel-action" {
-                        warn!("Unexpected action: {action:?}");
-                        unreachable!("Only cancel-actions are acceptable!!");
-                    }
-
                     let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
-                    if cancellation.action_id != action_id {
-                        warn!("Unexpected action: {action:?}");
-                        unreachable!("Cancel actions meant for current action only are acceptable!!");
-                    }
 
                     trace!("Cancelling process: '{}'", cancellation.action_id);
                     let status = ActionResponse::failure(action_id, Error::Cancelled(action.action_id).to_string());
