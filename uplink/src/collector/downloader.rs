@@ -56,7 +56,7 @@ use reqwest::{Certificate, Client, ClientBuilder, Error as ReqwestError, Identit
 use rsa::sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use tokio::select;
-use tokio::time::{Instant, sleep};
+use tokio::time::{sleep, Instant};
 
 use std::fs::{metadata, read, remove_dir_all, remove_file, write, File};
 use std::io;
@@ -460,7 +460,8 @@ impl DownloadState {
         let current: CurrentDownload = serde_json::from_slice(&read)?;
 
         // Unwrap is ok here as it is expected to be set for actions once received
-        let file = File::options().append(true).open(current.meta.download_path.as_ref().unwrap())?;
+        let file =
+            File::options().append(true).open(current.meta.download_path.as_ref().unwrap())?;
         let bytes_written = file.metadata()?.len() as usize;
 
         remove_file(path)?;
