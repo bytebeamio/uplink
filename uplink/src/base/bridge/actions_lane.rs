@@ -157,7 +157,7 @@ impl ActionsBridge {
                 action = self.actions_rx.recv_async() => {
                     let action = action?;
 
-                    if action.name == "cancel_action" && self.current_action.is_some() {
+                    if action.name == "cancel_action" {
                         self.handle_cancellation(action).await?;
                         continue
                     }
@@ -284,11 +284,11 @@ impl ActionsBridge {
     /// Forwards cancellation request to the handler if it can handle the same,
     /// else marks the current action as cancelled and avoids further redirections
     async fn handle_cancellation(&mut self, action: Action) -> Result<(), Error> {
+        let Some(current_action) = self.current_action.as_ref() else {
+            self.forward_action_error(action, Error::UnexpectedCancellation).await;
+            return Ok(());
+        };
         let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
-        let current_action = self
-            .current_action
-            .as_ref()
-            .expect("Actions that are not executing can't be cancelled");
         if cancellation.action_id != current_action.id {
             warn!("Unexpected cancellation: {cancellation:?}");
             self.forward_action_error(action, Error::UnexpectedCancellation).await;
