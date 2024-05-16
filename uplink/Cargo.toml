@@ -1,6 +1,6 @@
 [package]
 name = "uplink"
-version = "2.12.1"
+version = "2.12.1-react"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2021"
 
