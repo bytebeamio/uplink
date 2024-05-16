@@ -368,6 +368,11 @@ impl ActionsBridge {
     }
 
     async fn forward_action_response(&mut self, mut response: ActionResponse) {
+        // Ignore responses to timeout action
+        if response.action_id == "timeout" {
+            return;
+        }
+
         if self.parallel_actions.contains(&response.action_id) {
             self.forward_parallel_action_response(response).await;
 
