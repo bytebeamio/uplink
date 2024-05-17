@@ -71,7 +71,7 @@ async fn disable_downloader(State(state): State<StateHandle>) -> impl IntoRespon
 async fn enable_downloader(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Downloader started");
     let mut is_disabled = state.downloader_disable.lock().unwrap();
-    if *state.downloader_disable.lock().unwrap() {
+    if *is_disabled {
         *is_disabled = false;
         StatusCode::OK
     } else {
