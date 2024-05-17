@@ -15,6 +15,7 @@ pub struct Action {
     pub action_id: String,
     // action name
     pub name: String,
+    pub kind: String,
     // action payload. json. can be args/payload. depends on the invoked command
     pub payload: String,
     // Instant at which action must be timedout
