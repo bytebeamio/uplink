@@ -288,7 +288,7 @@ impl ActionsBridge {
             self.forward_action_error(action, Error::UnexpectedCancellation).await;
             return Ok(());
         };
-        let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
+        let mut cancellation: Cancellation = serde_json::from_str(&action.payload)?;
         if cancellation.action_id != current_action.id {
             warn!("Unexpected cancellation: {cancellation:?}");
             self.forward_action_error(action, Error::UnexpectedCancellation).await;
@@ -296,9 +296,11 @@ impl ActionsBridge {
         }
 
         if cancellation.name != current_action.action.name {
-            warn!("Unexpected cancellation: {cancellation:?}");
-            self.forward_action_error(action, Error::CorruptedCancellation).await;
-            return Ok(());
+            debug!(
+                "Action was redirected: {} ~> {}",
+                cancellation.name, current_action.action.name
+            );
+            current_action.action.name.clone_into(&mut cancellation.name);
         }
 
         let route = self
