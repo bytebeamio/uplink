@@ -5,6 +5,7 @@ use human_bytes::human_bytes;
 use lz4_flex::frame::FrameDecoder;
 use rumqttc::{read, Packet};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use structopt::StructOpt;
 use tabled::{
     settings::{locator::ByColumnName, Disable, Style},
@@ -37,6 +38,8 @@ pub enum Error {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Payload {
     timestamp: u64,
+    #[serde(flatten)]
+    payload: Value,
 }
 
 #[derive(Tabled)]
@@ -111,6 +114,7 @@ fn main() -> Result<(), Error> {
     let mut streams: HashMap<String, Stream> = HashMap::new();
     let mut total = Stream::default();
     let mut entries: Vec<Entry> = vec![];
+    let mut data = vec![];
 
     let dirs = std::fs::read_dir(commandline.directory)?;
     for dir in dirs {
@@ -172,6 +176,7 @@ fn main() -> Result<(), Error> {
                 if stream.end < timestamp {
                     stream.end = timestamp
                 }
+                data.push(payload);
             }
         }
     }
@@ -196,6 +201,8 @@ fn main() -> Result<(), Error> {
         let entry = Entry::new(topic, stream);
         entries.push(entry);
     }
+
+    eprint!("{}", serde_json::to_string(&data).unwrap());
 
     let mut table = Table::new(entries);
     table.with(Style::rounded());
