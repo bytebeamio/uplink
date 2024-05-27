@@ -191,7 +191,7 @@ impl ActionsBridge {
                         continue;
                     }
 
-                    let cancellation = Cancellation { action_id: action_id.clone(), name: action_name };
+                    let cancellation = Cancellation { action_id,  action_name };
                     let payload = serde_json::to_string(&cancellation)?;
                     let cancel_action = Action {
                         action_id: "timeout".to_owned(), // Describes cause of action cancellation. NOTE: Action handler shouldn't expect an integer.
@@ -199,7 +199,7 @@ impl ActionsBridge {
                         payload,
                     };
                     if route.try_send(cancel_action).is_err() {
-                        error!("Couldn't cancel action ({}) on timeout: {}", action_id, Error::UnresponsiveReceiver);
+                        error!("Couldn't cancel action ({}) on timeout: {}", cancellation.action_id, Error::UnresponsiveReceiver);
                         // Remove action anyways
                         self.clear_current_action();
                         continue;
@@ -298,17 +298,17 @@ impl ActionsBridge {
         }
 
         info!("Received action cancellation: {:?}", cancellation);
-        if cancellation.name != current_action.action.name {
+        if cancellation.action_name != current_action.action.name {
             debug!(
                 "Action was redirected: {} ~> {}",
-                cancellation.name, current_action.action.name
+                cancellation.action_name, current_action.action.name
             );
-            current_action.action.name.clone_into(&mut cancellation.name);
+            current_action.action.name.clone_into(&mut cancellation.action_name);
         }
 
         let route = self
             .action_routes
-            .get(&cancellation.name)
+            .get(&cancellation.action_name)
             .expect("Action shouldn't be in execution if it can't be routed!");
 
         // Ensure that action redirections for the action are turned off,
