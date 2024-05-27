@@ -173,24 +173,25 @@ impl ActionsBridge {
 
                 _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
                     let curret_action = self.current_action.as_mut().unwrap();
-                    let action = curret_action.action.clone();
+                    let action_id = curret_action.action.action_id.clone();
+                    let action_name = curret_action.action.name.clone();
 
                     let route = self
                         .action_routes
-                        .get(&action.name)
+                        .get(&action_name)
                         .expect("Action shouldn't be in execution if it can't be routed!");
 
                     if !route.is_cancellable() {
                         // Directly send timeout failure response if handler doesn't allow action cancellation
-                        error!("Timeout waiting for action response. Action ID = {}", action.action_id);
-                        self.forward_action_error(&action.action_id, Error::ActionTimeout).await;
+                        error!("Timeout waiting for action response. Action ID = {}", action_id);
+                        self.forward_action_error(&action_id, Error::ActionTimeout).await;
 
                         // Remove action because it timedout
                         self.clear_current_action();
                         continue;
                     }
 
-                    let cancellation = Cancellation { action_id: action.action_id.clone(), name: action.name };
+                    let cancellation = Cancellation { action_id: action_id.clone(), name: action_name };
                     let payload = serde_json::to_string(&cancellation)?;
                     let cancel_action = Action {
                         action_id: "timeout".to_owned(), // Describes cause of action cancellation. NOTE: Action handler shouldn't expect an integer.
@@ -198,7 +199,7 @@ impl ActionsBridge {
                         payload,
                     };
                     if route.try_send(cancel_action).is_err() {
-                        error!("Couldn't cancel action ({}) on timeout: {}", action.action_id, Error::UnresponsiveReceiver);
+                        error!("Couldn't cancel action ({}) on timeout: {}", action_id, Error::UnresponsiveReceiver);
                         // Remove action anyways
                         self.clear_current_action();
                         continue;
@@ -284,14 +285,15 @@ impl ActionsBridge {
     /// Forwards cancellation request to the handler if it can handle the same,
     /// else marks the current action as cancelled and avoids further redirections
     async fn handle_cancellation(&mut self, action: Action) -> Result<(), Error> {
+        let action_id = action.action_id.clone();
         let Some(current_action) = self.current_action.as_ref() else {
-            self.forward_action_error(&action.action_id, Error::UnexpectedCancellation).await;
+            self.forward_action_error(&action_id, Error::UnexpectedCancellation).await;
             return Ok(());
         };
         let mut cancellation: Cancellation = serde_json::from_str(&action.payload)?;
         if cancellation.action_id != current_action.id {
             warn!("Unexpected cancellation: {cancellation:?}");
-            self.forward_action_error(&action.action_id, Error::UnexpectedCancellation).await;
+            self.forward_action_error(&action_id, Error::UnexpectedCancellation).await;
             return Ok(());
         }
 
@@ -311,16 +313,15 @@ impl ActionsBridge {
 
         // Ensure that action redirections for the action are turned off,
         // action will be cancelled on next attempt to redirect
-        self.current_action.as_mut().unwrap().cancelled_by = Some(action.action_id.clone());
-        let response = ActionResponse::progress(&action.action_id, "Received", 0);
+        self.current_action.as_mut().unwrap().cancelled_by = Some(action_id.clone());
 
         if route.is_cancellable() {
-            if let Err(e) = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)
-            {
-                self.forward_action_error(&action.action_id, e).await;
+            if let Err(e) = route.try_send(action).map_err(|_| Error::UnresponsiveReceiver) {
+                self.forward_action_error(&action_id, e).await;
                 return Ok(());
             }
         }
+        let response = ActionResponse::progress(&action_id, "Received", 0);
         self.forward_action_response(response).await;
 
         Ok(())
