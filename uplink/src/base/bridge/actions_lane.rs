@@ -183,7 +183,7 @@ impl ActionsBridge {
                     if !route.is_cancellable() {
                         // Directly send timeout failure response if handler doesn't allow action cancellation
                         error!("Timeout waiting for action response. Action ID = {}", action.action_id);
-                        self.forward_action_error(action, Error::ActionTimeout).await;
+                        self.forward_action_error(&action.action_id, Error::ActionTimeout).await;
 
                         // Remove action because it timedout
                         self.clear_current_action();
@@ -248,7 +248,7 @@ impl ActionsBridge {
                     "Another action is currently occupying uplink; action_id = {}",
                     current_action.id
                 );
-                self.forward_action_error(action, Error::Busy).await;
+                self.forward_action_error(&action.action_id, Error::Busy).await;
                 return;
             }
         }
@@ -278,20 +278,20 @@ impl ActionsBridge {
         }
 
         error!("Failed to route action to app. Error = {:?}", error);
-        self.forward_action_error(action, error).await;
+        self.forward_action_error(&action.action_id, error).await;
     }
 
     /// Forwards cancellation request to the handler if it can handle the same,
     /// else marks the current action as cancelled and avoids further redirections
     async fn handle_cancellation(&mut self, action: Action) -> Result<(), Error> {
         let Some(current_action) = self.current_action.as_ref() else {
-            self.forward_action_error(action, Error::UnexpectedCancellation).await;
+            self.forward_action_error(&action.action_id, Error::UnexpectedCancellation).await;
             return Ok(());
         };
         let mut cancellation: Cancellation = serde_json::from_str(&action.payload)?;
         if cancellation.action_id != current_action.id {
             warn!("Unexpected cancellation: {cancellation:?}");
-            self.forward_action_error(action, Error::UnexpectedCancellation).await;
+            self.forward_action_error(&action.action_id, Error::UnexpectedCancellation).await;
             return Ok(());
         }
 
@@ -317,7 +317,7 @@ impl ActionsBridge {
         if route.is_cancellable() {
             if let Err(e) = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)
             {
-                self.forward_action_error(action, e).await;
+                self.forward_action_error(&action.action_id, e).await;
                 return Ok(());
             }
         }
@@ -432,17 +432,22 @@ impl ActionsBridge {
                         self.current_action.take()
                     {
                         // Marks the cancellation as a failure as action has reached completion without being cancelled
-                        self.forward_action_error(cancel_action, Error::FailedCancellation).await
+                        self.forward_action_error(
+                            &cancel_action.action_id,
+                            Error::FailedCancellation,
+                        )
+                        .await
                     }
                 }
                 Err(Error::Cancelled(cancel_action)) => {
                     let response = ActionResponse::success(&cancel_action);
                     self.streams.forward(response).await;
 
-                    self.forward_action_error(action, Error::Cancelled(cancel_action)).await;
+                    self.forward_action_error(&action.action_id, Error::Cancelled(cancel_action))
+                        .await;
                 }
                 Err(e) => {
-                    self.forward_action_error(action, e).await;
+                    self.forward_action_error(&action.action_id, e).await;
                 }
             }
 
@@ -483,8 +488,8 @@ impl ActionsBridge {
         self.streams.forward(response).await;
     }
 
-    async fn forward_action_error(&mut self, action: Action, error: Error) {
-        let response = ActionResponse::failure(&action.action_id, error.to_string());
+    async fn forward_action_error(&mut self, action_id: &str, error: Error) {
+        let response = ActionResponse::failure(action_id, error.to_string());
 
         self.streams.forward(response).await;
     }
