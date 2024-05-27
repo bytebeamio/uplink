@@ -214,6 +214,9 @@ pub struct ActionRoute {
     #[serde(default = "default_timeout")]
     #[serde_as(as = "DurationSeconds<u64>")]
     pub timeout: Duration,
+    // Can the action handler cancel actions mid execution?
+    #[serde(default)]
+    pub cancellable: bool,
 }
 
 impl From<&ActionRoute> for ActionRoute {
