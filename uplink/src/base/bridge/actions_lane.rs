@@ -421,7 +421,7 @@ impl ActionsBridge {
         // Forward actions included in the config to the appropriate forward route, when
         // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
         if response.is_done() {
-            let mut action = inflight_action.action.clone();
+            let mut action = self.current_action.take().unwrap().action;
 
             if let Some(a) = response.done_response.take() {
                 action = a;
@@ -449,12 +449,8 @@ impl ActionsBridge {
                     self.forward_action_error(&action.action_id, Error::Cancelled(cancel_action))
                         .await;
                 }
-                Err(e) => {
-                    self.forward_action_error(&action.action_id, e).await;
-                }
+                Err(e) => self.forward_action_error(&action.action_id, e).await,
             }
-
-            self.clear_current_action();
         }
     }
 
