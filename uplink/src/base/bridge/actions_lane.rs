@@ -311,7 +311,7 @@ impl ActionsBridge {
 
         // Ensure that action redirections for the action are turned off,
         // action will be cancelled on next attempt to redirect
-        self.current_action.as_mut().unwrap().cancelled_by = Some(action.clone());
+        self.current_action.as_mut().unwrap().cancelled_by = Some(action.action_id.clone());
         let response = ActionResponse::progress(&action.action_id, "Received", 0);
 
         if route.is_cancellable() {
@@ -405,7 +405,7 @@ impl ActionsBridge {
             if let Some(CurrentAction { cancelled_by: Some(cancel_action), .. }) =
                 self.current_action.take()
             {
-                let response = ActionResponse::success(&cancel_action.action_id);
+                let response = ActionResponse::success(&cancel_action);
                 self.streams.forward(response).await;
             }
             return;
@@ -432,11 +432,7 @@ impl ActionsBridge {
                         self.current_action.take()
                     {
                         // Marks the cancellation as a failure as action has reached completion without being cancelled
-                        self.forward_action_error(
-                            &cancel_action.action_id,
-                            Error::FailedCancellation,
-                        )
-                        .await
+                        self.forward_action_error(&cancel_action, Error::FailedCancellation).await
                     }
                 }
                 Err(Error::Cancelled(cancel_action)) => {
@@ -465,7 +461,7 @@ impl ActionsBridge {
         if let Some(CurrentAction { cancelled_by: Some(cancel_action), .. }) =
             self.current_action.as_ref()
         {
-            return Err(Error::Cancelled(cancel_action.action_id.clone()));
+            return Err(Error::Cancelled(cancel_action.clone()));
         }
 
         debug!(
@@ -507,7 +503,7 @@ struct CurrentAction {
     pub action: Action,
     pub timeout: Pin<Box<Sleep>>,
     // cancel_action request
-    pub cancelled_by: Option<Action>,
+    pub cancelled_by: Option<String>,
 }
 
 impl CurrentAction {
