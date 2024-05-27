@@ -295,6 +295,7 @@ impl ActionsBridge {
             return Ok(());
         }
 
+        info!("Received action cancellation: {:?}", cancellation);
         if cancellation.name != current_action.action.name {
             debug!(
                 "Action was redirected: {} ~> {}",
@@ -311,13 +312,16 @@ impl ActionsBridge {
         // Ensure that action redirections for the action are turned off,
         // action will be cancelled on next attempt to redirect
         self.current_action.as_mut().unwrap().cancelled_by = Some(action.clone());
+        let response = ActionResponse::progress(&action.action_id, "Received", 0);
 
         if route.is_cancellable() {
             if let Err(e) = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)
             {
                 self.forward_action_error(action, e).await;
+                return Ok(());
             }
         }
+        self.forward_action_response(response).await;
 
         Ok(())
     }
