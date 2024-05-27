@@ -259,7 +259,7 @@ impl ActionsBridge {
         let error = match self.try_route_action(action.clone()) {
             Ok(_) => {
                 let response = ActionResponse::progress(&action_id, "Received", 0);
-                self.forward_action_response(response).await;
+                self.streams.forward(response).await;
                 return;
             }
             Err(e) => e,
@@ -322,7 +322,7 @@ impl ActionsBridge {
             }
         }
         let response = ActionResponse::progress(&action_id, "Received", 0);
-        self.forward_action_response(response).await;
+        self.streams.forward(response).await;
 
         Ok(())
     }
