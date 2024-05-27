@@ -428,7 +428,7 @@ impl ActionsBridge {
             }
 
             match self.redirect_action(&mut action).await {
-                Ok(_) => return,
+                Ok(_) => (),
                 Err(Error::NoRoute(_)) => {
                     // NOTE: send success reponse for actions that don't have redirections configured
                     warn!("Action redirection is not configured for: {:?}", action);
