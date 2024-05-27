@@ -397,10 +397,12 @@ impl ActionsBridge {
             }
         };
 
-        if *inflight_action.action.action_id != response.action_id {
+        if !inflight_action.is_executing(&response.action_id)
+            && !inflight_action.is_cancelled_by(&response.action_id)
+        {
             error!(
-                "response id({}) != active action({})",
-                response.action_id, inflight_action.action.action_id
+                "response id({}) != active action({}); response = {:?}",
+                response.action_id, inflight_action.action.action_id, response
             );
             return;
         }
@@ -531,6 +533,14 @@ impl CurrentAction {
             timeout: Box::pin(time::sleep(json.timeout)),
             cancelled_by: None,
         })
+    }
+
+    fn is_executing(&self, action_id: &str) -> bool {
+        self.action.action_id == action_id
+    }
+
+    fn is_cancelled_by(&self, action_id: &str) -> bool {
+        self.cancelled_by.as_ref().is_some_and(|id| id == action_id)
     }
 }
 
