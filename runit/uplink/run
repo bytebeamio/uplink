@@ -41,7 +41,7 @@ if [ ! -f "$FILE" ]; then
          --header "x-bytebeam-tenant: ${BYTEBEAM_TENANT}" \
          --header "x-bytebeam-api-key: ${BYTEBEAM_API_KEY}" \
          --header 'Content-Type: application/json' \
-         --data '{"metadata": {"cluster": "'$CLUSTER'","application": "'$APPLICATION'"}}' \
+         --data '{"metadata": {"cluster": "'$CLUSTER'","application": "'$APPLICATION'","uid": "'$CLUSTER'-'$APPLICATION'"}}' \
          -o "$FILE"
 
     if [ $? -eq 0 ]; then
