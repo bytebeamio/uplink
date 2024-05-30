@@ -20,6 +20,8 @@ struct LogEntry {
     #[serde(skip)]
     pub timestamp: u64,
     pub message: Option<String>,
+    pub pid: Option<usize>,
+    pub query_id: Option<String>,
 }
 
 /// Parse timestamp from log line, use current time as default if unable to ascertain partially
@@ -83,6 +85,9 @@ impl LogEntry {
         multi_line: bool,
     ) -> Option<Self> {
         let to_string = |x: Match| x.as_str().to_string();
+        fn to_usize(x: Match) -> Option<usize> {
+            x.as_str().parse().ok()
+        }
         let line = line.trim().to_string();
         if let Some(captures) = log_template.captures(&line) {
             // Use current time if not able to parse properly
@@ -99,8 +104,18 @@ impl LogEntry {
                 .map(to_string)
                 .unwrap_or_else(|| std::env::var("LOG_TAG").unwrap_or("".to_owned()));
             let message = captures.name("message").map(to_string);
+            let pid = captures.name("pid").map(to_usize).flatten();
+            let query_id = captures.name("query_id").map(to_string);
 
-            return current_line.replace(LogEntry { line, tag, level, timestamp, message });
+            return current_line.replace(LogEntry {
+                line,
+                tag,
+                level,
+                timestamp,
+                message,
+                pid,
+                query_id,
+            });
         } else if multi_line {
             if let Some(log_entry) = current_line {
                 log_entry.line += &format!("\n{line}");
@@ -217,7 +232,9 @@ mod test {
                     .to_string(),
                 timestamp: 1688407162000,
                 message: Some("Outgoing = Publish(9)".to_string()),
-                tag: Some("uplink::base::mqtt".to_string())
+                tag: Some("uplink::base::mqtt".to_string()),
+                pid: None,
+                query_id: None
             }
         );
 
@@ -268,7 +285,9 @@ mod test {
                     .to_string(),
                 timestamp: 1688407162979,
                 message: Some("Outgoing = Publish(9)".to_string()),
-                tag: Some("uplink::base::mqtt".to_string())
+                tag: Some("uplink::base::mqtt".to_string()),
+                pid: None,
+                query_id: None
             }
         );
 
@@ -281,7 +300,9 @@ mod test {
                     .to_string(),
                 timestamp: 1688407163012,
                 message: Some("Incoming = PubAck(9)".to_string()),
-                tag: Some("uplink::base::mqtt".to_string())
+                tag: Some("uplink::base::mqtt".to_string()),
+                pid: None,
+                query_id: None
             }
         );
 
@@ -310,7 +331,9 @@ mod test {
                 line: "2023-07-11T13:56:44.101585Z  INFO beamd::http::endpoint: Method = \"POST\", Uri = \"/tenants/naveentest/devices/8/actions\", Payload = \"{\\\"name\\\":\\\"update_firmware\\\",\\\"id\\\":\\\"830\\\",\\\"payload\\\":\\\"{\\\\\\\"content-length\\\\\\\":35393,\\\\\\\"status\\\\\\\":false,\\\\\\\"url\\\\\\\":\\\\\\\"https://firmware.stage.bytebeam.io/api/v1/firmwares/one/artifact\\\\\\\",\\\\\\\"version\\\\\\\":\\\\\\\"one\\\\\\\"}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string(),
                 timestamp: 1689083804101,
                 message: Some("Method = \"POST\", Uri = \"/tenants/naveentest/devices/8/actions\", Payload = \"{\\\"name\\\":\\\"update_firmware\\\",\\\"id\\\":\\\"830\\\",\\\"payload\\\":\\\"{\\\\\\\"content-length\\\\\\\":35393,\\\\\\\"status\\\\\\\":false,\\\\\\\"url\\\\\\\":\\\\\\\"https://firmware.stage.bytebeam.io/api/v1/firmwares/one/artifact\\\\\\\",\\\\\\\"version\\\\\\\":\\\\\\\"one\\\\\\\"}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string()),
-                tag: Some("beamd::http::endpoint".to_string())
+                tag: Some("beamd::http::endpoint".to_string()),
+                pid: None,
+                query_id: None
             }
         );
 
@@ -322,7 +345,9 @@ mod test {
                 line: "2023-07-11T13:56:44.113343Z  INFO beamd::http::endpoint: Method = \"POST\", Uri = \"/tenants/rpi/devices/6/actions\", Payload = \"{\\\"name\\\":\\\"tunshell\\\",\\\"id\\\":\\\"226\\\",\\\"payload\\\":\\\"{}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string(),
                 timestamp: 1689083804113,
                 message: Some("Method = \"POST\", Uri = \"/tenants/rpi/devices/6/actions\", Payload = \"{\\\"name\\\":\\\"tunshell\\\",\\\"id\\\":\\\"226\\\",\\\"payload\\\":\\\"{}\\\",\\\"kind\\\":\\\"process\\\"}\"".to_string()),
-                tag: Some("beamd::http::endpoint".to_string())
+                tag: Some("beamd::http::endpoint".to_string()),
+                pid: None,
+                query_id: None
             }
         );
 
@@ -334,7 +359,9 @@ mod test {
                 tag: Some("beamd::clickhouse".to_string()),
                 level: Some("ERROR".to_string()),
                 timestamp: 1689083804221,
-                message: Some("Flush-error: [Status - 500] Ok(\"Code: 243. DB::Exception: Cannot reserve 11.58 MiB, not enough space. (NOT_ENOUGH_SPACE) (version 22.6.2.12 (official build))\\n\"), back_up_enabled: true\nin beamd::clickhouse::clickhouse_flush with stream: \"demo.uplink_process_stats\"".to_string())
+                message: Some("Flush-error: [Status - 500] Ok(\"Code: 243. DB::Exception: Cannot reserve 11.58 MiB, not enough space. (NOT_ENOUGH_SPACE) (version 22.6.2.12 (official build))\\n\"), back_up_enabled: true\nin beamd::clickhouse::clickhouse_flush with stream: \"demo.uplink_process_stats\"".to_string()),
+                pid: None,
+                query_id: None
             }
         );
 
@@ -360,7 +387,9 @@ mod test {
                 line: "23-07-11 18:03:32 consoled-6cd8795566-76km9 INFO [ring.logger:0] - {:request-method :get, :uri \"/api/v1/devices/count\", :server-name \"cloud.bytebeam.io\", :ring.logger/type :finish, :status 200, :ring.logger/ms 11}\n10.13.2.69 - - [11/Jul/2023:18:03:32 +0000] \"GET /api/v1/devices/count?status=active HTTP/1.1\" 200 1 \"https://cloud.bytebeam.io/projects/kptl/device-management/devices\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36\"rt=0.016 uct=0.000 cn= o=\n\"Notifying broker for tenant reactlabs device 305 action 683022\"".to_string(),
                 timestamp: 1689098612000,
                 message: Some("[ring.logger:0] - {:request-method :get, :uri \"/api/v1/devices/count\", :server-name \"cloud.bytebeam.io\", :ring.logger/type :finish, :status 200, :ring.logger/ms 11}\n10.13.2.69 - - [11/Jul/2023:18:03:32 +0000] \"GET /api/v1/devices/count?status=active HTTP/1.1\" 200 1 \"https://cloud.bytebeam.io/projects/kptl/device-management/devices\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36\"rt=0.016 uct=0.000 cn= o=\n\"Notifying broker for tenant reactlabs device 305 action 683022\"".to_string()),
-                tag: Some("consoled-6cd8795566-76km9".to_string())
+                tag: Some("consoled-6cd8795566-76km9".to_string()),
+                pid: None,
+                query_id: None
             }
         );
 
