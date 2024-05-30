@@ -1,6 +1,6 @@
 FROM rust:alpine as builder
 
-RUN apk add build-base openssl-dev
+RUN apk add build-base libressl-dev
 WORKDIR "/usr/share/bytebeam/uplink"
 
 COPY uplink/ uplink
