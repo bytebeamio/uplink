@@ -45,10 +45,7 @@ pub struct System {
 impl System {
     fn init(sys: &sysinfo::System) -> System {
         System {
-            kernel_version: match sys.kernel_version() {
-                Some(kv) => kv,
-                None => String::default(),
-            },
+            kernel_version: sys.kernel_version().unwrap_or_default(),
             total_memory: sys.total_memory(),
             ..Default::default()
         }
@@ -141,8 +138,9 @@ impl Network {
     /// Update metrics values for network usage over time
     fn update(&mut self, data: &NetworkData, timestamp: u64, sequence: u32) {
         let update_period = self.timer.elapsed().as_secs_f64();
-        self.incoming_data_rate = data.total_received() as f64 / update_period;
-        self.outgoing_data_rate = data.total_transmitted() as f64 / update_period;
+        self.timer = Instant::now();
+        self.incoming_data_rate = data.received() as f64 / update_period;
+        self.outgoing_data_rate = data.transmitted() as f64 / update_period;
         self.timestamp = timestamp;
         self.sequence = sequence;
     }
@@ -472,6 +470,7 @@ impl StatCollector {
         let mut sys = sysinfo::System::new();
         sys.refresh_disks_list();
         sys.refresh_networks_list();
+        sys.refresh_networks();
         sys.refresh_memory();
         sys.refresh_cpu();
         sys.refresh_components();
@@ -570,12 +569,12 @@ impl StatCollector {
 
     // Refresh network byte rate stats
     fn update_network_stats(&mut self) -> Result<(), Error> {
-        self.sys.refresh_networks();
         let timestamp = clock() as u64;
         for (net_name, net_data) in self.sys.networks() {
             let payload = self.networks.push(net_name.to_owned(), net_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
         }
+        self.sys.refresh_networks();
 
         Ok(())
     }
@@ -612,7 +611,7 @@ impl StatCollector {
         self.sys.refresh_processes();
         let timestamp = clock() as u64;
         for (&id, p) in self.sys.processes() {
-            let name = p.cmd().get(0).map(|s| s.to_string()).unwrap_or(p.name().to_string());
+            let name = p.cmd().first().map(|s| s.to_string()).unwrap_or(p.name().to_string());
 
             if self.config.system_stats.process_names.contains(&name) {
                 let payload = self.processes.push(id.as_u32(), p, name, timestamp);

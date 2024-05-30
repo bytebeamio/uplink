@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use tokio::time::Instant;
 
 use crate::{Payload, Point};
 
@@ -13,12 +13,13 @@ pub struct Action {
     // action id
     #[serde(alias = "id")]
     pub action_id: String,
-    // determines if action is a process
-    pub kind: String,
     // action name
     pub name: String,
     // action payload. json. can be args/payload. depends on the invoked command
     pub payload: String,
+    // Instant at which action must be timedout
+    #[serde(skip)]
+    pub deadline: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,33 +95,17 @@ impl ActionResponse {
         self
     }
 
-    pub fn as_payload(&self) -> Payload {
-        Payload::from(self)
-    }
-
     pub fn from_payload(payload: &Payload) -> Result<Self, serde_json::Error> {
         let intermediate = serde_json::to_value(payload)?;
         serde_json::from_value(intermediate)
     }
 }
 
-impl From<&ActionResponse> for Payload {
-    fn from(resp: &ActionResponse) -> Self {
-        Self {
-            stream: "action_status".to_owned(),
-            sequence: resp.sequence,
-            timestamp: resp.timestamp,
-            payload: json!({
-                "id": resp.action_id,
-                "state": resp.state,
-                "progress": resp.progress,
-                "errors": resp.errors
-            }),
-        }
-    }
-}
-
 impl Point for ActionResponse {
+    fn stream_name(&self) -> &str {
+        "action_status"
+    }
+
     fn sequence(&self) -> u32 {
         self.sequence
     }

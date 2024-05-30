@@ -7,6 +7,7 @@ pub mod journalctl;
 pub mod log_reader;
 #[cfg(target_os = "android")]
 pub mod logcat;
+pub mod preconditions;
 pub mod process;
 pub mod prometheus;
 pub mod script_runner;

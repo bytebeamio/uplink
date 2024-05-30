@@ -13,6 +13,8 @@ use std::time::Duration;
 use crate::base::clock;
 use crate::Payload;
 
+use super::Event;
+
 const RESET_LIMIT: u32 = 1500;
 
 #[inline]
@@ -60,7 +62,7 @@ pub struct Gps {
 }
 
 impl Gps {
-    pub async fn simulate(tx: Sender<Payload>, device: DeviceData) {
+    pub async fn simulate(tx: Sender<Event>, device: DeviceData) {
         let mut sequence = 0;
         let mut interval = interval(DataType::Gps.duration());
         let path_len = device.path.len() as u32;
@@ -74,12 +76,12 @@ impl Gps {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Payload {
+                .send_async(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "gps".to_string(),
                     sequence,
                     payload: json!(payload),
-                })
+                }))
                 .await
             {
                 error!("{e}");
@@ -194,7 +196,7 @@ pub struct Bms {
 }
 
 impl Bms {
-    pub async fn simulate(tx: Sender<Payload>) {
+    pub async fn simulate(tx: Sender<Event>) {
         let mut sequence = 0;
         let mut interval = interval(DataType::Bms.duration());
         loop {
@@ -205,12 +207,12 @@ impl Bms {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Payload {
+                .send_async(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "bms".to_string(),
                     sequence,
                     payload: json!(payload),
-                })
+                }))
                 .await
             {
                 error!("{e}");
@@ -243,7 +245,7 @@ pub struct Imu {
 }
 
 impl Imu {
-    pub async fn simulate(tx: Sender<Payload>) {
+    pub async fn simulate(tx: Sender<Event>) {
         let mut sequence = 0;
         let mut interval = interval(DataType::Imu.duration());
         loop {
@@ -254,12 +256,12 @@ impl Imu {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Payload {
+                .send_async(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "imu".to_string(),
                     sequence,
                     payload: json!(payload),
-                })
+                }))
                 .await
             {
                 error!("{e}");
@@ -286,7 +288,7 @@ pub struct Motor {
 }
 
 impl Motor {
-    pub async fn simulate(tx: Sender<Payload>) {
+    pub async fn simulate(tx: Sender<Event>) {
         let mut sequence = 0;
         let mut interval = interval(DataType::Motor.duration());
         loop {
@@ -297,12 +299,12 @@ impl Motor {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Payload {
+                .send_async(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "motor".to_string(),
                     sequence,
                     payload: json!(payload),
-                })
+                }))
                 .await
             {
                 error!("{e}");
@@ -335,7 +337,7 @@ pub struct PeripheralState {
 }
 
 impl PeripheralState {
-    pub async fn simulate(tx: Sender<Payload>) {
+    pub async fn simulate(tx: Sender<Event>) {
         let mut sequence = 0;
         let mut interval = interval(DataType::PeripheralData.duration());
         loop {
@@ -346,12 +348,12 @@ impl PeripheralState {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Payload {
+                .send_async(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "peripheral_state".to_string(),
                     sequence,
                     payload: json!(payload),
-                })
+                }))
                 .await
             {
                 error!("{e}");
@@ -381,7 +383,7 @@ pub struct DeviceShadow {
 }
 
 impl DeviceShadow {
-    pub async fn simulate(tx: Sender<Payload>) {
+    pub async fn simulate(tx: Sender<Event>) {
         let mut sequence = 0;
         let mut interval = interval(DataType::DeviceShadow.duration());
         loop {
@@ -392,12 +394,12 @@ impl DeviceShadow {
             trace!("Data Event: {:?}", payload);
 
             if let Err(e) = tx
-                .send_async(Payload {
+                .send_async(Event::Data(Payload {
                     timestamp: clock() as u64,
                     stream: "device_shadow".to_string(),
                     sequence,
                     payload: json!(payload),
-                })
+                }))
                 .await
             {
                 error!("{e}");

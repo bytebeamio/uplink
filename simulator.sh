@@ -42,6 +42,30 @@ persistence_path = \"/var/tmp/persistence/$id\"
 max_file_size = 104857600
 max_file_count = 3
 
+[streams.gps]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/gps/jsonarray"
+persistence = { max_file_size = 0 }
+
+[streams.bms]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/bms/jsonarray"
+persistence = { max_file_size = 0 }
+
+[streams.imu]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/imu/jsonarray"
+persistence = { max_file_size = 0 }
+
+[streams.motor]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/motor/jsonarray"
+persistence = { max_file_size = 0 }
+
+[streams.peripheral_state]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/peripheral_state/jsonarray"
+persistence = { max_file_size = 0 }
+
+[streams.device_shadow]
+topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
+persistence = { max_file_size = 0 }
+
 [simulator]
 gps_paths = "./paths"
 actions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }]
@@ -59,7 +83,7 @@ download_auth_config() {
     echo "Downloading config: $url"
     mkdir -p devices
     curl --location $url \
-        --header 'x-bytebeam-tenant: demo' \
+        --header "x-bytebeam-tenant: $BYTEBEAM_TENANT_ID" \
         --header "x-bytebeam-api-key: $BYTEBEAM_API_KEY" > devices/device_$id.json
 }
 

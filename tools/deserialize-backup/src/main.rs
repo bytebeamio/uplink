@@ -115,14 +115,18 @@ fn main() -> Result<(), Error> {
     let dirs = std::fs::read_dir(commandline.directory)?;
     for dir in dirs {
         let dir = dir?;
+        if dir.metadata()?.is_file() {
+            continue;
+        }
+
+        let path = dir.path();
+        let stream_name = dir.path().into_iter().last().unwrap().to_string_lossy().to_string();
         // NOTE: max_file_size and max_file_count should not matter when reading non-destructively
-        let mut storage = storage::Storage::new(1048576);
-        storage.set_persistence(dir.path(), 3)?;
+        let mut storage = storage::Storage::new(&stream_name, 1048576);
+        storage.set_persistence(path, 3)?;
         storage.set_non_destructive_read(true);
 
-        let stream = streams
-            .entry(dir.path().into_iter().last().unwrap().to_string_lossy().to_string())
-            .or_default();
+        let stream = streams.entry(stream_name).or_default();
         'outer: loop {
             loop {
                 match storage.reload_on_eof() {

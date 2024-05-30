@@ -6,9 +6,12 @@ use tokio::{
     time::{interval, Duration},
 };
 
-use crate::base::{
-    bridge::{BridgeTx, Payload},
-    clock, ClickhouseConfig, QueryLogConfig,
+use crate::{
+    base::{
+        bridge::{BridgeTx, Payload},
+        clock,
+    },
+    config::{ClickhouseConfig, QueryLogConfig},
 };
 
 #[derive(Debug, clickhouse::Row, Serialize, Deserialize)]
@@ -112,7 +115,7 @@ impl QueryLogReader {
             debug!("Row: {row:?}");
             let mut payload: Payload = row.into();
             payload.timestamp = clock() as u64;
-            payload.stream = self.config.stream.to_owned();
+            self.config.stream.clone_into(&mut payload.stream);
             self.sequence += 1;
             payload.sequence = self.sequence;
             self.bridge_tx.send_payload(payload).await;

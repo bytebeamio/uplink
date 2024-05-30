@@ -66,7 +66,7 @@ blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 # be collected, batched and forwarded to serializer to then be published onto platform.
 #
 # Required Parameters
-# - buf-size: Number of data points that shall be included in each Publish
+# - batch-size: Number of data points that shall be included in each Publish
 # - topic(optional): topic-filter to which data shall be published. If left
 #   unconfigured, stream will be created dynamically.
 # - flush-period(optional): Duration in seconds after a data point enters the stream
@@ -75,19 +75,23 @@ blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 #   should perform on the data transiting through the stream. Currently supported
 #   compression schemes are Lz4 and Disabled. Defaults to Disabled.
 # - persistence(optional): helps persist relevant information for data recovery purposes,
-#   used when there is a network/system failure. 
+#   used when there is a network/system failure.
+# - priority(optional, u8): Higher prioirity streams get to push their data
+#   onto the network first.
 #
-# In the following config for the device_shadow stream we set buf_size to 1 and mark
+# In the following config for the device_shadow stream we set batch_size to 1 and mark
 # it as non-persistent. streams are internally constructed as a map of Name -> Config
 [streams.device_shadow]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
 flush_period = 5
+priority = 75
 
 # Example using compression
 [streams.imu]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/imu/jsonarray/lz4"
-buf_size = 100
+batch_size = 100
 compression = "Lz4"
+priority = 50
 
 # Configuration details associated with uplink's persistent storage module which writes publish
 # packets to disk in case of slow or crashed network, for recovery purposes.
@@ -103,7 +107,7 @@ compression = "Lz4"
 # configuration, we use transient(in-memory) storage to handle network downtime only.
 [streams.gps]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/gps/jsonarray"
-buf_size = 10
+batch_size = 10
 persistence = { max_file_size = 1048576, max_file_count = 10 }
 
 # NOTE: While it is possible to configure persistence to be disabled, including only max_file_count
@@ -111,7 +115,7 @@ persistence = { max_file_size = 1048576, max_file_count = 10 }
 # config values will be default. Configuring only max_file_size is also allowed, without persistance.
 [streams.motor]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/motor/jsonarray/lz4"
-buf_size = 50
+batch_size = 50
 compression = "Lz4"
 persistence = { max_file_count = 3 }
 
@@ -121,9 +125,12 @@ persistence = { max_file_count = 3 }
 #
 # NOTE: Action statuses are expected on a specifc topic as configured in example below.
 # This also means that we require a topic to be configured or uplink will error out.
+# Given the importance of conveying action status at the earliest to platform,
+# it has highest priority by default of 255.
 [action_status]
 topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
 flush_period = 2
+priority = 255
 
 # Configurations for uplink's built-in file downloader, including the actions that can trigger
 # a download, the location in file system where uplink will download and store files from the

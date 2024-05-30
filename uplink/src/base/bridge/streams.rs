@@ -4,47 +4,41 @@ use std::sync::Arc;
 use flume::Sender;
 use log::{error, info, trace};
 
-use super::stream::{self, StreamStatus, MAX_BUFFER_SIZE};
-use super::StreamMetrics;
-use crate::{Config, Package, Payload, Stream};
+use super::stream::{self, StreamStatus};
+use super::{Point, StreamMetrics};
+use crate::config::StreamConfig;
+use crate::{Config, Package, Stream};
 
 use super::delaymap::DelayMap;
 
 const MAX_STREAM_COUNT: usize = 1000;
 
-pub struct Streams {
+pub struct Streams<T> {
     config: Arc<Config>,
     data_tx: Sender<Box<dyn Package>>,
     metrics_tx: Sender<StreamMetrics>,
-    map: HashMap<String, Stream<Payload>>,
+    map: HashMap<String, Stream<T>>,
     pub stream_timeouts: DelayMap<String>,
-    pub metrics_timeouts: DelayMap<String>,
 }
 
-impl Streams {
+impl<T: Point> Streams<T> {
     pub fn new(
         config: Arc<Config>,
         data_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
-        let mut map = HashMap::new();
-        for (name, stream) in &config.streams {
-            let stream = Stream::with_config(name, stream, data_tx.clone());
-            map.insert(name.to_owned(), stream);
-        }
+        Self { config, data_tx, metrics_tx, map: HashMap::new(), stream_timeouts: DelayMap::new() }
+    }
 
-        Self {
-            config,
-            data_tx,
-            metrics_tx,
-            map,
-            stream_timeouts: DelayMap::new(),
-            metrics_timeouts: DelayMap::new(),
+    pub fn config_streams(&mut self, streams_config: HashMap<String, StreamConfig>) {
+        for (name, stream) in streams_config {
+            let stream = Stream::new(&name, stream, self.data_tx.clone());
+            self.map.insert(name.to_owned(), stream);
         }
     }
 
-    pub async fn forward(&mut self, data: Payload) {
-        let stream_name = data.stream.to_owned();
+    pub async fn forward(&mut self, data: T) {
+        let stream_name = data.stream_name().to_string();
 
         let stream = match self.map.get_mut(&stream_name) {
             Some(partition) => partition,
@@ -60,7 +54,6 @@ impl Streams {
                     &stream_name,
                     &self.config.project_id,
                     &self.config.device_id,
-                    MAX_BUFFER_SIZE,
                     self.data_tx.clone(),
                 );
 
@@ -68,7 +61,7 @@ impl Streams {
             }
         };
 
-        let max_stream_size = stream.max_buffer_size;
+        let max_stream_size = stream.config.batch_size;
         let state = match stream.fill(data).await {
             Ok(s) => s,
             Err(e) => {

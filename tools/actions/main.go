@@ -14,15 +14,13 @@ import (
 
 type Action struct {
 	ID      string `json:"action_id"`
-	Kind    string `json:"kind"`
 	Command string `json:"name"`
 	Payload string `json:"payload"`
 }
 
-func NewAction(id, kind, command, payload string) *Action {
+func NewAction(id, command, payload string) *Action {
 	action := Action{
 		ID:      id,
-		Kind:    kind,
 		Command: command,
 		Payload: payload,
 	}
@@ -75,34 +73,29 @@ func createAction(name string) *Action {
 	fmt.Println("action =", name, "id =", id)
 	switch name {
 	case "update_firmware":
-		kind := "process"
 		command := "tools/ota"
 		payload := `{"hello": "world"}`
-		action := NewAction(id, kind, command, payload)
+		action := NewAction(id, command, payload)
 		return action
 	case "stop_collector":
-		kind := "control"
 		command := name
 		payload := `{"hello": "world"}`
-		action := NewAction(id, kind, command, payload)
+		action := NewAction(id, command, payload)
 		return action
 	case "start_collector":
-		kind := "control"
 		command := name
 		payload := `{"args": ["simulator"]}`
-		action := NewAction(id, kind, command, payload)
+		action := NewAction(id, command, payload)
 		return action
 	case "stop_collector_stream":
-		kind := "control"
 		command := name
 		payload := `{"args": ["simulator", "gps"]}`
-		action := NewAction(id, kind, command, payload)
+		action := NewAction(id, command, payload)
 		return action
 	case "start_collector_strea":
-		kind := "control"
 		command := name
 		payload := `{"args": ["simulator", "gps"]}`
-		action := NewAction(id, kind, command, payload)
+		action := NewAction(id, command, payload)
 		return action
 	default:
 		fmt.Println("Invalid action")

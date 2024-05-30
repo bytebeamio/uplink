@@ -4,8 +4,13 @@ use log::error;
 use reqwest::{Client, Method};
 use serde_json::{json, Map, Value};
 
-use crate::base::bridge::{BridgeTx, Payload};
-use crate::base::{clock, PrometheusConfig};
+use crate::{
+    base::{
+        bridge::{BridgeTx, Payload},
+        clock,
+    },
+    config::PrometheusConfig,
+};
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -88,12 +93,8 @@ fn frame_payload<'a>(mut line: impl Iterator<Item = &'a str>) -> Option<Payload>
     let value = value.parse::<f64>().ok()?;
     payload.insert(stream.to_owned(), json!(value));
 
-    let mut payload = Payload {
-        stream,
-        sequence: 0,
-        timestamp: clock() as u64,
-        payload: payload.into(),
-    };
+    let mut payload =
+        Payload { stream, sequence: 0, timestamp: clock() as u64, payload: payload.into() };
 
     if let Some(timestamp) = line.next() {
         let timestamp = timestamp.parse::<u64>().ok()?;
