@@ -15,7 +15,7 @@ use crate::base::LogReaderConfig;
 #[derive(Debug, Serialize, Clone, PartialEq)]
 struct LogEntry {
     pub line: String,
-    pub tag: Option<String>,
+    pub tag: String,
     pub level: Option<String>,
     #[serde(skip)]
     pub timestamp: u64,
@@ -93,7 +93,11 @@ impl LogEntry {
 
             let timestamp = (date.unix_timestamp_nanos() / 1_000_000) as u64;
             let level = captures.name("level").map(to_string);
-            let tag = captures.name("tag").map(to_string);
+            // set tag from env
+            let tag = captures
+                .name("tag")
+                .map(to_string)
+                .unwrap_or_else(|| std::env::var("LOG_TAG").unwrap_or("".to_owned()));
             let message = captures.name("message").map(to_string);
 
             return current_line.replace(LogEntry { line, tag, level, timestamp, message });
