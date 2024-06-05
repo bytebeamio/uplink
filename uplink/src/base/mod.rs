@@ -1,7 +1,10 @@
 use std::fmt::Debug;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use bridge::Payload;
 use tokio::join;
+
+use crate::{Action, ActionResponse};
 
 use self::bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
 use self::mqtt::CtrlTx as MqttCtrlTx;
@@ -40,4 +43,22 @@ impl CtrlTx {
             // self.downloader.trigger_shutdown()
         );
     }
+}
+
+#[async_trait::async_trait]
+pub trait Receiver<T> {
+    fn recv() -> Option<T>;
+    fn try_recv() -> Option<T>;
+    async fn recv_async() -> Option<T>;
+}
+
+pub trait ServiceBus {
+    type Error;
+
+    fn publish_data(data: Payload) -> Result<(), Self::Error>;
+    fn update_action_status(status: ActionResponse) -> Result<(), Self::Error>;
+    fn subscribe_to_streams(streams: Vec<String>) -> Result<impl Receiver<Payload>, Self::Error>;
+    fn register_action(name: String) -> Result<impl Receiver<Action>, Self::Error>;
+    fn deregister_action(action: String) -> Result<(), Self::Error>;
+    fn push_action(action: Action) -> Result<(), Self::Error>;
 }
