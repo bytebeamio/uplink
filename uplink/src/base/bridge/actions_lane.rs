@@ -399,7 +399,7 @@ impl ActionsBridge {
         let inflight_action = match &mut self.current_action {
             Some(v) => v,
             None => {
-                error!("Action timed out already/not present, ignoring response: {:?}", response);
+                warn!("Action id({}) timed out already/not present", response.action_id);
                 return;
             }
         };
@@ -407,9 +407,9 @@ impl ActionsBridge {
         if !inflight_action.is_executing(&response.action_id)
             && !inflight_action.is_cancelled_by(&response.action_id)
         {
-            error!(
-                "response id({}) != active action({}); response = {:?}",
-                response.action_id, inflight_action.action.action_id, response
+            warn!(
+                "response id({}) != active action({})",
+                response.action_id, inflight_action.action.action_id
             );
             return;
         }
