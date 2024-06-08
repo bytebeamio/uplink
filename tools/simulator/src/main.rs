@@ -170,14 +170,10 @@ async fn main() -> Result<(), Error> {
                 spawn(ActionResponse::simulate(action,  tx.clone()));
             }
             p = rx.recv_async() => {
-                let payload = match p {
-                    Ok(p) => p,
-                    Err(_) => {
-                        error!("All generators have stopped!");
-                        return Ok(())
-                    }
+                let Ok(payload) = p else {
+                    error!("All generators have stopped!");
+                    return Ok(());
                 };
-
 
                 let text = serde_json::to_string(&payload)?;
                 data_tx.send(text).await?;

@@ -38,24 +38,24 @@ impl<T: Point> Streams<T> {
     pub async fn forward(&mut self, data: T) {
         let stream_name = data.stream_name().to_string();
 
-        let stream = match self.map.get_mut(&stream_name) {
-            Some(partition) => partition,
-            None => {
-                if self.config.simulator.is_none() && self.map.keys().len() > 20 {
-                    error!("Failed to create {:?} stream. More than max 20 streams", stream_name);
-                    return;
-                }
-
-                let stream = Stream::dynamic(
-                    &stream_name,
-                    &self.config.project_id,
-                    &self.config.device_id,
-                    self.data_tx.clone(),
-                );
-
-                self.map.entry(stream_name.to_owned()).or_insert(stream)
+        // Create stream if it doesn't already exist
+        if !self.map.contains_key(&stream_name) {
+            if self.config.simulator.is_none() && self.map.keys().len() > 20 {
+                error!("Failed to create {:?} stream. More than max 20 streams", stream_name);
+                return;
             }
-        };
+
+            let stream = Stream::dynamic(
+                &stream_name,
+                &self.config.project_id,
+                &self.config.device_id,
+                self.data_tx.clone(),
+            );
+
+            self.map.insert(stream_name.to_owned(), stream);
+        }
+        // Doesn't panic because of above check
+        let stream = self.map.get_mut(&stream_name).unwrap();
 
         let max_stream_size = stream.config.batch_size;
         let state = match stream.fill(data).await {

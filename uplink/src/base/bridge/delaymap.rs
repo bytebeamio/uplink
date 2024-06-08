@@ -19,12 +19,11 @@ impl<T: Eq + Hash + Clone + Display> DelayMap<T> {
 
     // Removes timeout if it exists, else returns false.
     pub fn remove(&mut self, item: &T) {
-        match self.map.remove(item) {
-            Some(key) => {
-                self.queue.remove(&key);
-            }
-            None => warn!("Timeout couldn't be removed from DelayMap: {}", item),
-        }
+        let Some(key) = self.map.remove(item) else {
+            warn!("Timeout couldn't be removed from DelayMap: {item}");
+            return;
+        };
+        self.queue.remove(&key);
     }
 
     // Insert new timeout.

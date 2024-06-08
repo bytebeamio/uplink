@@ -208,9 +208,7 @@ impl Mqtt {
                             debug!("Outgoing = {:?}", packet);
                             match packet {
                                 rumqttc::Outgoing::Publish(_) => self.metrics.add_publish(),
-                                rumqttc::Outgoing::PingReq => {
-                                    self.metrics.add_pingreq();
-                                }
+                                rumqttc::Outgoing::PingReq => self.metrics.add_pingreq(),
                                 _ => {}
                             }
                         }

@@ -396,15 +396,11 @@ impl<C: MqttClient> Serializer<C> {
                     self.metrics.add_batch();
                 }
                 o = &mut publish => match o {
-                    Ok(_) => {
-                        break Ok(Status::EventLoopReady)
-                    }
+                    Ok(_) => break Ok(Status::EventLoopReady),
                     Err(MqttError::Send(Request::Publish(publish))) => {
                         break Ok(Status::EventLoopCrash(publish, stream));
-                    },
-                    Err(e) => {
-                        unreachable!("Unexpected error: {}", e);
                     }
+                    Err(e) => unreachable!("Unexpected error: {}", e),
                 },
                 _ = interval.tick() => {
                     check_metrics(&mut self.metrics, &mut self.stream_metrics, &self.storage_handler);
@@ -440,9 +436,8 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.mqtt.max_packet_size;
         let client = self.client.clone();
 
-        let (stream, storage) = match self.storage_handler.next(&mut self.metrics) {
-            Some(s) => s,
-            _ => return Ok(Status::Normal),
+        let Some((stream, storage)) = self.storage_handler.next(&mut self.metrics) else {
+            return Ok(Status::Normal);
         };
 
         // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
@@ -500,9 +495,8 @@ impl<C: MqttClient> Serializer<C> {
                         Err(e) => unreachable!("Unexpected error: {}", e),
                     };
 
-                    let (stream, storage) = match self.storage_handler.next(&mut self.metrics) {
-                        Some(s) => s,
-                        _ => return Ok(Status::Normal),
+                    let Some((stream, storage)) = self.storage_handler.next(&mut self.metrics) else {
+                        return Ok(Status::Normal);
                     };
 
                     let publish = match Packet::read(storage.reader(), max_packet_size) {
@@ -1328,60 +1322,53 @@ mod test {
         // run serializer in the background
         spawn(async { serializer.start().await.unwrap() });
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/top");
-                assert_eq!(payload, "100");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/top");
+        assert_eq!(payload, "100");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/top");
-                assert_eq!(payload, "1000");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/top");
+        assert_eq!(payload, "1000");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/two");
-                assert_eq!(payload, "3");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/two");
+        assert_eq!(payload, "3");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/one");
-                assert_eq!(payload, "1");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/one");
+        assert_eq!(payload, "1");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/one");
-                assert_eq!(payload, "10");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/one");
+        assert_eq!(payload, "10");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/default");
-                assert_eq!(payload, "0");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/default");
+        assert_eq!(payload, "0");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/default");
-                assert_eq!(payload, "2");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/default");
+        assert_eq!(payload, "2");
     }
 }
