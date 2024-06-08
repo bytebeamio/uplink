@@ -45,20 +45,20 @@ impl CtrlTx {
     }
 }
 
-#[async_trait::async_trait]
-pub trait Receiver<T> {
-    fn recv() -> Option<T>;
-    fn try_recv() -> Option<T>;
-    async fn recv_async() -> Option<T>;
+pub trait ServiceBusRx<T> {
+    fn recv(&mut self) -> Option<T>;
 }
 
-pub trait ServiceBus {
+pub trait ServiceBusTx {
     type Error;
 
-    fn publish_data(data: Payload) -> Result<(), Self::Error>;
-    fn update_action_status(status: ActionResponse) -> Result<(), Self::Error>;
-    fn subscribe_to_streams(streams: Vec<String>) -> Result<impl Receiver<Payload>, Self::Error>;
-    fn register_action(name: String) -> Result<impl Receiver<Action>, Self::Error>;
-    fn deregister_action(action: String) -> Result<(), Self::Error>;
-    fn push_action(action: Action) -> Result<(), Self::Error>;
+    fn publish_data(&mut self, data: Payload) -> Result<(), Self::Error>;
+    fn update_action_status(&mut self, status: ActionResponse) -> Result<(), Self::Error>;
+    fn subscribe_to_streams(
+        &mut self,
+        streams: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<(), Self::Error>;
+    fn register_action(&mut self, name: impl Into<String>) -> Result<(), Self::Error>;
+    fn deregister_action(&mut self, action: impl Into<String>) -> Result<(), Self::Error>;
+    fn push_action(&mut self, action: Action) -> Result<(), Self::Error>;
 }
