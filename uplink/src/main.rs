@@ -1,5 +1,6 @@
 mod console;
 
+use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -96,12 +97,11 @@ impl CommandLine {
     /// Reads config file to generate config struct and replaces places holders
     /// like bike id and data version
     fn get_configs(&self) -> Result<Config, anyhow::Error> {
-        let read_file_contents = |path| std::fs::read_to_string(path);
         let mut config =
             config::Config::builder().add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml));
 
         if let Some(path) = &self.config {
-            let read = read_file_contents(path).map_err(|e| {
+            let read = read_to_string(path).map_err(|e| {
                 Error::msg(format!(
                     "Config file couldn't be loaded from {:?}; error = {e}",
                     path.display()
@@ -110,7 +110,7 @@ impl CommandLine {
             config = config.add_source(File::from_str(&read, FileFormat::Toml));
         }
 
-        let auth = read_file_contents(&self.auth).map_err(|e| {
+        let auth = read_to_string(&self.auth).map_err(|e| {
             Error::msg(format!(
                 "Auth file couldn't be loaded from {:?}; error = {e}",
                 self.auth.display()
