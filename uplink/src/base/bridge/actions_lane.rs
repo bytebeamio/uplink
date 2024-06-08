@@ -378,14 +378,21 @@ impl ActionsBridge {
     }
 
     async fn forward_action_response(&mut self, mut response: ActionResponse) {
-        // Ignore responses to timeout action
+        info!("Action response = {:?}", response);
+
+        // Don't forward responses to timeout action
         if response.action_id == "timeout" {
             return;
         }
 
-        if self.parallel_actions.contains(&response.action_id) {
-            self.forward_parallel_action_response(response).await;
+        // Forward all other responses
+        self.streams.forward(response.clone()).await;
 
+        // Response to parallel actions shouldn't do anything
+        if self.parallel_actions.contains(&response.action_id) {
+            if response.is_completed() || response.is_failed() {
+                self.parallel_actions.remove(&response.action_id);
+            }
             return;
         }
 
@@ -406,9 +413,6 @@ impl ActionsBridge {
             );
             return;
         }
-
-        info!("Action response = {:?}", response);
-        self.streams.forward(response.clone()).await;
 
         if response.is_completed() || response.is_failed() {
             if let Some(CurrentAction { cancelled_by: Some(cancel_action), .. }) =
@@ -478,15 +482,6 @@ impl ActionsBridge {
         self.try_route_action(action.clone())?;
 
         Ok(())
-    }
-
-    async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
-        info!("Action response = {:?}", response);
-        if response.is_completed() || response.is_failed() {
-            self.parallel_actions.remove(&response.action_id);
-        }
-
-        self.streams.forward(response).await;
     }
 
     async fn forward_action_error(&mut self, action_id: &str, error: Error) {
