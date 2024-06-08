@@ -256,13 +256,10 @@ impl ActionsBridge {
 
         // NOTE: Don't do any blocking operations here
         // TODO: Remove blocking here. Audit all blocking functions here
-        let error = match self.try_route_action(action.clone()) {
-            Ok(_) => {
-                let response = ActionResponse::progress(&action_id, "Received", 0);
-                self.streams.forward(response).await;
-                return;
-            }
-            Err(e) => e,
+        let Err(error) = self.try_route_action(action.clone()) else {
+            let response = ActionResponse::progress(&action_id, "Received", 0);
+            self.streams.forward(response).await;
+            return;
         };
 
         // Remove action because it couldn't be routed
@@ -329,10 +326,7 @@ impl ActionsBridge {
 
     /// Save current action information in persistence
     fn save_current_action(&mut self) -> Result<(), Error> {
-        let current_action = match self.current_action.take() {
-            Some(c) => c,
-            None => return Ok(()),
-        };
+        let Some(current_action) = self.current_action.take() else { return Ok(()) };
         let mut path = self.config.persistence_path.clone();
         path.push("current_action");
         info!("Storing current action in persistence; path: {}", path.display());
@@ -396,12 +390,9 @@ impl ActionsBridge {
             return;
         }
 
-        let inflight_action = match &mut self.current_action {
-            Some(v) => v,
-            None => {
-                warn!("Action id({}) timed out already/not present", response.action_id);
-                return;
-            }
+        let Some(inflight_action) = &mut self.current_action else {
+            warn!("Action id({}) timed out already/not present", response.action_id);
+            return;
         };
 
         if !inflight_action.is_executing(&response.action_id)
