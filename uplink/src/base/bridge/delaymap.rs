@@ -30,7 +30,7 @@ impl<T: Eq + Hash + Clone + Display> DelayMap<T> {
     pub fn insert(&mut self, item: &T, period: Duration) {
         let key = self.queue.insert(item.clone(), period);
         if self.map.insert(item.to_owned(), key).is_some() {
-            warn!("Timeout might have already been in DelayMap: {}", item);
+            warn!("Timeout might have already been in DelayMap: {item}");
         }
     }
 

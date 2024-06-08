@@ -55,7 +55,7 @@ pub enum Error {
     Lz4(#[from] lz4_flex::frame::Error),
     #[error("Empty storage")]
     EmptyStorage,
-    #[error("Permission denied while accessing persistence directory \"{0}\"")]
+    #[error("Permission denied while accessing persistence directory {0:?}")]
     Persistence(String),
     #[error("Serializer has shutdown after handling crash")]
     Shutdown,
@@ -153,7 +153,7 @@ impl StorageHandler {
                 storage.set_persistence(&path, stream_config.persistence.max_file_count)?;
 
                 debug!(
-                    "Disk persistance is enabled for stream: \"{stream_name}\"; path: {}",
+                    "Disk persistance is enabled for stream: {stream_name:?}; path: {}",
                     path.display()
                 );
             }
@@ -327,7 +327,7 @@ impl<C: MqttClient> Serializer<C> {
             match write_to_storage(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
-                Err(e) => error!("Shutdown: write error = {:?}", e),
+                Err(e) => error!("Shutdown: write error = {e}"),
             }
         }
     }
@@ -343,7 +343,7 @@ impl<C: MqttClient> Serializer<C> {
         match write_to_storage(publish, storage) {
             Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
             Ok(_) => {}
-            Err(e) => error!("Crash loop: write error = {:?}", e),
+            Err(e) => error!("Crash loop: write error = {e}"),
         }
 
         loop {
@@ -354,7 +354,7 @@ impl<C: MqttClient> Serializer<C> {
             match write_to_storage(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
-                Err(e) => error!("Crash loop: write error = {:?}", e),
+                Err(e) => error!("Crash loop: write error = {e}"),
             }
         }
     }
@@ -387,7 +387,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                         Ok(_) => {},
                         Err(e) => {
-                            error!("Storage write error = {:?}", e);
+                            error!("Storage write error = {e}");
                             self.metrics.increment_errors();
                         }
                     };
@@ -400,7 +400,7 @@ impl<C: MqttClient> Serializer<C> {
                     Err(MqttError::Send(Request::Publish(publish))) => {
                         break Ok(Status::EventLoopCrash(publish, stream));
                     }
-                    Err(e) => unreachable!("Unexpected error: {}", e),
+                    Err(e) => unreachable!("Unexpected error: {e}"),
                 },
                 _ = interval.tick() => {
                     check_metrics(&mut self.metrics, &mut self.stream_metrics, &self.storage_handler);
@@ -447,7 +447,7 @@ impl<C: MqttClient> Serializer<C> {
             Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
             Err(e) => {
                 self.metrics.increment_errors();
-                error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+                error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
                 save_and_prepare_next_metrics(
                     &mut self.pending_metrics,
                     &mut self.metrics,
@@ -477,7 +477,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                         Ok(_) => {},
                         Err(e) => {
-                            error!("Storage write error = {:?}", e);
+                            error!("Storage write error = {e}");
                             self.metrics.increment_errors();
                         }
                     };
@@ -492,7 +492,7 @@ impl<C: MqttClient> Serializer<C> {
                     let client = match o {
                         Ok(c) => c,
                         Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish, last_publish_stream.clone())),
-                        Err(e) => unreachable!("Unexpected error: {}", e),
+                        Err(e) => unreachable!("Unexpected error: {e}"),
                     };
 
                     let Some((stream, storage)) = self.storage_handler.next(&mut self.metrics) else {
@@ -503,7 +503,7 @@ impl<C: MqttClient> Serializer<C> {
                         Ok(Packet::Publish(publish)) => publish,
                         Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
                         Err(e) => {
-                            error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+                            error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
                             break Ok(Status::Normal)
                         }
                     };
@@ -549,7 +549,7 @@ impl<C: MqttClient> Serializer<C> {
                     let stream = data.stream_config();
                     let publish = construct_publish(data, &mut self.stream_metrics)?;
                     let payload_size = publish.payload.len();
-                    debug!("publishing on {} with size = {}", publish.topic, payload_size);
+                    debug!("publishing on {} with size = {payload_size}", publish.topic);
                     match self.client.try_publish(&stream.topic, QoS::AtLeastOnce, false, publish.payload) {
                         Ok(_) => {
                             self.metrics.add_batch();
@@ -557,7 +557,7 @@ impl<C: MqttClient> Serializer<C> {
                             continue;
                         }
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish, stream)),
-                        Err(e) => unreachable!("Unexpected error: {}", e),
+                        Err(e) => unreachable!("Unexpected error: {e}"),
                     }
 
                 }
@@ -567,7 +567,7 @@ impl<C: MqttClient> Serializer<C> {
                     // available. It can be inmemory storage
 
                     if let Err(e) = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler) {
-                        debug!("Failed to flush serializer metrics (normal). Error = {}", e);
+                        debug!("Failed to flush serializer metrics (normal). Error = {e}");
                     }
                 }
                 // Transition into crash mode when uplink is shutting down
@@ -667,7 +667,7 @@ fn write_to_storage(
 ) -> Result<Option<u64>, storage::Error> {
     publish.pkid = 1;
     if let Err(e) = publish.write(storage.writer()) {
-        error!("Failed to fill disk buffer. Error = {:?}", e);
+        error!("Failed to fill disk buffer. Error = {e}");
         return Ok(None);
     }
 

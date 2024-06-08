@@ -431,8 +431,7 @@ impl DownloadState {
         // Retry downloading upto 3 times in case of connectivity issues
         // TODO: Error out for 1XX/3XX responses
         info!(
-            "Downloading from {} into {}; size = {}",
-            url,
+            "Downloading from {url} into {}; size = {}",
             file_path.display(),
             human_bytes(meta.content_length as f64)
         );

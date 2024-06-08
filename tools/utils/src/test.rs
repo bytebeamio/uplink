@@ -42,9 +42,9 @@ async fn main() {
 }
 
 fn first_response(value: u32) {
-    println!("first_response: {}", value);
+    println!("first_response: {value}");
 }
 
 // fn second_response(value: u32) {
-//     println!("second_response: {}", value);
+//     println!("second_response: {value}");
 // }

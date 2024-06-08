@@ -335,7 +335,7 @@ impl Persistence {
 
     /// Removes a persistence file with provided id
     fn remove(&mut self, id: u64) -> Result<PathBuf, Error> {
-        let file_name = format!("backup@{}", id);
+        let file_name = format!("backup@{id}");
         let mut file = PersistenceFile::new(&self.path, file_name)?;
         let path = file.path();
 
@@ -367,7 +367,7 @@ impl Persistence {
 
             if !self.non_destructive_read {
                 let deleted_file = self.remove(id)?;
-                warn!("file limit reached. deleting backup@{}; path = {deleted_file:?}", id);
+                warn!("file limit reached. deleting backup@{id}; path = {deleted_file:?}");
             }
 
             Some(id)
@@ -375,7 +375,7 @@ impl Persistence {
             None
         };
 
-        let file_name = format!("backup@{}", next_file_id);
+        let file_name = format!("backup@{next_file_id}");
         Ok(NextFile { file: PersistenceFile::new(&self.path, file_name)?, deleted })
     }
 
@@ -383,7 +383,7 @@ impl Persistence {
     fn load_next_read_file(&mut self, current_read_file: &mut BytesMut) -> Result<(), Error> {
         // Len always > 0 because of above if. Doesn't panic
         let id = self.backlog_files.pop_front().unwrap();
-        let file_name = format!("backup@{}", id);
+        let file_name = format!("backup@{id}");
         let mut file = PersistenceFile::new(&self.path, file_name)?;
 
         // Load file into memory and store its id for deleting in the future
@@ -429,7 +429,7 @@ mod test {
 
             match Packet::read(storage.reader(), 1048).unwrap() {
                 Packet::Publish(p) => publishes.push(p),
-                packet => unreachable!("{:?}", packet),
+                packet => unreachable!("{packet:?}"),
             }
         }
 

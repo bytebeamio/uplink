@@ -54,7 +54,7 @@ impl TcpJson {
         let listener = TcpListener::bind(&addr).await?;
         let mut handle: Option<JoinHandle<()>> = None;
 
-        info!("Waiting for app = {} to connect on {:?}", self.name, addr);
+        info!("Waiting for app = {} to connect on {addr}", self.name);
         loop {
             let framed = match listener.accept().await {
                 Ok((stream, addr)) => {
@@ -114,7 +114,7 @@ impl TcpJson {
     }
 
     async fn handle_incoming_line(&self, line: String) -> Result<(), Error> {
-        debug!("{}: Received line = {:?}", self.name, line);
+        debug!("{}: Received line = {line:?}", self.name);
         let data = serde_json::from_str::<Payload>(&line)?;
 
         if data.stream == "action_status" {

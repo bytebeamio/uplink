@@ -73,7 +73,7 @@ impl ScriptRunner {
                     let mut status: ActionResponse = match serde_json::from_str(&line) {
                         Ok(status) => status,
                         Err(e) => {
-                            error!("Failed to deserialize script output: \"{line}\"; Error: {e}");
+                            error!("Failed to deserialize script output: {line:?}; Error: {e}");
                             continue;
                         },
                     };
@@ -112,7 +112,7 @@ impl ScriptRunner {
                 Ok(DownloadFile { download_path: Some(download_path), .. }) => download_path,
                 Ok(_) => {
                     let err = format!(
-                        "Action payload doesn't contain path for script execution; payload: \"{}\"",
+                        "Action payload doesn't contain path for script execution; payload: {:?}",
                         action.payload
                     );
                     warn!("{err}");
@@ -121,7 +121,7 @@ impl ScriptRunner {
                 }
                 Err(e) => {
                     let err = format!(
-                        "Failed to deserialize action payload: \"{e}\"; payload: \"{}\"",
+                        "Failed to deserialize action payload: {e}; payload: {:?}",
                         action.payload
                     );
                     error!("{err}");

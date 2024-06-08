@@ -108,8 +108,8 @@ impl<T: Point> Streams<T> {
             // Initialize metrics timeouts when force flush sees data counts
             if metrics.points() > 0 {
                 info!(
-                    "{:>20}: points = {:<5} batches = {:<5} latency = {}",
-                    buffer_name, metrics.points, metrics.batches, metrics.average_batch_latency
+                    "{buffer_name:>20}: points = {:<5} batches = {:<5} latency = {}",
+                    metrics.points, metrics.batches, metrics.average_batch_latency
                 );
                 self.metrics_tx.try_send(metrics)?;
                 data.metrics.prepare_next();

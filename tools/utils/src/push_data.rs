@@ -34,7 +34,7 @@ async fn main() {
             d: idx.to_string(),
         };
         let data_s = serde_json::to_string(&data).unwrap();
-        println!("Sending: {}", data_s);
+        println!("Sending: {data_s}");
         framed.send(data_s).await.unwrap();
         sleep(Duration::from_secs(3)).await;
     }

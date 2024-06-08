@@ -143,9 +143,9 @@ fn main() -> Result<(), Error> {
 
             let mut publish = match read(storage.reader(), commandline.max_packet_size) {
                 Ok(Packet::Publish(publish)) => publish,
-                Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+                Ok(packet) => unreachable!("Unexpected packet: {packet:?}"),
                 Err(e) => {
-                    eprintln!("Failed to read from storage. Error = {:?}", e);
+                    eprintln!("Failed to read from storage. Error = {e}");
                     break;
                 }
             };
@@ -199,7 +199,7 @@ fn main() -> Result<(), Error> {
 
     let mut table = Table::new(entries);
     table.with(Style::rounded());
-    println!("{}", table);
+    println!("{table}");
     println!("NOTE: timestamps are relative to UNIX epoch and in milliseconds and message_rate is in units of points/second");
 
     println!("\nAggregated values (Network Impact)");
@@ -211,7 +211,7 @@ fn main() -> Result<(), Error> {
         .with(Disable::column(ByColumnName::new("compression_algo")))
         .with(Disable::column(ByColumnName::new("uncompressed_size")))
         .with(Disable::column(ByColumnName::new("uncompressed_data_rate")));
-    println!("{}", table);
+    println!("{table}");
 
     Ok(())
 }

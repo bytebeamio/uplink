@@ -103,7 +103,7 @@ impl CommandLine {
         if let Some(path) = &self.config {
             let read = read_file_contents(path).map_err(|e| {
                 Error::msg(format!(
-                    "Config file couldn't be loaded from \"{}\"; error = {e}",
+                    "Config file couldn't be loaded from {:?}; error = {e}",
                     path.display()
                 ))
             })?;
@@ -112,7 +112,7 @@ impl CommandLine {
 
         let auth = read_file_contents(&self.auth).map_err(|e| {
             Error::msg(format!(
-                "Auth file couldn't be loaded from \"{}\"; error = {e}",
+                "Auth file couldn't be loaded from {:?}; error = {e}",
                 self.auth.display()
             ))
         })?;
@@ -124,7 +124,7 @@ impl CommandLine {
         // Create directory at persistence_path if it doesn't already exist
         std::fs::create_dir_all(&config.persistence_path).map_err(|_| {
             Error::msg(format!(
-                "Permission denied for creating persistence directory at \"{}\"",
+                "Permission denied for creating persistence directory at {:?}",
                 config.persistence_path.display()
             ))
         })?;
@@ -269,7 +269,7 @@ impl CommandLine {
 
         if !config.downloader.actions.is_empty() {
             println!(
-                "    downloader:\n\tpath: \"{}\"\n\tactions: {:?}",
+                "    downloader:\n\tpath: {:?}\n\tactions: {:?}",
                 config.downloader.path.display(),
                 config.downloader.actions
             );
@@ -355,7 +355,7 @@ fn main() -> Result<(), Error> {
         for app in tcpapps {
             tokio::task::spawn(async move {
                 if let Err(e) = app.start().await {
-                    error!("App failed. Error = {:?}", e);
+                    error!("App failed. Error = {e}");
                 }
             });
         }
