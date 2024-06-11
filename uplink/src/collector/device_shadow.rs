@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use log::{error, trace};
 use serde::Serialize;
 
@@ -49,8 +47,7 @@ impl DeviceShadow {
         let ping_addr = "8.8.8.8".parse().unwrap();
         let ping_payload = [0; 64];
 
-        let mut device_shadow_interval =
-            tokio::time::interval(Duration::from_secs(self.config.interval));
+        let mut device_shadow_interval = tokio::time::interval(self.config.interval);
 
         loop {
             _ = device_shadow_interval.tick().await;
