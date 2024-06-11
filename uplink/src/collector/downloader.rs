@@ -548,7 +548,7 @@ pub struct CtrlTx {
 impl CtrlTx {
     /// Triggers shutdown of `Downloader`
     pub async fn trigger_shutdown(&self) {
-        self.inner.send_async(DownloaderShutdown).await.unwrap()
+        _ = self.inner.send_async(DownloaderShutdown).await;
     }
 }
 
