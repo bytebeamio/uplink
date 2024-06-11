@@ -19,6 +19,8 @@ pub enum Error {
     Link(#[from] rumqttd::local::LinkError),
     #[error("Parse error: {0}")]
     Parse(#[from] std::net::AddrParseError),
+    #[error("Rumqttd error: {0}")]
+    Rumqttd(#[from] rumqttd::Error),
 }
 
 pub struct BusRx {
@@ -122,7 +124,7 @@ pub fn new() -> Result<(BusTx, BusRx), Error> {
     let config = Config { id: 0, router, v4: Some(servers), ..Default::default() };
     let mut broker = Broker::new(config);
     let (tx, rx) = broker.link("uplink")?;
-    broker.start().unwrap();
+    broker.start()?;
 
     Ok((BusTx { tx }, BusRx { rx }))
 }
