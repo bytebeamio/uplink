@@ -2995,7 +2995,7 @@ dependencies = [
 [[package]]
 name = "rumqttd"
 version = "0.19.0"
-source = "git+https://github.com/bytebeamio/rumqtt?branch=uplink-changes#5f50d6cd23aee0da70ee68ccaa4cf6585189d627"
+source = "git+https://github.com/bytebeamio/rumqtt?branch=uplink-changes#c2345ccf70f040b03d1499a9e97f8d959fa128b8"
 dependencies = [
  "async-tungstenite 0.25.1",
  "axum 0.7.5",

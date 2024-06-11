@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bridge::Payload;
+use std::future::Future;
 use tokio::join;
 
 use crate::{Action, ActionResponse};
@@ -47,6 +48,7 @@ impl CtrlTx {
 
 pub trait ServiceBusRx<T> {
     fn recv(&mut self) -> Option<T>;
+    fn recv_async(&mut self) -> impl Future<Output = Option<T>>;
 }
 
 pub trait ServiceBusTx {

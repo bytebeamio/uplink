@@ -136,4 +136,8 @@ impl BridgeTx {
     pub async fn send_action_response(&self, response: ActionResponse) {
         self.status_tx.send_action_response(response).await
     }
+
+    pub fn send_action_response_sync(&self, response: ActionResponse) {
+        self.status_tx.send_action_response_sync(response)
+    }
 }

@@ -225,8 +225,10 @@ impl From<&ActionRoute> for ActionRoute {
     }
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct DeviceShadowConfig {
+    #[serde_as(as = "DurationSeconds<u64>")]
     pub interval: Duration,
 }
 
@@ -240,6 +242,11 @@ impl Default for DeviceShadowConfig {
 pub struct PreconditionCheckerConfig {
     pub path: PathBuf,
     pub actions: Vec<ActionRoute>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BusConfig {
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -284,4 +291,5 @@ pub struct Config {
     // #[cfg(target_os = "android")]
     // pub logging: Option<LogcatConfig>,
     pub precondition_checks: Option<PreconditionCheckerConfig>,
+    pub bus: Option<BusConfig>,
 }

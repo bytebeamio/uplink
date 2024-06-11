@@ -42,9 +42,10 @@
 //! [`name`]: Action#structfield.name
 use std::sync::{Arc, Mutex};
 use std::thread;
-// use std::time::Duration;
 
 use anyhow::Error;
+use collector::bus::Bus;
+use config::{ActionRoute, BusConfig, DEFAULT_TIMEOUT};
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
@@ -131,7 +132,7 @@ impl Uplink {
 
     pub fn spawn(
         &mut self,
-        bridge: Bridge,
+        mut bridge: Bridge,
         _downloader_disable: Arc<Mutex<bool>>,
     ) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
@@ -148,6 +149,17 @@ impl Uplink {
             self.serializer_metrics_tx(),
         )?;
         let ctrl_serializer = serializer.ctrl_tx();
+
+        if let Some(BusConfig { port }) = self.config.bus {
+            let bridge_tx = bridge.bridge_tx();
+            let actions_rx = bridge.register_action_routes([ActionRoute {
+                name: "*".to_string(),
+                timeout: DEFAULT_TIMEOUT,
+                cancellable: false,
+            }])?;
+            let bus = Bus::new(port, bridge_tx, actions_rx)?;
+            spawn_named_thread("BusRx", move || bus.start());
+        }
 
         // let (ctrl_tx, ctrl_rx) = bounded(1);
         // let ctrl_downloader = DownloaderCtrlTx { inner: ctrl_tx };
