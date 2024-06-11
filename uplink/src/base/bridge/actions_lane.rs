@@ -33,7 +33,7 @@ pub enum Error {
     ActionTimeout,
     #[error("Another action is currently being processed")]
     Busy,
-    #[error("Action Route clash: \"{0}\"")]
+    #[error("Action Route clash: {0:?}")]
     ActionRouteClash(String),
     #[error("Cancellation request received for action currently not in execution!")]
     UnexpectedCancellation,
@@ -183,7 +183,7 @@ impl ActionsBridge {
 
                     if !route.is_cancellable() {
                         // Directly send timeout failure response if handler doesn't allow action cancellation
-                        error!("Timeout waiting for action response. Action ID = {}", action_id);
+                        error!("Timeout waiting for action response. Action ID = {action_id}");
                         self.forward_action_error(&action_id, Error::ActionTimeout).await;
 
                         // Remove action because it timedout
@@ -199,7 +199,7 @@ impl ActionsBridge {
                         payload,
                     };
                     if route.try_send(cancel_action).is_err() {
-                        error!("Couldn't cancel action ({}) on timeout: {}", cancellation.action_id, Error::UnresponsiveReceiver);
+                        error!("Couldn't cancel action ({}) on timeout", cancellation.action_id);
                         // Remove action anyways
                         self.clear_current_action();
                         continue;
@@ -211,16 +211,16 @@ impl ActionsBridge {
 
                 // Flush streams that timeout
                 Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
-                    debug!("Flushing stream = {}", timedout_stream);
+                    debug!("Flushing stream = {timedout_stream}");
                     if let Err(e) = self.streams.flush_stream(&timedout_stream).await {
-                        error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
+                        error!("Failed to flush stream = {timedout_stream}. Error = {e}");
                     }
                 }
 
                 // Flush all metrics when timed out
                 _ = metrics_timeout.tick() => {
                     if let Err(e) = self.streams.check_and_flush_metrics() {
-                        debug!("Failed to flush stream metrics. Error = {}", e);
+                        debug!("Failed to flush stream metrics. Error = {e}");
                     }
                 }
 
@@ -470,8 +470,8 @@ impl ActionsBridge {
         }
 
         debug!(
-            "Redirecting action: {} ~> {}; action_id = {}",
-            action.name, fwd_name, action.action_id,
+            "Redirecting action: {} ~> {fwd_name}; action_id = {}",
+            action.name, action.action_id,
         );
 
         fwd_name.clone_into(&mut action.name);

@@ -209,7 +209,7 @@ impl Logcat {
         for tag in &config.tags {
             let min_level = LogLevel::from_syslog_level(config.min_level)
                 .expect("Couldn't figure out log level");
-            logcat_args.push(format!("{}:{}", tag, min_level.to_str()));
+            logcat_args.push(format!("{tag}:{}", min_level.to_str()));
         }
 
         log::info!("logcat args: {:?}", logcat_args);
@@ -230,7 +230,7 @@ impl Logcat {
             let mut logger = match logcat.spawn() {
                 Ok(logger) => logger,
                 Err(e) => {
-                    log::error!("failed to start logger: {}", e);
+                    log::error!("failed to start logger: {e}");
                     return;
                 }
             };
@@ -252,7 +252,7 @@ impl Logcat {
                 let entry = match LogEntry::from_string(next_line) {
                     Ok(entry) => entry,
                     Err(e) => {
-                        log::warn!("log line: {} couldn't be parsed due to: {}", next_line, e);
+                        log::warn!("log line: {next_line} couldn't be parsed due to: {e}");
                         continue;
                     }
                 };

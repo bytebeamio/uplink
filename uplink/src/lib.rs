@@ -172,7 +172,7 @@ impl Uplink {
 
             rt.block_on(async {
                 if let Err(e) = serializer.start().await {
-                    error!("Serializer stopped!! Error = {:?}", e);
+                    error!("Serializer stopped!! Error = {e}");
                 }
             })
         });
@@ -204,7 +204,7 @@ impl Uplink {
 
             rt.block_on(async move {
                 if let Err(e) = monitor.start().await {
-                    error!("Monitor stopped!! Error = {:?}", e);
+                    error!("Monitor stopped!! Error = {e}");
                 }
             })
         });
@@ -217,7 +217,7 @@ impl Uplink {
 
             rt.block_on(async move {
                 if let Err(e) = actions_lane.start().await {
-                    error!("Actions lane stopped!! Error = {:?}", e);
+                    error!("Actions lane stopped!! Error = {e}");
                 }
             })
         });
@@ -228,7 +228,7 @@ impl Uplink {
 
             rt.block_on(async move {
                 if let Err(e) = data_lane.start().await {
-                    error!("Data lane stopped!! Error = {:?}", e);
+                    error!("Data lane stopped!! Error = {e}");
                 }
             })
         });
@@ -242,93 +242,93 @@ impl Uplink {
         })
     }
 
-    // pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
-    //     let bridge_tx = bridge.bridge_tx();
+    pub fn spawn_builtins(&mut self, _bridge: &mut Bridge) -> Result<(), Error> {
+        // let bridge_tx = bridge.bridge_tx();
 
-    //  let route = ActionRoute {
-    //      name: "launch_shell".to_owned(),
-    //      timeout: Duration::from_secs(10),
-    //      cancellable: false,
-    //  };
-    //  let actions_rx = bridge.register_action_route(route)?;
-    //  let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
-    //  spawn_named_thread("Tunshell Client", move || tunshell_client.start());
+        // let route = ActionRoute {
+        //     name: "launch_shell".to_owned(),
+        //     timeout: Duration::from_secs(10),
+        //     cancellable: false,
+        // };
+        // let actions_rx = bridge.register_action_route(route)?;
+        // let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
+        // spawn_named_thread("Tunshell Client", move || tunshell_client.start());
 
-    //     let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
-    //     spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
+        // let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
+        // spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
 
-    //     if !self.config.ota_installer.actions.is_empty() {
-    //         let actions_rx = bridge.register_action_routes(&self.config.ota_installer.actions)?;
-    //         let ota_installer =
-    //             OTAInstaller::new(self.config.ota_installer.clone(), actions_rx, bridge_tx.clone());
-    //         spawn_named_thread("OTA Installer", move || ota_installer.start());
-    //     }
+        // if !self.config.ota_installer.actions.is_empty() {
+        //     let actions_rx = bridge.register_action_routes(&self.config.ota_installer.actions)?;
+        //     let ota_installer =
+        //         OTAInstaller::new(self.config.ota_installer.clone(), actions_rx, bridge_tx.clone());
+        //     spawn_named_thread("OTA Installer", move || ota_installer.start());
+        // }
 
-    //  #[cfg(target_os = "linux")]
-    //  if let Some(config) = self.config.logging.clone() {
-    //      let route = ActionRoute {
-    //          name: "journalctl_config".to_string(),
-    //          timeout: Duration::from_secs(10),
-    //          cancellable: false,
-    //      };
-    //      let actions_rx = bridge.register_action_route(route)?;
-    //      let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
-    //      spawn_named_thread("Logger", || {
-    //          if let Err(e) = logger.start() {
-    //              error!("Logger stopped!! Error = {:?}", e);
-    //          }
-    //      });
-    //  }
+        // #[cfg(target_os = "linux")]
+        // if let Some(config) = self.config.logging.clone() {
+        //     let route = ActionRoute {
+        //         name: "journalctl_config".to_string(),
+        //         timeout: Duration::from_secs(10),
+        //         cancellable: false,
+        //     };
+        //     let actions_rx = bridge.register_action_route(route)?;
+        //     let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
+        //     spawn_named_thread("Logger", || {
+        //         if let Err(e) = logger.start() {
+        //             error!("Logger stopped!! Error = {e}");
+        //         }
+        //     });
+        // }
 
-    //  #[cfg(target_os = "android")]
-    //  if let Some(config) = self.config.logging.clone() {
-    //      let route = ActionRoute {
-    //          name: "journalctl_config".to_string(),
-    //          timeout: Duration::from_secs(10),
-    //          cancellable: false,
-    //      };
-    //      let actions_rx = bridge.register_action_route(route)?;
-    //      let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
-    //      spawn_named_thread("Logger", || {
-    //          if let Err(e) = logger.start() {
-    //              error!("Logger stopped!! Error = {:?}", e);
-    //          }
-    //      });
-    //  }
+        // #[cfg(target_os = "android")]
+        // if let Some(config) = self.config.logging.clone() {
+        //     let route = ActionRoute {
+        //         name: "journalctl_config".to_string(),
+        //         timeout: Duration::from_secs(10),
+        //         cancellable: false,
+        //     };
+        //     let actions_rx = bridge.register_action_route(route)?;
+        //     let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
+        //     spawn_named_thread("Logger", || {
+        //         if let Err(e) = logger.start() {
+        //             error!("Logger stopped!! Error = {e}");
+        //         }
+        //     });
+        // }
 
-    //     if self.config.system_stats.enabled {
-    //         let stat_collector = StatCollector::new(self.config.clone(), bridge_tx.clone());
-    //         spawn_named_thread("Stat Collector", || stat_collector.start());
-    //     };
+        //     if self.config.system_stats.enabled {
+        //         let stat_collector = StatCollector::new(self.config.clone(), bridge_tx.clone());
+        //         spawn_named_thread("Stat Collector", || stat_collector.start());
+        //     };
 
-    //     if !self.config.processes.is_empty() {
-    //         let actions_rx = bridge.register_action_routes(&self.config.processes)?;
-    //         let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
-    //         spawn_named_thread("Process Handler", || {
-    //             if let Err(e) = process_handler.start() {
-    //                 error!("Process handler stopped!! Error = {:?}", e);
-    //             }
-    //         });
-    //     }
+        // if !self.config.processes.is_empty() {
+        //     let actions_rx = bridge.register_action_routes(&self.config.processes)?;
+        //     let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
+        //     spawn_named_thread("Process Handler", || {
+        //         if let Err(e) = process_handler.start() {
+        //             error!("Process handler stopped!! Error = {e}");
+        //         }
+        //     });
+        // }
 
-    //     if !self.config.script_runner.is_empty() {
-    //         let actions_rx = bridge.register_action_routes(&self.config.script_runner)?;
-    //         let script_runner = ScriptRunner::new(actions_rx, bridge_tx.clone());
-    //         spawn_named_thread("Script Runner", || {
-    //             if let Err(e) = script_runner.start() {
-    //                 error!("Script runner stopped!! Error = {:?}", e);
-    //             }
-    //         });
-    //     }
+        // if !self.config.script_runner.is_empty() {
+        //     let actions_rx = bridge.register_action_routes(&self.config.script_runner)?;
+        //     let script_runner = ScriptRunner::new(actions_rx, bridge_tx.clone());
+        //     spawn_named_thread("Script Runner", || {
+        //         if let Err(e) = script_runner.start() {
+        //             error!("Script runner stopped!! Error = {e}");
+        //         }
+        //     });
+        // }
 
-    //     if let Some(checker_config) = &self.config.precondition_checks {
-    //         let actions_rx = bridge.register_action_routes(&checker_config.actions)?;
-    //         let checker = PreconditionChecker::new(self.config.clone(), actions_rx, bridge_tx);
-    //         spawn_named_thread("Logger", || checker.start());
-    //     }
+        //     if let Some(checker_config) = &self.config.precondition_checks {
+        //         let actions_rx = bridge.register_action_routes(&checker_config.actions)?;
+        //         let checker = PreconditionChecker::new(self.config.clone(), actions_rx, bridge_tx);
+        //         spawn_named_thread("Logger", || checker.start());
+        //     }
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
     pub fn bridge_action_rx(&self) -> Receiver<Action> {
         self.action_rx.clone()

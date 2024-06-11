@@ -185,7 +185,7 @@ impl JournalCtl {
             let mut logger = match journalctl.spawn() {
                 Ok(logger) => logger,
                 Err(e) => {
-                    log::error!("failed to start logger: {}", e);
+                    log::error!("failed to start logger: {e}");
                     return;
                 }
             };
@@ -203,7 +203,7 @@ impl JournalCtl {
                         break;
                     }
                     Err(e) => {
-                        log::error!("error while reading logger output: {}", e);
+                        log::error!("error while reading logger output: {e}");
                         break;
                     }
                     _ => (),
@@ -213,14 +213,14 @@ impl JournalCtl {
                 let entry = match LogEntry::from_string(next_line) {
                     Ok(entry) => entry,
                     Err(e) => {
-                        log::warn!("log line: {} couldn't be parsed due to: {}", next_line, e);
+                        log::warn!("log line: {next_line} couldn't be parsed due to: {e}");
                         continue;
                     }
                 };
                 let payload = match entry.to_payload(log_index) {
                     Ok(p) => p,
                     Err(e) => {
-                        log::error!("Couldn't convert to payload: {:?}", e);
+                        log::error!("Couldn't convert to payload: {e}");
                         continue;
                     }
                 };

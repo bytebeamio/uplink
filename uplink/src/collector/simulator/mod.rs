@@ -62,7 +62,7 @@ impl ActionResponse {
 
 pub fn read_gps_path(paths_dir: &str) -> Arc<Vec<Gps>> {
     let i = rand::thread_rng().gen_range(0..10);
-    let file_name: String = format!("{}/path{}.json", paths_dir, i);
+    let file_name: String = format!("{paths_dir}/path{i}.json");
 
     let contents = fs::read_to_string(file_name).expect("Oops, failed ot read path");
 

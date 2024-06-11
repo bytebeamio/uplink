@@ -108,7 +108,7 @@ where
     fn take_buffer(&mut self) -> Buffer<T> {
         let name = self.name.clone();
         let config = self.config.clone();
-        trace!("Flushing stream name: {}, topic: {}", name, config.topic);
+        trace!("Flushing stream name: {name}, topic: {}", config.topic);
 
         mem::replace(&mut self.buffer, Buffer::new(name, config))
     }

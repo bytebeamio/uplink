@@ -55,7 +55,7 @@ pub enum Error {
     Lz4(#[from] lz4_flex::frame::Error),
     #[error("Empty storage")]
     EmptyStorage,
-    #[error("Permission denied while accessing persistence directory \"{0}\"")]
+    #[error("Permission denied while accessing persistence directory {0:?}")]
     Persistence(String),
     #[error("Serializer has shutdown after handling crash")]
     Shutdown,
@@ -153,7 +153,7 @@ impl StorageHandler {
                 storage.set_persistence(&path, stream_config.persistence.max_file_count)?;
 
                 debug!(
-                    "Disk persistance is enabled for stream: \"{stream_name}\"; path: {}",
+                    "Disk persistance is enabled for stream: {stream_name:?}; path: {}",
                     path.display()
                 );
             }
@@ -327,7 +327,7 @@ impl<C: MqttClient> Serializer<C> {
             match write_to_storage(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
-                Err(e) => error!("Shutdown: write error = {:?}", e),
+                Err(e) => error!("Shutdown: write error = {e}"),
             }
         }
     }
@@ -343,7 +343,7 @@ impl<C: MqttClient> Serializer<C> {
         match write_to_storage(publish, storage) {
             Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
             Ok(_) => {}
-            Err(e) => error!("Crash loop: write error = {:?}", e),
+            Err(e) => error!("Crash loop: write error = {e}"),
         }
 
         loop {
@@ -354,7 +354,7 @@ impl<C: MqttClient> Serializer<C> {
             match write_to_storage(publish, storage) {
                 Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
                 Ok(_) => {}
-                Err(e) => error!("Crash loop: write error = {:?}", e),
+                Err(e) => error!("Crash loop: write error = {e}"),
             }
         }
     }
@@ -387,7 +387,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                         Ok(_) => {},
                         Err(e) => {
-                            error!("Storage write error = {:?}", e);
+                            error!("Storage write error = {e}");
                             self.metrics.increment_errors();
                         }
                     };
@@ -396,15 +396,11 @@ impl<C: MqttClient> Serializer<C> {
                     self.metrics.add_batch();
                 }
                 o = &mut publish => match o {
-                    Ok(_) => {
-                        break Ok(Status::EventLoopReady)
-                    }
+                    Ok(_) => break Ok(Status::EventLoopReady),
                     Err(MqttError::Send(Request::Publish(publish))) => {
                         break Ok(Status::EventLoopCrash(publish, stream));
-                    },
-                    Err(e) => {
-                        unreachable!("Unexpected error: {}", e);
                     }
+                    Err(e) => unreachable!("Unexpected error: {e}"),
                 },
                 _ = interval.tick() => {
                     check_metrics(&mut self.metrics, &mut self.stream_metrics, &self.storage_handler);
@@ -440,9 +436,8 @@ impl<C: MqttClient> Serializer<C> {
         let max_packet_size = self.config.mqtt.max_packet_size;
         let client = self.client.clone();
 
-        let (stream, storage) = match self.storage_handler.next(&mut self.metrics) {
-            Some(s) => s,
-            _ => return Ok(Status::Normal),
+        let Some((stream, storage)) = self.storage_handler.next(&mut self.metrics) else {
+            return Ok(Status::Normal);
         };
 
         // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
@@ -452,7 +447,7 @@ impl<C: MqttClient> Serializer<C> {
             Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
             Err(e) => {
                 self.metrics.increment_errors();
-                error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+                error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
                 save_and_prepare_next_metrics(
                     &mut self.pending_metrics,
                     &mut self.metrics,
@@ -482,7 +477,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                         Ok(_) => {},
                         Err(e) => {
-                            error!("Storage write error = {:?}", e);
+                            error!("Storage write error = {e}");
                             self.metrics.increment_errors();
                         }
                     };
@@ -497,19 +492,18 @@ impl<C: MqttClient> Serializer<C> {
                     let client = match o {
                         Ok(c) => c,
                         Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish, last_publish_stream.clone())),
-                        Err(e) => unreachable!("Unexpected error: {}", e),
+                        Err(e) => unreachable!("Unexpected error: {e}"),
                     };
 
-                    let (stream, storage) = match self.storage_handler.next(&mut self.metrics) {
-                        Some(s) => s,
-                        _ => return Ok(Status::Normal),
+                    let Some((stream, storage)) = self.storage_handler.next(&mut self.metrics) else {
+                        return Ok(Status::Normal);
                     };
 
                     let publish = match Packet::read(storage.reader(), max_packet_size) {
                         Ok(Packet::Publish(publish)) => publish,
                         Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
                         Err(e) => {
-                            error!("Failed to read from storage. Forcing into Normal mode. Error = {:?}", e);
+                            error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
                             break Ok(Status::Normal)
                         }
                     };
@@ -555,7 +549,7 @@ impl<C: MqttClient> Serializer<C> {
                     let stream = data.stream_config();
                     let publish = construct_publish(data, &mut self.stream_metrics)?;
                     let payload_size = publish.payload.len();
-                    debug!("publishing on {} with size = {}", publish.topic, payload_size);
+                    debug!("publishing on {} with size = {payload_size}", publish.topic);
                     match self.client.try_publish(&stream.topic, QoS::AtLeastOnce, false, publish.payload) {
                         Ok(_) => {
                             self.metrics.add_batch();
@@ -563,7 +557,7 @@ impl<C: MqttClient> Serializer<C> {
                             continue;
                         }
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish, stream)),
-                        Err(e) => unreachable!("Unexpected error: {}", e),
+                        Err(e) => unreachable!("Unexpected error: {e}"),
                     }
 
                 }
@@ -573,7 +567,7 @@ impl<C: MqttClient> Serializer<C> {
                     // available. It can be inmemory storage
 
                     if let Err(e) = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler) {
-                        debug!("Failed to flush serializer metrics (normal). Error = {}", e);
+                        debug!("Failed to flush serializer metrics (normal). Error = {e}");
                     }
                 }
                 // Transition into crash mode when uplink is shutting down
@@ -673,7 +667,7 @@ fn write_to_storage(
 ) -> Result<Option<u64>, storage::Error> {
     publish.pkid = 1;
     if let Err(e) = publish.write(storage.writer()) {
-        error!("Failed to fill disk buffer. Error = {:?}", e);
+        error!("Failed to fill disk buffer. Error = {e}");
         return Ok(None);
     }
 
@@ -1328,60 +1322,53 @@ mod test {
         // run serializer in the background
         spawn(async { serializer.start().await.unwrap() });
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/top");
-                assert_eq!(payload, "100");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/top");
+        assert_eq!(payload, "100");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/top");
-                assert_eq!(payload, "1000");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/top");
+        assert_eq!(payload, "1000");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/two");
-                assert_eq!(payload, "3");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/two");
+        assert_eq!(payload, "3");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/one");
-                assert_eq!(payload, "1");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/one");
+        assert_eq!(payload, "1");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/one");
-                assert_eq!(payload, "10");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/one");
+        assert_eq!(payload, "10");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/default");
-                assert_eq!(payload, "0");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/default");
+        assert_eq!(payload, "0");
 
-        match req_rx.recv_async().await.unwrap() {
-            Request::Publish(Publish { topic, payload, .. }) => {
-                assert_eq!(topic, "topic/default");
-                assert_eq!(payload, "2");
-            }
-            _ => unreachable!(),
-        }
+        let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(topic, "topic/default");
+        assert_eq!(payload, "2");
     }
 }

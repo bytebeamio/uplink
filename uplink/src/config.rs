@@ -13,11 +13,11 @@ pub use crate::base::bridge::stream::MAX_BATCH_SIZE;
 // #[cfg(target_os = "android")]
 // use crate::collector::logcat::LogcatConfig;
 
-pub const DEFAULT_TIMEOUT: u64 = 60;
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[inline]
 fn default_timeout() -> Duration {
-    Duration::from_secs(DEFAULT_TIMEOUT)
+    DEFAULT_TIMEOUT
 }
 
 #[inline]
@@ -227,7 +227,7 @@ impl From<&ActionRoute> for ActionRoute {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DeviceShadowConfig {
-    pub interval: u64,
+    pub interval: Duration,
 }
 
 impl Default for DeviceShadowConfig {

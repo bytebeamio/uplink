@@ -45,13 +45,13 @@ async fn main() {
             errors: vec![],
         };
         let resp = serde_json::to_string(&response).unwrap();
-        println!("Sending: {}", resp);
+        println!("Sending: {resp}");
         framed.send(resp).await.unwrap();
     }
     let mut idx = 0;
     loop {
         let action_s = framed.next().await.unwrap().unwrap();
-        println!("Received: {}", action_s);
+        println!("Received: {action_s}");
         let action = serde_json::from_str::<Action>(action_s.as_str()).unwrap();
         sleep(Duration::from_secs(3));
         respond(&mut framed, &mut idx, action.action_id.as_str(), "Working", 33).await;

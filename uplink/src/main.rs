@@ -1,5 +1,6 @@
 mod console;
 
+use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -96,30 +97,34 @@ impl CommandLine {
     /// Reads config file to generate config struct and replaces places holders
     /// like bike id and data version
     fn get_configs(&self) -> Result<Config, anyhow::Error> {
-        let read_file_contents = |path| std::fs::read_to_string(path).ok();
-        let auth = read_file_contents(&self.auth).ok_or_else(|| {
-            Error::msg(format!("Auth file not found at \"{}\"", self.auth.display()))
+        let mut config =
+            config::Config::builder().add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml));
+
+        if let Some(path) = &self.config {
+            let read = read_to_string(path).map_err(|e| {
+                Error::msg(format!(
+                    "Config file couldn't be loaded from {:?}; error = {e}",
+                    path.display()
+                ))
+            })?;
+            config = config.add_source(File::from_str(&read, FileFormat::Toml));
+        }
+
+        let auth = read_to_string(&self.auth).map_err(|e| {
+            Error::msg(format!(
+                "Auth file couldn't be loaded from {:?}; error = {e}",
+                self.auth.display()
+            ))
         })?;
-        let config = match &self.config {
-            Some(path) => Some(read_file_contents(path).ok_or_else(|| {
-                Error::msg(format!("Config file not found at \"{}\"", path.display()))
-            })?),
-            None => None,
-        };
+        config = config.add_source(File::from_str(&auth, FileFormat::Json));
 
-        let config = config::Config::builder()
-            .add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml))
-            .add_source(File::from_str(&config.unwrap_or_default(), FileFormat::Toml))
-            .add_source(File::from_str(&auth, FileFormat::Json))
-            .add_source(Environment::default())
-            .build()?;
-
-        let mut config: Config = config.try_deserialize()?;
+        let mut config: Config =
+            config.add_source(Environment::default()).build()?.try_deserialize()?;
 
         // Create directory at persistence_path if it doesn't already exist
         std::fs::create_dir_all(&config.persistence_path).map_err(|_| {
             Error::msg(format!(
-                "Permission denied for creating persistence directory at \"{}\"",
+                "Permission denied for creating persistence directory at {:?}",
                 config.persistence_path.display()
             ))
         })?;
@@ -264,7 +269,7 @@ impl CommandLine {
 
         if !config.downloader.actions.is_empty() {
             println!(
-                "    downloader:\n\tpath: \"{}\"\n\tactions: {:?}",
+                "    downloader:\n\tpath: {:?}\n\tactions: {:?}",
                 config.downloader.path.display(),
                 config.downloader.actions
             );
@@ -350,7 +355,7 @@ fn main() -> Result<(), Error> {
         // for app in tcpapps {
         //     tokio::task::spawn(async move {
         //         if let Err(e) = app.start().await {
-        //             error!("App failed. Error = {:?}", e);
+        //             error!("App failed. Error = {e}");
         //         }
         //     });
         // }

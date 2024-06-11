@@ -122,7 +122,7 @@ impl Payload {
 
 pub fn read_gps_path(paths_dir: &str) -> Arc<Vec<Gps>> {
     let i = rand::thread_rng().gen_range(0..10);
-    let file_name: String = format!("{}/path{}.json", paths_dir, i);
+    let file_name: String = format!("{paths_dir}/path{i}.json");
 
     let contents = fs::read_to_string(file_name).expect("Oops, failed ot read path");
 
@@ -170,14 +170,10 @@ async fn main() -> Result<(), Error> {
                 spawn(ActionResponse::simulate(action,  tx.clone()));
             }
             p = rx.recv_async() => {
-                let payload = match p {
-                    Ok(p) => p,
-                    Err(_) => {
-                        error!("All generators have stopped!");
-                        return Ok(())
-                    }
+                let Ok(payload) = p else {
+                    error!("All generators have stopped!");
+                    return Ok(());
                 };
-
 
                 let text = serde_json::to_string(&payload)?;
                 data_tx.send(text).await?;

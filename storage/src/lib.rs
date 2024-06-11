@@ -102,29 +102,27 @@ impl Storage {
         if self.current_write_file.is_empty() {
             return Err(Error::NoWrites);
         }
-        match &mut self.persistence {
-            Some(persistence) => {
-                let NextFile { mut file, deleted } = persistence.open_next_write_file()?;
-                info!("Flushing data to disk for stoarge: {}; path = {:?}", self.name, file.path());
-                file.write(&mut self.current_write_file)?;
 
-                // 8 is the number of bytes the hash(u64) occupies
-                persistence.bytes_occupied += 8 + self.current_write_file.len();
-                self.current_write_file.clear();
+        let Some(persistence) = &mut self.persistence else {
+            // TODO(RT): Make sure that disk files starts with id 1 to represent in memory file
+            // with id 0
+            self.current_write_file.clear();
+            warn!(
+                "Persistence disabled for storage: {}. Deleted in-memory buffer on overflow",
+                self.name
+            );
+            return Ok(Some(0));
+        };
 
-                Ok(deleted)
-            }
-            None => {
-                // TODO(RT): Make sure that disk files starts with id 1 to represent in memory file
-                // with id 0
-                self.current_write_file.clear();
-                warn!(
-                    "Persistence disabled for storage: {}. Deleted in-memory buffer on overflow",
-                    self.name
-                );
-                Ok(Some(0))
-            }
-        }
+        let NextFile { mut file, deleted } = persistence.open_next_write_file()?;
+        info!("Flushing data to disk for stoarge: {}; path = {:?}", self.name, file.path());
+        file.write(&mut self.current_write_file)?;
+
+        // 8 is the number of bytes the hash(u64) occupies
+        persistence.bytes_occupied += 8 + self.current_write_file.len();
+        self.current_write_file.clear();
+
+        Ok(deleted)
     }
 
     /// Loads head file to current inmemory read buffer. Deletes
@@ -197,10 +195,8 @@ fn get_file_ids(path: &Path) -> Result<VecDeque<u64>, Error> {
             continue;
         }
 
-        match id(&path) {
-            Ok(id) => file_ids.push(id),
-            Err(_) => continue,
-        }
+        let Ok(id) = id(&path) else { continue };
+        file_ids.push(id);
     }
 
     file_ids.sort_unstable();
@@ -339,7 +335,7 @@ impl Persistence {
 
     /// Removes a persistence file with provided id
     fn remove(&mut self, id: u64) -> Result<PathBuf, Error> {
-        let file_name = format!("backup@{}", id);
+        let file_name = format!("backup@{id}");
         let mut file = PersistenceFile::new(&self.path, file_name)?;
         let path = file.path();
 
@@ -371,7 +367,7 @@ impl Persistence {
 
             if !self.non_destructive_read {
                 let deleted_file = self.remove(id)?;
-                warn!("file limit reached. deleting backup@{}; path = {deleted_file:?}", id);
+                warn!("file limit reached. deleting backup@{id}; path = {deleted_file:?}");
             }
 
             Some(id)
@@ -379,7 +375,7 @@ impl Persistence {
             None
         };
 
-        let file_name = format!("backup@{}", next_file_id);
+        let file_name = format!("backup@{next_file_id}");
         Ok(NextFile { file: PersistenceFile::new(&self.path, file_name)?, deleted })
     }
 
@@ -387,7 +383,7 @@ impl Persistence {
     fn load_next_read_file(&mut self, current_read_file: &mut BytesMut) -> Result<(), Error> {
         // Len always > 0 because of above if. Doesn't panic
         let id = self.backlog_files.pop_front().unwrap();
-        let file_name = format!("backup@{}", id);
+        let file_name = format!("backup@{id}");
         let mut file = PersistenceFile::new(&self.path, file_name)?;
 
         // Load file into memory and store its id for deleting in the future
@@ -433,7 +429,7 @@ mod test {
 
             match Packet::read(storage.reader(), 1048).unwrap() {
                 Packet::Publish(p) => publishes.push(p),
-                packet => unreachable!("{:?}", packet),
+                packet => unreachable!("{packet:?}"),
             }
         }
 
