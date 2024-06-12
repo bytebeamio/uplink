@@ -2,9 +2,10 @@ use std::cmp::Ordering;
 use std::env::current_dir;
 use std::path::PathBuf;
 use std::time::Duration;
-use std::{collections::HashMap, fmt::Debug};
+use std::{collections::HashMap, fmt};
 
-use serde::{Deserialize, Serialize};
+use serde::de::{Error, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{serde_as, DurationSeconds};
 
 pub use crate::base::bridge::stream::MAX_BATCH_SIZE;
@@ -244,6 +245,87 @@ pub struct PreconditionCheckerConfig {
     pub actions: Vec<ActionRoute>,
 }
 
+#[derive(Debug, Clone)]
+pub struct Field {
+    pub original: String,
+    pub renamed: Option<String>,
+}
+
+struct FieldVisitor;
+
+impl<'de> Visitor<'de> for FieldVisitor {
+    type Value = Field;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(r#"a string or a map with a single key-value pair"#)
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        Ok(Field { original: value.to_string(), renamed: None })
+    }
+
+    fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+    where
+        M: serde::de::MapAccess<'de>,
+    {
+        let entry = map.next_entry::<String, String>()?;
+        if let Some((renamed, original)) = entry {
+            dbg!(&renamed, &original);
+            Ok(Field { original, renamed: Some(renamed) })
+        } else {
+            Err(Error::custom("Expected a single key-value pair in the map"))
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Field {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(FieldVisitor)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InputConfig {
+    pub input_stream: String,
+    pub select_fields: Vec<Field>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum NoDataAction {
+    #[default]
+    Null,
+    PreviousValue,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Deserialize)]
+pub struct JoinConfig {
+    pub name: String,
+    pub construct_from: Vec<InputConfig>,
+    pub no_data_action: NoDataAction,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub time_interval: Duration,
+    pub publish_on_service_bus: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct JoinerConfig {
+    pub output_streams: Vec<JoinConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BusConfig {
+    pub port: u16,
+    pub joins: JoinerConfig,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
     pub project_id: String,
@@ -286,4 +368,5 @@ pub struct Config {
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
     pub precondition_checks: Option<PreconditionCheckerConfig>,
+    pub bus: Option<BusConfig>,
 }
