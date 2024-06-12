@@ -204,7 +204,7 @@ impl Bus {
                         error!("Couldn't parse payload as data payload");
                         continue;
                     };
-                    for (key, value) in dbg!(data) {
+                    for (key, value) in data {
                         router.map(key, value).await
                     }
                 }

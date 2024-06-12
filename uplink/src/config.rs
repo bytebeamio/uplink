@@ -273,7 +273,6 @@ impl<'de> Visitor<'de> for FieldVisitor {
     {
         let entry = map.next_entry::<String, String>()?;
         if let Some((renamed, original)) = entry {
-            dbg!(&renamed, &original);
             Ok(Field { original, renamed: Some(renamed) })
         } else {
             Err(Error::custom("Expected a single key-value pair in the map"))
