@@ -45,6 +45,8 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Error;
+use collector::bus::Bus;
+use config::DEFAULT_TIMEOUT;
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
@@ -163,6 +165,17 @@ impl Uplink {
                 downloader_disable,
             )?;
             spawn_named_thread("File Downloader", || file_downloader.start());
+        }
+
+        if let Some(cfg) = &self.config.bus {
+            let bridge_tx = bridge.bridge_tx();
+            let actions_rx = bridge.register_action_routes([ActionRoute {
+                name: "*".to_string(),
+                timeout: DEFAULT_TIMEOUT,
+                cancellable: false,
+            }])?;
+            let bus = Bus::new(cfg.clone(), bridge_tx, actions_rx)?;
+            spawn_named_thread("BusRx", move || bus.start());
         }
 
         // Serializer thread to handle network conditions state machine

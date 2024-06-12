@@ -360,10 +360,20 @@ impl ActionsBridge {
 
     /// Handle received actions
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
-        let route = self
-            .action_routes
-            .get(&action.name)
-            .ok_or_else(|| Error::NoRoute(action.name.clone()))?;
+        let Some(route) = self.action_routes.get(&action.name) else {
+            // actions that can't be routed should go onto the broker if enabled
+            let deadline = self
+                .action_routes
+                .get("*")
+                .ok_or_else(|| Error::NoRoute(action.name.clone()))?
+                .try_send(action.clone())
+                .map_err(|_| Error::UnresponsiveReceiver)?;
+            debug!("Action routed to broker");
+
+            self.current_action = Some(CurrentAction::new(action, deadline));
+
+            return Ok(());
+        };
 
         let deadline = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
         // current action left unchanged in case of new tunshell action
@@ -575,6 +585,10 @@ pub struct StatusTx {
 impl StatusTx {
     pub async fn send_action_response(&self, response: ActionResponse) {
         self.inner.send_async(response).await.unwrap()
+    }
+
+    pub fn send_action_response_sync(&self, response: ActionResponse) {
+        self.inner.send(response).unwrap()
     }
 }
 
