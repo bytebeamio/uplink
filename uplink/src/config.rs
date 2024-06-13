@@ -301,7 +301,7 @@ impl<'de> Visitor<'de> for SelectVisitor {
     type Value = SelectConfig;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str(r#"a string or a map with a single key-value pair"#)
+        formatter.write_str(r#"the string "all" or a list of `Field`s"#)
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -310,7 +310,7 @@ impl<'de> Visitor<'de> for SelectVisitor {
     {
         match value {
             "all" => Ok(SelectConfig::All),
-            _ => Err(Error::custom(r#"Expected an array of `Fields` or "all""#)),
+            _ => Err(Error::custom(r#"Expected the string "all""#)),
         }
     }
 
