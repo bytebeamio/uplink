@@ -180,7 +180,7 @@ mod tests {
 
         let ActionResponse { state, errors, .. } = status_rx.recv().unwrap();
         assert_eq!(state, "Failed");
-        assert_eq!(errors, ["Failed to deserialize action payload: \"EOF while parsing a value at line 1 column 0\"; payload: \"\""]);
+        assert_eq!(errors, ["Failed to deserialize action payload: EOF while parsing a value at line 1 column 0; payload: \"\""]);
     }
 
     #[test]
@@ -203,6 +203,6 @@ mod tests {
 
         let ActionResponse { state, errors, .. } = status_rx.recv().unwrap();
         assert_eq!(state, "Failed");
-        assert_eq!(errors, ["Action payload doesn't contain path for script execution; payload: \"{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}\""]);
+        assert_eq!(errors, ["Action payload doesn't contain path for script execution; payload: \"{\\\"url\\\": \\\"...\\\", \\\"content_length\\\": 0,\\\"file_name\\\": \\\"...\\\"}\""]);
     }
 }
