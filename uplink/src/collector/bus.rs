@@ -209,10 +209,12 @@ impl Bus {
                         continue;
                     };
                     let topic = String::from_utf8(publish.topic.to_vec()).unwrap();
-                    let Some (stream_name) = topic.split('/').last() else {error!("missing"); continue};
-                    for (key, value) in data {
-                        router.map(stream_name, key, value).await
-                    }
+                    let Some (stream_name) = topic.split('/').last() else {
+                        error!("unexpected topic structure: {topic}");
+                        continue
+                    };
+                    router.map(stream_name.to_owned(), data).await;
+
                 }
 
                 Ok(data) = back_rx.recv_async() => {
@@ -227,30 +229,33 @@ impl Bus {
     }
 }
 
+type Json = Map<String, Value>;
+
 struct Router {
-    map: HashMap<String, Vec<Sender<(String, Value)>>>,
+    map: HashMap<String, Vec<Sender<(String, Json)>>>,
     tasks: JoinSet<()>,
 }
 
 impl Router {
     async fn new(configs: Vec<JoinConfig>, bridge_tx: BridgeTx, back_tx: Sender<Payload>) -> Self {
-        let mut map: HashMap<String, Vec<Sender<(String, Value)>>> = HashMap::new();
+        let mut map: HashMap<String, Vec<Sender<(String, Json)>>> = HashMap::new();
         let mut tasks = JoinSet::new();
         for config in configs {
             let (tx, rx) = bounded(1);
             let mut field_renames = HashMap::new();
             for stream in &config.construct_from {
+                let renames: &mut HashMap<String, String> =
+                    field_renames.entry(stream.input_stream.to_owned()).or_default();
                 for field in &stream.select_fields {
-                    let field_canonical = format!("{}.{}", stream.input_stream, field.original);
                     if let Some(name) = &field.renamed {
-                        field_renames.insert(field_canonical.to_owned(), name.to_owned());
+                        renames.insert(field.original.to_owned(), name.to_owned());
                     }
-                    if let Some(senders) = map.get_mut(&field_canonical) {
-                        senders.push(tx.clone());
-                        continue;
-                    }
-                    map.insert(field_canonical, vec![tx.clone()]);
                 }
+                if let Some(senders) = map.get_mut(&stream.input_stream) {
+                    senders.push(tx.clone());
+                    continue;
+                }
+                map.insert(stream.input_stream.to_owned(), vec![tx.clone()]);
             }
             let joiner = Joiner {
                 rx,
@@ -265,19 +270,19 @@ impl Router {
 
         Router { map, tasks }
     }
-    async fn map(&mut self, input_stream: &str, key: String, value: Value) {
-        let Some(iter) = self.map.get(&format!("{input_stream}.{key}")) else { return };
+    async fn map(&mut self, input_stream: String, json: Json) {
+        let Some(iter) = self.map.get(&input_stream) else { return };
         for tx in iter {
-            _ = tx.send_async((key.clone(), value.clone())).await;
+            _ = tx.send_async((input_stream.clone(), json.clone())).await;
         }
     }
 }
 
 struct Joiner {
-    rx: Receiver<(String, Value)>,
-    joined: Map<String, Value>,
+    rx: Receiver<(String, Json)>,
+    joined: Json,
     config: JoinConfig,
-    field_renames: HashMap<String, String>,
+    field_renames: HashMap<String, HashMap<String, String>>,
     tx: BridgeTx,
     back_tx: Sender<Payload>,
 }
@@ -288,12 +293,17 @@ impl Joiner {
         let mut ticker = interval(self.config.time_interval);
         loop {
             select! {
-                Ok((mut key, value)) = self.rx.recv_async() => {
-                    if let Some(rename) = self.field_renames.get(&key){
-                        rename.clone_into(&mut key);
+                Ok((stream_name, json)) = self.rx.recv_async() => {
+                    for (mut key, value) in json {
+                        if let Some(map) = self.field_renames.get(&stream_name) {
+                            if let Some(rename) = map.get(&key) {
+                                rename.clone_into(&mut key);
+                            }
+                        }
+                        self.joined.insert(key, value);
                     }
-                    self.joined.insert(key, value);
                 }
+
                 _ = ticker.tick() => {
                     if self.joined.is_empty() {
                         continue
