@@ -214,10 +214,10 @@ joins = { output_streams = [
         { input_stream = "altimeter", select_fields = [
             "altitude",
         ] },
-    ], time_interval = 60, no_data_action = "null", publish_on_service_bus = true },
+    ], push_interval = 60, no_data_action = "null", publish_on_service_bus = true },
     { name = "device_shadow", construct_from = [
         { input_stream = "device_shadow", select_fields = "all" },
-    ], time_interval = 10, no_data_action = "previous_value", publish_on_service_bus = true },
+    ], push_interval = "on_new_data", no_data_action = "previous_value", publish_on_service_bus = true },
     { name = "example", construct_from = [
         { input_stream = "stream_one", select_fields = [
             "field_x",
@@ -226,5 +226,5 @@ joins = { output_streams = [
         { input_stream = "stream_two", select_fields = [
             { "field_z" = "field_x" },
         ] },
-    ], time_interval = 120, no_data_action = "previous_value", publish_on_service_bus = false },
+    ], push_interval = 120, no_data_action = "previous_value", publish_on_service_bus = false },
 ] }

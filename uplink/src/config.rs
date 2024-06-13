@@ -350,14 +350,61 @@ pub enum NoDataAction {
     PreviousValue,
 }
 
-#[serde_as]
+#[derive(Debug, Clone)]
+pub enum PushInterval {
+    OnNewData,
+    OnTimeout(Duration),
+}
+
+struct PushVisitor;
+
+impl<'de> Visitor<'de> for PushVisitor {
+    type Value = PushInterval;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(r#"the string "on_new_data" or a unsigned integer"#)
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        match value {
+            "on_new_data" => Ok(PushInterval::OnNewData),
+            _ => Err(Error::custom(r#"Expected the string "on_new_data""#)),
+        }
+    }
+
+    fn visit_u64<E>(self, secs: u64) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        Ok(PushInterval::OnTimeout(Duration::from_secs(secs)))
+    }
+
+    fn visit_i64<E>(self, secs: i64) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        self.visit_u64(secs as u64)
+    }
+}
+
+impl<'de> Deserialize<'de> for PushInterval {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(PushVisitor)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct JoinConfig {
     pub name: String,
     pub construct_from: Vec<InputConfig>,
     pub no_data_action: NoDataAction,
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub time_interval: Duration,
+    pub push_interval: PushInterval,
     pub publish_on_service_bus: bool,
 }
 

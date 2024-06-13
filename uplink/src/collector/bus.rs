@@ -18,7 +18,7 @@ use crate::{
         bridge::{BridgeTx, Payload},
         clock, ServiceBusRx, ServiceBusTx,
     },
-    config::{BusConfig, Field, JoinConfig, NoDataAction, SelectConfig},
+    config::{BusConfig, Field, JoinConfig, NoDataAction, PushInterval, SelectConfig},
     spawn_named_thread, Action,
 };
 
@@ -264,6 +264,7 @@ impl Router {
                 tx: bridge_tx.clone(),
                 fields,
                 back_tx: back_tx.clone(),
+                sequence: 0,
             };
             tasks.spawn(joiner.start());
         }
@@ -285,53 +286,73 @@ struct Joiner {
     fields: HashMap<String, HashMap<String, Field>>,
     tx: BridgeTx,
     back_tx: Sender<Payload>,
+    sequence: u32,
 }
 
 impl Joiner {
     async fn start(mut self) {
-        let mut sequence = 0;
-        let mut ticker = interval(self.config.time_interval);
+        let PushInterval::OnTimeout(period) = self.config.push_interval else {
+            loop {
+                if let Err(e) = self.recv_data().await {
+                    error!("{e}");
+                    return;
+                }
+            }
+        };
+        let mut ticker = interval(period);
         loop {
             select! {
-                Ok((stream_name, json)) = self.rx.recv_async() => {
-                    if let Some(map) = self.fields.get(&stream_name) {
-                        for (mut key, value) in json {
-                            if let Some(field) = map.get(&key) {
-                                if let Some(name) = &field.renamed {
-                                    name.clone_into(&mut key);
-                                }
-                                self.joined.insert(key, value);
-                            }
-                            // drop unenumerated keys from json
-                        }
-                    } else {
-                        // Select All
-                        for (key, value) in json {
-                            self.joined.insert(key, value);
-                        }
-                    }
+                Err(e) = self.recv_data() => {
+                    error!("{e}");
+                    return;
                 }
 
                 _ = ticker.tick() => {
-                    if self.joined.is_empty() {
-                        continue
-                    }
-                    sequence += 1;
-                    let payload = Payload {
-                        stream: self.config.name.clone(),
-                        sequence,
-                        timestamp: clock() as u64,
-                        payload: json!(self.joined)
-                    };
-                    if self.config.publish_on_service_bus {
-                        _ = self.back_tx.send_async(payload.clone()).await;
-                    }
-                    self.tx.send_payload(payload).await;
-                    if self.config.no_data_action == NoDataAction::Null {
-                        self.joined.clear();
-                    }
+                    self.send_data().await
                 }
             }
+        }
+    }
+
+    async fn recv_data(&mut self) -> Result<(), Error> {
+        let (stream_name, json) = self.rx.recv_async().await?;
+        if let Some(map) = self.fields.get(&stream_name) {
+            for (mut key, value) in json {
+                if let Some(field) = map.get(&key) {
+                    if let Some(name) = &field.renamed {
+                        name.clone_into(&mut key);
+                    }
+                    self.joined.insert(key, value);
+                }
+                // drop unenumerated keys from json
+            }
+        } else {
+            // Select All
+            for (key, value) in json {
+                self.joined.insert(key, value);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn send_data(&mut self) {
+        if self.joined.is_empty() {
+            return;
+        }
+        self.sequence += 1;
+        let payload = Payload {
+            stream: self.config.name.clone(),
+            sequence: self.sequence,
+            timestamp: clock() as u64,
+            payload: json!(self.joined),
+        };
+        if self.config.publish_on_service_bus {
+            _ = self.back_tx.send_async(payload.clone()).await;
+        }
+        self.tx.send_payload(payload).await;
+        if self.config.no_data_action == NoDataAction::Null {
+            self.joined.clear();
         }
     }
 }
