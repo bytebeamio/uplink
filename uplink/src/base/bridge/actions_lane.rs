@@ -469,9 +469,9 @@ impl ActionsBridge {
 
         // Cancelled action should not be redirected
         if let Some(CurrentAction { cancelled_by: Some(cancel_action), .. }) =
-            self.current_action.as_ref()
+            self.current_action.take()
         {
-            return Err(Error::Cancelled(cancel_action.clone()));
+            return Err(Error::Cancelled(cancel_action));
         }
 
         debug!(
