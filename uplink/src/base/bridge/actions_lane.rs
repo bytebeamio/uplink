@@ -414,8 +414,13 @@ impl ActionsBridge {
             if let Some(CurrentAction { cancelled_by: Some(cancel_action), .. }) =
                 self.current_action.take()
             {
-                let response = ActionResponse::success(&cancel_action);
-                self.streams.forward(response).await;
+                if response.is_failed() {
+                    let response = ActionResponse::success(&cancel_action);
+                    self.streams.forward(response).await;
+                } else {
+                    // Marks the cancellation as a failure as action has reached completion without being cancelled
+                    self.forward_action_error(&cancel_action, Error::FailedCancellation).await
+                }
             }
             return;
         }
