@@ -208,8 +208,10 @@ impl Bus {
                         error!("Couldn't parse payload as data payload");
                         continue;
                     };
+                    let topic = String::from_utf8(publish.topic.to_vec()).unwrap();
+                    let Some (stream_name) = topic.split('/').last() else {error!("missing"); continue};
                     for (key, value) in data {
-                        router.map(key, value).await
+                        router.map(stream_name, key, value).await
                     }
                 }
 
@@ -236,21 +238,18 @@ impl Router {
         let mut tasks = JoinSet::new();
         for config in configs {
             let (tx, rx) = bounded(1);
-            if let Some(senders) = map.get_mut(&config.name) {
-                senders.push(tx);
-                continue;
-            }
-            map.insert(config.name.to_string(), vec![tx]);
-
             let mut field_renames = HashMap::new();
             for stream in &config.construct_from {
                 for field in &stream.select_fields {
+                    let field_canonical = format!("{}.{}", stream.input_stream, field.original);
                     if let Some(name) = &field.renamed {
-                        field_renames.insert(
-                            format!("{}.{}", stream.input_stream, field.original),
-                            name.to_owned(),
-                        );
+                        field_renames.insert(field_canonical.to_owned(), name.to_owned());
                     }
+                    if let Some(senders) = map.get_mut(&field_canonical) {
+                        senders.push(tx.clone());
+                        continue;
+                    }
+                    map.insert(field_canonical, vec![tx.clone()]);
                 }
             }
             let joiner = Joiner {
@@ -266,8 +265,8 @@ impl Router {
 
         Router { map, tasks }
     }
-    async fn map(&mut self, key: String, value: Value) {
-        let Some(iter) = self.map.get(&key) else { return };
+    async fn map(&mut self, input_stream: &str, key: String, value: Value) {
+        let Some(iter) = self.map.get(&format!("{input_stream}.{key}")) else { return };
         for tx in iter {
             _ = tx.send_async((key.clone(), value.clone())).await;
         }
