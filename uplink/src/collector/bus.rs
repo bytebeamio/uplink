@@ -4,7 +4,7 @@ use std::{
 };
 
 use flume::{bounded, Receiver, Sender};
-use log::error;
+use log::{error, warn};
 use rumqttd::{
     local::{LinkRx, LinkTx},
     protocol::Publish,
@@ -315,22 +315,34 @@ impl Joiner {
         }
     }
 
+    // Don't insert timestamp values if data is not to be pushed instantly, never insert sequence
+    fn is_insertable(&self, key: &str) -> bool {
+        match key {
+            "timestamp" => self.config.push_interval == PushInterval::OnNewData,
+            key => key != "sequence",
+        }
+    }
+
     async fn recv_data(&mut self) -> Result<(), Error> {
         let (stream_name, json) = self.rx.recv_async().await?;
         if let Some(map) = self.fields.get(&stream_name) {
             for (mut key, value) in json {
-                if let Some(field) = map.get(&key) {
-                    if let Some(name) = &field.renamed {
-                        name.clone_into(&mut key);
-                    }
+                // drop unenumerated keys from json
+                let Some(field) = map.get(&key) else { continue };
+                if let Some(name) = &field.renamed {
+                    name.clone_into(&mut key);
+                }
+
+                if self.is_insertable(&key) {
                     self.joined.insert(key, value);
                 }
-                // drop unenumerated keys from json
             }
         } else {
-            // Select All
+            // Select All if no mapping exists
             for (key, value) in json {
-                self.joined.insert(key, value);
+                if self.is_insertable(&key) {
+                    self.joined.insert(key, value);
+                }
             }
         }
 
@@ -342,16 +354,27 @@ impl Joiner {
             return;
         }
         self.sequence += 1;
+        // timestamp value should pass as is for instant push, else be the system time
+        let timestamp = match self.joined.remove("timestamp").and_then(|value| {
+            let parsed = value.as_i64().map(|t| t as u64);
+            if parsed.is_none() {
+                warn!("timestamp: {value:?} has unexpected type; defaulting to system time")
+            }
+            parsed
+        }) {
+            Some(t) => t,
+            _ => clock() as u64,
+        };
         let payload = Payload {
             stream: self.config.name.clone(),
             sequence: self.sequence,
-            timestamp: clock() as u64,
+            timestamp,
             payload: json!(self.joined),
         };
         if self.config.publish_on_service_bus {
             _ = self.back_tx.send_async(payload.clone()).await;
         }
-        self.tx.send_payload(payload).await;
+        self.tx.send_payload(dbg!(payload)).await;
         if self.config.no_data_action == NoDataAction::Null {
             self.joined.clear();
         }

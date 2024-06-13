@@ -350,7 +350,7 @@ pub enum NoDataAction {
     PreviousValue,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PushInterval {
     OnNewData,
     OnTimeout(Duration),
