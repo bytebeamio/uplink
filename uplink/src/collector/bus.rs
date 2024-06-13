@@ -374,7 +374,7 @@ impl Joiner {
         if self.config.publish_on_service_bus {
             _ = self.back_tx.send_async(payload.clone()).await;
         }
-        self.tx.send_payload(dbg!(payload)).await;
+        self.tx.send_payload(payload).await;
         if self.config.no_data_action == NoDataAction::Null {
             self.joined.clear();
         }
