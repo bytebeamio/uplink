@@ -175,7 +175,7 @@ impl Uplink {
                 cancellable: false,
             }])?;
             let bus = Bus::new(cfg.clone(), bridge_tx, actions_rx)?;
-            spawn_named_thread("BusRx", move || bus.start());
+            spawn_named_thread("Bus Interface", move || bus.start());
         }
 
         // Serializer thread to handle network conditions state machine

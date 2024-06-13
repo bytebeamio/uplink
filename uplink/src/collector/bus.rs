@@ -19,7 +19,7 @@ use crate::{
         clock, ServiceBusRx, ServiceBusTx,
     },
     config::{BusConfig, JoinConfig, NoDataAction},
-    Action,
+    spawn_named_thread, Action,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -160,7 +160,11 @@ impl Bus {
         let mut broker =
             Broker::new(Config { id: 0, router, v4: Some(servers), ..Default::default() });
         let (tx, rx) = broker.link("uplink")?;
-        broker.start()?;
+        spawn_named_thread("Broker", move || {
+            if let Err(e) = broker.start() {
+                error!("{e}")
+            }
+        });
 
         Ok(Self { tx: BusTx { tx }, rx: BusRx { rx }, bridge_tx, actions_rx, config })
     }
