@@ -297,6 +297,7 @@ impl Joiner {
                     error!("{e}");
                     return;
                 }
+                self.send_data().await;
             }
         };
         let mut ticker = interval(period);
