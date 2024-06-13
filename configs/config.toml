@@ -215,6 +215,9 @@ joins = { output_streams = [
             "altitude",
         ] },
     ], time_interval = 60, no_data_action = "null", publish_on_service_bus = true },
+    { name = "device_shadow", construct_from = [
+        { input_stream = "device_shadow", select_fields = "all" },
+    ], time_interval = 10, no_data_action = "previous_value", publish_on_service_bus = true },
     { name = "example", construct_from = [
         { input_stream = "stream_one", select_fields = [
             "field_x",

@@ -289,10 +289,57 @@ impl<'de> Deserialize<'de> for Field {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum SelectConfig {
+    All,
+    Fields(Vec<Field>),
+}
+
+struct SelectVisitor;
+
+impl<'de> Visitor<'de> for SelectVisitor {
+    type Value = SelectConfig;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(r#"a string or a map with a single key-value pair"#)
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        match value {
+            "all" => Ok(SelectConfig::All),
+            _ => Err(Error::custom(r#"Expected an array of `Fields` or "all""#)),
+        }
+    }
+
+    fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+    where
+        S: serde::de::SeqAccess<'de>,
+    {
+        let mut fields = vec![];
+        while let Some(field) = seq.next_element()? {
+            fields.push(field);
+        }
+
+        Ok(SelectConfig::Fields(fields))
+    }
+}
+
+impl<'de> Deserialize<'de> for SelectConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(SelectVisitor)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputConfig {
     pub input_stream: String,
-    pub select_fields: Vec<Field>,
+    pub select_fields: SelectConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]

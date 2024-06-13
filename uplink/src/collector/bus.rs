@@ -18,7 +18,7 @@ use crate::{
         bridge::{BridgeTx, Payload},
         clock, ServiceBusRx, ServiceBusTx,
     },
-    config::{BusConfig, JoinConfig, NoDataAction},
+    config::{BusConfig, Field, JoinConfig, NoDataAction, SelectConfig},
     spawn_named_thread, Action,
 };
 
@@ -242,13 +242,13 @@ impl Router {
         let mut tasks = JoinSet::new();
         for config in configs {
             let (tx, rx) = bounded(1);
-            let mut field_renames = HashMap::new();
+            let mut fields = HashMap::new();
             for stream in &config.construct_from {
-                let renames: &mut HashMap<String, String> =
-                    field_renames.entry(stream.input_stream.to_owned()).or_default();
-                for field in &stream.select_fields {
-                    if let Some(name) = &field.renamed {
-                        renames.insert(field.original.to_owned(), name.to_owned());
+                if let SelectConfig::Fields(selected_fields) = &stream.select_fields {
+                    let renames: &mut HashMap<String, Field> =
+                        fields.entry(stream.input_stream.to_owned()).or_default();
+                    for field in selected_fields {
+                        renames.insert(field.original.to_owned(), field.to_owned());
                     }
                 }
                 if let Some(senders) = map.get_mut(&stream.input_stream) {
@@ -262,7 +262,7 @@ impl Router {
                 joined: Map::new(),
                 config,
                 tx: bridge_tx.clone(),
-                field_renames,
+                fields,
                 back_tx: back_tx.clone(),
             };
             tasks.spawn(joiner.start());
@@ -282,7 +282,7 @@ struct Joiner {
     rx: Receiver<(String, Json)>,
     joined: Json,
     config: JoinConfig,
-    field_renames: HashMap<String, HashMap<String, String>>,
+    fields: HashMap<String, HashMap<String, Field>>,
     tx: BridgeTx,
     back_tx: Sender<Payload>,
 }
@@ -294,13 +294,21 @@ impl Joiner {
         loop {
             select! {
                 Ok((stream_name, json)) = self.rx.recv_async() => {
-                    for (mut key, value) in json {
-                        if let Some(map) = self.field_renames.get(&stream_name) {
-                            if let Some(rename) = map.get(&key) {
-                                rename.clone_into(&mut key);
+                    if let Some(map) = self.fields.get(&stream_name) {
+                        for (mut key, value) in json {
+                            if let Some(field) = map.get(&key) {
+                                if let Some(name) = &field.renamed {
+                                    name.clone_into(&mut key);
+                                }
+                                self.joined.insert(key, value);
                             }
+                            // drop unenumerated keys from json
                         }
-                        self.joined.insert(key, value);
+                    } else {
+                        // Select All
+                        for (key, value) in json {
+                            self.joined.insert(key, value);
+                        }
                     }
                 }
 
