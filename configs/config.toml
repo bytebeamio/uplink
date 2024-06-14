@@ -169,9 +169,9 @@ port = 3333
 # Required Parameters
 # - num_devices: number of devices to be simulated
 # - gps_paths: path to directory containing files with gps paths to be used in simulation
-# [simulator]
-# num_devices = 10
-# gps_paths = "./paths/"
+[simulator]
+gps_paths = "./paths/"
+actions = [{ name = "lock" }]
 
 # Configuration of logger, journalctl in the case of linux. As configured, uplink will 
 # push log lines in batches of size
