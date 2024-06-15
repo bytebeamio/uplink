@@ -84,10 +84,13 @@ impl ActionsBridge {
 
         let mut streams_config = HashMap::new();
         let mut action_status = config.action_status.clone();
+
+        // TODO: Should be removed once action response batching is supported on platform
         if action_status.batch_size > 1 {
             warn!("Buffer size of `action_status` stream restricted to 1")
         }
         action_status.batch_size = 1;
+
         streams_config.insert("action_status".to_owned(), action_status);
         let mut streams = Streams::new(config.clone(), package_tx, metrics_tx);
         streams.config_streams(streams_config);
