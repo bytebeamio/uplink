@@ -140,12 +140,15 @@ struct StorageHandler {
 impl StorageHandler {
     fn new(config: Arc<Config>) -> Result<Self, Error> {
         let mut map = BTreeMap::new();
-        for (stream_name, stream_config) in config.streams.iter() {
+        let mut streams = config.streams.clone();
+        // NOTE: persist action_status if not configured otherwise
+        streams.insert("action_status".into(), config.action_status.clone());
+        for (stream_name, stream_config) in streams {
             let mut storage =
                 Storage::new(&stream_config.topic, stream_config.persistence.max_file_size);
             if stream_config.persistence.max_file_count > 0 {
                 let mut path = config.persistence_path.clone();
-                path.push(stream_name);
+                path.push(&stream_name);
 
                 std::fs::create_dir_all(&path).map_err(|_| {
                     Error::Persistence(config.persistence_path.to_string_lossy().to_string())
