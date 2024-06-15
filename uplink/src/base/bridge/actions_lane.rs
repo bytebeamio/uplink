@@ -43,6 +43,8 @@ pub enum Error {
     FailedCancellation,
     #[error("Action cancelled by action_id: {0}")]
     Cancelled(String),
+    #[error("Uplink restarted before action response")]
+    Restart,
 }
 
 pub struct ActionsBridge {
@@ -232,6 +234,14 @@ impl ActionsBridge {
                     if let Err(e) = self.save_current_action() {
                         error!("Failed to save current action: {e}");
                     }
+
+                    // NOTE: marks parallel actions still in execution as failed
+                    // (serializer will persist on disk even if network is down)
+                    let parallel_actions: Vec<String> = self.parallel_actions.drain().collect();
+                    for action_id in parallel_actions {
+                        self.forward_action_error(&action_id, Error::Restart).await
+                    }
+
                     // NOTE: there might be events still waiting for recv on bridge_rx
                     self.shutdown_handle.send(()).unwrap();
 
