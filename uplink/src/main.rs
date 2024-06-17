@@ -21,7 +21,7 @@ pub type ReloadHandle =
 use uplink::config::{AppConfig, Config, StreamConfig, MAX_BATCH_SIZE};
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
-const DEFAULT_CONFIG: &str = r#"    
+const DEFAULT_CONFIG: &str = r#"
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -329,7 +329,8 @@ fn main() -> Result<(), Error> {
     };
 
     let downloader_disable = Arc::new(Mutex::new(false));
-    let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone())?;
+    let network_up = Arc::new(Mutex::new(false));
+    let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone(), network_up.clone())?;
 
     if let Some(config) = config.simulator.clone() {
         spawn_named_thread("Simulator", || {
@@ -341,7 +342,7 @@ fn main() -> Result<(), Error> {
         let port = config.console.port;
         let ctrl_tx = ctrl_tx.clone();
         spawn_named_thread("Uplink Console", move || {
-            console::start(port, reload_handle, ctrl_tx, downloader_disable)
+            console::start(port, reload_handle, ctrl_tx, downloader_disable, network_up)
         });
     }
 

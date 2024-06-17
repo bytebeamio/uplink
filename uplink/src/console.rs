@@ -4,7 +4,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::IntoResponse,
-    routing::{post, put},
+    routing::{get, post, put},
     Router,
 };
 use log::info;
@@ -17,6 +17,7 @@ struct StateHandle {
     reload_handle: ReloadHandle,
     ctrl_tx: CtrlTx,
     downloader_disable: Arc<Mutex<bool>>,
+    network_up: Arc<Mutex<bool>>,
 }
 
 #[tokio::main]
@@ -25,15 +26,17 @@ pub async fn start(
     reload_handle: ReloadHandle,
     ctrl_tx: CtrlTx,
     downloader_disable: Arc<Mutex<bool>>,
+    network_up: Arc<Mutex<bool>>,
 ) {
     let address = format!("0.0.0.0:{port}");
     info!("Starting uplink console server: {address}");
-    let state = StateHandle { reload_handle, ctrl_tx, downloader_disable };
+    let state = StateHandle { reload_handle, ctrl_tx, downloader_disable, network_up };
     let app = Router::new()
         .route("/logs", post(reload_loglevel))
         .route("/shutdown", post(shutdown))
         .route("/disable_downloader", put(disable_downloader))
         .route("/enable_downloader", put(enable_downloader))
+        .route("/is_online", get(is_online))
         .with_state(state);
 
     axum::Server::bind(&address.parse().unwrap()).serve(app.into_make_service()).await.unwrap();
@@ -76,5 +79,13 @@ async fn enable_downloader(State(state): State<StateHandle>) -> impl IntoRespons
         StatusCode::OK
     } else {
         StatusCode::ACCEPTED
+    }
+}
+
+async fn is_online(State(state): State<StateHandle>) -> impl IntoResponse {
+    if *state.network_up.lock().unwrap() {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
     }
 }

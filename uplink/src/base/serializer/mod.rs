@@ -224,7 +224,7 @@ impl StorageHandler {
 }
 
 /// The uplink Serializer is the component that deals with serializing, compressing and writing data onto disk or Network.
-/// In case of network issues, the Serializer enters various states depending on the severeness, managed by [`start()`].                                                                                       
+/// In case of network issues, the Serializer enters various states depending on the severeness, managed by [`start()`].
 ///
 /// The Serializer writes data directly to network in **normal mode** with the [`try_publish()`] method on the MQTT client.
 /// In case of the network being slow, this fails and we are forced into **slow mode**, where-in new data gets written into
