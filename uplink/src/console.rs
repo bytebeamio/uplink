@@ -2,12 +2,13 @@ use std::sync::{Arc, Mutex};
 
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{response::Builder, StatusCode},
     response::IntoResponse,
     routing::{get, post, put},
     Router,
 };
 use log::info;
+use serde_json::json;
 use uplink::base::CtrlTx;
 
 use crate::ReloadHandle;
@@ -36,7 +37,7 @@ pub async fn start(
         .route("/shutdown", post(shutdown))
         .route("/disable_downloader", put(disable_downloader))
         .route("/enable_downloader", put(enable_downloader))
-        .route("/is_online", get(is_online))
+        .route("/status", get(status))
         .with_state(state);
 
     axum::Server::bind(&address.parse().unwrap()).serve(app.into_make_service()).await.unwrap();
@@ -82,10 +83,14 @@ async fn enable_downloader(State(state): State<StateHandle>) -> impl IntoRespons
     }
 }
 
-async fn is_online(State(state): State<StateHandle>) -> impl IntoResponse {
-    if *state.network_up.lock().unwrap() {
-        StatusCode::OK
-    } else {
-        StatusCode::SERVICE_UNAVAILABLE
-    }
+// Pushes uplink status as JSON text
+async fn status(State(state): State<StateHandle>) -> impl IntoResponse {
+    Builder::new()
+        .body(
+            json!({
+                "connected": *state.network_up.lock().unwrap(),
+            })
+            .to_string(),
+        )
+        .unwrap()
 }
