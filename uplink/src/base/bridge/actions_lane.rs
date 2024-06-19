@@ -367,10 +367,9 @@ impl ActionsBridge {
 
     /// Handle received actions
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
-        let route = self
-            .action_routes
-            .get(&action.name)
-            .ok_or_else(|| Error::NoRoute(action.name.clone()))?;
+        let Some(route) = self.action_routes.get(&action.name) else {
+            return Err(Error::NoRoute(action.name));
+        };
 
         let deadline = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
         // current action left unchanged in case of new tunshell action
