@@ -148,10 +148,6 @@ impl ActionsBridge {
         CtrlTx { inner: self.ctrl_tx.clone() }
     }
 
-    fn clear_current_action(&mut self) {
-        self.current_action.take();
-    }
-
     pub async fn start(&mut self) -> Result<(), Error> {
         let mut metrics_timeout = interval(self.config.stream_metrics.timeout);
         let mut end: Pin<Box<Sleep>> = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
@@ -168,7 +164,6 @@ impl ActionsBridge {
                     }
 
                     self.handle_action(action).await;
-
                 }
 
                 response = self.status_rx.recv_async() => {
@@ -192,7 +187,7 @@ impl ActionsBridge {
                         self.forward_action_error(&action_id, Error::ActionTimeout).await;
 
                         // Remove action because it timedout
-                        self.clear_current_action();
+                        self.current_action.take();
                         continue;
                     }
 
@@ -206,7 +201,7 @@ impl ActionsBridge {
                     if route.try_send(cancel_action).is_err() {
                         error!("Couldn't cancel action ({}) on timeout", cancellation.action_id);
                         // Remove action anyways
-                        self.clear_current_action();
+                        self.current_action.take();
                         continue;
                     }
 
@@ -276,7 +271,7 @@ impl ActionsBridge {
         };
 
         // Remove action because it couldn't be routed
-        self.clear_current_action();
+        self.current_action.take();
 
         // Ignore sending failure status to backend. This makes
         // backend retry action.
