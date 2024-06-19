@@ -417,6 +417,7 @@ impl ActionsBridge {
                 self.current_action.take()
             {
                 if response.is_failed() {
+                    // NOTE: action need not actually have been cancelled
                     let response = ActionResponse::success(&cancel_action);
                     self.streams.forward(response).await;
                 } else {
@@ -424,6 +425,7 @@ impl ActionsBridge {
                     self.forward_action_error(&cancel_action, Error::FailedCancellation).await
                 }
             }
+
             return;
         }
 
