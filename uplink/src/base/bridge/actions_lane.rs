@@ -434,51 +434,40 @@ impl ActionsBridge {
 
         // Forward actions included in the config to the appropriate forward route, when
         // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
-        if response.is_done() {
-            let mut action = self.current_action.take().unwrap().action;
-
+        if response.is_done() && self.current_action.is_some() {
+            let CurrentAction { action, .. } = self.current_action.as_mut().unwrap();
             if let Some(a) = response.done_response.take() {
-                action = a;
+                *action = a;
             }
 
-            match self.redirect_action(&mut action).await {
-                Ok(_) => (),
-                Err(Error::NoRoute(_)) => {
-                    // NOTE: send success reponse for actions that don't have redirections configured
-                    warn!("Action redirection is not configured for: {:?}", action);
-                    let response = ActionResponse::success(&action.action_id);
-                    self.streams.forward(response).await;
-
-                    if let Some(CurrentAction { cancelled_by: Some(cancel_action), .. }) =
-                        self.current_action.take()
-                    {
-                        // Marks the cancellation as a failure as action has reached completion without being cancelled
-                        self.forward_action_error(&cancel_action, Error::FailedCancellation).await
-                    }
-                }
-                Err(Error::Cancelled(cancel_action)) => {
-                    let response = ActionResponse::success(&cancel_action);
-                    self.streams.forward(response).await;
-
-                    self.forward_action_error(&action.action_id, Error::Cancelled(cancel_action))
-                        .await;
-                }
-                Err(e) => self.forward_action_error(&action.action_id, e).await,
-            }
+            self.redirect_current_action().await;
         }
     }
 
-    async fn redirect_action(&mut self, action: &mut Action) -> Result<(), Error> {
-        let fwd_name = self
-            .action_redirections
-            .get(&action.name)
-            .ok_or_else(|| Error::NoRoute(action.name.clone()))?;
+    async fn redirect_current_action(&mut self) {
+        let CurrentAction { mut action, cancelled_by, .. } = self.current_action.take().unwrap();
+
+        let Some(fwd_name) = self.action_redirections.get(&action.name) else {
+            // NOTE: send success reponse for actions that don't have redirections configured
+            warn!("Action redirection is not configured for: {:?}", action);
+            let response = ActionResponse::success(&action.action_id);
+            self.streams.forward(response).await;
+
+            if let Some(cancel_action) = cancelled_by {
+                // Marks the cancellation as a failure as action has reached completion without being cancelled
+                self.forward_action_error(&cancel_action, Error::FailedCancellation).await
+            }
+            return;
+        };
 
         // Cancelled action should not be redirected
-        if let Some(CurrentAction { cancelled_by: Some(cancel_action), .. }) =
-            self.current_action.take()
-        {
-            return Err(Error::Cancelled(cancel_action));
+        if let Some(cancel_action) = cancelled_by {
+            let response = ActionResponse::success(&cancel_action);
+            self.streams.forward(response).await;
+
+            self.forward_action_error(&action.action_id, Error::Cancelled(cancel_action)).await;
+
+            return;
         }
 
         debug!(
@@ -487,9 +476,9 @@ impl ActionsBridge {
         );
 
         fwd_name.clone_into(&mut action.name);
-        self.try_route_action(action.clone())?;
-
-        Ok(())
+        if let Err(e) = self.try_route_action(action.clone()) {
+            self.forward_action_error(&action.action_id, e).await
+        }
     }
 
     async fn forward_action_error(&mut self, action_id: &str, error: Error) {
