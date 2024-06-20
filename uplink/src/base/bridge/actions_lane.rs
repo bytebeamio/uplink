@@ -1164,7 +1164,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_action_failure() {
+    async fn cancel_action_failure_not_executing() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
+        let config = default_config();
+        let (bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+
+        spawn_bridge(bridge);
+
+        let action = Action {
+            action_id: "2".to_string(),
+            name: "cancel_action".to_string(),
+            payload: r#"{"action_id": "1", "name": "test"}"#.to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        let mut responses = Responses { rx: data_rx, responses: vec![] };
+
+        let status = responses.next();
+        assert_eq!(status.action_id, "2");
+        assert!(status.is_failed());
+        assert_eq!(
+            status.errors,
+            ["Cancellation request received for action currently not in execution!"]
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_action_failure_on_completion() {
         let tmpdir = tempdir::TempDir::new("bridge").unwrap();
         std::env::set_current_dir(&tmpdir).unwrap();
         let config = default_config();
@@ -1188,7 +1215,7 @@ mod tests {
             let response = ActionResponse::progress(&action.action_id, "Running", 0);
             rt.block_on(bridge_tx_1.send_action_response(response));
 
-            std::thread::sleep(Duration::from_secs(1));
+            std::thread::sleep(Duration::from_secs(2));
             let response = ActionResponse::success(&action.action_id);
             rt.block_on(bridge_tx_1.send_action_response(response));
         });
