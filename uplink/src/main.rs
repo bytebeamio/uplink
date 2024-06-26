@@ -21,7 +21,7 @@ pub type ReloadHandle =
 use uplink::config::{AppConfig, Config, StreamConfig, MAX_BATCH_SIZE};
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
-const DEFAULT_CONFIG: &str = r#"    
+const DEFAULT_CONFIG: &str = r#"
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -355,9 +355,7 @@ fn main() -> Result<(), Error> {
     rt.block_on(async {
         for app in tcpapps {
             tokio::task::spawn(async move {
-                if let Err(e) = app.start().await {
-                    error!("App failed. Error = {e}");
-                }
+                app.start().await;
             });
         }
 
