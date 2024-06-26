@@ -133,11 +133,13 @@ impl Uplink {
         &mut self,
         mut bridge: Bridge,
         downloader_disable: Arc<Mutex<bool>>,
+        network_up: Arc<Mutex<bool>>,
     ) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
         let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
 
-        let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
+        let mut mqtt =
+            Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx, network_up);
         let mqtt_client = mqtt.client();
         let ctrl_mqtt = mqtt.ctrl_tx();
 

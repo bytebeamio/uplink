@@ -9,6 +9,7 @@ use tokio::{select, task};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::sync::Mutex;
 
 use crate::{Action, Config};
 use rumqttc::{
@@ -58,6 +59,8 @@ pub struct Mqtt {
     /// Control handles
     ctrl_rx: Receiver<MqttShutdown>,
     ctrl_tx: Sender<MqttShutdown>,
+    /// True when network is connected
+    network_up: Arc<Mutex<bool>>,
 }
 
 impl Mqtt {
@@ -65,6 +68,7 @@ impl Mqtt {
         config: Arc<Config>,
         actions_tx: Sender<Action>,
         metrics_tx: Sender<MqttMetrics>,
+        network_up: Arc<Mutex<bool>>,
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config);
@@ -81,6 +85,7 @@ impl Mqtt {
             metrics_tx,
             ctrl_tx,
             ctrl_rx,
+            network_up,
         }
     }
 
@@ -168,6 +173,7 @@ impl Mqtt {
                 event = self.eventloop.poll() => {
                     match event {
                         Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
+                            *self.network_up.lock().unwrap() = true;
                             info!("Connected to broker. Session present = {}", connack.session_present);
                             let subscription = self.config.actions_subscription.clone();
                             let client = self.client();
@@ -213,6 +219,7 @@ impl Mqtt {
                             }
                         }
                         Err(e) => {
+                            *self.network_up.lock().unwrap() = false;
                             self.metrics.add_reconnection();
                             self.check_disconnection_metrics(e);
                             tokio::time::sleep(Duration::from_secs(3)).await;
