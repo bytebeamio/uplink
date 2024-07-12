@@ -1,4 +1,10 @@
-use std::{collections::HashMap, io::Read, string::FromUtf8Error};
+use std::{
+    collections::HashMap,
+    fs::{create_dir_all, File},
+    io::{Read, Write},
+    path::PathBuf,
+    string::FromUtf8Error,
+};
 
 use bytes::Bytes;
 use human_bytes::human_bytes;
@@ -19,7 +25,13 @@ pub struct CommandLine {
     pub max_packet_size: usize,
     /// backup directory
     #[structopt(short = "d", help = "backup directory")]
-    pub directory: String,
+    pub directory: PathBuf,
+    /// Write content into human readable form into this directory
+    #[structopt(
+        short = "h",
+        help = "Write file contents in human readable form into this directory"
+    )]
+    pub human_readable: Option<PathBuf>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -105,6 +117,26 @@ impl Entry {
     }
 }
 
+struct HumanReadableFile {
+    file: File,
+}
+
+impl HumanReadableFile {
+    fn new(path: &PathBuf, stream: &str) -> Self {
+        create_dir_all(path).expect("Directory couldn't be created");
+        let mut path = path.to_owned();
+        path.push(stream);
+
+        Self {
+            file: File::options()
+                .create(true)
+                .append(true)
+                .open(path)
+                .expect("File couldn't be created"),
+        }
+    }
+}
+
 fn main() -> Result<(), Error> {
     let commandline: CommandLine = StructOpt::from_args();
 
@@ -125,6 +157,8 @@ fn main() -> Result<(), Error> {
         let mut storage = storage::Storage::new(&stream_name, 1048576);
         storage.set_persistence(path, 3)?;
         storage.set_non_destructive_read(true);
+        let mut human_readable_file =
+            commandline.human_readable.as_ref().map(|p| HumanReadableFile::new(p, &stream_name));
 
         let stream = streams.entry(stream_name).or_default();
         'outer: loop {
@@ -171,6 +205,13 @@ fn main() -> Result<(), Error> {
 
                 if stream.end < timestamp {
                     stream.end = timestamp
+                }
+
+                // Write human readable
+                if let Some(HumanReadableFile { file }) = &mut human_readable_file {
+                    let text = String::from_utf8(publish.payload.to_vec())
+                        .expect("Should have been JSON text");
+                    write!(file, "{}", text).unwrap();
                 }
             }
         }
