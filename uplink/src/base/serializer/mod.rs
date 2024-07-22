@@ -14,7 +14,7 @@ use storage::Storage;
 use thiserror::Error;
 use tokio::{select, time::interval};
 
-use crate::config::{default_file_size, Compression, StreamConfig};
+use crate::config::{Compression, StreamConfig};
 use crate::{Config, Package};
 pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
 
@@ -132,6 +132,7 @@ impl MqttClient for AsyncClient {
 }
 
 struct StorageHandler {
+    config: Arc<Config>,
     map: BTreeMap<Arc<StreamConfig>, Storage>,
     // Stream being read from
     read_stream: Option<Arc<StreamConfig>>,
@@ -163,13 +164,13 @@ impl StorageHandler {
             map.insert(Arc::new(stream_config.clone()), storage);
         }
 
-        Ok(Self { map, read_stream: None })
+        Ok(Self { config, map, read_stream: None })
     }
 
     fn select(&mut self, stream: &Arc<StreamConfig>) -> &mut Storage {
         self.map
             .entry(stream.to_owned())
-            .or_insert_with(|| Storage::new(&stream.topic, default_file_size()))
+            .or_insert_with(|| Storage::new(&stream.topic, self.config.default_buf_size))
     }
 
     fn next(&mut self, metrics: &mut Metrics) -> Option<(&Arc<StreamConfig>, &mut Storage)> {
