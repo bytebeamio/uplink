@@ -30,7 +30,7 @@ pub struct CommandLine {
 async fn main() {
     let CommandLine { process_names, update_period, port, .. } = init();
 
-    let addr = format!("localhost:{}", port);
+    let addr = format!("localhost:{port}");
 
     loop {
         let Ok(stream) = TcpStream::connect(&addr).await else {

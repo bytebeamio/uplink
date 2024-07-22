@@ -71,7 +71,7 @@ gps_paths = "./paths"
 actions= [{ name = \"load_file\" }, { name = \"install_firmware\" }, { name = \"update_config\" }, { name = \"unlock\" }, { name = \"lock\" }]
 
 [downloader]
-actions= [{ name = \"send_file\" }, { name = \"update_firmware\" }]
+actions= [{ name = \"send_file\" }, { name = \"update_firmware\", timeout = 1800 }]
 path = \"/var/tmp/ota/$id\"
 EOF
 )" > devices/device_$id.toml

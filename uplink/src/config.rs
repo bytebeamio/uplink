@@ -13,11 +13,11 @@ use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(target_os = "android")]
 use crate::collector::logcat::LogcatConfig;
 
-pub const DEFAULT_TIMEOUT: u64 = 60;
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[inline]
 fn default_timeout() -> Duration {
-    Duration::from_secs(DEFAULT_TIMEOUT)
+    DEFAULT_TIMEOUT
 }
 
 #[inline]
@@ -214,6 +214,9 @@ pub struct ActionRoute {
     #[serde(default = "default_timeout")]
     #[serde_as(as = "DurationSeconds<u64>")]
     pub timeout: Duration,
+    // Can the action handler cancel actions mid execution?
+    #[serde(default)]
+    pub cancellable: bool,
 }
 
 impl From<&ActionRoute> for ActionRoute {
@@ -222,9 +225,11 @@ impl From<&ActionRoute> for ActionRoute {
     }
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct DeviceShadowConfig {
-    pub interval: u64,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub interval: Duration,
 }
 
 impl Default for DeviceShadowConfig {
@@ -328,6 +333,8 @@ pub struct Config {
     pub streams: HashMap<String, StreamConfig>,
     #[serde(default = "default_persistence_path")]
     pub persistence_path: PathBuf,
+    #[serde(default = "default_file_size")]
+    pub default_buf_size: usize,
     pub action_status: StreamConfig,
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,

@@ -70,7 +70,7 @@ impl Gps {
             let path_index = ((device.path_offset + sequence) % path_len) as usize;
             let payload = device.path.get(path_index).unwrap();
 
-            trace!("Data Event: {:?}", payload);
+            trace!("Data Event: {payload:?}");
 
             if let Err(e) =
                 tx.send_async(Payload::new("gps".to_string(), sequence, json!(payload))).await
@@ -195,7 +195,7 @@ impl Bms {
             let payload: Bms = Faker.fake();
             next_sequence(&mut sequence);
 
-            trace!("Data Event: {:?}", payload);
+            trace!("Data Event: {payload:?}");
 
             if let Err(e) =
                 tx.send_async(Payload::new("bms".to_string(), sequence, json!(payload))).await
@@ -238,7 +238,7 @@ impl Imu {
             let payload: Imu = Faker.fake();
             next_sequence(&mut sequence);
 
-            trace!("Data Event: {:?}", payload);
+            trace!("Data Event: {payload:?}");
 
             if let Err(e) =
                 tx.send_async(Payload::new("imu".to_string(), sequence, json!(payload))).await
@@ -275,7 +275,7 @@ impl Motor {
             let payload: Motor = Faker.fake();
             next_sequence(&mut sequence);
 
-            trace!("Data Event: {:?}", payload);
+            trace!("Data Event: {payload:?}");
 
             if let Err(e) =
                 tx.send_async(Payload::new("motor".to_string(), sequence, json!(payload))).await
@@ -318,7 +318,7 @@ impl PeripheralState {
             let payload: PeripheralState = Faker.fake();
             next_sequence(&mut sequence);
 
-            trace!("Data Event: {:?}", payload);
+            trace!("Data Event: {payload:?}");
 
             if let Err(e) = tx
                 .send_async(Payload::new("peripheral_state".to_string(), sequence, json!(payload)))
@@ -359,7 +359,7 @@ impl DeviceShadow {
             let payload: DeviceShadow = Faker.fake();
             next_sequence(&mut sequence);
 
-            trace!("Data Event: {:?}", payload);
+            trace!("Data Event: {payload:?}");
 
             if let Err(e) = tx
                 .send_async(Payload::new("device_shadow".to_string(), sequence, json!(payload)))

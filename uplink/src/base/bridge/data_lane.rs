@@ -63,15 +63,15 @@ impl DataBridge {
                 }
                 // Flush streams that timeout
                 Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
-                    debug!("Flushing stream = {}", timedout_stream);
+                    debug!("Flushing stream = {timedout_stream}");
                     if let Err(e) = self.streams.flush_stream(&timedout_stream).await {
-                        error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
+                        error!("Failed to flush stream = {timedout_stream}. Error = {e}");
                     }
                 }
                 // Flush all metrics when timed out
                 _ = metrics_timeout.tick() => {
                     if let Err(e) = self.streams.check_and_flush_metrics() {
-                        debug!("Failed to flush stream metrics. Error = {}", e);
+                        debug!("Failed to flush stream metrics. Error = {e}");
                     }
                 }
                 // Handle a shutdown signal

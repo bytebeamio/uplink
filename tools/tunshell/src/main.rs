@@ -1,10 +1,10 @@
 use std::process::exit;
 
+use clap::Parser;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use rumqttc::{Client, MqttOptions, QoS};
 use serde::{Deserialize, Serialize};
 use tunshell_client::{Client as TunshellClient, ClientMode, Config as TunshellConfig, HostShell};
-use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[clap(version = "0.1.0")]
@@ -47,14 +47,12 @@ fn main() {
     // parsing arguments
     let config: Config = Config::parse();
     let relay = "https://".to_string() + &config.relay + "/api/sessions";
-    let publish_topic: String = "/tenants/".to_string() + &config.project_id + "/devices/" + &config.device_id + "/actions";
+    let publish_topic: String =
+        "/tenants/".to_string() + &config.project_id + "/devices/" + &config.device_id + "/actions";
     let subscribe_topic: String = publish_topic.clone() + "/status";
 
     // get session keys from relay server
-    let SessionKeys {
-        peer1_key: self_key,
-        peer2_key: target_key,
-    } = ureq::post(&relay)
+    let SessionKeys { peer1_key: self_key, peer2_key: target_key } = ureq::post(&relay)
         .call()
         .expect("unable to connect to relay server")
         .into_json()
@@ -73,12 +71,12 @@ fn main() {
             relay: "eu.relay.tunshell.com".to_string(),
             encryption: encrytion_key.clone(),
         })
-            .unwrap(),
+        .unwrap(),
     };
 
     std::thread::spawn(move || {
         for (_, notification) in eventloop.iter().enumerate() {
-            println!("Notification = {:?}", notification);
+            println!("Notification = {notification:?}");
         }
     });
 
@@ -89,12 +87,12 @@ fn main() {
         true,
         serde_json::to_string(&action).unwrap(),
     ) {
-        println!("{:?}", e);
+        println!("{e}");
         exit(1);
     }
 
     if let Err(e) = client.subscribe(subscribe_topic, QoS::AtLeastOnce) {
-        println!("{:?}", e);
+        println!("{e}");
         exit(1);
     }
 
@@ -116,19 +114,14 @@ fn main() {
     match rt.block_on(client.start_session()) {
         Ok(code) => exit(code as i32),
         Err(e) => {
-            println!("Session error = {:?}", e);
+            println!("Session error = {e}");
             exit(1)
         }
     }
 }
 
 fn generate_encryption_key() -> String {
-    std::str::from_utf8(
-        &thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(22)
-            .collect::<Vec<u8>>(),
-    )
+    std::str::from_utf8(&thread_rng().sample_iter(&Alphanumeric).take(22).collect::<Vec<u8>>())
         .unwrap()
         .to_owned()
 }

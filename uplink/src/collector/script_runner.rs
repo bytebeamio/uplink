@@ -1,12 +1,12 @@
 use flume::{Receiver, RecvError, SendError};
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::select;
-use tokio::time::timeout_at;
 
 use super::downloader::DownloadFile;
+use crate::base::actions::Cancellation;
 use crate::base::bridge::BridgeTx;
 use crate::{Action, ActionResponse, Package};
 
@@ -28,6 +28,8 @@ pub enum Error {
     Busy,
     #[error("No stdout in spawned action")]
     NoStdout,
+    #[error("Script has been cancelled: '{0}'")]
+    Cancelled(String),
 }
 
 /// Script runner runs a script downloaded with FileDownloader and handles their output over the action_status stream.
@@ -71,7 +73,7 @@ impl ScriptRunner {
                     let mut status: ActionResponse = match serde_json::from_str(&line) {
                         Ok(status) => status,
                         Err(e) => {
-                            error!("Failed to deserialize script output: \"{line}\"; Error: {e}");
+                            error!("Failed to deserialize script output: {line:?}; Error: {e}");
                             continue;
                         },
                     };
@@ -85,6 +87,14 @@ impl ScriptRunner {
                     info!("Action done!! Status = {:?}", status);
                     self.forward_status(ActionResponse::success(id)).await;
                     break;
+                },
+                // Cancel script run on receiving cancel action, e.g. on action timeout
+                Ok(action) = self.actions_rx.recv_async() => {
+                    let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
+
+                    trace!("Cancelling script: '{}'", cancellation.action_id);
+                    let status = ActionResponse::failure(id, Error::Cancelled(action.action_id).to_string());
+                    self.bridge_tx.send_action_response(status).await;
                 },
             }
         }
@@ -102,7 +112,7 @@ impl ScriptRunner {
                 Ok(DownloadFile { download_path: Some(download_path), .. }) => download_path,
                 Ok(_) => {
                     let err = format!(
-                        "Action payload doesn't contain path for script execution; payload: \"{}\"",
+                        "Action payload doesn't contain path for script execution; payload: {:?}",
                         action.payload
                     );
                     warn!("{err}");
@@ -111,7 +121,7 @@ impl ScriptRunner {
                 }
                 Err(e) => {
                     let err = format!(
-                        "Failed to deserialize action payload: \"{e}\"; payload: \"{}\"",
+                        "Failed to deserialize action payload: {e}; payload: {:?}",
                         action.payload
                     );
                     error!("{err}");
@@ -119,20 +129,9 @@ impl ScriptRunner {
                     continue;
                 }
             };
-            let deadline = match &action.deadline {
-                Some(d) => *d,
-                _ => {
-                    error!("Unconfigured deadline: {}", action.name);
-                    continue;
-                }
-            };
             // Spawn the action and capture its stdout
             let child = self.run(command).await?;
-            if let Ok(o) =
-                timeout_at(deadline, self.spawn_and_capture_stdout(child, &action.action_id)).await
-            {
-                o?
-            }
+            self.spawn_and_capture_stdout(child, &action.action_id).await?
         }
     }
 
@@ -176,13 +175,12 @@ mod tests {
                 action_id: "1".to_string(),
                 name: "test".to_string(),
                 payload: "".to_string(),
-                deadline: None,
             })
             .unwrap();
 
         let ActionResponse { state, errors, .. } = status_rx.recv().unwrap();
         assert_eq!(state, "Failed");
-        assert_eq!(errors, ["Failed to deserialize action payload: \"EOF while parsing a value at line 1 column 0\"; payload: \"\""]);
+        assert_eq!(errors, ["Failed to deserialize action payload: EOF while parsing a value at line 1 column 0; payload: \"\""]);
     }
 
     #[test]
@@ -200,12 +198,11 @@ mod tests {
                 name: "test".to_string(),
                 payload: "{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}"
                     .to_string(),
-                deadline: None,
             })
             .unwrap();
 
         let ActionResponse { state, errors, .. } = status_rx.recv().unwrap();
         assert_eq!(state, "Failed");
-        assert_eq!(errors, ["Action payload doesn't contain path for script execution; payload: \"{\"url\": \"...\", \"content_length\": 0,\"file_name\": \"...\"}\""]);
+        assert_eq!(errors, ["Action payload doesn't contain path for script execution; payload: \"{\\\"url\\\": \\\"...\\\", \\\"content_length\\\": 0,\\\"file_name\\\": \\\"...\\\"}\""]);
     }
 }

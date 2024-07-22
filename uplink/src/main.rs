@@ -1,5 +1,6 @@
 mod console;
 
+use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -20,7 +21,7 @@ pub type ReloadHandle =
 use uplink::config::{AppConfig, Config, StreamConfig, MAX_BATCH_SIZE};
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
-const DEFAULT_CONFIG: &str = r#"    
+const DEFAULT_CONFIG: &str = r#"
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -47,6 +48,7 @@ const DEFAULT_CONFIG: &str = r#"
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     batch_size = 1
     flush_period = 2
+    persistence = { max_file_count = 1 } # Ensures action responses are not lost on restarts
     priority = 255 # highest priority for quick delivery of action status info to platform
 
     [streams.device_shadow]
@@ -96,30 +98,34 @@ impl CommandLine {
     /// Reads config file to generate config struct and replaces places holders
     /// like bike id and data version
     fn get_configs(&self) -> Result<Config, anyhow::Error> {
-        let read_file_contents = |path| std::fs::read_to_string(path).ok();
-        let auth = read_file_contents(&self.auth).ok_or_else(|| {
-            Error::msg(format!("Auth file not found at \"{}\"", self.auth.display()))
+        let mut config =
+            config::Config::builder().add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml));
+
+        if let Some(path) = &self.config {
+            let read = read_to_string(path).map_err(|e| {
+                Error::msg(format!(
+                    "Config file couldn't be loaded from {:?}; error = {e}",
+                    path.display()
+                ))
+            })?;
+            config = config.add_source(File::from_str(&read, FileFormat::Toml));
+        }
+
+        let auth = read_to_string(&self.auth).map_err(|e| {
+            Error::msg(format!(
+                "Auth file couldn't be loaded from {:?}; error = {e}",
+                self.auth.display()
+            ))
         })?;
-        let config = match &self.config {
-            Some(path) => Some(read_file_contents(path).ok_or_else(|| {
-                Error::msg(format!("Config file not found at \"{}\"", path.display()))
-            })?),
-            None => None,
-        };
+        config = config.add_source(File::from_str(&auth, FileFormat::Json));
 
-        let config = config::Config::builder()
-            .add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml))
-            .add_source(File::from_str(&config.unwrap_or_default(), FileFormat::Toml))
-            .add_source(File::from_str(&auth, FileFormat::Json))
-            .add_source(Environment::default())
-            .build()?;
-
-        let mut config: Config = config.try_deserialize()?;
+        let mut config: Config =
+            config.add_source(Environment::default()).build()?.try_deserialize()?;
 
         // Create directory at persistence_path if it doesn't already exist
         std::fs::create_dir_all(&config.persistence_path).map_err(|_| {
             Error::msg(format!(
-                "Permission denied for creating persistence directory at \"{}\"",
+                "Permission denied for creating persistence directory at {:?}",
                 config.persistence_path.display()
             ))
         })?;
@@ -180,6 +186,21 @@ impl CommandLine {
         }
 
         config.actions_subscription = format!("/tenants/{tenant_id}/devices/{device_id}/actions");
+
+        // downloader actions are cancellable by default
+        for route in config.downloader.actions.iter_mut() {
+            route.cancellable = true;
+        }
+
+        // process actions are cancellable by default
+        for route in config.processes.iter_mut() {
+            route.cancellable = true;
+        }
+
+        // script runner actions are cancellable by default
+        for route in config.script_runner.iter_mut() {
+            route.cancellable = true;
+        }
 
         Ok(config)
     }
@@ -249,7 +270,7 @@ impl CommandLine {
 
         if !config.downloader.actions.is_empty() {
             println!(
-                "    downloader:\n\tpath: \"{}\"\n\tactions: {:?}",
+                "    downloader:\n\tpath: {:?}\n\tactions: {:?}",
                 config.downloader.path.display(),
                 config.downloader.actions
             );
@@ -308,7 +329,8 @@ fn main() -> Result<(), Error> {
     };
 
     let downloader_disable = Arc::new(Mutex::new(false));
-    let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone())?;
+    let network_up = Arc::new(Mutex::new(false));
+    let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone(), network_up.clone())?;
 
     if let Some(config) = config.simulator.clone() {
         spawn_named_thread("Simulator", || {
@@ -320,7 +342,7 @@ fn main() -> Result<(), Error> {
         let port = config.console.port;
         let ctrl_tx = ctrl_tx.clone();
         spawn_named_thread("Uplink Console", move || {
-            console::start(port, reload_handle, ctrl_tx, downloader_disable)
+            console::start(port, reload_handle, ctrl_tx, downloader_disable, network_up)
         });
     }
 
@@ -334,9 +356,7 @@ fn main() -> Result<(), Error> {
     rt.block_on(async {
         for app in tcpapps {
             tokio::task::spawn(async move {
-                if let Err(e) = app.start().await {
-                    error!("App failed. Error = {:?}", e);
-                }
+                app.start().await;
             });
         }
 

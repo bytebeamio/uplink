@@ -135,11 +135,13 @@ impl Uplink {
         &mut self,
         mut bridge: Bridge,
         downloader_disable: Arc<Mutex<bool>>,
+        network_up: Arc<Mutex<bool>>,
     ) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
         let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
 
-        let mut mqtt = Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx);
+        let mut mqtt =
+            Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx, network_up);
         let mqtt_client = mqtt.client();
         let ctrl_mqtt = mqtt.ctrl_tx();
 
@@ -174,7 +176,7 @@ impl Uplink {
 
             rt.block_on(async {
                 if let Err(e) = serializer.start().await {
-                    error!("Serializer stopped!! Error = {:?}", e);
+                    error!("Serializer stopped!! Error = {e}");
                 }
             })
         });
@@ -206,7 +208,7 @@ impl Uplink {
 
             rt.block_on(async move {
                 if let Err(e) = monitor.start().await {
-                    error!("Monitor stopped!! Error = {:?}", e);
+                    error!("Monitor stopped!! Error = {e}");
                 }
             })
         });
@@ -219,7 +221,7 @@ impl Uplink {
 
             rt.block_on(async move {
                 if let Err(e) = actions_lane.start().await {
-                    error!("Actions lane stopped!! Error = {:?}", e);
+                    error!("Actions lane stopped!! Error = {e}");
                 }
             })
         });
@@ -230,7 +232,7 @@ impl Uplink {
 
             rt.block_on(async move {
                 if let Err(e) = data_lane.start().await {
-                    error!("Data lane stopped!! Error = {:?}", e);
+                    error!("Data lane stopped!! Error = {e}");
                 }
             })
         });
@@ -247,8 +249,11 @@ impl Uplink {
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
         let bridge_tx = bridge.bridge_tx();
 
-        let route =
-            ActionRoute { name: "launch_shell".to_owned(), timeout: Duration::from_secs(10) };
+        let route = ActionRoute {
+            name: "launch_shell".to_owned(),
+            timeout: Duration::from_secs(10),
+            cancellable: false,
+        };
         let actions_rx = bridge.register_action_route(route)?;
         let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
         spawn_named_thread("Tunshell Client", move || tunshell_client.start());
@@ -268,12 +273,13 @@ impl Uplink {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
                 timeout: Duration::from_secs(10),
+                cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
             let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
             spawn_named_thread("Logger", || {
                 if let Err(e) = logger.start() {
-                    error!("Logger stopped!! Error = {:?}", e);
+                    error!("Logger stopped!! Error = {e}");
                 }
             });
         }
@@ -292,12 +298,13 @@ impl Uplink {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
                 timeout: Duration::from_secs(10),
+                cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
             let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
             spawn_named_thread("Logger", || {
                 if let Err(e) = logger.start() {
-                    error!("Logger stopped!! Error = {:?}", e);
+                    error!("Logger stopped!! Error = {e}");
                 }
             });
         }
@@ -312,7 +319,7 @@ impl Uplink {
             let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
             spawn_named_thread("Process Handler", || {
                 if let Err(e) = process_handler.start() {
-                    error!("Process handler stopped!! Error = {:?}", e);
+                    error!("Process handler stopped!! Error = {e}");
                 }
             });
         }
@@ -322,7 +329,7 @@ impl Uplink {
             let script_runner = ScriptRunner::new(actions_rx, bridge_tx.clone());
             spawn_named_thread("Script Runner", || {
                 if let Err(e) = script_runner.start() {
-                    error!("Script runner stopped!! Error = {:?}", e);
+                    error!("Script runner stopped!! Error = {e}");
                 }
             });
         }

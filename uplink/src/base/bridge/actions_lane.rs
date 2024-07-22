@@ -11,6 +11,7 @@ use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration}
 
 use super::streams::Streams;
 use super::{ActionBridgeShutdown, Package, StreamMetrics};
+use crate::base::actions::Cancellation;
 use crate::config::ActionRoute;
 use crate::{Action, ActionResponse, Config};
 
@@ -32,11 +33,19 @@ pub enum Error {
     ActionTimeout,
     #[error("Another action is currently being processed")]
     Busy,
-    #[error("Action Route clash: \"{0}\"")]
+    #[error("Action Route clash: {0:?}")]
     ActionRouteClash(String),
+    #[error("Cancellation request received for action currently not in execution!")]
+    UnexpectedCancellation,
+    #[error("Cancellation request for action in execution, but names don't match!")]
+    CorruptedCancellation,
+    #[error("Cancellation request failed as action completed execution!")]
+    FailedCancellation,
+    #[error("Action cancelled by action_id: {0}")]
+    Cancelled(String),
+    #[error("Uplink restarted before action response")]
+    Restart,
 }
-
-struct RedirectionError(Action);
 
 pub struct ActionsBridge {
     /// All configuration
@@ -77,10 +86,13 @@ impl ActionsBridge {
 
         let mut streams_config = HashMap::new();
         let mut action_status = config.action_status.clone();
+
+        // TODO: Should be removed once action response batching is supported on platform
         if action_status.batch_size > 1 {
             warn!("Buffer size of `action_status` stream restricted to 1")
         }
         action_status.batch_size = 1;
+
         streams_config.insert("action_status".to_owned(), action_status);
         let mut streams = Streams::new(config.clone(), package_tx, metrics_tx);
         streams.config_streams(streams_config);
@@ -103,10 +115,10 @@ impl ActionsBridge {
 
     pub fn register_action_route(
         &mut self,
-        ActionRoute { name, timeout: duration }: ActionRoute,
+        ActionRoute { name, timeout: duration, cancellable }: ActionRoute,
         actions_tx: Sender<Action>,
     ) -> Result<(), Error> {
-        let action_router = ActionRouter { actions_tx, duration };
+        let action_router = ActionRouter { actions_tx, duration, cancellable };
         if self.action_routes.insert(name.clone(), action_router).is_some() {
             return Err(Error::ActionRouteClash(name));
         }
@@ -136,10 +148,6 @@ impl ActionsBridge {
         CtrlTx { inner: self.ctrl_tx.clone() }
     }
 
-    fn clear_current_action(&mut self) {
-        self.current_action.take();
-    }
-
     pub async fn start(&mut self) -> Result<(), Error> {
         let mut metrics_timeout = interval(self.config.stream_metrics.timeout);
         let mut end: Pin<Box<Sleep>> = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
@@ -149,38 +157,86 @@ impl ActionsBridge {
             select! {
                 action = self.actions_rx.recv_async() => {
                     let action = action?;
+
+                    if action.name == "cancel_action" {
+                        self.handle_cancellation(action).await?;
+                        continue
+                    }
+
                     self.handle_action(action).await;
                 }
+
                 response = self.status_rx.recv_async() => {
                     let response = response?;
                     self.forward_action_response(response).await;
                 }
-                _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
-                    let action = self.current_action.take().unwrap();
-                    error!("Timeout waiting for action response. Action ID = {}", action.id);
-                    self.forward_action_error(action.action, Error::ActionTimeout).await;
 
-                    // Remove action because it timedout
-                    self.clear_current_action()
+                _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
+                    let curret_action = self.current_action.as_mut().unwrap();
+                    let action_id = curret_action.action.action_id.clone();
+                    let action_name = curret_action.action.name.clone();
+
+                    let route = self
+                        .action_routes
+                        .get(&action_name)
+                        .expect("Action shouldn't be in execution if it can't be routed!");
+
+                    if !route.is_cancellable() {
+                        // Directly send timeout failure response if handler doesn't allow action cancellation
+                        error!("Timeout waiting for action response. Action ID = {action_id}");
+                        self.forward_action_error(&action_id, Error::ActionTimeout).await;
+
+                        // Remove action because it timedout
+                        self.current_action.take();
+                        continue;
+                    }
+
+                    let cancellation = Cancellation { action_id,  action_name };
+                    let payload = serde_json::to_string(&cancellation)?;
+                    let cancel_action = Action {
+                        action_id: "timeout".to_owned(), // Describes cause of action cancellation. NOTE: Action handler shouldn't expect an integer.
+                        name: "cancel_action".to_owned(),
+                        payload,
+                    };
+                    if route.try_send(cancel_action).is_err() {
+                        error!("Couldn't cancel action ({}) on timeout", cancellation.action_id);
+                        // Remove action anyways
+                        self.current_action.take();
+                        continue;
+                    }
+
+                    // set timeout to end of time in wait of cancellation response
+                    curret_action.timeout =  Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
                 }
+
                 // Flush streams that timeout
                 Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
-                    debug!("Flushing stream = {}", timedout_stream);
+                    debug!("Flushing stream = {timedout_stream}");
                     if let Err(e) = self.streams.flush_stream(&timedout_stream).await {
-                        error!("Failed to flush stream = {}. Error = {}", timedout_stream, e);
+                        error!("Failed to flush stream = {timedout_stream}. Error = {e}");
                     }
                 }
+
                 // Flush all metrics when timed out
                 _ = metrics_timeout.tick() => {
                     if let Err(e) = self.streams.check_and_flush_metrics() {
-                        debug!("Failed to flush stream metrics. Error = {}", e);
+                        debug!("Failed to flush stream metrics. Error = {e}");
                     }
                 }
+
                 // Handle a shutdown signal
                 _ = self.ctrl_rx.recv_async() => {
                     if let Err(e) = self.save_current_action() {
                         error!("Failed to save current action: {e}");
                     }
+
+                    // NOTE: marks parallel actions still in execution as failed
+                    // (serializer will persist on disk even if network is down)
+                    let parallel_actions: Vec<String> = self.parallel_actions.drain().collect();
+                    for action_id in parallel_actions {
+                        self.forward_action_error(&action_id, Error::Restart).await
+                    }
+
                     // NOTE: there might be events still waiting for recv on bridge_rx
                     self.shutdown_handle.send(()).unwrap();
 
@@ -199,26 +255,23 @@ impl ActionsBridge {
             if action.name != TUNSHELL_ACTION {
                 warn!(
                     "Another action is currently occupying uplink; action_id = {}",
-                    current_action.id
+                    current_action.action.action_id
                 );
-                self.forward_action_error(action, Error::Busy).await;
+                self.forward_action_error(&action.action_id, Error::Busy).await;
                 return;
             }
         }
 
         // NOTE: Don't do any blocking operations here
         // TODO: Remove blocking here. Audit all blocking functions here
-        let error = match self.try_route_action(action.clone()) {
-            Ok(_) => {
-                let response = ActionResponse::progress(&action_id, "Received", 0);
-                self.forward_action_response(response).await;
-                return;
-            }
-            Err(e) => e,
+        let Err(error) = self.try_route_action(action.clone()) else {
+            let response = ActionResponse::progress(&action_id, "Received", 0);
+            self.streams.forward(response).await;
+            return;
         };
 
         // Remove action because it couldn't be routed
-        self.clear_current_action();
+        self.current_action.take();
 
         // Ignore sending failure status to backend. This makes
         // backend retry action.
@@ -231,15 +284,57 @@ impl ActionsBridge {
         }
 
         error!("Failed to route action to app. Error = {:?}", error);
-        self.forward_action_error(action, error).await;
+        self.forward_action_error(&action.action_id, error).await;
+    }
+
+    /// Forwards cancellation request to the handler if it can handle the same,
+    /// else marks the current action as cancelled and avoids further redirections
+    async fn handle_cancellation(&mut self, action: Action) -> Result<(), Error> {
+        let action_id = action.action_id.clone();
+        let Some(current_action) = self.current_action.as_ref() else {
+            self.forward_action_error(&action_id, Error::UnexpectedCancellation).await;
+            return Ok(());
+        };
+        let mut cancellation: Cancellation = serde_json::from_str(&action.payload)?;
+        if cancellation.action_id != current_action.action.action_id {
+            warn!("Unexpected cancellation: {cancellation:?}");
+            self.forward_action_error(&action_id, Error::UnexpectedCancellation).await;
+            return Ok(());
+        }
+
+        info!("Received action cancellation: {:?}", cancellation);
+        if cancellation.action_name != current_action.action.name {
+            debug!(
+                "Action was redirected: {} ~> {}",
+                cancellation.action_name, current_action.action.name
+            );
+            current_action.action.name.clone_into(&mut cancellation.action_name);
+        }
+
+        let route = self
+            .action_routes
+            .get(&cancellation.action_name)
+            .expect("Action shouldn't be in execution if it can't be routed!");
+
+        // Ensure that action redirections for the action are turned off,
+        // action will be cancelled on next attempt to redirect
+        self.current_action.as_mut().unwrap().cancelled_by = Some(action_id.clone());
+
+        if route.is_cancellable() {
+            if let Err(e) = route.try_send(action).map_err(|_| Error::UnresponsiveReceiver) {
+                self.forward_action_error(&action_id, e).await;
+                return Ok(());
+            }
+        }
+        let response = ActionResponse::progress(&action_id, "Received", 0);
+        self.streams.forward(response).await;
+
+        Ok(())
     }
 
     /// Save current action information in persistence
     fn save_current_action(&mut self) -> Result<(), Error> {
-        let current_action = match self.current_action.take() {
-            Some(c) => c,
-            None => return Ok(()),
-        };
+        let Some(current_action) = self.current_action.take() else { return Ok(()) };
         let mut path = self.config.persistence_path.clone();
         path.push("current_action");
         info!("Storing current action in persistence; path: {}", path.display());
@@ -255,7 +350,10 @@ impl ActionsBridge {
 
         if path.is_file() {
             let current_action = CurrentAction::read_from_disk(path)?;
-            info!("Loading saved action from persistence; action_id: {}", current_action.id);
+            info!(
+                "Loading saved action from persistence; action_id: {}",
+                current_action.action.action_id
+            );
             self.current_action = Some(current_action)
         }
 
@@ -264,10 +362,9 @@ impl ActionsBridge {
 
     /// Handle received actions
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
-        let route = self
-            .action_routes
-            .get(&action.name)
-            .ok_or_else(|| Error::NoRoute(action.name.clone()))?;
+        let Some(route) = self.action_routes.get(&action.name) else {
+            return Err(Error::NoRoute(action.name));
+        };
 
         let deadline = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
         // current action left unchanged in case of new tunshell action
@@ -282,88 +379,107 @@ impl ActionsBridge {
     }
 
     async fn forward_action_response(&mut self, mut response: ActionResponse) {
-        if self.parallel_actions.contains(&response.action_id) {
-            self.forward_parallel_action_response(response).await;
-
-            return;
-        }
-
-        let inflight_action = match &mut self.current_action {
-            Some(v) => v,
-            None => {
-                error!("Action timed out already/not present, ignoring response: {:?}", response);
-                return;
-            }
-        };
-
-        if *inflight_action.id != response.action_id {
-            error!("response id({}) != active action({})", response.action_id, inflight_action.id);
-            return;
-        }
-
         info!("Action response = {:?}", response);
+
+        // Don't forward responses to timeout action
+        if response.action_id == "timeout" {
+            return;
+        }
+
+        // Forward all other responses
         self.streams.forward(response.clone()).await;
 
+        // Response to parallel actions shouldn't do anything
+        if self.parallel_actions.contains(&response.action_id) {
+            if response.is_completed() || response.is_failed() {
+                self.parallel_actions.remove(&response.action_id);
+            }
+            return;
+        }
+
+        let Some(inflight_action) = &mut self.current_action else {
+            warn!("Action id({}) timed out already/not present", response.action_id);
+            return;
+        };
+
+        if !inflight_action.is_executing(&response.action_id)
+            && !inflight_action.is_cancelled_by(&response.action_id)
+        {
+            warn!(
+                "response id({}) != active action({})",
+                response.action_id, inflight_action.action.action_id
+            );
+            return;
+        }
+
         if response.is_completed() || response.is_failed() {
-            self.clear_current_action();
+            if let Some(CurrentAction { cancelled_by: Some(cancel_action), .. }) =
+                self.current_action.take()
+            {
+                if response.is_failed() {
+                    // NOTE: action need not actually have been cancelled
+                    let response = ActionResponse::success(&cancel_action);
+                    self.streams.forward(response).await;
+                } else {
+                    // Marks the cancellation as a failure as action has reached completion without being cancelled
+                    self.forward_action_error(&cancel_action, Error::FailedCancellation).await
+                }
+            }
+
             return;
         }
 
         // Forward actions included in the config to the appropriate forward route, when
         // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
-        if response.is_done() {
-            let mut action = inflight_action.action.clone();
-
+        if response.is_done() && self.current_action.is_some() {
+            let CurrentAction { action, .. } = self.current_action.as_mut().unwrap();
             if let Some(a) = response.done_response.take() {
-                action = a;
+                *action = a;
             }
 
-            if let Err(RedirectionError(action)) = self.redirect_action(action).await {
-                // NOTE: send success reponse for actions that don't have redirections configured
-                warn!("Action redirection is not configured for: {:?}", action);
-                let response = ActionResponse::success(&action.action_id);
-                self.streams.forward(response).await;
-
-                self.clear_current_action();
-            }
+            self.redirect_current_action().await;
         }
     }
 
-    async fn redirect_action(&mut self, mut action: Action) -> Result<(), RedirectionError> {
-        let fwd_name = self
-            .action_redirections
-            .get(&action.name)
-            .ok_or_else(|| RedirectionError(action.clone()))?;
+    async fn redirect_current_action(&mut self) {
+        let CurrentAction { mut action, cancelled_by, .. } = self.current_action.take().unwrap();
+
+        let Some(fwd_name) = self.action_redirections.get(&action.name) else {
+            // NOTE: send success reponse for actions that don't have redirections configured
+            warn!("Action redirection is not configured for: {:?}", action);
+            let response = ActionResponse::success(&action.action_id);
+            self.streams.forward(response).await;
+
+            if let Some(cancel_action) = cancelled_by {
+                // Marks the cancellation as a failure as action has reached completion without being cancelled
+                self.forward_action_error(&cancel_action, Error::FailedCancellation).await
+            }
+            return;
+        };
+
+        // Cancelled action should not be redirected
+        if let Some(cancel_action) = cancelled_by {
+            let response = ActionResponse::success(&cancel_action);
+            self.streams.forward(response).await;
+
+            self.forward_action_error(&action.action_id, Error::Cancelled(cancel_action)).await;
+
+            return;
+        }
 
         debug!(
-            "Redirecting action: {} ~> {}; action_id = {}",
-            action.name, fwd_name, action.action_id,
+            "Redirecting action: {} ~> {fwd_name}; action_id = {}",
+            action.name, action.action_id,
         );
 
         fwd_name.clone_into(&mut action.name);
-
         if let Err(e) = self.try_route_action(action.clone()) {
-            error!("Failed to route action to app. Error = {:?}", e);
-            self.forward_action_error(action, e).await;
-
-            // Remove action because it couldn't be forwarded
-            self.clear_current_action()
+            self.forward_action_error(&action.action_id, e).await
         }
-
-        Ok(())
     }
 
-    async fn forward_parallel_action_response(&mut self, response: ActionResponse) {
-        info!("Action response = {:?}", response);
-        if response.is_completed() || response.is_failed() {
-            self.parallel_actions.remove(&response.action_id);
-        }
-
-        self.streams.forward(response).await;
-    }
-
-    async fn forward_action_error(&mut self, action: Action, error: Error) {
-        let response = ActionResponse::failure(&action.action_id, error.to_string());
+    async fn forward_action_error(&mut self, action_id: &str, error: Error) {
+        let response = ActionResponse::failure(action_id, error.to_string());
 
         self.streams.forward(response).await;
     }
@@ -371,29 +487,25 @@ impl ActionsBridge {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct SaveAction {
-    pub id: String,
     pub action: Action,
     pub timeout: Duration,
 }
 
 struct CurrentAction {
-    pub id: String,
     pub action: Action,
     pub timeout: Pin<Box<Sleep>>,
+    // cancel_action request
+    pub cancelled_by: Option<String>,
 }
 
 impl CurrentAction {
     pub fn new(action: Action, deadline: Instant) -> CurrentAction {
-        CurrentAction {
-            id: action.action_id.clone(),
-            action,
-            timeout: Box::pin(time::sleep_until(deadline)),
-        }
+        CurrentAction { action, timeout: Box::pin(time::sleep_until(deadline)), cancelled_by: None }
     }
 
     pub fn write_to_disk(self, path: PathBuf) -> Result<(), Error> {
         let timeout = self.timeout.as_ref().deadline() - Instant::now();
-        let save_action = SaveAction { id: self.id, action: self.action, timeout };
+        let save_action = SaveAction { action: self.action, timeout };
         let json = serde_json::to_string(&save_action)?;
         fs::write(path, json)?;
 
@@ -406,10 +518,18 @@ impl CurrentAction {
         fs::remove_file(path)?;
 
         Ok(CurrentAction {
-            id: json.id,
             action: json.action,
             timeout: Box::pin(time::sleep(json.timeout)),
+            cancelled_by: None,
         })
+    }
+
+    fn is_executing(&self, action_id: &str) -> bool {
+        self.action.action_id == action_id
+    }
+
+    fn is_cancelled_by(&self, action_id: &str) -> bool {
+        self.cancelled_by.as_ref().is_some_and(|id| id == action_id)
     }
 }
 
@@ -417,17 +537,21 @@ impl CurrentAction {
 pub struct ActionRouter {
     pub(crate) actions_tx: Sender<Action>,
     duration: Duration,
+    cancellable: bool,
 }
 
 impl ActionRouter {
     #[allow(clippy::result_large_err)]
     /// Forwards action to the appropriate application and returns the instance in time at which it should be timedout if incomplete
-    pub fn try_send(&self, mut action: Action) -> Result<Instant, TrySendError<Action>> {
+    pub fn try_send(&self, action: Action) -> Result<Instant, TrySendError<Action>> {
         let deadline = Instant::now() + self.duration;
-        action.deadline = Some(deadline);
         self.actions_tx.try_send(action)?;
 
         Ok(deadline)
+    }
+
+    pub fn is_cancellable(&self) -> bool {
+        self.cancellable
     }
 }
 
@@ -458,7 +582,7 @@ impl CtrlTx {
 
 #[cfg(test)]
 mod tests {
-    use tokio::runtime::Runtime;
+    use tokio::{runtime::Runtime, select};
 
     use crate::config::{StreamConfig, StreamMetricsConfig};
 
@@ -520,13 +644,21 @@ mod tests {
         std::env::set_current_dir(&tmpdir).unwrap();
         let config = Arc::new(default_config());
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
-        let route_1 = ActionRoute { name: "route_1".to_string(), timeout: Duration::from_secs(10) };
+        let route_1 = ActionRoute {
+            name: "route_1".to_string(),
+            timeout: Duration::from_secs(10),
+            cancellable: false,
+        };
 
         let (route_tx, route_1_rx) = bounded(1);
         bridge.register_action_route(route_1, route_tx).unwrap();
 
         let (route_tx, route_2_rx) = bounded(1);
-        let route_2 = ActionRoute { name: "route_2".to_string(), timeout: Duration::from_secs(30) };
+        let route_2 = ActionRoute {
+            name: "route_2".to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
         bridge.register_action_route(route_2, route_tx).unwrap();
 
         spawn_bridge(bridge);
@@ -556,7 +688,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "route_1".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action_1).unwrap();
 
@@ -579,7 +710,6 @@ mod tests {
             action_id: "2".to_string(),
             name: "route_2".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action_2).unwrap();
 
@@ -604,7 +734,11 @@ mod tests {
         let config = Arc::new(default_config());
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
+        let test_route = ActionRoute {
+            name: "test".to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
 
         let (route_tx, action_rx) = bounded(1);
         bridge.register_action_route(test_route, route_tx).unwrap();
@@ -622,7 +756,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action_1).unwrap();
 
@@ -636,7 +769,6 @@ mod tests {
             action_id: "2".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action_2).unwrap();
 
@@ -654,7 +786,11 @@ mod tests {
         let config = Arc::new(default_config());
         let (mut bridge, actions_tx, data_rx) = create_bridge(config);
 
-        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
+        let test_route = ActionRoute {
+            name: "test".to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
 
         let (route_tx, action_rx) = bounded(1);
         bridge.register_action_route(test_route, route_tx).unwrap();
@@ -676,7 +812,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 
@@ -704,12 +839,19 @@ mod tests {
         let bridge_tx_2 = bridge.status_tx();
 
         let (route_tx, action_rx_1) = bounded(1);
-        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
+        let test_route = ActionRoute {
+            name: "test".to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
         let (route_tx, action_rx_2) = bounded(1);
-        let redirect_route =
-            ActionRoute { name: "redirect".to_string(), timeout: Duration::from_secs(30) };
+        let redirect_route = ActionRoute {
+            name: "redirect".to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
         bridge.register_action_route(redirect_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
@@ -740,7 +882,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 
@@ -771,12 +912,19 @@ mod tests {
         let bridge_tx_2 = bridge.status_tx();
 
         let (route_tx, action_rx_1) = bounded(1);
-        let tunshell_route =
-            ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: Duration::from_secs(30) };
+        let tunshell_route = ActionRoute {
+            name: TUNSHELL_ACTION.to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
         bridge.register_action_route(tunshell_route, route_tx).unwrap();
 
         let (route_tx, action_rx_2) = bounded(1);
-        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
+        let test_route = ActionRoute {
+            name: "test".to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
@@ -809,7 +957,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 
@@ -819,7 +966,6 @@ mod tests {
             action_id: "2".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 
@@ -860,12 +1006,19 @@ mod tests {
         let bridge_tx_2 = bridge.status_tx();
 
         let (route_tx, action_rx_1) = bounded(1);
-        let test_route = ActionRoute { name: "test".to_string(), timeout: Duration::from_secs(30) };
+        let test_route = ActionRoute {
+            name: "test".to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
         bridge.register_action_route(test_route, route_tx).unwrap();
 
         let (route_tx, action_rx_2) = bounded(1);
-        let tunshell_route =
-            ActionRoute { name: TUNSHELL_ACTION.to_string(), timeout: Duration::from_secs(30) };
+        let tunshell_route = ActionRoute {
+            name: TUNSHELL_ACTION.to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
         bridge.register_action_route(tunshell_route, route_tx).unwrap();
 
         spawn_bridge(bridge);
@@ -898,7 +1051,6 @@ mod tests {
             action_id: "1".to_string(),
             name: "test".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 
@@ -908,7 +1060,6 @@ mod tests {
             action_id: "2".to_string(),
             name: "launch_shell".to_string(),
             payload: "test".to_string(),
-            deadline: None,
         };
         actions_tx.send(action).unwrap();
 
@@ -937,5 +1088,273 @@ mod tests {
         let status = responses.next();
         assert_eq!(status.action_id, "1");
         assert!(status.is_completed());
+    }
+
+    #[tokio::test]
+    async fn cancel_action() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
+        let config = default_config();
+        let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+
+        let bridge_tx_1 = bridge.status_tx();
+        let (route_tx, action_rx_1) = bounded(1);
+        let test_route = ActionRoute {
+            name: "test".to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: true,
+        };
+        bridge.register_action_route(test_route, route_tx).unwrap();
+
+        spawn_bridge(bridge);
+
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            let action = action_rx_1.recv().unwrap();
+            assert_eq!(action.action_id, "1");
+            let response = ActionResponse::progress(&action.action_id, "Running", 0);
+            rt.block_on(bridge_tx_1.send_action_response(response));
+            let cancel_action = action_rx_1.recv().unwrap();
+            assert_eq!(cancel_action.action_id, "2");
+            assert_eq!(cancel_action.name, "cancel_action");
+            let response = ActionResponse::failure(&action.action_id, "Cancelled");
+            rt.block_on(bridge_tx_1.send_action_response(response));
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            action_id: "1".to_string(),
+            name: "test".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            action_id: "2".to_string(),
+            name: "cancel_action".to_string(),
+            payload: r#"{"action_id": "1", "name": "test"}"#.to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        let mut responses = Responses { rx: data_rx, responses: vec![] };
+
+        let ActionResponse { action_id, state, .. } = responses.next();
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Received");
+
+        let ActionResponse { action_id, state, .. } = responses.next();
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Running");
+
+        let ActionResponse { action_id, state, .. } = responses.next();
+        assert_eq!(action_id, "2");
+        assert_eq!(state, "Received");
+
+        let status = responses.next();
+        assert_eq!(status.action_id, "1");
+        assert!(status.is_failed());
+        assert_eq!(status.errors, ["Cancelled"]);
+
+        let status = responses.next();
+        assert_eq!(status.action_id, "2");
+        assert!(status.is_completed());
+    }
+
+    #[tokio::test]
+    async fn cancel_action_failure_not_executing() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
+        let config = default_config();
+        let (bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+
+        spawn_bridge(bridge);
+
+        let action = Action {
+            action_id: "2".to_string(),
+            name: "cancel_action".to_string(),
+            payload: r#"{"action_id": "1", "name": "test"}"#.to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        let mut responses = Responses { rx: data_rx, responses: vec![] };
+
+        let status = responses.next();
+        assert_eq!(status.action_id, "2");
+        assert!(status.is_failed());
+        assert_eq!(
+            status.errors,
+            ["Cancellation request received for action currently not in execution!"]
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_action_failure_on_completion() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
+        let config = default_config();
+        let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+
+        let bridge_tx_1 = bridge.status_tx();
+        let (route_tx, action_rx_1) = bounded(1);
+        let test_route = ActionRoute {
+            name: "test".to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
+        bridge.register_action_route(test_route, route_tx).unwrap();
+
+        spawn_bridge(bridge);
+
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            let action = action_rx_1.recv().unwrap();
+            assert_eq!(action.action_id, "1");
+            let response = ActionResponse::progress(&action.action_id, "Running", 0);
+            rt.block_on(bridge_tx_1.send_action_response(response));
+
+            std::thread::sleep(Duration::from_secs(2));
+            let response = ActionResponse::success(&action.action_id);
+            rt.block_on(bridge_tx_1.send_action_response(response));
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            action_id: "1".to_string(),
+            name: "test".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            action_id: "2".to_string(),
+            name: "cancel_action".to_string(),
+            payload: r#"{"action_id": "1", "name": "test"}"#.to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        let mut responses = Responses { rx: data_rx, responses: vec![] };
+
+        let ActionResponse { action_id, state, .. } = responses.next();
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Received");
+
+        let ActionResponse { action_id, state, .. } = responses.next();
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Running");
+
+        let ActionResponse { action_id, state, .. } = responses.next();
+        assert_eq!(action_id, "2");
+        assert_eq!(state, "Received");
+
+        let status = responses.next();
+        assert_eq!(status.action_id, "1");
+        assert!(status.is_completed());
+
+        let status = responses.next();
+        assert_eq!(status.action_id, "2");
+        assert!(status.is_failed());
+        assert_eq!(status.errors, ["Cancellation request failed as action completed execution!"]);
+    }
+
+    #[tokio::test]
+    async fn cancel_action_between_redirect() {
+        let tmpdir = tempdir::TempDir::new("bridge").unwrap();
+        std::env::set_current_dir(&tmpdir).unwrap();
+        let mut config = default_config();
+        config.action_redirections.insert("test".to_string(), "redirect".to_string());
+        let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+
+        let bridge_tx_1 = bridge.status_tx();
+        let (route_tx, action_rx_1) = bounded(1);
+        let test_route = ActionRoute {
+            name: "test".to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
+        bridge.register_action_route(test_route, route_tx).unwrap();
+
+        let bridge_tx_2 = bridge.status_tx();
+        let (route_tx, action_rx_2) = bounded(1);
+        let test_route = ActionRoute {
+            name: "redirect".to_string(),
+            timeout: Duration::from_secs(30),
+            cancellable: false,
+        };
+        bridge.register_action_route(test_route, route_tx).unwrap();
+
+        spawn_bridge(bridge);
+
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            let action = action_rx_2.recv().unwrap();
+            assert_eq!(action.action_id, "1");
+            let response = ActionResponse::progress(&action.action_id, "Running", 0);
+            rt.block_on(bridge_tx_1.send_action_response(response));
+            std::thread::sleep(Duration::from_secs(3));
+            let response = ActionResponse::progress(&action.action_id, "Finished", 100);
+            rt.block_on(bridge_tx_1.send_action_response(response));
+        });
+
+        std::thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            let action = action_rx_1.recv().unwrap();
+            assert_eq!(action.action_id, "1");
+            let response = ActionResponse::progress(&action.action_id, "Running", 0);
+            rt.block_on(bridge_tx_2.send_action_response(response));
+            std::thread::sleep(Duration::from_secs(3));
+            let response = ActionResponse::progress(&action.action_id, "Finished", 100);
+            rt.block_on(bridge_tx_2.send_action_response(response));
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            action_id: "1".to_string(),
+            name: "test".to_string(),
+            payload: "test".to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        let action = Action {
+            action_id: "2".to_string(),
+            name: "cancel_action".to_string(),
+            payload: r#"{"action_id": "1", "name": "test"}"#.to_string(),
+        };
+        actions_tx.send(action).unwrap();
+
+        let mut responses = Responses { rx: data_rx, responses: vec![] };
+
+        let ActionResponse { action_id, state, .. } = responses.next();
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Received");
+
+        let ActionResponse { action_id, state, .. } = responses.next();
+        assert_eq!(action_id, "1");
+        assert_eq!(state, "Running");
+
+        let ActionResponse { action_id, state, .. } = responses.next();
+        assert_eq!(action_id, "2");
+        assert_eq!(state, "Received");
+
+        let status = responses.next();
+        assert_eq!(status.action_id, "1");
+        assert!(status.is_done());
+
+        let status = responses.next();
+        assert_eq!(status.action_id, "2");
+        assert!(status.is_completed());
+
+        let status = responses.next();
+        assert_eq!(status.action_id, "1");
+        assert!(status.is_failed());
+        assert_eq!(status.errors, ["Action cancelled by action_id: 2"]);
     }
 }

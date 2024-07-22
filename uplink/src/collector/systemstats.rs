@@ -520,27 +520,27 @@ impl StatCollector {
             std::thread::sleep(Duration::from_secs(self.config.system_stats.update_period));
 
             if let Err(e) = self.update_memory_stats() {
-                error!("Error refreshing system memory statistics: {}", e);
+                error!("Error refreshing system memory statistics: {e}");
             }
 
             if let Err(e) = self.update_disk_stats() {
-                error!("Error refreshing disk statistics: {}", e);
+                error!("Error refreshing disk statistics: {e}");
             }
 
             if let Err(e) = self.update_network_stats() {
-                error!("Error refreshing network statistics: {}", e);
+                error!("Error refreshing network statistics: {e}");
             }
 
             if let Err(e) = self.update_cpu_stats() {
-                error!("Error refreshing CPU statistics: {}", e);
+                error!("Error refreshing CPU statistics: {e}");
             }
 
             if let Err(e) = self.update_component_stats() {
-                error!("Error refreshing component statistics: {}", e);
+                error!("Error refreshing component statistics: {e}");
             }
 
             if let Err(e) = self.update_process_stats() {
-                error!("Error refreshing process statistics: {}", e);
+                error!("Error refreshing process statistics: {e}");
             }
         }
     }

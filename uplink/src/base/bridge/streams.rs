@@ -40,26 +40,24 @@ impl<T: Point> Streams<T> {
     pub async fn forward(&mut self, data: T) {
         let stream_name = data.stream_name().to_string();
 
-        let stream = match self.map.get_mut(&stream_name) {
-            Some(partition) => partition,
-            None => {
-                if self.config.simulator.is_none() && self.map.keys().len() > MAX_STREAM_COUNT {
-                    error!(
-                        "Failed to create {stream_name} stream. More than max {MAX_STREAM_COUNT} streams"
-                    );
-                    return;
-                }
-
-                let stream = Stream::dynamic(
-                    &stream_name,
-                    &self.config.project_id,
-                    &self.config.device_id,
-                    self.data_tx.clone(),
-                );
-
-                self.map.entry(stream_name.to_owned()).or_insert(stream)
+        // Create stream if it doesn't already exist
+        if !self.map.contains_key(&stream_name) {
+            if self.config.simulator.is_none() && self.map.keys().len() > MAX_STREAM_COUNT {
+                error!("Failed to create {stream_name} stream. More than max {MAX_STREAM_COUNT} streams");
+                return;
             }
-        };
+
+            let stream = Stream::dynamic(
+                &stream_name,
+                &self.config.project_id,
+                &self.config.device_id,
+                self.data_tx.clone(),
+            );
+
+            self.map.insert(stream_name.to_owned(), stream);
+        }
+        // Doesn't panic because of above check
+        let stream = self.map.get_mut(&stream_name).unwrap();
 
         let max_stream_size = stream.config.batch_size;
         let state = match stream.fill(data).await {
@@ -112,8 +110,8 @@ impl<T: Point> Streams<T> {
             // Initialize metrics timeouts when force flush sees data counts
             if metrics.points() > 0 {
                 info!(
-                    "{:>20}: points = {:<5} batches = {:<5} latency = {}",
-                    buffer_name, metrics.points, metrics.batches, metrics.average_batch_latency
+                    "{buffer_name:>20}: points = {:<5} batches = {:<5} latency = {}",
+                    metrics.points, metrics.batches, metrics.average_batch_latency
                 );
                 self.metrics_tx.try_send(metrics)?;
                 data.metrics.prepare_next();
