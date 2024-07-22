@@ -14,8 +14,11 @@ script_runner = [{ name = "run_script", timeout = 10 }]
 # Location on disk for persisted streams to write backlogs into, also used to write
 persistence_path = "/tmp/uplink/"
 
+# Size of in-memory buffer for dynamically created streams. Used for backlog management.
+default_buf_size = 1024 # 1KB
+
 # MQTT client configuration
-# 
+#
 # Required Parameters
 # - max_packet_size: Maximum packet size acceptable for MQTT messages
 # - max_inflight: Maximum number of outgoing QoS 1/2 messages that can be
@@ -43,18 +46,18 @@ actions = [{ name = "install_update" }, { name = "load_file" }]
 port = 6060
 actions = []
 
-# Metrics configurations are available for serializer and streams. By default 
-# they are disabled and no metrics will be forwarded to platform. 
+# Metrics configurations are available for serializer and streams. By default
+# they are disabled and no metrics will be forwarded to platform.
 # Parameters
 # - topic(optional): One can configure to push stats to a specific topic,
 #   different from the default by configuring it with this field.
 #
-# Serializer module can publish associated metrics, to keep track of 
-# serializer performance. 
+# Serializer module can publish associated metrics, to keep track of
+# serializer performance.
 [serializer_metrics]
 enabled = true
 
-# Serializer module can also publishe stream metrics, to keep track of latencies 
+# Serializer module can also publishe stream metrics, to keep track of latencies
 # and batch sizes on a per-stream basis.
 # NOTE: Leaving this configuration empty like the following tells uplink to enable
 # sending metrics, but with default topic string.
@@ -95,15 +98,15 @@ priority = 50
 
 # Configuration details associated with uplink's persistent storage module which writes publish
 # packets to disk in case of slow or crashed network, for recovery purposes.
-# 
+#
 # Required Parameters
 # - max_file_size(defaults to 100MB): Maximum size upto which single persistence file can grow.
 #   This value alone can be changed to configure in-memory storage of packets during network recovery.
 # - path(optional): Path to directory for storing backlog in files, shouldn't contain anything else.
-#   Please ensure the location is unique for each stream to ensure there is no clash in files. 
+#   Please ensure the location is unique for each stream to ensure there is no clash in files.
 # - max_file_count(optional, defaults to 3): Maximum number of persistence files allowed on disk.
 #
-# NOTE: Persitence is an optional feature that is disabled by default, i.e. if not inlcuded in the 
+# NOTE: Persitence is an optional feature that is disabled by default, i.e. if not inlcuded in the
 # configuration, we use transient(in-memory) storage to handle network downtime only.
 [streams.gps]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/gps/jsonarray"
@@ -134,14 +137,18 @@ priority = 255
 
 # Configurations for uplink's built-in file downloader, including the actions that can trigger
 # a download, the location in file system where uplink will download and store files from the
-# provided URL in the payload of download file actions, over HTTP(S). 
+# provided URL in the payload of download file actions, over HTTP(S).
 # If left unconfigured, downloader will be disabled.
 #
 # Required Parameters
 # - actions: List of actions names that can trigger the downloader, with configurable timeouts
 # - path: Location in fs where the files are downloaded into
 [downloader]
-actions = [{ name = "update_firmware" }, { name = "send_file", timeout = 10 }, { name = "send_script" }]
+actions = [
+    { name = "update_firmware" },
+    { name = "send_file", timeout = 10 },
+    { name = "send_script" },
+]
 path = "/var/tmp/ota-file"
 
 # Configurations associated with the system stats module of uplink, if enabled
@@ -161,7 +168,7 @@ update_period = 30
 enabled = true
 port = 3333
 
-# Configurations associated with running uplink in simulator mode, if enabled 
+# Configurations associated with running uplink in simulator mode, if enabled
 # uplink will push simulated data for device_id 1..=num_devices and respond to any
 # actions triggered on the tenant connected to, with progress 0..=100.
 # NOTE: uplink bridge will hence be turned off.
@@ -173,15 +180,15 @@ port = 3333
 # num_devices = 10
 # gps_paths = "./paths/"
 
-# Configuration of logger, journalctl in the case of linux. As configured, uplink will 
+# Configuration of logger, journalctl in the case of linux. As configured, uplink will
 # push log lines in batches of size
-# 
+#
 # Required Parameters
 # - tags: syslog identifiers for the processes to be logged, e.g. systemd, sshd, kernel
 # - units: names of the systemd units that are to be logged, e.g. collector.service, app.service
 # - min_level: priority level by number(7 is Debug, 0 is Emergency)
 # - stream_size: maximum number of log line before the log stream is flushed
-# 
+#
 # [logging]
 # tags = ["systemd"]
 # units = ["collector"]
