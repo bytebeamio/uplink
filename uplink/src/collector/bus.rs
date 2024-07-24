@@ -354,14 +354,18 @@ impl Joiner {
             return;
         }
         self.sequence += 1;
-        // timestamp value should pass as is for instant push, else be the system time
-        let timestamp = match self.joined.remove("timestamp").and_then(|value| {
+
+        #[inline]
+        fn parse_as_u64(value: Value) -> Option<u64> {
             let parsed = value.as_i64().map(|t| t as u64);
             if parsed.is_none() {
                 warn!("timestamp: {value:?} has unexpected type; defaulting to system time")
             }
             parsed
-        }) {
+        }
+
+        // timestamp value should pass as is for instant push, else be the system time
+        let timestamp = match self.joined.remove("timestamp").and_then(parse_as_u64) {
             Some(t) => t,
             _ => clock() as u64,
         };
