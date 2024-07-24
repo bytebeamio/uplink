@@ -380,3 +380,105 @@ impl Joiner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        thread::{sleep, spawn},
+        time::Duration,
+    };
+
+    use rumqttc::{Client, Event, MqttOptions, Packet, QoS};
+
+    use crate::{
+        base::bridge::{DataTx, StatusTx},
+        config::{InputConfig, JoinerConfig},
+        ActionResponse,
+    };
+
+    use super::*;
+
+    #[test]
+    fn as_is_data_from_bus() {
+        let joins = JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "as_is".to_owned(),
+                construct_from: vec![InputConfig {
+                    input_stream: "input".to_owned(),
+                    select_fields: SelectConfig::All,
+                }],
+                no_data_action: NoDataAction::Null,
+                push_interval: PushInterval::OnNewData,
+                publish_on_service_bus: false,
+            }],
+        };
+        let config = BusConfig { port: 1884, joins };
+
+        let (data_tx, data_rx) = bounded(1);
+        let (status_tx, _status_rx) = bounded(1);
+        let bridge_tx = BridgeTx {
+            data_tx: DataTx { inner: data_tx },
+            status_tx: StatusTx { inner: status_tx },
+        };
+        let (_actions_tx, actions_rx) = bounded(1);
+        spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
+
+        let opt = MqttOptions::new("test", "localhost", 1884);
+        let (client, mut conn) = Client::new(opt, 1);
+
+        sleep(Duration::from_millis(100));
+        let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        let input = json!({"field_1": 123, "field_2": "abc"});
+        client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        sleep(Duration::from_millis(100));
+        let Payload { stream, sequence: 1, payload, .. } = data_rx.try_recv().unwrap() else {
+            panic!()
+        };
+        assert_eq!(stream, "as_is");
+        assert_eq!(payload, input);
+    }
+
+    #[test]
+    fn as_is_status_from_bus() {
+        let config = BusConfig { port: 1885, joins: JoinerConfig { output_streams: vec![] } };
+
+        let (data_tx, _data_rx) = bounded(1);
+        let (status_tx, status_rx) = bounded(1);
+        let bridge_tx = BridgeTx {
+            data_tx: DataTx { inner: data_tx },
+            status_tx: StatusTx { inner: status_tx },
+        };
+        let (_actions_tx, actions_rx) = bounded(1);
+        spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
+
+        let opt = MqttOptions::new("test", "localhost", 1885);
+        let (client, mut conn) = Client::new(opt, 1);
+
+        sleep(Duration::from_millis(100));
+        let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        client
+            .publish(
+                "streams/action_status",
+                QoS::AtLeastOnce,
+                false,
+                br#"{"action_id": 123, "state": "abc", "progress": 234, "errors": ["Testing"]}"#,
+            )
+            .unwrap();
+        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        sleep(Duration::from_millis(100));
+        let ActionResponse { action_id, sequence: 1, state, progress, errors, .. } =
+            status_rx.try_recv().unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(action_id, "123");
+        assert_eq!(state, "abc");
+        assert_eq!(progress, 234);
+        assert_eq!(errors, ["Testing"]);
+    }
+}
