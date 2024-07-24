@@ -129,11 +129,7 @@ pub struct Bus {
 }
 
 impl Bus {
-    pub fn new(
-        config: BusConfig,
-        bridge_tx: BridgeTx,
-        actions_rx: Receiver<Action>,
-    ) -> Result<Self, Error> {
+    pub fn new(config: BusConfig, bridge_tx: BridgeTx, actions_rx: Receiver<Action>) -> Self {
         let router = RouterConfig {
             max_segment_size: 1024,
             max_connections: 10,
@@ -151,7 +147,7 @@ impl Bus {
         };
         let server = ServerSettings {
             name: "service_bus".to_owned(),
-            listen: format!("127.0.0.1:{}", config.port).parse::<SocketAddr>()?,
+            listen: format!("127.0.0.1:{}", config.port).parse::<SocketAddr>().unwrap(),
             tls: None,
             next_connection_delay_ms: 0,
             connections,
@@ -159,14 +155,14 @@ impl Bus {
         let servers = [("service_bus".to_owned(), server)].into_iter().collect();
         let mut broker =
             Broker::new(Config { id: 0, router, v4: Some(servers), ..Default::default() });
-        let (tx, rx) = broker.link("uplink")?;
+        let (tx, rx) = broker.link("uplink").unwrap();
         spawn_named_thread("Broker", move || {
             if let Err(e) = broker.start() {
                 error!("{e}")
             }
         });
 
-        Ok(Self { tx: BusTx { tx }, rx: BusRx { rx }, bridge_tx, actions_rx, config })
+        Self { tx: BusTx { tx }, rx: BusRx { rx }, bridge_tx, actions_rx, config }
     }
 
     #[tokio::main(flavor = "current_thread")]

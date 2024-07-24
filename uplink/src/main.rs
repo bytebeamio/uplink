@@ -18,10 +18,13 @@ use tracing_subscriber::{EnvFilter, Registry};
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
-use uplink::config::{AppConfig, Config, StreamConfig, MAX_BATCH_SIZE};
+use uplink::collector::bus::Bus;
+use uplink::config::{
+    ActionRoute, AppConfig, Config, StreamConfig, DEFAULT_TIMEOUT, MAX_BATCH_SIZE,
+};
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
-const DEFAULT_CONFIG: &str = r#"    
+const DEFAULT_CONFIG: &str = r#"
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -327,8 +330,24 @@ fn main() -> Result<(), Error> {
         _ => None,
     };
 
+    let bus = config.bus.as_ref().map(|cfg| {
+        let actions_rx = bridge
+            .register_action_routes([ActionRoute {
+                name: "*".to_string(),
+                timeout: DEFAULT_TIMEOUT,
+                cancellable: false,
+            }])
+            .unwrap();
+
+        Bus::new(cfg.clone(), bridge_tx.clone(), actions_rx)
+    });
+
     let downloader_disable = Arc::new(Mutex::new(false));
     let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone())?;
+
+    if let Some(bus) = bus {
+        spawn_named_thread("Bus Interface", move || bus.start())
+    };
 
     if let Some(config) = config.simulator.clone() {
         spawn_named_thread("Simulator", || {
