@@ -93,6 +93,7 @@ impl ServiceBusTx for BusTx {
             let filter = format!("streams/{}", stream.into());
             self.tx.subscribe(filter)?;
         }
+        self.tx.subscribe("streams/action_status")?;
 
         Ok(())
     }
@@ -460,25 +461,26 @@ mod tests {
         sleep(Duration::from_millis(100));
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
+        let action_status = ActionResponse {
+            action_id: "123".to_owned(),
+            sequence: 1,
+            timestamp: 0,
+            state: "abc".to_owned(),
+            progress: 234,
+            errors: vec!["Testing".to_owned()],
+            done_response: None,
+        };
         client
             .publish(
                 "streams/action_status",
                 QoS::AtLeastOnce,
                 false,
-                br#"{"action_id": 123, "state": "abc", "progress": 234, "errors": ["Testing"]}"#,
+                json!(action_status).to_string(),
             )
             .unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
         sleep(Duration::from_millis(100));
-        let ActionResponse { action_id, sequence: 1, state, progress, errors, .. } =
-            status_rx.try_recv().unwrap()
-        else {
-            panic!()
-        };
-        assert_eq!(action_id, "123");
-        assert_eq!(state, "abc");
-        assert_eq!(progress, 234);
-        assert_eq!(errors, ["Testing"]);
+        assert_eq!(action_status, status_rx.try_recv().unwrap());
     }
 }
