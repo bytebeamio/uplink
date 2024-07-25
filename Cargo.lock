@@ -4289,7 +4289,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "uplink"
-version = "2.12.2"
+version = "2.14.0"
 dependencies = [
  "anyhow",
  "async-trait",

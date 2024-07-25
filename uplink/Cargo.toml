@@ -1,6 +1,6 @@
 [package]
 name = "uplink"
-version = "2.12.2"
+version = "2.14.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2021"
 
@@ -20,7 +20,10 @@ tokio-util = { workspace = true }
 # binary utils
 anyhow = "1"
 axum = "0.6"
-config = { version = "0.13.2", default-features = false, features = ["toml", "json"] }
+config = { version = "0.13.2", default-features = false, features = [
+    "toml",
+    "json",
+] }
 structopt = "0.3"
 
 # serializer
@@ -32,8 +35,8 @@ storage = { path = "../storage" }
 # logging
 log = { workspace = true }
 regex = "1.7.1"
-tracing = { version="0.1", features=["log"] }
-tracing-subscriber = { version="0.3.18", features=["env-filter"] }
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 # built-in collectors
 # tunshell
@@ -47,7 +50,10 @@ fs2 = "0.4"
 futures-util = { workspace = true }
 hex = "0.4"
 human_bytes = "0.4"
-reqwest = { version = "0.11", default-features = false, features = ["stream", "rustls-tls"] }
+reqwest = { version = "0.11", default-features = false, features = [
+    "stream",
+    "rustls-tls",
+] }
 rsa = { version = "0.9.6", features = ["sha2"] }
 # systemstats
 sysinfo = "0.26"

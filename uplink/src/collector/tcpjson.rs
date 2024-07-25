@@ -5,6 +5,7 @@ use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
 use tokio::task::{spawn, JoinHandle};
+use tokio::time::{sleep, Duration};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
@@ -49,9 +50,20 @@ impl TcpJson {
         TcpJson { name, config, bridge, actions_rx }
     }
 
-    pub async fn start(self) -> Result<(), Error> {
+    pub async fn start(self) {
         let addr = format!("0.0.0.0:{}", self.config.port);
-        let listener = TcpListener::bind(&addr).await?;
+        let listener = loop {
+            match TcpListener::bind(&addr).await {
+                Ok(s) => break s,
+                Err(e) => {
+                    error!(
+                        "Couldn't bind to port: {}; Error = {e}; retrying in 5s",
+                        self.config.port
+                    );
+                    sleep(Duration::from_secs(5)).await;
+                }
+            }
+        };
         let mut handle: Option<JoinHandle<()>> = None;
 
         info!("Waiting for app = {} to connect on {addr}", self.name);

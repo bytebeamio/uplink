@@ -51,6 +51,7 @@ const DEFAULT_CONFIG: &str = r#"
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     batch_size = 1
     flush_period = 2
+    persistence = { max_file_count = 1 } # Ensures action responses are not lost on restarts
     priority = 255 # highest priority for quick delivery of action status info to platform
 
     [streams.device_shadow]
@@ -343,7 +344,8 @@ fn main() -> Result<(), Error> {
     });
 
     let downloader_disable = Arc::new(Mutex::new(false));
-    let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone())?;
+    let network_up = Arc::new(Mutex::new(false));
+    let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone(), network_up.clone())?;
 
     if let Some(bus) = bus {
         spawn_named_thread("Bus Interface", move || bus.start())
@@ -359,7 +361,7 @@ fn main() -> Result<(), Error> {
         let port = config.console.port;
         let ctrl_tx = ctrl_tx.clone();
         spawn_named_thread("Uplink Console", move || {
-            console::start(port, reload_handle, ctrl_tx, downloader_disable)
+            console::start(port, reload_handle, ctrl_tx, downloader_disable, network_up)
         });
     }
 
@@ -373,9 +375,7 @@ fn main() -> Result<(), Error> {
     rt.block_on(async {
         for app in tcpapps {
             tokio::task::spawn(async move {
-                if let Err(e) = app.start().await {
-                    error!("App failed. Error = {e}");
-                }
+                app.start().await;
             });
         }
 

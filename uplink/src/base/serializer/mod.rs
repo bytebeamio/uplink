@@ -14,7 +14,7 @@ use storage::Storage;
 use thiserror::Error;
 use tokio::{select, time::interval};
 
-use crate::config::{default_file_size, Compression, StreamConfig};
+use crate::config::{Compression, StreamConfig};
 use crate::{Config, Package};
 pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
 
@@ -132,6 +132,7 @@ impl MqttClient for AsyncClient {
 }
 
 struct StorageHandler {
+    config: Arc<Config>,
     map: BTreeMap<Arc<StreamConfig>, Storage>,
     // Stream being read from
     read_stream: Option<Arc<StreamConfig>>,
@@ -140,12 +141,15 @@ struct StorageHandler {
 impl StorageHandler {
     fn new(config: Arc<Config>) -> Result<Self, Error> {
         let mut map = BTreeMap::new();
-        for (stream_name, stream_config) in config.streams.iter() {
+        let mut streams = config.streams.clone();
+        // NOTE: persist action_status if not configured otherwise
+        streams.insert("action_status".into(), config.action_status.clone());
+        for (stream_name, stream_config) in streams {
             let mut storage =
                 Storage::new(&stream_config.topic, stream_config.persistence.max_file_size);
             if stream_config.persistence.max_file_count > 0 {
                 let mut path = config.persistence_path.clone();
-                path.push(stream_name);
+                path.push(&stream_name);
 
                 std::fs::create_dir_all(&path).map_err(|_| {
                     Error::Persistence(config.persistence_path.to_string_lossy().to_string())
@@ -160,13 +164,13 @@ impl StorageHandler {
             map.insert(Arc::new(stream_config.clone()), storage);
         }
 
-        Ok(Self { map, read_stream: None })
+        Ok(Self { config, map, read_stream: None })
     }
 
     fn select(&mut self, stream: &Arc<StreamConfig>) -> &mut Storage {
         self.map
             .entry(stream.to_owned())
-            .or_insert_with(|| Storage::new(&stream.topic, default_file_size()))
+            .or_insert_with(|| Storage::new(&stream.topic, self.config.default_buf_size))
     }
 
     fn next(&mut self, metrics: &mut Metrics) -> Option<(&Arc<StreamConfig>, &mut Storage)> {
@@ -221,7 +225,7 @@ impl StorageHandler {
 }
 
 /// The uplink Serializer is the component that deals with serializing, compressing and writing data onto disk or Network.
-/// In case of network issues, the Serializer enters various states depending on the severeness, managed by [`start()`].                                                                                       
+/// In case of network issues, the Serializer enters various states depending on the severeness, managed by [`start()`].
 ///
 /// The Serializer writes data directly to network in **normal mode** with the [`try_publish()`] method on the MQTT client.
 /// In case of the network being slow, this fails and we are forced into **slow mode**, where-in new data gets written into
