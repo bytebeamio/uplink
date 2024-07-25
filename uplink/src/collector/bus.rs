@@ -206,6 +206,7 @@ impl Bus {
                         continue;
                     };
                     let topic = String::from_utf8(publish.topic.to_vec()).unwrap();
+                    // Expected topic structure: `streams/{stream_name}`
                     let Some (stream_name) = topic.split('/').last() else {
                         error!("unexpected topic structure: {topic}");
                         continue
