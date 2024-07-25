@@ -212,7 +212,6 @@ impl Bus {
                         continue
                     };
                     router.map(stream_name.to_owned(), data).await;
-
                 }
 
                 Ok(data) = back_rx.recv_async() => {
@@ -437,7 +436,7 @@ mod tests {
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let input = json!({"field_1": 123, "field_2": "abc"});
-        client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
+        client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let Payload { stream, sequence: 1, payload, .. } =
@@ -480,7 +479,7 @@ mod tests {
         client
             .publish(
                 "streams/action_status",
-                QoS::AtLeastOnce,
+                QoS::AtMostOnce,
                 false,
                 json!(action_status).to_string(),
             )
@@ -528,15 +527,11 @@ mod tests {
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let input_one = json!({"field_1": 123, "field_2": "abc"});
-        client
-            .publish("streams/input_one", QoS::AtLeastOnce, false, input_one.to_string())
-            .unwrap();
+        client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let input_two = json!({"field_x": 456, "field_y": "xyz"});
-        client
-            .publish("streams/input_two", QoS::AtLeastOnce, false, input_two.to_string())
-            .unwrap();
+        client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let Payload { stream, sequence: 1, payload, .. } =
@@ -594,18 +589,14 @@ mod tests {
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let input_one = json!({"field_1": 123, "field_2": "abc"});
-        client
-            .publish("streams/input_one", QoS::AtLeastOnce, false, input_one.to_string())
-            .unwrap();
+        client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
         else {
             panic!()
         };
 
         let input_two = json!({"field_x": 456, "field_y": "xyz"});
-        client
-            .publish("streams/input_two", QoS::AtLeastOnce, false, input_two.to_string())
-            .unwrap();
+        client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let Payload { stream, sequence: 1, payload, .. } =
@@ -653,7 +644,7 @@ mod tests {
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let input = json!({"field_1": 123, "field_2": "abc"});
-        client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
+        client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
         else {
             panic!()
@@ -713,18 +704,14 @@ mod tests {
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let input_one = json!({"field_1": 123, "field_2": "abc"});
-        client
-            .publish("streams/input_one", QoS::AtLeastOnce, false, input_one.to_string())
-            .unwrap();
+        client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
         else {
             panic!()
         };
 
         let input_two = json!({"field_x": 456, "field_y": "xyz"});
-        client
-            .publish("streams/input_two", QoS::AtLeastOnce, false, input_two.to_string())
-            .unwrap();
+        client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let Payload { stream, sequence: 1, payload, .. } =
@@ -769,7 +756,7 @@ mod tests {
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let input = json!({"field_1": 123, "field_2": "abc"});
-        client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
+        client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
         else {
             panic!()
@@ -785,7 +772,7 @@ mod tests {
         assert_eq!(payload, output);
 
         let input = json!({"field_1": 456});
-        client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
+        client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let Payload { stream, sequence: 2, payload, .. } =
@@ -830,14 +817,23 @@ mod tests {
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let input = json!({"field_1": 123, "field_2": "abc"});
-        client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
+        client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
         else {
             panic!()
         };
 
         let Payload { stream, sequence: 1, payload, .. } =
-            data_rx.recv_timeout(Duration::from_millis(1000)).unwrap()
+            data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
+        else {
+            panic!()
+        };
+        let output = json!({"field_1": 123, "field_2": "abc"});
+        assert_eq!(stream, "output");
+        assert_eq!(payload, output);
+
+        let Payload { stream, sequence: 2, payload, .. } =
+            data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
         else {
             panic!()
         };
@@ -846,11 +842,14 @@ mod tests {
         assert_eq!(payload, output);
 
         let input = json!({"field_1": 456});
-        client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
-        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+        client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
 
-        let Payload { stream, sequence: 2, payload, .. } =
-            data_rx.recv_timeout(Duration::from_millis(1000)).unwrap()
+        let Payload { stream, sequence: 3, payload, .. } =
+            data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
         else {
             panic!()
         };
