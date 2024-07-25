@@ -610,4 +610,52 @@ mod tests {
         assert_eq!(stream, "output");
         assert_eq!(payload, output);
     }
+
+    #[test]
+    fn select_from_stream_on_bus() {
+        let joins = JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![InputConfig {
+                    input_stream: "input".to_owned(),
+                    select_fields: SelectConfig::Fields(vec![Field {
+                        original: "field_1".to_owned(),
+                        renamed: None,
+                    }]),
+                }],
+                no_data_action: NoDataAction::Null,
+                push_interval: PushInterval::OnNewData,
+                publish_on_service_bus: false,
+            }],
+        };
+        let config = BusConfig { port: 1886, joins };
+
+        let (data_tx, data_rx) = bounded(1);
+        let (status_tx, _status_rx) = bounded(1);
+        let bridge_tx = BridgeTx {
+            data_tx: DataTx { inner: data_tx },
+            status_tx: StatusTx { inner: status_tx },
+        };
+        let (_actions_tx, actions_rx) = bounded(1);
+        spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
+
+        let opt = MqttOptions::new("test", "localhost", 1886);
+        let (client, mut conn) = Client::new(opt, 1);
+
+        sleep(Duration::from_millis(100));
+        let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        sleep(Duration::from_millis(200));
+        let input = json!({"field_1": 123, "field_2": "abc"});
+        client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        sleep(Duration::from_millis(100));
+        let Payload { stream, sequence: 1, payload, .. } = data_rx.try_recv().unwrap() else {
+            panic!()
+        };
+        let output = json!({"field_1": 123});
+        assert_eq!(stream, "output");
+        assert_eq!(payload, output);
+    }
 }
