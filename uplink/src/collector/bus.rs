@@ -729,16 +729,22 @@ mod tests {
         let joins = JoinerConfig {
             output_streams: vec![JoinConfig {
                 name: "output".to_owned(),
-                construct_from: vec![InputConfig {
-                    input_stream: "input".to_owned(),
-                    select_fields: SelectConfig::All,
-                }],
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                ],
                 no_data_action: NoDataAction::Null,
                 push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
                 publish_on_service_bus: false,
             }],
         };
-        let config = BusConfig { port: 1890, joins };
+        let config = BusConfig { port: 1891, joins };
 
         let (data_tx, data_rx) = bounded(1);
         let (status_tx, _status_rx) = bounded(1);
@@ -749,14 +755,14 @@ mod tests {
         let (_actions_tx, actions_rx) = bounded(1);
         spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-        let opt = MqttOptions::new("test", "localhost", 1890);
+        let opt = MqttOptions::new("test", "localhost", 1891);
         let (client, mut conn) = Client::new(opt, 1);
 
         sleep(Duration::from_millis(100));
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
-        let input = json!({"field_1": 123, "field_2": "abc"});
-        client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
+        let input_one = json!({"field_1": 123, "field_2": "abc"});
+        client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
         else {
             panic!()
@@ -771,16 +777,42 @@ mod tests {
         assert_eq!(stream, "output");
         assert_eq!(payload, output);
 
-        let input = json!({"field_1": 456});
-        client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
-        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+        let input_two = json!({"field_3": 456, "field_4": "xyz"});
+        client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
 
         let Payload { stream, sequence: 2, payload, .. } =
             data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
         else {
             panic!()
         };
-        let output = json!({"field_1": 456});
+        let output = json!({"field_3": 456, "field_4": "xyz"});
+        assert_eq!(stream, "output");
+        assert_eq!(payload, output);
+
+        let input_one = json!({"field_1": 789, "field_2": "efg"});
+        client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+
+        let input_two = json!({"field_3": 098, "field_4": "zyx"});
+        client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+
+        let Payload { stream, sequence: 3, payload, .. } =
+            data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
+        else {
+            panic!()
+        };
+        let output = json!({"field_1": 789, "field_2": "efg","field_3": 098, "field_4": "zyx"});
         assert_eq!(stream, "output");
         assert_eq!(payload, output);
     }
@@ -790,10 +822,16 @@ mod tests {
         let joins = JoinerConfig {
             output_streams: vec![JoinConfig {
                 name: "output".to_owned(),
-                construct_from: vec![InputConfig {
-                    input_stream: "input".to_owned(),
-                    select_fields: SelectConfig::All,
-                }],
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                ],
                 no_data_action: NoDataAction::PreviousValue,
                 push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
                 publish_on_service_bus: false,
@@ -816,8 +854,8 @@ mod tests {
         sleep(Duration::from_millis(100));
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
-        let input = json!({"field_1": 123, "field_2": "abc"});
-        client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
+        let input_one = json!({"field_1": 123, "field_2": "abc"});
+        client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
         else {
             panic!()
@@ -832,17 +870,31 @@ mod tests {
         assert_eq!(stream, "output");
         assert_eq!(payload, output);
 
+        let input_two = json!({"field_3": 456, "field_4": "xyz"});
+        client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+
         let Payload { stream, sequence: 2, payload, .. } =
             data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
         else {
             panic!()
         };
-        let output = json!({"field_1": 123, "field_2": "abc"});
+        let output = json!({"field_1": 123, "field_2": "abc", "field_3": 456, "field_4": "xyz"});
         assert_eq!(stream, "output");
         assert_eq!(payload, output);
 
-        let input = json!({"field_1": 456});
-        client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
+        let input_one = json!({"field_1": 789, "field_2": "efg"});
+        client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+
+        let input_two = json!({"field_3": 098, "field_4": "zyx"});
+        client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
         else {
             panic!()
@@ -853,7 +905,7 @@ mod tests {
         else {
             panic!()
         };
-        let output = json!({"field_1": 456, "field_2": "abc"});
+        let output = json!({"field_1": 789, "field_2": "efg", "field_3": 098, "field_4": "zyx"});
         assert_eq!(stream, "output");
         assert_eq!(payload, output);
     }
