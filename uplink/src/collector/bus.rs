@@ -439,8 +439,9 @@ mod tests {
         client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
-        sleep(Duration::from_millis(100));
-        let Payload { stream, sequence: 1, payload, .. } = data_rx.try_recv().unwrap() else {
+        let Payload { stream, sequence: 1, payload, .. } =
+            data_rx.recv_timeout(Duration::from_millis(100)).unwrap()
+        else {
             panic!()
         };
         assert_eq!(stream, "as_is");
@@ -485,8 +486,7 @@ mod tests {
             .unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
-        sleep(Duration::from_millis(100));
-        assert_eq!(action_status, status_rx.try_recv().unwrap());
+        assert_eq!(action_status, status_rx.recv_timeout(Duration::from_millis(100)).unwrap());
     }
 
     #[test]
@@ -538,14 +538,17 @@ mod tests {
             .unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
-        sleep(Duration::from_millis(100));
-        let Payload { stream, sequence: 1, payload, .. } = data_rx.try_recv().unwrap() else {
+        let Payload { stream, sequence: 1, payload, .. } =
+            data_rx.recv_timeout(Duration::from_millis(200)).unwrap()
+        else {
             panic!()
         };
         assert_eq!(stream, "output");
         assert_eq!(payload, input_one);
 
-        let Payload { stream, sequence: 2, payload, .. } = data_rx.try_recv().unwrap() else {
+        let Payload { stream, sequence: 2, payload, .. } =
+            data_rx.recv_timeout(Duration::from_millis(100)).unwrap()
+        else {
             panic!()
         };
         assert_eq!(stream, "output");
@@ -572,7 +575,7 @@ mod tests {
                 publish_on_service_bus: false,
             }],
         };
-        let config = BusConfig { port: 1886, joins };
+        let config = BusConfig { port: 1887, joins };
 
         let (data_tx, data_rx) = bounded(1);
         let (status_tx, _status_rx) = bounded(1);
@@ -583,18 +586,20 @@ mod tests {
         let (_actions_tx, actions_rx) = bounded(1);
         spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-        let opt = MqttOptions::new("test", "localhost", 1886);
+        let opt = MqttOptions::new("test", "localhost", 1887);
         let (client, mut conn) = Client::new(opt, 1);
 
         sleep(Duration::from_millis(100));
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
-        sleep(Duration::from_millis(200));
         let input_one = json!({"field_1": 123, "field_2": "abc"});
         client
             .publish("streams/input_one", QoS::AtLeastOnce, false, input_one.to_string())
             .unwrap();
-        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
 
         let input_two = json!({"field_x": 456, "field_y": "xyz"});
         client
@@ -602,8 +607,9 @@ mod tests {
             .unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
-        sleep(Duration::from_millis(1000));
-        let Payload { stream, sequence: 1, payload, .. } = data_rx.try_recv().unwrap() else {
+        let Payload { stream, sequence: 1, payload, .. } =
+            data_rx.recv_timeout(Duration::from_millis(1000)).unwrap()
+        else {
             panic!()
         };
         let output = json!({"field_1": 123, "field_2": "abc", "field_x": 456, "field_y": "xyz"});
@@ -628,7 +634,7 @@ mod tests {
                 publish_on_service_bus: false,
             }],
         };
-        let config = BusConfig { port: 1886, joins };
+        let config = BusConfig { port: 1888, joins };
 
         let (data_tx, data_rx) = bounded(1);
         let (status_tx, _status_rx) = bounded(1);
@@ -639,19 +645,22 @@ mod tests {
         let (_actions_tx, actions_rx) = bounded(1);
         spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-        let opt = MqttOptions::new("test", "localhost", 1886);
+        let opt = MqttOptions::new("test", "localhost", 1888);
         let (client, mut conn) = Client::new(opt, 1);
 
         sleep(Duration::from_millis(100));
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
-        sleep(Duration::from_millis(200));
         let input = json!({"field_1": 123, "field_2": "abc"});
         client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
-        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
 
-        sleep(Duration::from_millis(100));
-        let Payload { stream, sequence: 1, payload, .. } = data_rx.try_recv().unwrap() else {
+        let Payload { stream, sequence: 1, payload, .. } =
+            data_rx.recv_timeout(Duration::from_millis(500)).unwrap()
+        else {
             panic!()
         };
         let output = json!({"field_1": 123});
@@ -685,7 +694,7 @@ mod tests {
                 publish_on_service_bus: false,
             }],
         };
-        let config = BusConfig { port: 1886, joins };
+        let config = BusConfig { port: 1889, joins };
 
         let (data_tx, data_rx) = bounded(1);
         let (status_tx, _status_rx) = bounded(1);
@@ -696,18 +705,20 @@ mod tests {
         let (_actions_tx, actions_rx) = bounded(1);
         spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-        let opt = MqttOptions::new("test", "localhost", 1886);
+        let opt = MqttOptions::new("test", "localhost", 1889);
         let (client, mut conn) = Client::new(opt, 1);
 
         sleep(Duration::from_millis(100));
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
-        sleep(Duration::from_millis(200));
         let input_one = json!({"field_1": 123, "field_2": "abc"});
         client
             .publish("streams/input_one", QoS::AtLeastOnce, false, input_one.to_string())
             .unwrap();
-        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
 
         let input_two = json!({"field_x": 456, "field_y": "xyz"});
         client
@@ -715,8 +726,9 @@ mod tests {
             .unwrap();
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
-        sleep(Duration::from_millis(1000));
-        let Payload { stream, sequence: 1, payload, .. } = data_rx.try_recv().unwrap() else {
+        let Payload { stream, sequence: 1, payload, .. } =
+            data_rx.recv_timeout(Duration::from_millis(1000)).unwrap()
+        else {
             panic!()
         };
         let output = json!({"field_1": 123, "field_x": 456});
@@ -738,7 +750,7 @@ mod tests {
                 publish_on_service_bus: false,
             }],
         };
-        let config = BusConfig { port: 1886, joins };
+        let config = BusConfig { port: 1890, joins };
 
         let (data_tx, data_rx) = bounded(1);
         let (status_tx, _status_rx) = bounded(1);
@@ -749,16 +761,18 @@ mod tests {
         let (_actions_tx, actions_rx) = bounded(1);
         spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-        let opt = MqttOptions::new("test", "localhost", 1886);
+        let opt = MqttOptions::new("test", "localhost", 1890);
         let (client, mut conn) = Client::new(opt, 1);
 
         sleep(Duration::from_millis(100));
         let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
-        sleep(Duration::from_millis(200));
         let input = json!({"field_1": 123, "field_2": "abc"});
         client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
-        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
 
         let Payload { stream, sequence: 1, payload, .. } =
             data_rx.recv_timeout(Duration::from_millis(1000)).unwrap()
