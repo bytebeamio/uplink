@@ -744,7 +744,7 @@ mod tests {
                 publish_on_service_bus: false,
             }],
         };
-        let config = BusConfig { port: 1891, joins };
+        let config = BusConfig { port: 1890, joins };
 
         let (data_tx, data_rx) = bounded(1);
         let (status_tx, _status_rx) = bounded(1);
@@ -755,7 +755,7 @@ mod tests {
         let (_actions_tx, actions_rx) = bounded(1);
         spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-        let opt = MqttOptions::new("test", "localhost", 1891);
+        let opt = MqttOptions::new("test", "localhost", 1890);
         let (client, mut conn) = Client::new(opt, 1);
 
         sleep(Duration::from_millis(100));
