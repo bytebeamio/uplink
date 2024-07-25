@@ -290,9 +290,12 @@ impl Joiner {
     async fn start(mut self) {
         let PushInterval::OnTimeout(period) = self.config.push_interval else {
             loop {
-                if let Err(e) = self.recv_data().await {
-                    error!("{e}");
-                    return;
+                match self.rx.recv_async().await {
+                    Ok((stream_name, json)) => self.update(stream_name, json),
+                    Err(e) => {
+                        error!("{e}");
+                        return;
+                    }
                 }
                 self.send_data().await;
             }
@@ -300,9 +303,14 @@ impl Joiner {
         let mut ticker = interval(period);
         loop {
             select! {
-                Err(e) = self.recv_data() => {
-                    error!("{e}");
-                    return;
+                r = self.rx.recv_async() => {
+                    match r {
+                        Ok((stream_name, json)) => self.update(stream_name, json),
+                        Err(e) => {
+                            error!("{e}");
+                            return;
+                        }
+                    }
                 }
 
                 _ = ticker.tick() => {
@@ -320,8 +328,7 @@ impl Joiner {
         }
     }
 
-    async fn recv_data(&mut self) -> Result<(), Error> {
-        let (stream_name, json) = self.rx.recv_async().await?;
+    fn update(&mut self, stream_name: String, json: Json) {
         if let Some(map) = self.fields.get(&stream_name) {
             for (mut key, value) in json {
                 // drop unenumerated keys from json
@@ -342,8 +349,6 @@ impl Joiner {
                 }
             }
         }
-
-        Ok(())
     }
 
     async fn send_data(&mut self) {
