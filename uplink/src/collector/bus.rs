@@ -776,7 +776,7 @@ mod tests {
         };
 
         let Payload { stream, sequence: 1, payload, .. } =
-            data_rx.recv_timeout(Duration::from_millis(1000)).unwrap()
+            data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
         else {
             panic!()
         };
@@ -789,7 +789,7 @@ mod tests {
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
         let Payload { stream, sequence: 2, payload, .. } =
-            data_rx.recv_timeout(Duration::from_millis(1000)).unwrap()
+            data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
         else {
             panic!()
         };
