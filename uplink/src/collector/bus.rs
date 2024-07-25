@@ -723,4 +723,63 @@ mod tests {
         assert_eq!(stream, "output");
         assert_eq!(payload, output);
     }
+
+    #[test]
+    fn null_after_flush() {
+        let joins = JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![InputConfig {
+                    input_stream: "input".to_owned(),
+                    select_fields: SelectConfig::All,
+                }],
+                no_data_action: NoDataAction::Null,
+                push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
+                publish_on_service_bus: false,
+            }],
+        };
+        let config = BusConfig { port: 1886, joins };
+
+        let (data_tx, data_rx) = bounded(1);
+        let (status_tx, _status_rx) = bounded(1);
+        let bridge_tx = BridgeTx {
+            data_tx: DataTx { inner: data_tx },
+            status_tx: StatusTx { inner: status_tx },
+        };
+        let (_actions_tx, actions_rx) = bounded(1);
+        spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
+
+        let opt = MqttOptions::new("test", "localhost", 1886);
+        let (client, mut conn) = Client::new(opt, 1);
+
+        sleep(Duration::from_millis(100));
+        let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        sleep(Duration::from_millis(200));
+        let input = json!({"field_1": 123, "field_2": "abc"});
+        client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        let Payload { stream, sequence: 1, payload, .. } =
+            data_rx.recv_timeout(Duration::from_millis(1000)).unwrap()
+        else {
+            panic!()
+        };
+        let output = json!({"field_1": 123, "field_2": "abc"});
+        assert_eq!(stream, "output");
+        assert_eq!(payload, output);
+
+        let input = json!({"field_1": 456});
+        client.publish("streams/input", QoS::AtLeastOnce, false, input.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        let Payload { stream, sequence: 2, payload, .. } =
+            data_rx.recv_timeout(Duration::from_millis(1000)).unwrap()
+        else {
+            panic!()
+        };
+        let output = json!({"field_1": 456});
+        assert_eq!(stream, "output");
+        assert_eq!(payload, output);
+    }
 }
