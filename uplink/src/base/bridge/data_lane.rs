@@ -88,7 +88,7 @@ impl DataBridge {
 /// Handle for apps to send action status to bridge
 #[derive(Debug, Clone)]
 pub struct DataTx {
-    pub(crate) inner: Sender<Payload>,
+    pub inner: Sender<Payload>,
 }
 
 impl DataTx {
