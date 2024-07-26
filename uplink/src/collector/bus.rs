@@ -402,7 +402,7 @@ mod tests {
         time::Duration,
     };
 
-    use rumqttc::{Client, Event, MqttOptions, Packet, QoS};
+    use rumqttc::{Client, Event, MqttOptions, Packet, Publish, QoS};
 
     use crate::{
         base::bridge::{DataTx, StatusTx},
@@ -1085,6 +1085,86 @@ mod tests {
         };
         let output = json!({"field_a1": 123, "field_a2": 456, "field_b": "abc", "field_c": "xyz"});
         assert_eq!(stream, "output");
+        assert_eq!(payload, output);
+    }
+
+    #[test]
+    fn publish_joined_stream_back_on_bus() {
+        let joins = JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                ],
+                no_data_action: NoDataAction::Null,
+                push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
+                publish_on_service_bus: true,
+            }],
+        };
+        let config = BusConfig { port: 1894, joins };
+
+        let (data_tx, data_rx) = bounded(1);
+        let (status_tx, _status_rx) = bounded(1);
+        let bridge_tx = BridgeTx {
+            data_tx: DataTx { inner: data_tx },
+            status_tx: StatusTx { inner: status_tx },
+        };
+        let (_actions_tx, actions_rx) = bounded(1);
+        spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
+
+        let opt = MqttOptions::new("test", "localhost", 1894);
+        let (client, mut conn) = Client::new(opt, 1);
+
+        sleep(Duration::from_millis(100));
+        let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
+        client.subscribe("streams/output", QoS::AtMostOnce).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+        let Event::Incoming(Packet::SubAck(_)) =
+            conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+
+        let input_one = json!({"field_1": 123, "field_2": "abc"});
+        client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+
+        let input_two = json!({"field_x": 456, "field_y": "xyz"});
+        client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        let Payload { stream, sequence: 1, payload, .. } =
+            data_rx.recv_timeout(Duration::from_millis(1000)).unwrap()
+        else {
+            panic!()
+        };
+        let output = json!({"field_1": 123, "field_2": "abc", "field_x": 456, "field_y": "xyz"});
+        assert_eq!(stream, "output");
+        assert_eq!(payload, output);
+
+        let Event::Incoming(Packet::Publish(Publish { topic, payload, .. })) =
+            conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+        let mut payload: Value = serde_json::from_slice(&payload).unwrap();
+        let obj = payload.as_object_mut().unwrap();
+        obj.remove("sequence");
+        obj.remove("timestamp");
+        assert_eq!(topic, "streams/output");
         assert_eq!(payload, output);
     }
 }
