@@ -403,6 +403,7 @@ mod tests {
     };
 
     use rumqttc::{Client, Event, MqttOptions, Packet, Publish, QoS};
+    use serde::Deserialize;
 
     use crate::{
         base::bridge::{DataTx, StatusTx},
@@ -1088,6 +1089,8 @@ mod tests {
         assert_eq!(payload, output);
     }
 
+    /// This test is to validate the behavior of the bus when it is configured to push a joined stream back onto the bus.
+    /// In this test the client subscribes to the output stream on the bus, publishes data onto input streams and then expects the joined data back from the bus.
     #[test]
     fn publish_joined_stream_back_on_bus() {
         let joins = JoinerConfig {
@@ -1160,11 +1163,18 @@ mod tests {
         else {
             panic!()
         };
-        let mut payload: Value = serde_json::from_slice(&payload).unwrap();
-        let obj = payload.as_object_mut().unwrap();
-        obj.remove("sequence");
-        obj.remove("timestamp");
-        assert_eq!(topic, "streams/output");
-        assert_eq!(payload, output);
+        {
+            #[derive(Deserialize)]
+            struct Payload {
+                sequence: u32,
+                timestamp: u64,
+                #[serde(flatten)]
+                payload: Value,
+            }
+            let Payload { sequence, payload, .. } = serde_json::from_slice(&payload).unwrap();
+            assert_eq!(topic, "streams/output");
+            assert_eq!(sequence, 1);
+            assert_eq!(payload, output);
+        }
     }
 }
