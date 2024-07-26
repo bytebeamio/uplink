@@ -389,6 +389,14 @@ impl Joiner {
 
 #[cfg(test)]
 mod tests {
+    //! Each test follows a similar structure:
+    //! - Setup Configuration: Define the bus configuration, including join configurations, push intervals, and other parameters.
+    //! - Initialize Channels: Create bounded channels for data and status transmission.
+    //! - Start the Bus: Spawn a new thread to start the bus with the given configuration and channels.
+    //! - Setup MQTT Client: Configure and connect the MQTT client to the bus.
+    //! - Publish Messages: Publish JSON messages to the defined input streams.
+    //! - Receive and Verify: Receive the output messages and verify that they match the expected results.
+
     use std::{
         thread::{sleep, spawn},
         time::Duration,
@@ -404,6 +412,7 @@ mod tests {
 
     use super::*;
 
+    /// This test checks if data published to the input stream is received as-is on the output stream.
     #[test]
     fn as_is_data_from_bus() {
         let joins = JoinerConfig {
@@ -448,6 +457,7 @@ mod tests {
         assert_eq!(payload, input);
     }
 
+    /// This test verifies that action status messages published to the bus are correctly received.
     #[test]
     fn as_is_status_from_bus() {
         let config = BusConfig { port: 1885, joins: JoinerConfig { output_streams: vec![] } };
@@ -489,6 +499,7 @@ mod tests {
         assert_eq!(action_status, status_rx.recv_timeout(Duration::from_millis(100)).unwrap());
     }
 
+    /// This test ensures that data from two different input streams is joined correctly and published to the output stream when new data is received.
     #[test]
     fn join_two_streams_on_new_data_from_bus() {
         let joins = JoinerConfig {
@@ -551,6 +562,7 @@ mod tests {
         assert_eq!(payload, input_two);
     }
 
+    /// This test checks the joining of data from two streams based on a timeout interval, ensuring the correct output even if data is received after the timeout.
     #[test]
     fn join_two_streams_on_timeout_from_bus() {
         let joins = JoinerConfig {
@@ -609,6 +621,7 @@ mod tests {
         assert_eq!(payload, output);
     }
 
+    /// This test validates that only selected fields from an input stream are published to the output stream.
     #[test]
     fn select_from_stream_on_bus() {
         let joins = JoinerConfig {
@@ -660,6 +673,7 @@ mod tests {
         assert_eq!(payload, output);
     }
 
+    /// This test checks that selected fields from two different streams are combined and published correctly to the output stream.
     #[test]
     fn select_from_two_streams_on_bus() {
         let joins = JoinerConfig {
@@ -724,6 +738,7 @@ mod tests {
         assert_eq!(payload, output);
     }
 
+    /// This test verifies that the system correctly handles flushing of streams, ensuring that when no new data arrives, keys are droppped/set to null.
     #[test]
     fn null_after_flush() {
         let joins = JoinerConfig {
@@ -817,6 +832,7 @@ mod tests {
         assert_eq!(payload, output);
     }
 
+    /// This test checks that the system correctly handles data when configured with PreviousValue, ensuring that the last known values are used when no new data arrives.
     #[test]
     fn previous_value_after_flush() {
         let joins = JoinerConfig {
