@@ -925,4 +925,166 @@ mod tests {
         assert_eq!(stream, "output");
         assert_eq!(payload, output);
     }
+
+    /// This test checks how the system handles two input streams that have similar fields without renaming them.
+    /// The expected behavior is to merge the fields, with the latest value for duplicated fields being used.
+    #[test]
+    fn two_streams_with_similar_fields_no_rename() {
+        let joins = JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::Fields(vec![
+                            Field { original: "field_a".to_owned(), renamed: None },
+                            Field { original: "field_b".to_owned(), renamed: None },
+                        ]),
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::Fields(vec![
+                            Field { original: "field_a".to_owned(), renamed: None },
+                            Field { original: "field_c".to_owned(), renamed: None },
+                        ]),
+                    },
+                ],
+                no_data_action: NoDataAction::PreviousValue,
+                push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
+                publish_on_service_bus: false,
+            }],
+        };
+        let config = BusConfig { port: 1892, joins };
+
+        let (data_tx, data_rx) = bounded(1);
+        let (status_tx, _status_rx) = bounded(1);
+        let bridge_tx = BridgeTx {
+            data_tx: DataTx { inner: data_tx },
+            status_tx: StatusTx { inner: status_tx },
+        };
+        let (_actions_tx, actions_rx) = bounded(1);
+        spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
+
+        let opt = MqttOptions::new("test", "localhost", 1892);
+        let (client, mut conn) = Client::new(opt, 1);
+
+        sleep(Duration::from_millis(100));
+        let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        let input_one = json!({"field_a": 123, "field_b": "abc"});
+        client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+
+        let Payload { stream, sequence: 1, payload, .. } =
+            data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
+        else {
+            panic!()
+        };
+        let output = json!({"field_a": 123, "field_b": "abc"});
+        assert_eq!(stream, "output");
+        assert_eq!(payload, output);
+
+        let input_two = json!({"field_a": 456, "field_c": "xyz"});
+        client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+
+        let Payload { stream, sequence: 2, payload, .. } =
+            data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
+        else {
+            panic!()
+        };
+        let output = json!({"field_a": 456, "field_b": "abc", "field_c": "xyz"});
+        assert_eq!(stream, "output");
+        assert_eq!(payload, output);
+    }
+
+    /// This test checks how the system handles two input streams that have similar fields but with renaming to avoid field conflicts.
+    /// The expected behavior is to have the fields renamed as specified and merged into the output.
+    #[test]
+    fn two_streams_with_similar_fields_renamed() {
+        let joins = JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::Fields(vec![
+                            Field {
+                                original: "field_a".to_owned(),
+                                renamed: Some("field_a1".to_owned()),
+                            },
+                            Field { original: "field_b".to_owned(), renamed: None },
+                        ]),
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::Fields(vec![
+                            Field {
+                                original: "field_a".to_owned(),
+                                renamed: Some("field_a2".to_owned()),
+                            },
+                            Field { original: "field_c".to_owned(), renamed: None },
+                        ]),
+                    },
+                ],
+                no_data_action: NoDataAction::PreviousValue,
+                push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
+                publish_on_service_bus: false,
+            }],
+        };
+        let config = BusConfig { port: 1893, joins };
+
+        let (data_tx, data_rx) = bounded(1);
+        let (status_tx, _status_rx) = bounded(1);
+        let bridge_tx = BridgeTx {
+            data_tx: DataTx { inner: data_tx },
+            status_tx: StatusTx { inner: status_tx },
+        };
+        let (_actions_tx, actions_rx) = bounded(1);
+        spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
+
+        let opt = MqttOptions::new("test", "localhost", 1893);
+        let (client, mut conn) = Client::new(opt, 1);
+
+        sleep(Duration::from_millis(100));
+        let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        let input_one = json!({"field_a": 123, "field_b": "abc"});
+        client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+
+        let Payload { stream, sequence: 1, payload, .. } =
+            data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
+        else {
+            panic!()
+        };
+        let output = json!({"field_a1": 123, "field_b": "abc"});
+        assert_eq!(stream, "output");
+        assert_eq!(payload, output);
+
+        let input_two = json!({"field_a": 456, "field_c": "xyz"});
+        client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+        let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+
+        let Payload { stream, sequence: 2, payload, .. } =
+            data_rx.recv_timeout(Duration::from_secs(2)).unwrap()
+        else {
+            panic!()
+        };
+        let output = json!({"field_a1": 123, "field_a2": 456, "field_b": "abc", "field_c": "xyz"});
+        assert_eq!(stream, "output");
+        assert_eq!(payload, output);
+    }
 }
