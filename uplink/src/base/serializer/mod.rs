@@ -665,7 +665,7 @@ fn construct_publish(
 
 // Writes the provided publish packet to [Storage], after setting its pkid to 1.
 // If the write buffer is full, it is flushed/written onto disk based on config.
-fn write_to_storage(
+pub fn write_to_storage(
     mut publish: Publish,
     storage: &mut Storage,
 ) -> Result<Option<u64>, storage::Error> {
@@ -863,7 +863,7 @@ impl CtrlTx {
 // - Restart with no internet but files on disk
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use serde_json::Value;
     use tokio::{spawn, time::sleep};
 
@@ -931,7 +931,7 @@ mod test {
         }
     }
 
-    fn default_config() -> Config {
+    pub fn default_config() -> Config {
         Config {
             broker: "localhost".to_owned(),
             port: 1883,
@@ -942,7 +942,7 @@ mod test {
         }
     }
 
-    fn defaults(
+    pub fn defaults(
         config: Arc<Config>,
     ) -> (Serializer<MockClient>, Sender<Box<dyn Package>>, Receiver<Request>) {
         let (data_tx, data_rx) = bounded(1);
@@ -961,12 +961,12 @@ mod test {
         Base(#[from] crate::base::bridge::stream::Error),
     }
 
-    struct MockCollector {
+    pub struct MockCollector {
         stream: Stream<Payload>,
     }
 
     impl MockCollector {
-        fn new(
+        pub fn new(
             stream_name: &str,
             stream_config: StreamConfig,
             data_tx: Sender<Box<dyn Package>>,
@@ -974,7 +974,7 @@ mod test {
             MockCollector { stream: Stream::new(stream_name, stream_config, data_tx) }
         }
 
-        async fn send(&mut self, i: u32) -> Result<(), Error> {
+        pub async fn send(&mut self, i: u32) -> Result<(), Error> {
             let payload = Payload {
                 stream: Default::default(),
                 sequence: i,
