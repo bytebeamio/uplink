@@ -865,7 +865,7 @@ impl CtrlTx {
 #[cfg(test)]
 mod test {
     use serde_json::Value;
-    use tokio::spawn;
+    use tokio::{spawn, time::sleep};
 
     use crate::{
         base::bridge::{stream::Stream, Payload},
@@ -974,29 +974,31 @@ mod test {
             MockCollector { stream: Stream::new(stream_name, stream_config, data_tx) }
         }
 
-        fn send(&mut self, i: u32) -> Result<(), Error> {
+        async fn send(&mut self, i: u32) -> Result<(), Error> {
             let payload = Payload {
                 stream: Default::default(),
                 sequence: i,
                 timestamp: 0,
                 payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}")?,
             };
-            self.stream.push(payload)?;
+            self.stream.fill(payload).await?;
 
             Ok(())
         }
     }
 
-    #[test]
+    #[tokio::test]
     // Force runs serializer in normal mode, without persistence
-    fn normal_to_slow() {
+    async fn normal_to_slow() {
         let config = default_config();
         let (mut serializer, data_tx, net_rx) = defaults(Arc::new(config));
 
         // Slow Network, takes packets only once in 10s
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(10));
-            net_rx.recv().unwrap();
+        spawn(async move {
+            loop {
+                sleep(Duration::from_secs(10)).await;
+                net_rx.recv_async().await.unwrap();
+            }
         });
 
         let (stream_name, stream_config) = (
@@ -1004,13 +1006,13 @@ mod test {
             StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
         );
         let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
-        std::thread::spawn(move || {
+        spawn(async move {
             for i in 1..3 {
-                collector.send(i).unwrap();
+                collector.send(i).await.unwrap();
             }
         });
 
-        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.normal()).unwrap() {
+        match serializer.normal().await.unwrap() {
             Status::SlowEventloop(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }, _) => {
                 assert_eq!(topic, "hello/world");
                 let recvd: Value = serde_json::from_slice(&payload).unwrap();
@@ -1044,17 +1046,19 @@ mod test {
         assert_eq!(publish, stored_publish);
     }
 
-    #[test]
+    #[tokio::test]
     // Force runs serializer in disk mode, with network returning
-    fn disk_to_catchup() {
+    async fn disk_to_catchup() {
         let config = Arc::new(default_config());
 
         let (mut serializer, data_tx, net_rx) = defaults(config);
 
         // Slow Network, takes packets only once in 10s
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(5));
-            net_rx.recv().unwrap();
+        spawn(async move {
+            loop {
+                sleep(Duration::from_secs(5)).await;
+                net_rx.recv_async().await.unwrap();
+            }
         });
 
         let (stream_name, stream_config) = (
@@ -1063,10 +1067,10 @@ mod test {
         );
         let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Faster collector, send data every 5s
-        std::thread::spawn(move || {
+        spawn(async move {
             for i in 1..10 {
-                collector.send(i).unwrap();
-                std::thread::sleep(Duration::from_secs(3));
+                collector.send(i).await.unwrap();
+                sleep(Duration::from_secs(3)).await;
             }
         });
 
@@ -1075,17 +1079,14 @@ mod test {
             QoS::AtLeastOnce,
             "[{{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}}]".as_bytes(),
         );
-        let status = tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(serializer.slow(publish, Arc::new(Default::default())))
-            .unwrap();
+        let status = serializer.slow(publish, Arc::new(Default::default())).await.unwrap();
 
         assert_eq!(status, Status::EventLoopReady);
     }
 
-    #[test]
+    #[tokio::test]
     // Force runs serializer in disk mode, with crashed network
-    fn disk_to_crash() {
+    async fn disk_to_crash() {
         let config = Arc::new(default_config());
         let (mut serializer, data_tx, _) = defaults(config);
 
@@ -1095,10 +1096,10 @@ mod test {
         );
         let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Faster collector, send data every 5s
-        std::thread::spawn(move || {
+        spawn(async move {
             for i in 1..10 {
-                collector.send(i).unwrap();
-                std::thread::sleep(Duration::from_secs(3));
+                collector.send(i).await.unwrap();
+                sleep(Duration::from_secs(3)).await;
             }
         });
 
@@ -1108,12 +1109,12 @@ mod test {
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
 
-        match tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(serializer.slow(
+        match serializer
+            .slow(
                 publish,
                 Arc::new(StreamConfig { topic: "hello/world".to_string(), ..Default::default() }),
-            ))
+            )
+            .await
             .unwrap()
         {
             Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }, _) => {
@@ -1125,21 +1126,20 @@ mod test {
         }
     }
 
-    #[test]
+    #[tokio::test]
     // Force runs serializer in catchup mode, with empty persistence
-    fn catchup_to_normal_empty_persistence() {
+    async fn catchup_to_normal_empty_persistence() {
         let config = Arc::new(default_config());
 
         let (mut serializer, _, _) = defaults(config);
 
-        let status =
-            tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap();
+        let status = serializer.catchup().await.unwrap();
         assert_eq!(status, Status::Normal);
     }
 
-    #[test]
+    #[tokio::test]
     // Force runs serializer in catchup mode, with data already in persistence
-    fn catchup_to_normal_with_persistence() {
+    async fn catchup_to_normal_with_persistence() {
         let config = Arc::new(default_config());
 
         let (mut serializer, data_tx, net_rx) = defaults(config);
@@ -1156,18 +1156,18 @@ mod test {
         );
         let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Run a collector practically once
-        std::thread::spawn(move || {
+        spawn(async move {
             for i in 2..6 {
-                collector.send(i).unwrap();
-                std::thread::sleep(Duration::from_secs(100));
+                collector.send(i).await.unwrap();
+                sleep(Duration::from_secs(100)).await;
             }
         });
 
         // Decent network that lets collector push data once into storage
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(5));
+        spawn(async move {
+            sleep(Duration::from_secs(5)).await;
             for i in 1..6 {
-                match net_rx.recv().unwrap() {
+                match net_rx.recv_async().await.unwrap() {
                     Request::Publish(Publish { payload, .. }) => {
                         let recvd = String::from_utf8(payload.to_vec()).unwrap();
                         let expected = format!(
@@ -1188,14 +1188,13 @@ mod test {
         );
         write_to_storage(publish.clone(), &mut storage).unwrap();
 
-        let status =
-            tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap();
+        let status = serializer.catchup().await.unwrap();
         assert_eq!(status, Status::Normal);
     }
 
-    #[test]
+    #[tokio::test]
     // Force runs serializer in catchup mode, with persistence and crashed network
-    fn catchup_to_crash_with_persistence() {
+    async fn catchup_to_crash_with_persistence() {
         let config = Arc::new(default_config());
 
         let (mut serializer, data_tx, _) = defaults(config);
@@ -1215,10 +1214,10 @@ mod test {
         );
         let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
         // Run a collector
-        std::thread::spawn(move || {
+        spawn(async move {
             for i in 2..6 {
-                collector.send(i).unwrap();
-                std::thread::sleep(Duration::from_secs(10));
+                collector.send(i).await.unwrap();
+                sleep(Duration::from_secs(10)).await;
             }
         });
 
@@ -1230,7 +1229,7 @@ mod test {
         );
         write_to_storage(publish.clone(), &mut storage).unwrap();
 
-        match tokio::runtime::Runtime::new().unwrap().block_on(serializer.catchup()).unwrap() {
+        match serializer.catchup().await.unwrap() {
             Status::EventLoopCrash(Publish { topic, payload, .. }, _) => {
                 assert_eq!(topic, "hello/world");
                 let recvd = std::str::from_utf8(&payload).unwrap();
