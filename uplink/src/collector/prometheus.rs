@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use log::error;
 use reqwest::{Client, Method};
@@ -44,9 +44,9 @@ impl Prometheus {
 
     async fn query(&self) -> Result<(), Error> {
         let resp = self.client.request(Method::GET, &self.config.endpoint).send().await?;
-        let lines: Vec<_> = resp.text().await?.lines().map(|s| s.to_owned()).collect();
+        let text = resp.text().await?;
 
-        for payload in read_prom(lines) {
+        for payload in read_prom(&text) {
             self.tx.send_payload(payload).await;
         }
 
@@ -54,8 +54,11 @@ impl Prometheus {
     }
 }
 
-fn read_prom(lines: Vec<String>) -> Vec<Payload> {
-    let mut payloads = vec![];
+fn read_prom(text: &str) -> Vec<Payload> {
+    let mut groups = HashMap::new();
+    let mut ungrouped = HashMap::new();
+
+    let lines = text.lines();
     for line in lines {
         let line = line.trim();
         // skip the line that starts with #
@@ -63,18 +66,75 @@ fn read_prom(lines: Vec<String>) -> Vec<Payload> {
             continue;
         }
 
-        // split the line by space
-        let tokens = &mut line.split_whitespace();
-        if let Some(p) = frame_payload(tokens) {
-            payloads.push(p);
+        // If metrics have same label, e.g. {node=1,io=0},
+        // then we will group them together.
+        // if there are no labels, each line will be treated as new Payload
+        if let Some((label, name, value)) = frame_metric(line) {
+            if let Some(label) = label {
+                groups.entry(label).or_insert_with(Map::new).insert(name, json!(value));
+            } else {
+                let mut m = serde_json::Map::new();
+                m.insert(name.clone(), json!(value));
+                ungrouped.insert(name, m);
+            }
         }
     }
 
-    payloads
+    groups
+        .into_iter()
+        .map(|(label, mut payload)| {
+            let mut node_and_id = create_map(&label);
+
+            // check if node_and_id contains io or compute
+            // and determine stream name based on it!
+            let stream = if node_and_id.contains_key("io_id") {
+                "io_metrics"
+            } else if node_and_id.contains_key("compute_id") {
+                "compute_metrics"
+            } else {
+                // TODO: add list of other modules
+                // - what shall be the behaviour if none of the modules match?
+                // - can we get this from config?
+                "metrics"
+            };
+
+            payload.append(&mut node_and_id);
+
+            (stream.to_owned(), payload)
+        })
+        .chain(ungrouped)
+        .map(|(stream, payload)| Payload {
+            stream,
+            sequence: 0,
+            timestamp: clock() as u64,
+            payload: payload.into(),
+        })
+        .collect()
+}
+
+fn frame_metric(line: &str) -> Option<(Option<String>, String, f64)> {
+    let mut tokens = line.split_whitespace();
+    let metric_and_labels = tokens.next()?;
+    let value = tokens.next()?.parse().ok()?;
+
+    let mut metric_iter = metric_and_labels.split('{');
+    let metric_name = metric_iter.next()?.to_owned();
+
+    let labels = metric_iter.next().map(|m| m.trim_end_matches('}').to_owned());
+
+    // NOTE: as we are grouping metrics, timestamps will be discarded!
+    // we are discarding even if label isn't there ( no grouping )
+    // to be consistent
+    // if let Some(timestamp) = tokens.next() {
+    //     let timestamp = timestamp.parse::<u64>().ok()?;
+    //     payload.timestamp = timestamp;
+    // }
+
+    Some((labels, metric_name, value))
 }
 
 // Create a function with impl Iterator over &str
-fn frame_payload<'a>(mut line: impl Iterator<Item = &'a str>) -> Option<Payload> {
+fn _frame_payload<'a>(mut line: impl Iterator<Item = &'a str>) -> Option<Payload> {
     // split at the first { to get stream and payload
     let stream_and_payload = line.next()?;
 
@@ -111,6 +171,7 @@ fn create_map(line: &str) -> Map<String, Value> {
     for item in v {
         let parts: Vec<&str> = item.split('=').collect();
         if parts.len() == 2 {
+            // NOTE: shall we strip quotes (") from parts[1]?
             map.insert(parts[0].to_string(), json!(parts[1]));
         }
     }
@@ -120,7 +181,44 @@ fn create_map(line: &str) -> Map<String, Value> {
 
 #[cfg(test)]
 mod test {
-    use super::frame_payload;
+    use super::{_frame_payload, read_prom};
+
+    #[test]
+    fn ghz_metrics() {
+        let scrape = r#"
+            # HELP metrics_ghz_active_connections Number of current active connections.
+            # TYPE metrics_ghz_active_connections gauge
+            metrics_ghz_active_connections{io_id="0"} 0
+            # HELP metrics_ghz_incoming_data Total incoming data processed.
+            # TYPE metrics_ghz_incoming_data counter
+            metrics_ghz_incoming_data_total{io_id="0"} 143900
+            # HELP metrics_ghz_incoming_publish Total incoming publish packets.
+            # TYPE metrics_ghz_incoming_publish counter
+            metrics_ghz_incoming_publish_total{io_id="0"} 90
+            # HELP metrics_ghz_incoming_data_throughput Throughput of incoming data processed by IO.
+            # TYPE metrics_ghz_incoming_data_throughput gauge
+            metrics_ghz_incoming_data_throughput{io_id="0"} 0.0
+            # HELP metrics_ghz_outgoing_data Total outgoing data processed.
+            # TYPE metrics_ghz_outgoing_data counter
+            metrics_ghz_outgoing_data_total{io_id="0"} 1080
+            # HELP metrics_ghz_outgoing_data_throughput Throughput of outgoing data processed by IO.
+            # TYPE metrics_ghz_outgoing_data_throughput gauge
+            metrics_ghz_outgoing_data_throughput{io_id="0"} 0.0
+            # HELP metrics_ghz_compute_data_processed Total data processed by compute.
+            # TYPE metrics_ghz_compute_data_processed counter
+            metrics_ghz_compute_data_processed_total{compute_id="0"} 0
+            metrics_ghz_compute_data_processed_total{compute_id="1"} 0
+            # HELP metrics_ghz_compute_data_throughput Throughput of data processed by compute.
+            # TYPE metrics_ghz_compute_data_throughput gauge
+            metrics_ghz_compute_data_throughput{compute_id="1"} 0.0
+            metrics_ghz_compute_data_throughput{compute_id="0"} 0.0
+            # HELP metrics_ghz_storage_data_processed Total data processed by storage.
+            # TYPE metrics_ghz_storage_data_processed counter
+            metrics_ghz_storage_data_processed_total 156463
+            # EOF
+        "#;
+        dbg!(read_prom(scrape));
+    }
 
     #[test]
     fn parse_prom_to_payload() {
@@ -199,7 +297,7 @@ mod test {
 
             // split the line by space
             let tokens = &mut line.split_whitespace();
-            let payload = frame_payload(tokens).unwrap();
+            let payload = _frame_payload(tokens).unwrap();
 
             dbg!(&payload);
         }
