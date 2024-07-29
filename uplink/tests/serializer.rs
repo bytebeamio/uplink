@@ -13,11 +13,12 @@ use uplink::{
     base::{
         bridge::Payload,
         serializer::{
-            test::{default_config, defaults, MockCollector},
+            tests::{default_config, defaults},
             write_to_storage,
         },
     },
     config::{Persistence, StreamConfig},
+    mock::MockCollector,
     Storage,
 };
 
