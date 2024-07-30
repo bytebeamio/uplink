@@ -75,8 +75,3 @@ vergen = { version = "7", features = ["git", "build", "time"] }
 
 [dev-dependencies]
 tempdir = { workspace = true }
-
-[[test]]
-name = "serializer"
-path = "tests/serializer.rs"
-required-features = ["test"]

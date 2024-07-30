@@ -863,7 +863,7 @@ impl CtrlTx {
 // - Restart with no internet but files on disk
 
 #[cfg(test)]
-pub mod test {
+pub mod tests {
     use serde_json::Value;
     use tokio::{spawn, time::sleep};
 

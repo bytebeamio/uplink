@@ -1,24 +1,17 @@
 use std::thread::spawn;
 
-use flume::{bounded, Receiver};
+use flume::bounded;
 use uplink::{
     base::bridge::{BridgeTx, DataTx, StatusTx},
     collector::script_runner::ScriptRunner,
     Action, ActionResponse,
 };
 
-fn create_bridge() -> (BridgeTx, Receiver<ActionResponse>) {
-    let (inner, _) = bounded(2);
-    let data_tx = DataTx { inner };
-    let (inner, status_rx) = bounded(2);
-    let status_tx = StatusTx { inner };
-
-    (BridgeTx { data_tx, status_tx }, status_rx)
-}
-
 #[test]
 fn empty_payload() {
-    let (bridge_tx, status_rx) = create_bridge();
+    let (tx, _) = bounded(2);
+    let (inner, status_rx) = bounded(2);
+    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: StatusTx { inner } };
 
     let (actions_tx, actions_rx) = bounded(1);
     let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
@@ -39,7 +32,9 @@ fn empty_payload() {
 
 #[test]
 fn missing_path() {
-    let (bridge_tx, status_rx) = create_bridge();
+    let (tx, _) = bounded(2);
+    let (inner, status_rx) = bounded(2);
+    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: StatusTx { inner } };
 
     let (actions_tx, actions_rx) = bounded(1);
     let script_runner = ScriptRunner::new(actions_rx, bridge_tx);

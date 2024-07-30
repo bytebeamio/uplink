@@ -1,33 +1,30 @@
-use std::{
-    fs::{create_dir_all, remove_dir_all},
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
+use std::{fs::create_dir_all, path::PathBuf, sync::Arc, time::Duration};
 
 use bytes::Bytes;
+use flume::bounded;
 use rumqttc::{Publish, QoS, Request};
+use tempdir::TempDir;
 use tokio::spawn;
 
 use uplink::{
     base::{
         bridge::Payload,
-        serializer::{
-            tests::{default_config, defaults},
-            write_to_storage,
-        },
+        serializer::{write_to_storage, Serializer},
     },
-    config::{Persistence, StreamConfig},
-    mock::MockCollector,
+    config::{Config, Persistence, StreamConfig},
+    mock::{MockClient, MockCollector},
     Storage,
 };
 
 #[tokio::test]
 // Ensures that the data of streams are removed based on preference
 async fn preferential_send_on_network() {
-    let mut config = default_config();
+    let temp_dir = TempDir::new("preferential_send").unwrap();
+    let mut config = Config::default();
+    config.default_buf_size = 1024 * 1024;
+    config.mqtt.max_packet_size = 1024 * 1024;
     config.stream_metrics.timeout = Duration::from_secs(1000);
-    config.persistence_path = PathBuf::from(".tmp.serializer_test");
+    config.persistence_path = PathBuf::from(temp_dir.path());
     let persistence = Persistence { max_file_size: 1024 * 1024, max_file_count: 1 };
     config.streams.extend([
         (
@@ -103,10 +100,14 @@ async fn preferential_send_on_network() {
     write_to_storage(publish("topic/top".to_string(), 2), &mut top).unwrap();
     top.flush().unwrap();
 
-    // start serializer in the background
     let config = Arc::new(config);
-    let (serializer, data_tx, req_rx) = defaults(config);
+    let (data_tx, data_rx) = bounded(1);
+    let (net_tx, req_rx) = bounded(1);
+    let (metrics_tx, _metrics_rx) = bounded(1);
+    let client = MockClient { net_tx };
+    let serializer = Serializer::new(config, data_rx, client, metrics_tx).unwrap();
 
+    // start serializer in the background
     spawn(async { serializer.start().await.unwrap() });
 
     let mut default = MockCollector::new(
@@ -165,6 +166,4 @@ async fn preferential_send_on_network() {
     };
     assert_eq!(topic, "topic/default");
     assert_eq!(payload, "[{\"sequence\":7,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
-
-    remove_dir_all(".tmp.serializer_test").unwrap();
 }

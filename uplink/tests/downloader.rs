@@ -1,51 +1,26 @@
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
 
-use flume::{bounded, Receiver};
+use flume::bounded;
 use serde_json::json;
 use tempdir::TempDir;
+
 use uplink::{
-    base::bridge::BridgeTx,
+    base::bridge::{BridgeTx, DataTx, StatusTx},
     collector::downloader::{DownloadFile, FileDownloader},
-    config::{Config, DownloaderConfig},
-    Action, ActionResponse,
+    config::{ActionRoute, Config, DownloaderConfig},
+    Action,
 };
-
-use uplink::{
-    base::bridge::{DataTx, StatusTx},
-    config::{ActionRoute, MqttConfig},
-};
-
-fn config(downloader: DownloaderConfig) -> Config {
-    Config {
-        broker: "localhost".to_owned(),
-        port: 1883,
-        device_id: "123".to_owned(),
-        streams: HashMap::new(),
-        mqtt: MqttConfig { max_packet_size: 1024 * 1024, ..Default::default() },
-        downloader,
-        ..Default::default()
-    }
-}
-
-fn create_bridge() -> (BridgeTx, Receiver<ActionResponse>) {
-    let (inner, _) = bounded(2);
-    let data_tx = DataTx { inner };
-    let (inner, status_rx) = bounded(2);
-    let status_tx = StatusTx { inner };
-
-    (BridgeTx { data_tx, status_tx }, status_rx)
-}
 
 // Prepare config
 fn test_config(temp_dir: &Path, test_name: &str) -> Config {
     let mut path = PathBuf::from(temp_dir);
     path.push(test_name);
-    let downloader_cfg = DownloaderConfig {
+    let mut config = Config::default();
+    config.downloader = DownloaderConfig {
         actions: vec![ActionRoute {
             name: "firmware_update".to_owned(),
             timeout: Duration::from_secs(10),
@@ -53,7 +28,8 @@ fn test_config(temp_dir: &Path, test_name: &str) -> Config {
         }],
         path,
     };
-    config(downloader_cfg.clone())
+
+    config
 }
 
 #[test]
@@ -62,7 +38,10 @@ fn download_file() {
     let temp_dir = TempDir::new("download_file").unwrap();
     let config = test_config(temp_dir.path(), "download_file");
     let mut downloader_path = config.downloader.path.clone();
-    let (bridge_tx, status_rx) = create_bridge();
+
+    let (tx, _) = bounded(2);
+    let (inner, status_rx) = bounded(2);
+    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: StatusTx { inner } };
 
     // Create channels to forward and push actions on
     let (download_tx, download_rx) = bounded(1);
@@ -128,7 +107,10 @@ fn download_file() {
 fn checksum_of_file() {
     let temp_dir = TempDir::new("file_checksum").unwrap();
     let config = test_config(temp_dir.path(), "file_checksum");
-    let (bridge_tx, status_rx) = create_bridge();
+
+    let (tx, _) = bounded(2);
+    let (inner, status_rx) = bounded(2);
+    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: StatusTx { inner } };
 
     // Create channels to forward and push action_status on
     let (download_tx, download_rx) = bounded(1);
