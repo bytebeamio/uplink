@@ -30,8 +30,6 @@ pub enum Error {
     Link(#[from] rumqttd::local::LinkError),
     #[error("Parse error: {0}")]
     Parse(#[from] std::net::AddrParseError),
-    #[error("Rumqttd error: {0}")]
-    Rumqttd(#[from] rumqttd::Error),
     #[error("Recv error: {0}")]
     Recv(#[from] flume::RecvError),
 }
@@ -53,7 +51,7 @@ impl ServiceBusRx<Publish> for BusRx {
 
     async fn recv_async(&mut self) -> Option<Publish> {
         loop {
-            return match self.rx.recv_async().await {
+            return match self.rx.next().await {
                 Ok(Some(Notification::Forward(Forward { publish, .. }))) => Some(publish),
                 Err(_) => None,
                 _ => continue,
