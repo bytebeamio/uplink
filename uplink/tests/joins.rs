@@ -1,3 +1,4 @@
+#![cfg(feature = "bus")]
 //! Each test follows a similar structure:
 //! - Setup Configuration: Define the bus configuration, including join configurations, push intervals, and other parameters.
 //! - Initialize Channels: Create bounded channels for data and status transmission.

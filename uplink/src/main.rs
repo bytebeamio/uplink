@@ -18,10 +18,11 @@ use tracing_subscriber::{EnvFilter, Registry};
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
+#[cfg(feature = "bus")]
 use uplink::collector::bus::Bus;
-use uplink::config::{
-    ActionRoute, AppConfig, Config, StreamConfig, DEFAULT_TIMEOUT, MAX_BATCH_SIZE,
-};
+#[cfg(feature = "bus")]
+use uplink::config::{ActionRoute, DEFAULT_TIMEOUT};
+use uplink::config::{AppConfig, Config, StreamConfig, MAX_BATCH_SIZE};
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
 const DEFAULT_CONFIG: &str = r#"
@@ -331,6 +332,7 @@ fn main() -> Result<(), Error> {
         _ => None,
     };
 
+    #[cfg(feature = "bus")]
     let bus = config.bus.as_ref().map(|cfg| {
         let actions_rx = bridge
             .register_action_routes([ActionRoute {
@@ -347,6 +349,7 @@ fn main() -> Result<(), Error> {
     let network_up = Arc::new(Mutex::new(false));
     let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone(), network_up.clone())?;
 
+    #[cfg(feature = "bus")]
     if let Some(bus) = bus {
         spawn_named_thread("Bus Interface", move || bus.start())
     };

@@ -569,7 +569,7 @@ impl ActionRouter {
 /// Handle for apps to send action status to bridge
 #[derive(Debug, Clone)]
 pub struct StatusTx {
-    pub(crate) inner: Sender<ActionResponse>,
+    pub inner: Sender<ActionResponse>,
 }
 
 impl StatusTx {
