@@ -103,7 +103,7 @@ impl PartialOrd for StreamConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Copy, Clone, Deserialize, PartialEq, Eq, PartialOrd)]
 pub struct Persistence {
     #[serde(default = "default_file_size")]
     pub max_file_size: usize,

@@ -8,10 +8,10 @@ mod actions_lane;
 mod data_lane;
 mod delaymap;
 mod metrics;
-pub(crate) mod stream;
+pub mod stream;
 mod streams;
 
-use actions_lane::{ActionsBridge, Error};
+pub use actions_lane::{ActionsBridge, Error};
 pub use actions_lane::{CtrlTx as ActionsLaneCtrlTx, StatusTx};
 use data_lane::DataBridge;
 pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};

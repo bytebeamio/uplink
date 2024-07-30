@@ -51,6 +51,7 @@ use log::error;
 pub mod base;
 pub mod collector;
 pub mod config;
+pub mod mock;
 
 use self::config::{ActionRoute, Config};
 pub use base::actions::{Action, ActionResponse};
