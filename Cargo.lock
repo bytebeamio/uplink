@@ -906,6 +906,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixedbitset"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
+
+[[package]]
 name = "flume"
 version = "0.10.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1394,19 +1400,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hyper-tls"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
-dependencies = [
- "bytes 1.5.0",
- "hyper 0.14.28",
- "native-tls",
- "tokio 1.36.0",
- "tokio-native-tls 0.3.1",
-]
-
-[[package]]
 name = "hyper-util"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1693,7 +1686,6 @@ checksum = "9bf4e7146e30ad172c42c39b3246864bd2d3c6396780711a1baf749cfe423e21"
 dependencies = [
  "base64 0.21.7",
  "hyper 0.14.28",
- "hyper-tls",
  "indexmap 2.2.2",
  "ipnet",
  "metrics",
@@ -1701,7 +1693,6 @@ dependencies = [
  "quanta",
  "thiserror",
  "tokio 1.36.0",
- "tracing",
 ]
 
 [[package]]
@@ -2718,9 +2709,10 @@ dependencies = [
 [[package]]
 name = "rumqttc"
 version = "0.24.0"
-source = "git+https://github.com/bytebeamio/rumqtt#c5bfdd74a535cadd518c12f7667e64f1ec68858c"
+source = "git+https://github.com/bytebeamio/rumqtt#11d2e97428746d3e4c24880555615c867fa46f70"
 dependencies = [
  "bytes 1.5.0",
+ "fixedbitset",
  "flume 0.11.0",
  "futures-util",
  "log",
@@ -2737,7 +2729,7 @@ dependencies = [
 [[package]]
 name = "rumqttd"
 version = "0.19.0"
-source = "git+https://github.com/bytebeamio/rumqtt?branch=uplink-changes#c2345ccf70f040b03d1499a9e97f8d959fa128b8"
+source = "git+https://github.com/bytebeamio/rumqtt#11d2e97428746d3e4c24880555615c867fa46f70"
 dependencies = [
  "axum 0.7.5",
  "bytes 1.5.0",
@@ -3720,16 +3712,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-native-tls"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
-dependencies = [
- "native-tls",
- "tokio 1.36.0",
-]
-
-[[package]]
 name = "tokio-rustls"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3991,7 +3973,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio 0.2.25",
- "tokio-native-tls 0.1.0",
+ "tokio-native-tls",
  "tokio-rustls 0.13.1",
  "tokio-util 0.3.1",
  "tunshell-shared",
@@ -4024,8 +4006,8 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.0",
- "rand 0.8.5",
+ "cfg-if 0.1.10",
+ "rand 0.4.6",
  "static_assertions",
 ]
 

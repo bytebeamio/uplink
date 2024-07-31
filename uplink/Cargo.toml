@@ -8,7 +8,7 @@ edition = "2021"
 bytes = { workspace = true }
 flume = { workspace = true }
 rumqttc = { workspace = true }
-rumqttd = { git = "https://github.com/bytebeamio/rumqtt", branch = "uplink-changes", default-features = false, optional = true }
+rumqttd = { git = "https://github.com/bytebeamio/rumqtt", default-features = false, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = "3.3.0"
