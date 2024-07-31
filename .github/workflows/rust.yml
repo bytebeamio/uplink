@@ -2,13 +2,13 @@ name: Rust
 
 on:
   push:
-    branches: [ main, next ]
+    branches: [main, next]
   pull_request:
-    branches: [ main, next ]
+    branches: [main, next]
 
 jobs:
   clippy:
-    name: Clippy on linux x86
+    name: Test on linux x86
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -17,7 +17,7 @@ jobs:
         env:
           RUSTFLAGS: "-D warnings"
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --verbose --all-features
 
   clippy-android:
     name: Clippy on android aarch64
@@ -37,4 +37,3 @@ jobs:
           RUST_FLAGS: "-D warnings"
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
-
