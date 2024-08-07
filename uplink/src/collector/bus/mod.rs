@@ -12,10 +12,7 @@ use serde_json::{Map, Value};
 use tokio::select;
 
 use crate::{
-    base::{
-        bridge::{BridgeTx, Payload},
-        ServiceBusRx, ServiceBusTx,
-    },
+    base::bridge::{BridgeTx, Payload},
     config::BusConfig,
     spawn_named_thread, Action,
 };
@@ -38,17 +35,7 @@ pub struct BusRx {
     rx: LinkRx,
 }
 
-impl ServiceBusRx<Publish> for BusRx {
-    fn recv(&mut self) -> Option<Publish> {
-        loop {
-            return match self.rx.recv() {
-                Ok(Some(Notification::Forward(Forward { publish, .. }))) => Some(publish),
-                Err(_) => None,
-                _ => continue,
-            };
-        }
-    }
-
+impl BusRx {
     async fn recv_async(&mut self) -> Option<Publish> {
         loop {
             return match self.rx.next().await {
@@ -64,20 +51,10 @@ pub struct BusTx {
     tx: LinkTx,
 }
 
-impl ServiceBusTx for BusTx {
-    type Error = Error;
-
-    fn publish_data(&mut self, data: Payload) -> Result<(), Self::Error> {
+impl BusTx {
+    fn publish_data(&mut self, data: Payload) -> Result<(), Error> {
         let topic = format!("streams/{}", data.stream);
         let payload = serde_json::to_vec(&data)?;
-        self.tx.publish(topic, payload)?;
-
-        Ok(())
-    }
-
-    fn update_action_status(&mut self, status: crate::ActionResponse) -> Result<(), Self::Error> {
-        let topic = "streams/action_status".to_owned();
-        let payload = serde_json::to_vec(&status)?;
         self.tx.publish(topic, payload)?;
 
         Ok(())
@@ -86,7 +63,7 @@ impl ServiceBusTx for BusTx {
     fn subscribe_to_streams(
         &mut self,
         streams: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), Error> {
         for stream in streams {
             let filter = format!("streams/{}", stream.into());
             self.tx.subscribe(filter)?;
@@ -96,21 +73,7 @@ impl ServiceBusTx for BusTx {
         Ok(())
     }
 
-    fn register_action(&mut self, name: impl Into<String>) -> Result<(), Self::Error> {
-        let filter = format!("actions/{}", name.into());
-        self.tx.subscribe(filter)?;
-
-        Ok(())
-    }
-
-    fn deregister_action(&mut self, name: impl Into<String>) -> Result<(), Self::Error> {
-        let filter = format!("actions/{}", name.into());
-        self.tx.unsubscribe(filter)?;
-
-        Ok(())
-    }
-
-    fn push_action(&mut self, action: Action) -> Result<(), Self::Error> {
+    fn push_action(&mut self, action: Action) -> Result<(), Error> {
         let topic = format!("streams/{}", action.name);
         let payload = serde_json::to_vec(&action)?;
         self.tx.publish(topic, payload)?;
