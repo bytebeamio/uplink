@@ -206,8 +206,10 @@ interval = 30
 # Required Parameters
 # - port: the port on which the broker/server is listening for incoming service connections
 # - joins: description of how uplink will join incoming data and push outgoing data streams
+# - console_port: port on which the rumqttd console API is exposed
 [bus]
 port = 1883
+console_port = 3030
 joins = { output_streams = [
     { name = "location", construct_from = [
         { input_stream = "gps", select_fields = [

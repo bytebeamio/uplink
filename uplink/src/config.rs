@@ -416,6 +416,7 @@ pub struct JoinerConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct BusConfig {
     pub port: u16,
+    pub console_port: u16,
     pub joins: JoinerConfig,
 }
 

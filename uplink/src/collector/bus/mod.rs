@@ -6,7 +6,8 @@ use log::error;
 use rumqttd::{
     local::{LinkRx, LinkTx},
     protocol::Publish,
-    Broker, Config, ConnectionSettings, Forward, Notification, RouterConfig, ServerSettings,
+    Broker, Config, ConnectionSettings, ConsoleSettings, Forward, Notification, RouterConfig,
+    ServerSettings,
 };
 use serde_json::{Map, Value};
 use tokio::select;
@@ -116,9 +117,16 @@ impl Bus {
             next_connection_delay_ms: 0,
             connections,
         };
+        let mut console = ConsoleSettings::default();
+        console.listen = format!("127.0.0.1:{}", config.console_port);
         let servers = [("service_bus".to_owned(), server)].into_iter().collect();
-        let mut broker =
-            Broker::new(Config { id: 0, router, v4: Some(servers), ..Default::default() });
+        let mut broker = Broker::new(Config {
+            id: 0,
+            router,
+            v4: Some(servers),
+            console: Some(console),
+            ..Default::default()
+        });
         let (tx, rx) = broker.link("uplink").unwrap();
         spawn_named_thread("Broker", move || {
             if let Err(e) = broker.start() {
