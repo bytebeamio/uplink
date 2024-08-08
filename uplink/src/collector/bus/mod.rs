@@ -53,7 +53,7 @@ pub struct BusTx {
 
 impl BusTx {
     fn publish_data(&mut self, data: Payload) -> Result<(), Error> {
-        let topic = format!("streams/{}", data.stream);
+        let topic = format!("/streams/{}", data.stream);
         let payload = serde_json::to_vec(&data)?;
         self.tx.publish(topic, payload)?;
 
@@ -65,17 +65,19 @@ impl BusTx {
         streams: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<(), Error> {
         for stream in streams {
-            let filter = format!("streams/{}", stream.into());
+            let filter = format!("/streams/{}", stream.into());
             self.tx.subscribe(filter)?;
         }
-        self.tx.subscribe("streams/action_status")?;
 
         Ok(())
     }
 
-    fn push_action(&mut self, action: Action) -> Result<(), Error> {
-        let topic = format!("streams/{}", action.name);
+    fn run_action(&mut self, action: Action) -> Result<(), Error> {
+        let topic = format!("/actions/{}", action.name);
+        let response_topic = format!("/actions/{}/status", action.action_id);
         let payload = serde_json::to_vec(&action)?;
+
+        self.tx.subscribe(response_topic)?;
         self.tx.publish(topic, payload)?;
 
         Ok(())
@@ -147,13 +149,13 @@ impl Bus {
         loop {
             select! {
                 Ok(action) = self.actions_rx.recv_async() => {
-                    if let Err(e) = self.tx.push_action(action) {
+                    if let Err(e) = self.tx.run_action(action) {
                         error!("{e}")
                     }
                 }
 
                 Some(publish) = self.rx.recv_async() => {
-                    if publish.topic == "streams/action_status" {
+                    if publish.topic.starts_with(b"/actions/") && publish.topic.ends_with(b"/status") {
                         let Ok(status) = serde_json::from_slice(&publish.payload) else {
                             error!("Couldn't parse payload as action status");
                             continue;
@@ -184,5 +186,85 @@ impl Bus {
                 _ = router.tasks.join_next() => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        thread::{sleep, spawn},
+        time::Duration,
+    };
+
+    use rumqttc::{Client, Event, MqttOptions, Packet, QoS};
+    use serde_json::json;
+
+    use crate::{
+        base::bridge::{DataTx, StatusTx},
+        config::JoinerConfig,
+        ActionResponse,
+    };
+
+    use super::*;
+
+    /// This test verifies that action status messages published to the bus are correctly received.
+    #[test]
+    fn recv_action_and_respond() {
+        let port = 1883;
+        let config = BusConfig { port, joins: JoinerConfig { output_streams: vec![] } };
+
+        let (data_tx, _data_rx) = bounded(1);
+        let (status_tx, status_rx) = bounded(1);
+        let bridge_tx = BridgeTx {
+            data_tx: DataTx { inner: data_tx },
+            status_tx: StatusTx { inner: status_tx },
+        };
+        let (actions_tx, actions_rx) = bounded(1);
+        spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
+
+        let opt = MqttOptions::new("test", "localhost", port);
+        let (client, mut conn) = Client::new(opt, 1);
+
+        sleep(Duration::from_millis(100));
+        let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        client.subscribe("/actions/abc", QoS::AtMostOnce).unwrap();
+        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+        let Event::Incoming(_) = conn.recv().unwrap().unwrap() else { panic!() };
+        sleep(Duration::from_millis(100));
+
+        let action =
+            Action { action_id: "123".to_owned(), name: "abc".to_owned(), payload: "".to_owned() };
+        let expected_action = action.clone();
+        actions_tx.send(action).unwrap();
+
+        let Event::Incoming(Packet::Publish(publish)) =
+            conn.recv_timeout(Duration::from_millis(500)).unwrap().unwrap()
+        else {
+            panic!()
+        };
+        let action = serde_json::from_slice(&publish.payload).unwrap();
+        assert_eq!(expected_action, action);
+
+        let action_status = ActionResponse {
+            action_id: "123".to_owned(),
+            sequence: 1,
+            timestamp: 0,
+            state: "abc".to_owned(),
+            progress: 234,
+            errors: vec!["Testing".to_owned()],
+            done_response: None,
+        };
+        client
+            .publish(
+                "/actions/123/status",
+                QoS::AtMostOnce,
+                false,
+                json!(action_status).to_string(),
+            )
+            .unwrap();
+        let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
+
+        assert_eq!(action_status, status_rx.recv_timeout(Duration::from_millis(200)).unwrap());
     }
 }

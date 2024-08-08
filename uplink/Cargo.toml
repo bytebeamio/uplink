@@ -79,3 +79,8 @@ tempdir = { workspace = true }
 
 [features]
 bus = ["rumqttd"]
+
+[[test]]
+name = "joins"
+path = "tests/joins.rs"
+required-features = ["bus"]

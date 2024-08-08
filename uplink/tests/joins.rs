@@ -1,4 +1,3 @@
-#![cfg(feature = "bus")]
 //! Each test follows a similar structure:
 //! - Setup Configuration: Define the bus configuration, including join configurations, push intervals, and other parameters.
 //! - Initialize Channels: Create bounded channels for data and status transmission.
@@ -24,12 +23,12 @@ use uplink::{
         BusConfig, Field, InputConfig, JoinConfig, JoinerConfig, NoDataAction, PushInterval,
         SelectConfig,
     },
-    ActionResponse,
 };
 
 /// This test checks if data published to the input stream is received as-is on the output stream.
 #[test]
 fn as_is_data_from_bus() {
+    let port = 1884;
     let joins = JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "as_is".to_owned(),
@@ -42,7 +41,7 @@ fn as_is_data_from_bus() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port: 1884, joins };
+    let config = BusConfig { port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -51,14 +50,14 @@ fn as_is_data_from_bus() {
     let (_actions_tx, actions_rx) = bounded(1);
     spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-    let opt = MqttOptions::new("test", "localhost", 1884);
+    let opt = MqttOptions::new("test", "localhost", port);
     let (client, mut conn) = Client::new(opt, 1);
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let input = json!({"field_1": 123, "field_2": "abc"});
-    client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
+    client.publish("/streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let Payload { stream, sequence: 1, payload, .. } =
@@ -70,44 +69,10 @@ fn as_is_data_from_bus() {
     assert_eq!(payload, input);
 }
 
-/// This test verifies that action status messages published to the bus are correctly received.
-#[test]
-fn as_is_status_from_bus() {
-    let config = BusConfig { port: 1885, joins: JoinerConfig { output_streams: vec![] } };
-
-    let (data_tx, _data_rx) = bounded(1);
-    let (status_tx, status_rx) = bounded(1);
-    let bridge_tx =
-        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
-    let (_actions_tx, actions_rx) = bounded(1);
-    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
-
-    let opt = MqttOptions::new("test", "localhost", 1885);
-    let (client, mut conn) = Client::new(opt, 1);
-
-    sleep(Duration::from_millis(100));
-    let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
-
-    let action_status = ActionResponse {
-        action_id: "123".to_owned(),
-        sequence: 1,
-        timestamp: 0,
-        state: "abc".to_owned(),
-        progress: 234,
-        errors: vec!["Testing".to_owned()],
-        done_response: None,
-    };
-    client
-        .publish("streams/action_status", QoS::AtMostOnce, false, json!(action_status).to_string())
-        .unwrap();
-    let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
-
-    assert_eq!(action_status, status_rx.recv_timeout(Duration::from_millis(100)).unwrap());
-}
-
 /// This test ensures that data from two different input streams is joined correctly and published to the output stream when new data is received.
 #[test]
 fn join_two_streams_on_new_data_from_bus() {
+    let port = 1886;
     let joins = JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
@@ -126,7 +91,7 @@ fn join_two_streams_on_new_data_from_bus() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port: 1886, joins };
+    let config = BusConfig { port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -135,18 +100,18 @@ fn join_two_streams_on_new_data_from_bus() {
     let (_actions_tx, actions_rx) = bounded(1);
     spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-    let opt = MqttOptions::new("test", "localhost", 1886);
+    let opt = MqttOptions::new("test", "localhost", port);
     let (client, mut conn) = Client::new(opt, 1);
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let input_one = json!({"field_1": 123, "field_2": "abc"});
-    client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+    client.publish("/streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let input_two = json!({"field_x": 456, "field_y": "xyz"});
-    client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+    client.publish("/streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let Payload { stream, sequence: 1, payload, .. } =
@@ -169,6 +134,7 @@ fn join_two_streams_on_new_data_from_bus() {
 /// This test checks the joining of data from two streams based on a timeout interval, ensuring the correct output even if data is received after the timeout.
 #[test]
 fn join_two_streams_on_timeout_from_bus() {
+    let port = 1887;
     let joins = JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
@@ -187,7 +153,7 @@ fn join_two_streams_on_timeout_from_bus() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port: 1887, joins };
+    let config = BusConfig { port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -196,20 +162,20 @@ fn join_two_streams_on_timeout_from_bus() {
     let (_actions_tx, actions_rx) = bounded(1);
     spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-    let opt = MqttOptions::new("test", "localhost", 1887);
+    let opt = MqttOptions::new("test", "localhost", port);
     let (client, mut conn) = Client::new(opt, 1);
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let input_one = json!({"field_1": 123, "field_2": "abc"});
-    client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+    client.publish("/streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
 
     let input_two = json!({"field_x": 456, "field_y": "xyz"});
-    client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+    client.publish("/streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let Payload { stream, sequence: 1, payload, .. } =
@@ -225,6 +191,7 @@ fn join_two_streams_on_timeout_from_bus() {
 /// This test validates that only selected fields from an input stream are published to the output stream.
 #[test]
 fn select_from_stream_on_bus() {
+    let port = 1888;
     let joins = JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
@@ -240,7 +207,7 @@ fn select_from_stream_on_bus() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port: 1888, joins };
+    let config = BusConfig { port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -249,14 +216,14 @@ fn select_from_stream_on_bus() {
     let (_actions_tx, actions_rx) = bounded(1);
     spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-    let opt = MqttOptions::new("test", "localhost", 1888);
+    let opt = MqttOptions::new("test", "localhost", port);
     let (client, mut conn) = Client::new(opt, 1);
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let input = json!({"field_1": 123, "field_2": "abc"});
-    client.publish("streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
+    client.publish("/streams/input", QoS::AtMostOnce, false, input.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -274,6 +241,7 @@ fn select_from_stream_on_bus() {
 /// This test checks that selected fields from two different streams are combined and published correctly to the output stream.
 #[test]
 fn select_from_two_streams_on_bus() {
+    let port = 1889;
     let joins = JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
@@ -298,7 +266,7 @@ fn select_from_two_streams_on_bus() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port: 1889, joins };
+    let config = BusConfig { port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -307,20 +275,20 @@ fn select_from_two_streams_on_bus() {
     let (_actions_tx, actions_rx) = bounded(1);
     spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-    let opt = MqttOptions::new("test", "localhost", 1889);
+    let opt = MqttOptions::new("test", "localhost", port);
     let (client, mut conn) = Client::new(opt, 1);
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let input_one = json!({"field_1": 123, "field_2": "abc"});
-    client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+    client.publish("/streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
 
     let input_two = json!({"field_x": 456, "field_y": "xyz"});
-    client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+    client.publish("/streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let Payload { stream, sequence: 1, payload, .. } =
@@ -336,6 +304,7 @@ fn select_from_two_streams_on_bus() {
 /// This test verifies that the system correctly handles flushing of streams, ensuring that when no new data arrives, keys are droppped/set to null.
 #[test]
 fn null_after_flush() {
+    let port = 1890;
     let joins = JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
@@ -354,7 +323,7 @@ fn null_after_flush() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port: 1890, joins };
+    let config = BusConfig { port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -363,14 +332,14 @@ fn null_after_flush() {
     let (_actions_tx, actions_rx) = bounded(1);
     spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-    let opt = MqttOptions::new("test", "localhost", 1890);
+    let opt = MqttOptions::new("test", "localhost", port);
     let (client, mut conn) = Client::new(opt, 1);
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let input_one = json!({"field_1": 123, "field_2": "abc"});
-    client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+    client.publish("/streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -385,7 +354,7 @@ fn null_after_flush() {
     assert_eq!(payload, output);
 
     let input_two = json!({"field_3": 456, "field_4": "xyz"});
-    client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+    client.publish("/streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -400,13 +369,13 @@ fn null_after_flush() {
     assert_eq!(payload, output);
 
     let input_one = json!({"field_1": 789, "field_2": "efg"});
-    client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+    client.publish("/streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
 
     let input_two = json!({"field_3": 098, "field_4": "zyx"});
-    client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+    client.publish("/streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -424,6 +393,7 @@ fn null_after_flush() {
 /// This test checks that the system correctly handles data when configured with PreviousValue, ensuring that the last known values are used when no new data arrives.
 #[test]
 fn previous_value_after_flush() {
+    let port = 1891;
     let joins = JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
@@ -442,7 +412,7 @@ fn previous_value_after_flush() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port: 1891, joins };
+    let config = BusConfig { port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -451,14 +421,14 @@ fn previous_value_after_flush() {
     let (_actions_tx, actions_rx) = bounded(1);
     spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-    let opt = MqttOptions::new("test", "localhost", 1891);
+    let opt = MqttOptions::new("test", "localhost", port);
     let (client, mut conn) = Client::new(opt, 1);
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let input_one = json!({"field_1": 123, "field_2": "abc"});
-    client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+    client.publish("/streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -473,7 +443,7 @@ fn previous_value_after_flush() {
     assert_eq!(payload, output);
 
     let input_two = json!({"field_3": 456, "field_4": "xyz"});
-    client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+    client.publish("/streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -488,13 +458,13 @@ fn previous_value_after_flush() {
     assert_eq!(payload, output);
 
     let input_one = json!({"field_1": 789, "field_2": "efg"});
-    client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+    client.publish("/streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
 
     let input_two = json!({"field_3": 098, "field_4": "zyx"});
-    client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+    client.publish("/streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -513,6 +483,7 @@ fn previous_value_after_flush() {
 /// The expected behavior is to merge the fields, with the latest value for duplicated fields being used.
 #[test]
 fn two_streams_with_similar_fields_no_rename() {
+    let port = 1892;
     let joins = JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
@@ -537,7 +508,7 @@ fn two_streams_with_similar_fields_no_rename() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port: 1892, joins };
+    let config = BusConfig { port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -546,14 +517,14 @@ fn two_streams_with_similar_fields_no_rename() {
     let (_actions_tx, actions_rx) = bounded(1);
     spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-    let opt = MqttOptions::new("test", "localhost", 1892);
+    let opt = MqttOptions::new("test", "localhost", port);
     let (client, mut conn) = Client::new(opt, 1);
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let input_one = json!({"field_a": 123, "field_b": "abc"});
-    client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+    client.publish("/streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -568,7 +539,7 @@ fn two_streams_with_similar_fields_no_rename() {
     assert_eq!(payload, output);
 
     let input_two = json!({"field_a": 456, "field_c": "xyz"});
-    client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+    client.publish("/streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -587,6 +558,7 @@ fn two_streams_with_similar_fields_no_rename() {
 /// The expected behavior is to have the fields renamed as specified and merged into the output.
 #[test]
 fn two_streams_with_similar_fields_renamed() {
+    let port = 1893;
     let joins = JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
@@ -617,7 +589,7 @@ fn two_streams_with_similar_fields_renamed() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port: 1893, joins };
+    let config = BusConfig { port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -626,14 +598,14 @@ fn two_streams_with_similar_fields_renamed() {
     let (_actions_tx, actions_rx) = bounded(1);
     spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-    let opt = MqttOptions::new("test", "localhost", 1893);
+    let opt = MqttOptions::new("test", "localhost", port);
     let (client, mut conn) = Client::new(opt, 1);
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let input_one = json!({"field_a": 123, "field_b": "abc"});
-    client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+    client.publish("/streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -648,7 +620,7 @@ fn two_streams_with_similar_fields_renamed() {
     assert_eq!(payload, output);
 
     let input_two = json!({"field_a": 456, "field_c": "xyz"});
-    client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+    client.publish("/streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -667,6 +639,7 @@ fn two_streams_with_similar_fields_renamed() {
 /// In this test the client subscribes to the output stream on the bus, publishes data onto input streams and then expects the joined data back from the bus.
 #[test]
 fn publish_joined_stream_back_on_bus() {
+    let port = 1894;
     let joins = JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
@@ -685,7 +658,7 @@ fn publish_joined_stream_back_on_bus() {
             publish_on_service_bus: true,
         }],
     };
-    let config = BusConfig { port: 1894, joins };
+    let config = BusConfig { port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -694,12 +667,12 @@ fn publish_joined_stream_back_on_bus() {
     let (_actions_tx, actions_rx) = bounded(1);
     spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-    let opt = MqttOptions::new("test", "localhost", 1894);
+    let opt = MqttOptions::new("test", "localhost", port);
     let (client, mut conn) = Client::new(opt, 1);
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
-    client.subscribe("streams/output", QoS::AtMostOnce).unwrap();
+    client.subscribe("/streams/output", QoS::AtMostOnce).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
@@ -710,13 +683,13 @@ fn publish_joined_stream_back_on_bus() {
     };
 
     let input_one = json!({"field_1": 123, "field_2": "abc"});
-    client.publish("streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
+    client.publish("/streams/input_one", QoS::AtMostOnce, false, input_one.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv_timeout(Duration::from_millis(200)).unwrap().unwrap() else {
         panic!()
     };
 
     let input_two = json!({"field_x": 456, "field_y": "xyz"});
-    client.publish("streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
+    client.publish("/streams/input_two", QoS::AtMostOnce, false, input_two.to_string()).unwrap();
     let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
     let Payload { stream, sequence: 1, payload, .. } =
@@ -743,7 +716,7 @@ fn publish_joined_stream_back_on_bus() {
             payload: Value,
         }
         let Payload { sequence, payload, .. } = serde_json::from_slice(&payload).unwrap();
-        assert_eq!(topic, "streams/output");
+        assert_eq!(topic, "/streams/output");
         assert_eq!(sequence, 1);
         assert_eq!(payload, output);
     }
