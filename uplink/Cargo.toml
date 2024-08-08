@@ -8,7 +8,7 @@ edition = "2021"
 bytes = { workspace = true }
 flume = { workspace = true }
 rumqttc = { workspace = true }
-rumqttd = { git = "https://github.com/bytebeamio/rumqtt", default-features = false, optional = true }
+rumqttd = { git = "https://github.com/bytebeamio/rumqtt", default-features = false, optional = true, branch = "console-response" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = "3.3.0"
@@ -78,6 +78,7 @@ vergen = { version = "7", features = ["git", "build", "time"] }
 tempdir = { workspace = true }
 
 [features]
+default = ["bus"]
 bus = ["rumqttd"]
 
 [[test]]

@@ -41,7 +41,7 @@ fn as_is_data_from_bus() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port, joins };
+    let config = BusConfig { console_port: 3030, port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -91,7 +91,7 @@ fn join_two_streams_on_new_data_from_bus() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port, joins };
+    let config = BusConfig { console_port: 3030, port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -153,7 +153,7 @@ fn join_two_streams_on_timeout_from_bus() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port, joins };
+    let config = BusConfig { console_port: 3030, port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -207,7 +207,7 @@ fn select_from_stream_on_bus() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port, joins };
+    let config = BusConfig { console_port: 3030, port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -266,7 +266,7 @@ fn select_from_two_streams_on_bus() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port, joins };
+    let config = BusConfig { console_port: 3030, port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -323,7 +323,7 @@ fn null_after_flush() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port, joins };
+    let config = BusConfig { console_port: 3030, port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -412,7 +412,7 @@ fn previous_value_after_flush() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port, joins };
+    let config = BusConfig { console_port: 3030, port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -508,7 +508,7 @@ fn two_streams_with_similar_fields_no_rename() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port, joins };
+    let config = BusConfig { console_port: 3030, port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -589,7 +589,7 @@ fn two_streams_with_similar_fields_renamed() {
             publish_on_service_bus: false,
         }],
     };
-    let config = BusConfig { port, joins };
+    let config = BusConfig { console_port: 3030, port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);
@@ -658,7 +658,7 @@ fn publish_joined_stream_back_on_bus() {
             publish_on_service_bus: true,
         }],
     };
-    let config = BusConfig { port, joins };
+    let config = BusConfig { console_port: 3030, port, joins };
 
     let (data_tx, data_rx) = bounded(1);
     let (status_tx, _status_rx) = bounded(1);

@@ -2729,7 +2729,7 @@ dependencies = [
 [[package]]
 name = "rumqttd"
 version = "0.19.0"
-source = "git+https://github.com/bytebeamio/rumqtt#11d2e97428746d3e4c24880555615c867fa46f70"
+source = "git+https://github.com/bytebeamio/rumqtt?branch=console-response#7490aeba32d270091913d8ecb198b2fda83f95b5"
 dependencies = [
  "axum 0.7.5",
  "bytes 1.5.0",

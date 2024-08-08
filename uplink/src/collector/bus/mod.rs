@@ -1,8 +1,12 @@
-use std::{collections::HashSet, net::SocketAddr};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+};
 
 use flume::{bounded, Receiver};
 use joins::Router;
 use log::error;
+use reqwest::get;
 use rumqttd::{
     local::{LinkRx, LinkTx},
     protocol::Publish,
@@ -15,7 +19,7 @@ use tokio::select;
 use crate::{
     base::bridge::{BridgeTx, Payload},
     config::BusConfig,
-    spawn_named_thread, Action,
+    spawn_named_thread, Action, ActionResponse,
 };
 
 mod joins;
@@ -30,6 +34,10 @@ pub enum Error {
     Parse(#[from] std::net::AddrParseError),
     #[error("Recv error: {0}")]
     Recv(#[from] flume::RecvError),
+    #[error("Req error: {0}")]
+    Req(#[from] reqwest::Error),
+    #[error("Action was not expected")]
+    NoRoute,
 }
 
 pub struct BusRx {
@@ -50,6 +58,7 @@ impl BusRx {
 
 pub struct BusTx {
     tx: LinkTx,
+    console_url: String,
 }
 
 impl BusTx {
@@ -73,10 +82,19 @@ impl BusTx {
         Ok(())
     }
 
-    fn run_action(&mut self, action: Action) -> Result<(), Error> {
+    async fn run_action(&mut self, action: &Action) -> Result<(), Error> {
         let topic = format!("/actions/{}", action.name);
+
+        let url = format!("http://{}/subscriptions", self.console_url);
+        let body = get(url).await?.bytes().await?;
+        let subscriptions: HashMap<String, Vec<String>> = serde_json::from_slice(&body)?;
+
+        if !subscriptions.contains_key(&topic) {
+            return Err(Error::NoRoute);
+        }
+
         let response_topic = format!("/actions/{}/status", action.action_id);
-        let payload = serde_json::to_vec(&action)?;
+        let payload = serde_json::to_vec(action)?;
 
         self.tx.subscribe(response_topic)?;
         self.tx.publish(topic, payload)?;
@@ -118,7 +136,8 @@ impl Bus {
             connections,
         };
         let mut console = ConsoleSettings::default();
-        console.listen = format!("127.0.0.1:{}", config.console_port);
+        let console_url = format!("127.0.0.1:{}", config.console_port);
+        console_url.clone_into(&mut console.listen);
         let servers = [("service_bus".to_owned(), server)].into_iter().collect();
         let mut broker = Broker::new(Config {
             id: 0,
@@ -134,7 +153,7 @@ impl Bus {
             }
         });
 
-        Self { tx: BusTx { tx }, rx: BusRx { rx }, bridge_tx, actions_rx, config }
+        Self { tx: BusTx { tx, console_url }, rx: BusRx { rx }, bridge_tx, actions_rx, config }
     }
 
     #[tokio::main(flavor = "current_thread")]
@@ -157,8 +176,10 @@ impl Bus {
         loop {
             select! {
                 Ok(action) = self.actions_rx.recv_async() => {
-                    if let Err(e) = self.tx.run_action(action) {
-                        error!("{e}")
+                    if let Err(e) = self.tx.run_action(&action).await {
+                        error!("{e}");
+                        let status = ActionResponse::failure(&action.action_id, e.to_string());
+                        self.bridge_tx.send_action_response(status).await;
                     }
                 }
 
@@ -168,7 +189,7 @@ impl Bus {
                             error!("Couldn't parse payload as action status");
                             continue;
                         };
-                        self.bridge_tx.send_action_response_sync(status);
+                        self.bridge_tx.send_action_response(status).await;
                         continue;
                     }
 
@@ -219,7 +240,8 @@ mod tests {
     #[test]
     fn recv_action_and_respond() {
         let port = 1883;
-        let config = BusConfig { port, joins: JoinerConfig { output_streams: vec![] } };
+        let config =
+            BusConfig { port, console_port: 3030, joins: JoinerConfig { output_streams: vec![] } };
 
         let (data_tx, _data_rx) = bounded(1);
         let (status_tx, status_rx) = bounded(1);
