@@ -225,6 +225,7 @@ mod tests {
         time::Duration,
     };
 
+    use flume::{Receiver, Sender};
     use rumqttc::{Client, Event, MqttOptions, Packet, QoS};
     use serde_json::json;
 
@@ -236,12 +237,10 @@ mod tests {
 
     use super::*;
 
-    /// This test verifies that action status messages published to the bus are correctly received.
-    #[test]
-    fn recv_action_and_respond() {
-        let port = 1883;
+    fn setup() -> (u16, Sender<Action>, Receiver<ActionResponse>) {
+        let (port, console_port) = (1883, 3030);
         let config =
-            BusConfig { port, console_port: 3030, joins: JoinerConfig { output_streams: vec![] } };
+            BusConfig { port, console_port, joins: JoinerConfig { output_streams: vec![] } };
 
         let (data_tx, _data_rx) = bounded(1);
         let (status_tx, status_rx) = bounded(1);
@@ -251,6 +250,14 @@ mod tests {
         };
         let (actions_tx, actions_rx) = bounded(1);
         spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
+
+        (port, actions_tx, status_rx)
+    }
+
+    /// This test verifies that action status messages published to the bus are correctly received.
+    #[test]
+    fn recv_action_and_respond() {
+        let (port, actions_tx, status_rx) = setup();
 
         let opt = MqttOptions::new("test", "localhost", port);
         let (client, mut conn) = Client::new(opt, 1);
@@ -296,5 +303,21 @@ mod tests {
         let Event::Outgoing(_) = conn.recv().unwrap().unwrap() else { panic!() };
 
         assert_eq!(action_status, status_rx.recv_timeout(Duration::from_millis(200)).unwrap());
+    }
+
+    /// This test verifies that action status is set to failed for actions which are not subscribed to on the bus
+    #[test]
+    fn mark_unregistered_action_as_failed() {
+        let (_, actions_tx, status_rx) = setup();
+
+        let action =
+            Action { action_id: "123".to_owned(), name: "abc".to_owned(), payload: "".to_owned() };
+        actions_tx.send(action).unwrap();
+
+        let ActionResponse { action_id, state, errors, .. } =
+            status_rx.recv_timeout(Duration::from_millis(200)).unwrap();
+        assert_eq!(action_id, "123");
+        assert_eq!(state, "Failed");
+        assert_eq!(errors, ["Action was not expected"]);
     }
 }
