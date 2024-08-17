@@ -1,4 +1,5 @@
 use std::{
+    sync::atomic::{AtomicU16, Ordering},
     thread::{sleep, spawn},
     time::Duration,
 };
@@ -14,8 +15,11 @@ use uplink::{
     Action, ActionResponse,
 };
 
+const OFFEST: AtomicU16 = AtomicU16::new(0);
+
 fn setup() -> (u16, Sender<Action>, Receiver<ActionResponse>) {
-    let (port, console_port) = (1883, 3030);
+    let offset = OFFEST.fetch_add(1, Ordering::Relaxed);
+    let (port, console_port) = (1883 + offset, 3030 + offset);
     let config = BusConfig { port, console_port, joins: JoinerConfig { output_streams: vec![] } };
 
     let (data_tx, _data_rx) = bounded(1);

@@ -7,12 +7,13 @@
 //! - Receive and Verify: Receive the output messages and verify that they match the expected results.
 
 use std::{
+    sync::atomic::{AtomicU16, Ordering},
     thread::{sleep, spawn},
     time::Duration,
 };
 
-use flume::bounded;
-use rumqttc::{Client, Event, MqttOptions, Packet, Publish, QoS};
+use flume::{bounded, Receiver, Sender};
+use rumqttc::{Client, Connection, Event, MqttOptions, Packet, Publish, QoS};
 use serde::Deserialize;
 
 use serde_json::{json, Value};
@@ -23,13 +24,36 @@ use uplink::{
         BusConfig, Field, InputConfig, JoinConfig, JoinerConfig, NoDataAction, PushInterval,
         SelectConfig,
     },
+    Action, ActionResponse,
 };
+
+const OFFEST: AtomicU16 = AtomicU16::new(0);
+
+fn setup(
+    joins: JoinerConfig,
+) -> (Receiver<Payload>, Receiver<ActionResponse>, Sender<Action>, Client, Connection) {
+    let offset = OFFEST.fetch_add(1, Ordering::Relaxed);
+    let (port, console_port) = (1883 + offset, 3030 + offset);
+
+    let config = BusConfig { console_port, port, joins };
+
+    let (data_tx, data_rx) = bounded(1);
+    let (status_tx, status_rx) = bounded(1);
+    let bridge_tx =
+        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
+    let (actions_tx, actions_rx) = bounded(1);
+    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
+
+    let opt = MqttOptions::new("test", "localhost", port);
+    let (client, conn) = Client::new(opt, 1);
+
+    (data_rx, status_rx, actions_tx, client, conn)
+}
 
 /// This test checks if data published to the input stream is received as-is on the output stream.
 #[test]
 fn as_is_data_from_bus() {
-    let port = 1884;
-    let joins = JoinerConfig {
+    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "as_is".to_owned(),
             construct_from: vec![InputConfig {
@@ -40,18 +64,7 @@ fn as_is_data_from_bus() {
             push_interval: PushInterval::OnNewData,
             publish_on_service_bus: false,
         }],
-    };
-    let config = BusConfig { console_port: 3030, port, joins };
-
-    let (data_tx, data_rx) = bounded(1);
-    let (status_tx, _status_rx) = bounded(1);
-    let bridge_tx =
-        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
-    let (_actions_tx, actions_rx) = bounded(1);
-    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
-
-    let opt = MqttOptions::new("test", "localhost", port);
-    let (client, mut conn) = Client::new(opt, 1);
+    });
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -72,8 +85,7 @@ fn as_is_data_from_bus() {
 /// This test ensures that data from two different input streams is joined correctly and published to the output stream when new data is received.
 #[test]
 fn join_two_streams_on_new_data_from_bus() {
-    let port = 1886;
-    let joins = JoinerConfig {
+    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
             construct_from: vec![
@@ -90,18 +102,7 @@ fn join_two_streams_on_new_data_from_bus() {
             push_interval: PushInterval::OnNewData,
             publish_on_service_bus: false,
         }],
-    };
-    let config = BusConfig { console_port: 3030, port, joins };
-
-    let (data_tx, data_rx) = bounded(1);
-    let (status_tx, _status_rx) = bounded(1);
-    let bridge_tx =
-        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
-    let (_actions_tx, actions_rx) = bounded(1);
-    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
-
-    let opt = MqttOptions::new("test", "localhost", port);
-    let (client, mut conn) = Client::new(opt, 1);
+    });
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -134,8 +135,7 @@ fn join_two_streams_on_new_data_from_bus() {
 /// This test checks the joining of data from two streams based on a timeout interval, ensuring the correct output even if data is received after the timeout.
 #[test]
 fn join_two_streams_on_timeout_from_bus() {
-    let port = 1887;
-    let joins = JoinerConfig {
+    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
             construct_from: vec![
@@ -152,18 +152,7 @@ fn join_two_streams_on_timeout_from_bus() {
             push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
             publish_on_service_bus: false,
         }],
-    };
-    let config = BusConfig { console_port: 3030, port, joins };
-
-    let (data_tx, data_rx) = bounded(1);
-    let (status_tx, _status_rx) = bounded(1);
-    let bridge_tx =
-        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
-    let (_actions_tx, actions_rx) = bounded(1);
-    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
-
-    let opt = MqttOptions::new("test", "localhost", port);
-    let (client, mut conn) = Client::new(opt, 1);
+    });
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -191,8 +180,7 @@ fn join_two_streams_on_timeout_from_bus() {
 /// This test validates that only selected fields from an input stream are published to the output stream.
 #[test]
 fn select_from_stream_on_bus() {
-    let port = 1888;
-    let joins = JoinerConfig {
+    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
             construct_from: vec![InputConfig {
@@ -206,18 +194,7 @@ fn select_from_stream_on_bus() {
             push_interval: PushInterval::OnNewData,
             publish_on_service_bus: false,
         }],
-    };
-    let config = BusConfig { console_port: 3030, port, joins };
-
-    let (data_tx, data_rx) = bounded(1);
-    let (status_tx, _status_rx) = bounded(1);
-    let bridge_tx =
-        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
-    let (_actions_tx, actions_rx) = bounded(1);
-    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
-
-    let opt = MqttOptions::new("test", "localhost", port);
-    let (client, mut conn) = Client::new(opt, 1);
+    });
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -241,8 +218,7 @@ fn select_from_stream_on_bus() {
 /// This test checks that selected fields from two different streams are combined and published correctly to the output stream.
 #[test]
 fn select_from_two_streams_on_bus() {
-    let port = 1889;
-    let joins = JoinerConfig {
+    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
             construct_from: vec![
@@ -265,18 +241,7 @@ fn select_from_two_streams_on_bus() {
             push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
             publish_on_service_bus: false,
         }],
-    };
-    let config = BusConfig { console_port: 3030, port, joins };
-
-    let (data_tx, data_rx) = bounded(1);
-    let (status_tx, _status_rx) = bounded(1);
-    let bridge_tx =
-        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
-    let (_actions_tx, actions_rx) = bounded(1);
-    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
-
-    let opt = MqttOptions::new("test", "localhost", port);
-    let (client, mut conn) = Client::new(opt, 1);
+    });
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -304,8 +269,7 @@ fn select_from_two_streams_on_bus() {
 /// This test verifies that the system correctly handles flushing of streams, ensuring that when no new data arrives, keys are droppped/set to null.
 #[test]
 fn null_after_flush() {
-    let port = 1890;
-    let joins = JoinerConfig {
+    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
             construct_from: vec![
@@ -322,18 +286,7 @@ fn null_after_flush() {
             push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
             publish_on_service_bus: false,
         }],
-    };
-    let config = BusConfig { console_port: 3030, port, joins };
-
-    let (data_tx, data_rx) = bounded(1);
-    let (status_tx, _status_rx) = bounded(1);
-    let bridge_tx =
-        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
-    let (_actions_tx, actions_rx) = bounded(1);
-    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
-
-    let opt = MqttOptions::new("test", "localhost", port);
-    let (client, mut conn) = Client::new(opt, 1);
+    });
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -393,8 +346,7 @@ fn null_after_flush() {
 /// This test checks that the system correctly handles data when configured with PreviousValue, ensuring that the last known values are used when no new data arrives.
 #[test]
 fn previous_value_after_flush() {
-    let port = 1891;
-    let joins = JoinerConfig {
+    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
             construct_from: vec![
@@ -411,18 +363,7 @@ fn previous_value_after_flush() {
             push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
             publish_on_service_bus: false,
         }],
-    };
-    let config = BusConfig { console_port: 3030, port, joins };
-
-    let (data_tx, data_rx) = bounded(1);
-    let (status_tx, _status_rx) = bounded(1);
-    let bridge_tx =
-        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
-    let (_actions_tx, actions_rx) = bounded(1);
-    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
-
-    let opt = MqttOptions::new("test", "localhost", port);
-    let (client, mut conn) = Client::new(opt, 1);
+    });
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -483,8 +424,7 @@ fn previous_value_after_flush() {
 /// The expected behavior is to merge the fields, with the latest value for duplicated fields being used.
 #[test]
 fn two_streams_with_similar_fields_no_rename() {
-    let port = 1892;
-    let joins = JoinerConfig {
+    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
             construct_from: vec![
@@ -507,18 +447,7 @@ fn two_streams_with_similar_fields_no_rename() {
             push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
             publish_on_service_bus: false,
         }],
-    };
-    let config = BusConfig { console_port: 3030, port, joins };
-
-    let (data_tx, data_rx) = bounded(1);
-    let (status_tx, _status_rx) = bounded(1);
-    let bridge_tx =
-        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
-    let (_actions_tx, actions_rx) = bounded(1);
-    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
-
-    let opt = MqttOptions::new("test", "localhost", port);
-    let (client, mut conn) = Client::new(opt, 1);
+    });
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -558,8 +487,7 @@ fn two_streams_with_similar_fields_no_rename() {
 /// The expected behavior is to have the fields renamed as specified and merged into the output.
 #[test]
 fn two_streams_with_similar_fields_renamed() {
-    let port = 1893;
-    let joins = JoinerConfig {
+    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
             construct_from: vec![
@@ -588,18 +516,7 @@ fn two_streams_with_similar_fields_renamed() {
             push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
             publish_on_service_bus: false,
         }],
-    };
-    let config = BusConfig { console_port: 3030, port, joins };
-
-    let (data_tx, data_rx) = bounded(1);
-    let (status_tx, _status_rx) = bounded(1);
-    let bridge_tx =
-        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
-    let (_actions_tx, actions_rx) = bounded(1);
-    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
-
-    let opt = MqttOptions::new("test", "localhost", port);
-    let (client, mut conn) = Client::new(opt, 1);
+    });
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -639,8 +556,7 @@ fn two_streams_with_similar_fields_renamed() {
 /// In this test the client subscribes to the output stream on the bus, publishes data onto input streams and then expects the joined data back from the bus.
 #[test]
 fn publish_joined_stream_back_on_bus() {
-    let port = 1894;
-    let joins = JoinerConfig {
+    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
         output_streams: vec![JoinConfig {
             name: "output".to_owned(),
             construct_from: vec![
@@ -657,18 +573,7 @@ fn publish_joined_stream_back_on_bus() {
             push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
             publish_on_service_bus: true,
         }],
-    };
-    let config = BusConfig { console_port: 3030, port, joins };
-
-    let (data_tx, data_rx) = bounded(1);
-    let (status_tx, _status_rx) = bounded(1);
-    let bridge_tx =
-        BridgeTx { data_tx: DataTx { inner: data_tx }, status_tx: StatusTx { inner: status_tx } };
-    let (_actions_tx, actions_rx) = bounded(1);
-    spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
-
-    let opt = MqttOptions::new("test", "localhost", port);
-    let (client, mut conn) = Client::new(opt, 1);
+    });
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
