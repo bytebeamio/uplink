@@ -112,11 +112,11 @@ impl Joiner {
         }
     }
 
-    // Don't insert timestamp values if data is not to be pushed instantly, never insert sequence
+    // Use data sequence and timestamp if data is to be pushed instantly
     fn is_insertable(&self, key: &str) -> bool {
         match key {
-            "timestamp" => self.config.push_interval == PushInterval::OnNewData,
-            key => key != "sequence",
+            "timestamp" | "sequence" => self.config.push_interval == PushInterval::OnNewData,
+            _ => true,
         }
     }
 
@@ -147,25 +147,44 @@ impl Joiner {
         if self.joined.is_empty() {
             return;
         }
-        self.sequence += 1;
 
-        #[inline]
-        fn parse_as_u64(value: Value) -> Option<u64> {
-            let parsed = value.as_i64().map(|t| t as u64);
-            if parsed.is_none() {
-                warn!("timestamp: {value:?} has unexpected type; defaulting to system time")
-            }
-            parsed
-        }
-
-        // timestamp value should pass as is for instant push, else be the system time
-        let timestamp = match self.joined.remove("timestamp").and_then(parse_as_u64) {
-            Some(t) => t,
-            _ => clock() as u64,
-        };
+        // timestamp and sequence values should be passed as is for instant push, else use generated values
+        let timestamp = self
+            .joined
+            .remove("timestamp")
+            .and_then(|value| {
+                value.as_i64().map_or_else(
+                    || {
+                        warn!(
+                            "timestamp: {value:?} has unexpected type; defaulting to system time"
+                        );
+                        None
+                    },
+                    |v| Some(v as u64),
+                )
+            })
+            .unwrap_or_else(|| clock() as u64);
+        let sequence = self
+            .joined
+            .remove("sequence")
+            .and_then(|value| {
+                value.as_i64().map_or_else(
+                    || {
+                        warn!(
+                            "sequence: {value:?} has unexpected type; defaulting to internal sequence"
+                        );
+                        None
+                    },
+                    |v| Some(v as u32),
+                )
+            })
+            .unwrap_or_else(|| {
+                self.sequence += 1;
+                self.sequence
+            });
         let payload = Payload {
             stream: self.config.name.clone(),
-            sequence: self.sequence,
+            sequence,
             timestamp,
             payload: json!(self.joined),
         };
