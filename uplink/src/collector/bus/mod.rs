@@ -89,7 +89,7 @@ impl BusTx {
         let body = get(url).await?.bytes().await?;
         let subscriptions: HashMap<String, Vec<String>> = serde_json::from_slice(&body)?;
 
-        if subscriptions.get(&topic).is_some_and(|s| !s.is_empty()) {
+        if !subscriptions.get(&topic).is_some_and(|s| !s.is_empty()) {
             return Err(Error::NoRoute);
         }
 
