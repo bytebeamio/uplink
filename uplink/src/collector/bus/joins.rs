@@ -80,7 +80,7 @@ struct Joiner {
 
 impl Joiner {
     async fn start(mut self) {
-        let PushInterval::OnTimeout(period) = self.config.push_interval else {
+        let PushInterval::OnTimeout(period) = self.config.push_interval_s else {
             loop {
                 match self.rx.recv_async().await {
                     Ok((stream_name, json)) => self.update(stream_name, json),
@@ -115,7 +115,7 @@ impl Joiner {
     // Use data sequence and timestamp if data is to be pushed instantly
     fn is_insertable(&self, key: &str) -> bool {
         match key {
-            "timestamp" | "sequence" => self.config.push_interval == PushInterval::OnNewData,
+            "timestamp" | "sequence" => self.config.push_interval_s == PushInterval::OnNewData,
             _ => true,
         }
     }

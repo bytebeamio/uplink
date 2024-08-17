@@ -404,7 +404,7 @@ pub struct JoinConfig {
     pub name: String,
     pub construct_from: Vec<InputConfig>,
     pub no_data_action: NoDataAction,
-    pub push_interval: PushInterval,
+    pub push_interval_s: PushInterval,
     pub publish_on_service_bus: bool,
 }
 
