@@ -7,7 +7,6 @@
 //! - Receive and Verify: Receive the output messages and verify that they match the expected results.
 
 use std::{
-    sync::atomic::{AtomicU16, Ordering},
     thread::{sleep, spawn},
     time::Duration,
 };
@@ -27,12 +26,10 @@ use uplink::{
     Action, ActionResponse,
 };
 
-const OFFEST: AtomicU16 = AtomicU16::new(0);
-
 fn setup(
     joins: JoinerConfig,
+    offset: u16,
 ) -> (Receiver<Payload>, Receiver<ActionResponse>, Sender<Action>, Client, Connection) {
-    let offset = OFFEST.fetch_add(1, Ordering::Relaxed);
     let (port, console_port) = (1883 + offset, 3030 + offset);
 
     let config = BusConfig { console_port, port, joins };
@@ -53,18 +50,21 @@ fn setup(
 /// This test checks if data published to the input stream is received as-is on the output stream.
 #[test]
 fn as_is_data_from_bus() {
-    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
-        output_streams: vec![JoinConfig {
-            name: "as_is".to_owned(),
-            construct_from: vec![InputConfig {
-                input_stream: "input".to_owned(),
-                select_fields: SelectConfig::All,
+    let (data_rx, _, _, client, mut conn) = setup(
+        JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "as_is".to_owned(),
+                construct_from: vec![InputConfig {
+                    input_stream: "input".to_owned(),
+                    select_fields: SelectConfig::All,
+                }],
+                no_data_action: NoDataAction::Null,
+                push_interval: PushInterval::OnNewData,
+                publish_on_service_bus: false,
             }],
-            no_data_action: NoDataAction::Null,
-            push_interval: PushInterval::OnNewData,
-            publish_on_service_bus: false,
-        }],
-    });
+        },
+        0,
+    );
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -85,24 +85,27 @@ fn as_is_data_from_bus() {
 /// This test ensures that data from two different input streams is joined correctly and published to the output stream when new data is received.
 #[test]
 fn join_two_streams_on_new_data_from_bus() {
-    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
-        output_streams: vec![JoinConfig {
-            name: "output".to_owned(),
-            construct_from: vec![
-                InputConfig {
-                    input_stream: "input_one".to_owned(),
-                    select_fields: SelectConfig::All,
-                },
-                InputConfig {
-                    input_stream: "input_two".to_owned(),
-                    select_fields: SelectConfig::All,
-                },
-            ],
-            no_data_action: NoDataAction::Null,
-            push_interval: PushInterval::OnNewData,
-            publish_on_service_bus: false,
-        }],
-    });
+    let (data_rx, _, _, client, mut conn) = setup(
+        JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                ],
+                no_data_action: NoDataAction::Null,
+                push_interval: PushInterval::OnNewData,
+                publish_on_service_bus: false,
+            }],
+        },
+        1,
+    );
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -135,24 +138,27 @@ fn join_two_streams_on_new_data_from_bus() {
 /// This test checks the joining of data from two streams based on a timeout interval, ensuring the correct output even if data is received after the timeout.
 #[test]
 fn join_two_streams_on_timeout_from_bus() {
-    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
-        output_streams: vec![JoinConfig {
-            name: "output".to_owned(),
-            construct_from: vec![
-                InputConfig {
-                    input_stream: "input_one".to_owned(),
-                    select_fields: SelectConfig::All,
-                },
-                InputConfig {
-                    input_stream: "input_two".to_owned(),
-                    select_fields: SelectConfig::All,
-                },
-            ],
-            no_data_action: NoDataAction::Null,
-            push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
-            publish_on_service_bus: false,
-        }],
-    });
+    let (data_rx, _, _, client, mut conn) = setup(
+        JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                ],
+                no_data_action: NoDataAction::Null,
+                push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
+                publish_on_service_bus: false,
+            }],
+        },
+        2,
+    );
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -180,21 +186,24 @@ fn join_two_streams_on_timeout_from_bus() {
 /// This test validates that only selected fields from an input stream are published to the output stream.
 #[test]
 fn select_from_stream_on_bus() {
-    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
-        output_streams: vec![JoinConfig {
-            name: "output".to_owned(),
-            construct_from: vec![InputConfig {
-                input_stream: "input".to_owned(),
-                select_fields: SelectConfig::Fields(vec![Field {
-                    original: "field_1".to_owned(),
-                    renamed: None,
-                }]),
+    let (data_rx, _, _, client, mut conn) = setup(
+        JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![InputConfig {
+                    input_stream: "input".to_owned(),
+                    select_fields: SelectConfig::Fields(vec![Field {
+                        original: "field_1".to_owned(),
+                        renamed: None,
+                    }]),
+                }],
+                no_data_action: NoDataAction::Null,
+                push_interval: PushInterval::OnNewData,
+                publish_on_service_bus: false,
             }],
-            no_data_action: NoDataAction::Null,
-            push_interval: PushInterval::OnNewData,
-            publish_on_service_bus: false,
-        }],
-    });
+        },
+        3,
+    );
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -218,30 +227,33 @@ fn select_from_stream_on_bus() {
 /// This test checks that selected fields from two different streams are combined and published correctly to the output stream.
 #[test]
 fn select_from_two_streams_on_bus() {
-    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
-        output_streams: vec![JoinConfig {
-            name: "output".to_owned(),
-            construct_from: vec![
-                InputConfig {
-                    input_stream: "input_one".to_owned(),
-                    select_fields: SelectConfig::Fields(vec![Field {
-                        original: "field_1".to_owned(),
-                        renamed: None,
-                    }]),
-                },
-                InputConfig {
-                    input_stream: "input_two".to_owned(),
-                    select_fields: SelectConfig::Fields(vec![Field {
-                        original: "field_x".to_owned(),
-                        renamed: None,
-                    }]),
-                },
-            ],
-            no_data_action: NoDataAction::Null,
-            push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
-            publish_on_service_bus: false,
-        }],
-    });
+    let (data_rx, _, _, client, mut conn) = setup(
+        JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::Fields(vec![Field {
+                            original: "field_1".to_owned(),
+                            renamed: None,
+                        }]),
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::Fields(vec![Field {
+                            original: "field_x".to_owned(),
+                            renamed: None,
+                        }]),
+                    },
+                ],
+                no_data_action: NoDataAction::Null,
+                push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
+                publish_on_service_bus: false,
+            }],
+        },
+        4,
+    );
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -269,24 +281,27 @@ fn select_from_two_streams_on_bus() {
 /// This test verifies that the system correctly handles flushing of streams, ensuring that when no new data arrives, keys are droppped/set to null.
 #[test]
 fn null_after_flush() {
-    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
-        output_streams: vec![JoinConfig {
-            name: "output".to_owned(),
-            construct_from: vec![
-                InputConfig {
-                    input_stream: "input_one".to_owned(),
-                    select_fields: SelectConfig::All,
-                },
-                InputConfig {
-                    input_stream: "input_two".to_owned(),
-                    select_fields: SelectConfig::All,
-                },
-            ],
-            no_data_action: NoDataAction::Null,
-            push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
-            publish_on_service_bus: false,
-        }],
-    });
+    let (data_rx, _, _, client, mut conn) = setup(
+        JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                ],
+                no_data_action: NoDataAction::Null,
+                push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
+                publish_on_service_bus: false,
+            }],
+        },
+        5,
+    );
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -346,24 +361,27 @@ fn null_after_flush() {
 /// This test checks that the system correctly handles data when configured with PreviousValue, ensuring that the last known values are used when no new data arrives.
 #[test]
 fn previous_value_after_flush() {
-    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
-        output_streams: vec![JoinConfig {
-            name: "output".to_owned(),
-            construct_from: vec![
-                InputConfig {
-                    input_stream: "input_one".to_owned(),
-                    select_fields: SelectConfig::All,
-                },
-                InputConfig {
-                    input_stream: "input_two".to_owned(),
-                    select_fields: SelectConfig::All,
-                },
-            ],
-            no_data_action: NoDataAction::PreviousValue,
-            push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
-            publish_on_service_bus: false,
-        }],
-    });
+    let (data_rx, _, _, client, mut conn) = setup(
+        JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                ],
+                no_data_action: NoDataAction::PreviousValue,
+                push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
+                publish_on_service_bus: false,
+            }],
+        },
+        6,
+    );
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -424,30 +442,33 @@ fn previous_value_after_flush() {
 /// The expected behavior is to merge the fields, with the latest value for duplicated fields being used.
 #[test]
 fn two_streams_with_similar_fields_no_rename() {
-    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
-        output_streams: vec![JoinConfig {
-            name: "output".to_owned(),
-            construct_from: vec![
-                InputConfig {
-                    input_stream: "input_one".to_owned(),
-                    select_fields: SelectConfig::Fields(vec![
-                        Field { original: "field_a".to_owned(), renamed: None },
-                        Field { original: "field_b".to_owned(), renamed: None },
-                    ]),
-                },
-                InputConfig {
-                    input_stream: "input_two".to_owned(),
-                    select_fields: SelectConfig::Fields(vec![
-                        Field { original: "field_a".to_owned(), renamed: None },
-                        Field { original: "field_c".to_owned(), renamed: None },
-                    ]),
-                },
-            ],
-            no_data_action: NoDataAction::PreviousValue,
-            push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
-            publish_on_service_bus: false,
-        }],
-    });
+    let (data_rx, _, _, client, mut conn) = setup(
+        JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::Fields(vec![
+                            Field { original: "field_a".to_owned(), renamed: None },
+                            Field { original: "field_b".to_owned(), renamed: None },
+                        ]),
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::Fields(vec![
+                            Field { original: "field_a".to_owned(), renamed: None },
+                            Field { original: "field_c".to_owned(), renamed: None },
+                        ]),
+                    },
+                ],
+                no_data_action: NoDataAction::PreviousValue,
+                push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
+                publish_on_service_bus: false,
+            }],
+        },
+        7,
+    );
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -487,36 +508,39 @@ fn two_streams_with_similar_fields_no_rename() {
 /// The expected behavior is to have the fields renamed as specified and merged into the output.
 #[test]
 fn two_streams_with_similar_fields_renamed() {
-    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
-        output_streams: vec![JoinConfig {
-            name: "output".to_owned(),
-            construct_from: vec![
-                InputConfig {
-                    input_stream: "input_one".to_owned(),
-                    select_fields: SelectConfig::Fields(vec![
-                        Field {
-                            original: "field_a".to_owned(),
-                            renamed: Some("field_a1".to_owned()),
-                        },
-                        Field { original: "field_b".to_owned(), renamed: None },
-                    ]),
-                },
-                InputConfig {
-                    input_stream: "input_two".to_owned(),
-                    select_fields: SelectConfig::Fields(vec![
-                        Field {
-                            original: "field_a".to_owned(),
-                            renamed: Some("field_a2".to_owned()),
-                        },
-                        Field { original: "field_c".to_owned(), renamed: None },
-                    ]),
-                },
-            ],
-            no_data_action: NoDataAction::PreviousValue,
-            push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
-            publish_on_service_bus: false,
-        }],
-    });
+    let (data_rx, _, _, client, mut conn) = setup(
+        JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::Fields(vec![
+                            Field {
+                                original: "field_a".to_owned(),
+                                renamed: Some("field_a1".to_owned()),
+                            },
+                            Field { original: "field_b".to_owned(), renamed: None },
+                        ]),
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::Fields(vec![
+                            Field {
+                                original: "field_a".to_owned(),
+                                renamed: Some("field_a2".to_owned()),
+                            },
+                            Field { original: "field_c".to_owned(), renamed: None },
+                        ]),
+                    },
+                ],
+                no_data_action: NoDataAction::PreviousValue,
+                push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
+                publish_on_service_bus: false,
+            }],
+        },
+        8,
+    );
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -556,24 +580,27 @@ fn two_streams_with_similar_fields_renamed() {
 /// In this test the client subscribes to the output stream on the bus, publishes data onto input streams and then expects the joined data back from the bus.
 #[test]
 fn publish_joined_stream_back_on_bus() {
-    let (data_rx, _, _, client, mut conn) = setup(JoinerConfig {
-        output_streams: vec![JoinConfig {
-            name: "output".to_owned(),
-            construct_from: vec![
-                InputConfig {
-                    input_stream: "input_one".to_owned(),
-                    select_fields: SelectConfig::All,
-                },
-                InputConfig {
-                    input_stream: "input_two".to_owned(),
-                    select_fields: SelectConfig::All,
-                },
-            ],
-            no_data_action: NoDataAction::Null,
-            push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
-            publish_on_service_bus: true,
-        }],
-    });
+    let (data_rx, _, _, client, mut conn) = setup(
+        JoinerConfig {
+            output_streams: vec![JoinConfig {
+                name: "output".to_owned(),
+                construct_from: vec![
+                    InputConfig {
+                        input_stream: "input_one".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                    InputConfig {
+                        input_stream: "input_two".to_owned(),
+                        select_fields: SelectConfig::All,
+                    },
+                ],
+                no_data_action: NoDataAction::Null,
+                push_interval: PushInterval::OnTimeout(Duration::from_secs(1)),
+                publish_on_service_bus: true,
+            }],
+        },
+        9,
+    );
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };

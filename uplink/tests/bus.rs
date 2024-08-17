@@ -1,11 +1,10 @@
 use std::{
-    sync::atomic::{AtomicU16, Ordering},
     thread::{sleep, spawn},
     time::Duration,
 };
 
 use flume::{bounded, Receiver, Sender};
-use rumqttc::{Client, Event, MqttOptions, Packet, QoS};
+use rumqttc::{Client, Connection, Event, MqttOptions, Packet, QoS};
 use serde_json::json;
 
 use uplink::{
@@ -15,11 +14,8 @@ use uplink::{
     Action, ActionResponse,
 };
 
-const OFFEST: AtomicU16 = AtomicU16::new(0);
-
-fn setup() -> (u16, Sender<Action>, Receiver<ActionResponse>) {
-    let offset = OFFEST.fetch_add(1, Ordering::Relaxed);
-    let (port, console_port) = (1883 + offset, 3030 + offset);
+fn setup(offset: u16) -> (Sender<Action>, Receiver<ActionResponse>, Client, Connection) {
+    let (port, console_port) = (1873 + offset, 3020 + offset);
     let config = BusConfig { port, console_port, joins: JoinerConfig { output_streams: vec![] } };
 
     let (data_tx, _data_rx) = bounded(1);
@@ -29,16 +25,16 @@ fn setup() -> (u16, Sender<Action>, Receiver<ActionResponse>) {
     let (actions_tx, actions_rx) = bounded(1);
     spawn(|| Bus::new(config, bridge_tx, actions_rx).start());
 
-    (port, actions_tx, status_rx)
+    let opt = MqttOptions::new("test", "localhost", port);
+    let (client, conn) = Client::new(opt, 1);
+
+    (actions_tx, status_rx, client, conn)
 }
 
 /// This test verifies that action status messages published to the bus are correctly received.
 #[test]
 fn recv_action_and_respond() {
-    let (port, actions_tx, status_rx) = setup();
-
-    let opt = MqttOptions::new("test", "localhost", port);
-    let (client, mut conn) = Client::new(opt, 1);
+    let (actions_tx, status_rx, client, mut conn) = setup(0);
 
     sleep(Duration::from_millis(100));
     let Event::Incoming(Packet::ConnAck(_)) = conn.recv().unwrap().unwrap() else { panic!() };
@@ -81,7 +77,7 @@ fn recv_action_and_respond() {
 /// This test verifies that action status is set to failed for actions which are not subscribed to on the bus
 #[test]
 fn mark_unregistered_action_as_failed() {
-    let (_, actions_tx, status_rx) = setup();
+    let (actions_tx, status_rx, _, _) = setup(1);
 
     let action =
         Action { action_id: "123".to_owned(), name: "abc".to_owned(), payload: "".to_owned() };
