@@ -1,0 +1,105 @@
+{
+  "processes": [
+    {
+      "name": "echo",
+      "timeout": 10
+    }
+  ],
+
+  "action_redirections": {
+    "firmware_update": "install_update",
+    "send_file": "load_file",
+    "send_script": "run_script"
+  },
+
+  "persistence_path": "/tmp/uplink/",
+
+  "default_buf_size": 1024,
+
+  "mqtt": {
+    "max_packet_size": 256000,
+    "max_inflight": 100,
+    "keep_alive": 30,
+    "network_timeout": 30
+  },
+
+  "tcpapps": {
+    "1": {
+      "port": 5050,
+      "actions": [
+        {
+          "name": "install_update"
+        },
+        {
+          "name": "load_file"
+        }
+      ]
+    },
+    "2": {
+      "port": 6060,
+      "actions": []
+    }
+  },
+
+  "serializer_metrics": {
+    "enabled": true
+  },
+
+  "stream_metrics": {
+    "enabled": true,
+    "blacklist": ["cancollector_metrics", "candump_metrics", "pinger"]
+  },
+
+  "streams": {
+    "device_shadow": {
+      "topic": "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray",
+      "flush_period": 5,
+      "priority": 75
+    },
+    "imu": {
+      "topic": "/tenants/{tenant_id}/devices/{device_id}/events/imu/jsonarray/lz4",
+      "batch_size": 100,
+      "compression": "Lz4",
+      "priority": 50
+    },
+    "gps": {
+      "topic": "/tenants/{tenant_id}/devices/{device_id}/events/gps/jsonarray",
+      "batch_size": 10,
+      "persistence": { "max_file_size": 1048576, "max_file_count": 10 }
+    },
+    "motor": {
+      "topic": "/tenants/{tenant_id}/devices/{device_id}/events/motor/jsonarray/lz4",
+      "batch_size": 50,
+      "compression": "Lz4",
+      "persistence": { "max_file_count": 3 }
+    }
+  },
+
+  "action_status": {
+    "topic": "/tenants/{tenant_id}/devices/{device_id}/action/status",
+    "flush_period": 2,
+    "priority": 255
+  },
+
+  "downloader": {
+    "actions": [
+      { "name": "update_firmware" },
+      { "name": "send_file", "timeout": 10 },
+      { "name": "send_script" }
+    ],
+    "path": "/var/tmp/ota-file"
+  },
+
+  "system_stats": {
+    "enabled": false,
+    "process_names": ["uplink"],
+    "update_period": 30
+  },
+
+  "console": {
+    "enabled": true,
+    "port": 3333
+  },
+
+  "device_shadow": { "interval": 30 }
+}
