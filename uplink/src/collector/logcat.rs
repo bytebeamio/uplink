@@ -28,7 +28,7 @@ pub enum Error {
     Msg,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LogcatConfig {
     pub tags: Vec<String>,
     pub min_level: u8,

@@ -1,5 +1,7 @@
 use std::cmp::Ordering;
 use std::env::current_dir;
+use std::fs::File;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{collections::HashMap, fmt::Debug};
@@ -14,6 +16,16 @@ use crate::collector::journalctl::JournalCtlConfig;
 use crate::collector::logcat::LogcatConfig;
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Serde Error")]
+    Serde(#[from] serde_json::Error),
+    #[error("Io Error")]
+    Io(#[from] std::io::Error),
+    #[error("Toml Error")]
+    Toml(#[from] toml::ser::Error),
+}
 
 #[inline]
 fn default_timeout() -> Duration {
@@ -57,7 +69,7 @@ pub enum Compression {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct StreamConfig {
     pub topic: String,
     #[serde(default = "max_batch_size")]
@@ -103,7 +115,7 @@ impl PartialOrd for StreamConfig {
     }
 }
 
-#[derive(Debug, Copy, Clone, Deserialize, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd)]
 pub struct Persistence {
     #[serde(default = "default_file_size")]
     pub max_file_size: usize,
@@ -117,14 +129,14 @@ impl Default for Persistence {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Authentication {
     pub ca_certificate: String,
     pub device_certificate: String,
     pub device_private_key: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Stats {
     pub enabled: bool,
     pub process_names: Vec<String>,
@@ -132,7 +144,7 @@ pub struct Stats {
     pub stream_size: Option<usize>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SimulatorConfig {
     /// path to directory containing files with gps paths to be used in simulation
     pub gps_paths: String,
@@ -140,7 +152,7 @@ pub struct SimulatorConfig {
     pub actions: Vec<ActionRoute>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DownloaderConfig {
     #[serde(default = "default_download_path")]
     pub path: PathBuf,
@@ -153,7 +165,7 @@ impl Default for DownloaderConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct InstallerConfig {
     pub path: String,
     pub actions: Vec<ActionRoute>,
@@ -186,20 +198,20 @@ pub struct MqttMetricsConfig {
     pub topic: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AppConfig {
     pub port: u16,
     #[serde(default)]
     pub actions: Vec<ActionRoute>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ConsoleConfig {
     pub enabled: bool,
     pub port: u16,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct MqttConfig {
     pub max_packet_size: usize,
     pub max_inflight: u16,
@@ -208,7 +220,7 @@ pub struct MqttConfig {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ActionRoute {
     pub name: String,
     #[serde(default = "default_timeout")]
@@ -226,7 +238,7 @@ impl From<&ActionRoute> for ActionRoute {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DeviceShadowConfig {
     #[serde_as(as = "DurationSeconds<u64>")]
     pub interval: Duration,
@@ -238,13 +250,13 @@ impl Default for DeviceShadowConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PreconditionCheckerConfig {
     pub path: PathBuf,
     pub actions: Vec<ActionRoute>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Config {
     pub project_id: String,
     pub device_id: String,
@@ -288,4 +300,15 @@ pub struct Config {
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
     pub precondition_checks: Option<PreconditionCheckerConfig>,
+}
+
+impl Config {
+    /// Saves updated config onto disk
+    pub fn write_file(&self, path: &PathBuf) -> Result<(), Error> {
+        let mut writer = File::create(path)?;
+        let toml = toml::to_string(&self)?;
+        write!(&mut writer, "{toml}")?;
+
+        Ok(())
+    }
 }
