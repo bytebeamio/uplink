@@ -9,11 +9,12 @@ use std::fs;
 use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
 
+use crate::base::actions::Cancellation;
+use crate::config::{ActionRoute, Config, DeviceConfig};
+use crate::{Action, ActionResponse};
+
 use super::streams::Streams;
 use super::{ActionBridgeShutdown, Package, StreamMetrics};
-use crate::base::actions::Cancellation;
-use crate::config::ActionRoute;
-use crate::{Action, ActionResponse, Config};
 
 const TUNSHELL_ACTION: &str = "launch_shell";
 
@@ -75,6 +76,7 @@ pub struct ActionsBridge {
 impl ActionsBridge {
     pub fn new(
         config: Arc<Config>,
+        device_config: Arc<DeviceConfig>,
         package_tx: Sender<Box<dyn Package>>,
         actions_rx: Receiver<Action>,
         shutdown_handle: Sender<()>,
@@ -94,7 +96,7 @@ impl ActionsBridge {
         action_status.batch_size = 1;
 
         streams_config.insert("action_status".to_owned(), action_status);
-        let mut streams = Streams::new(config.clone(), package_tx, metrics_tx);
+        let mut streams = Streams::new(config.clone(), device_config, package_tx, metrics_tx);
         streams.config_streams(streams_config);
 
         Self {

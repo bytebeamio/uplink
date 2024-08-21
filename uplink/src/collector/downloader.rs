@@ -70,7 +70,8 @@ use std::{
 use std::{io::Write, path::PathBuf};
 
 use crate::base::actions::Cancellation;
-use crate::{base::bridge::BridgeTx, config::DownloaderConfig, Action, ActionResponse, Config};
+use crate::config::{Authentication, Config, DownloaderConfig};
+use crate::{base::bridge::BridgeTx, Action, ActionResponse};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -116,6 +117,7 @@ impl FileDownloader {
     /// Creates a handler for download actions within uplink and uses HTTP to download files.
     pub fn new(
         config: Arc<Config>,
+        authentication: &Option<Authentication>,
         actions_rx: Receiver<Action>,
         bridge_tx: BridgeTx,
         shutdown_rx: Receiver<DownloaderShutdown>,
@@ -123,7 +125,7 @@ impl FileDownloader {
     ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
-        let client = match &config.authentication {
+        let client = match authentication {
             Some(certs) => {
                 let ca = Certificate::from_pem(certs.ca_certificate.as_bytes())?;
                 let mut buf = BytesMut::from(certs.device_private_key.as_bytes());

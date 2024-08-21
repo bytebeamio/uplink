@@ -245,14 +245,18 @@ pub struct PreconditionCheckerConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct Config {
+pub struct DeviceConfig {
     pub project_id: String,
     pub device_id: String,
     pub broker: String,
     pub port: u16,
+    pub authentication: Option<Authentication>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct Config {
     #[serde(default)]
     pub console: ConsoleConfig,
-    pub authentication: Option<Authentication>,
     #[serde(default = "default_tcpapps")]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
