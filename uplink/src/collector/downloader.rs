@@ -70,7 +70,8 @@ use std::{
 use std::{io::Write, path::PathBuf};
 
 use crate::base::actions::Cancellation;
-use crate::{base::bridge::BridgeTx, config::DownloaderConfig, Action, ActionResponse, Config};
+use crate::config::{Authentication, Config, DownloaderConfig};
+use crate::{base::bridge::BridgeTx, Action, ActionResponse};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -116,6 +117,7 @@ impl FileDownloader {
     /// Creates a handler for download actions within uplink and uses HTTP to download files.
     pub fn new(
         config: Arc<Config>,
+        authentication: &Option<Authentication>,
         actions_rx: Receiver<Action>,
         bridge_tx: BridgeTx,
         shutdown_rx: Receiver<DownloaderShutdown>,
@@ -123,7 +125,7 @@ impl FileDownloader {
     ) -> Result<Self, Error> {
         // Authenticate with TLS certs from config
         let client_builder = ClientBuilder::new();
-        let client = match &config.authentication {
+        let client = match authentication {
             Some(certs) => {
                 let ca = Certificate::from_pem(certs.ca_certificate.as_bytes())?;
                 let mut buf = BytesMut::from(certs.device_private_key.as_bytes());
@@ -353,11 +355,11 @@ fn check_disk_size(config: &DownloaderConfig, download: &DownloadFile) -> Result
 /// [`payload`]: Action#structfield.payload
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct DownloadFile {
-    url: String,
+    pub url: String,
     #[serde(alias = "content-length")]
-    content_length: usize,
+    pub content_length: usize,
     #[serde(alias = "version")]
-    file_name: String,
+    pub file_name: String,
     /// Path to location in fs where file will be stored
     pub download_path: Option<PathBuf>,
     /// Checksum that can be used to verify download was successful
@@ -549,224 +551,5 @@ impl CtrlTx {
     /// Triggers shutdown of `Downloader`
     pub async fn trigger_shutdown(&self) {
         _ = self.inner.send_async(DownloaderShutdown).await;
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::collections::HashMap;
-
-    use flume::bounded;
-    use serde_json::json;
-    use tempdir::TempDir;
-
-    use crate::{
-        base::bridge::{DataTx, StatusTx},
-        config::{ActionRoute, MqttConfig},
-    };
-
-    use super::*;
-
-    fn config(downloader: DownloaderConfig) -> Config {
-        Config {
-            broker: "localhost".to_owned(),
-            port: 1883,
-            device_id: "123".to_owned(),
-            streams: HashMap::new(),
-            mqtt: MqttConfig { max_packet_size: 1024 * 1024, ..Default::default() },
-            downloader,
-            ..Default::default()
-        }
-    }
-
-    fn create_bridge() -> (BridgeTx, Receiver<ActionResponse>) {
-        let (inner, _) = bounded(2);
-        let data_tx = DataTx { inner };
-        let (inner, status_rx) = bounded(2);
-        let status_tx = StatusTx { inner };
-
-        (BridgeTx { data_tx, status_tx }, status_rx)
-    }
-
-    // Prepare config
-    fn test_config(temp_dir: &Path, test_name: &str) -> Config {
-        let mut path = PathBuf::from(temp_dir);
-        path.push(test_name);
-        let downloader_cfg = DownloaderConfig {
-            actions: vec![ActionRoute {
-                name: "firmware_update".to_owned(),
-                timeout: Duration::from_secs(10),
-                cancellable: true,
-            }],
-            path,
-        };
-        config(downloader_cfg.clone())
-    }
-
-    #[test]
-    // Test file downloading capabilities of FileDownloader by downloading the uplink logo from GitHub
-    fn download_file() {
-        let temp_dir = TempDir::new("download_file").unwrap();
-        let config = test_config(temp_dir.path(), "download_file");
-        let mut downloader_path = config.downloader.path.clone();
-        let (bridge_tx, status_rx) = create_bridge();
-
-        // Create channels to forward and push actions on
-        let (download_tx, download_rx) = bounded(1);
-        let (_, ctrl_rx) = bounded(1);
-        let downloader = FileDownloader::new(
-            Arc::new(config),
-            download_rx,
-            bridge_tx,
-            ctrl_rx,
-            Arc::new(Mutex::new(false)),
-        )
-        .unwrap();
-
-        // Start FileDownloader in separate thread
-        std::thread::spawn(|| downloader.start());
-
-        // Create a firmware update action
-        let download_update = DownloadFile {
-            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            content_length: 296658,
-            file_name: "test.txt".to_string(),
-            download_path: None,
-            checksum: None,
-        };
-        let mut expected_forward = download_update.clone();
-        downloader_path.push("firmware_update");
-        downloader_path.push("test.txt");
-        expected_forward.download_path = Some(downloader_path);
-        let download_action = Action {
-            action_id: "1".to_string(),
-            name: "firmware_update".to_string(),
-            payload: json!(download_update).to_string(),
-        };
-
-        std::thread::sleep(Duration::from_millis(10));
-
-        // Send action to FileDownloader with Sender<Action>
-        download_tx.try_send(download_action).unwrap();
-
-        // Collect action_status and ensure it is as expected
-        let status = status_rx.recv().unwrap();
-        assert_eq!(status.state, "Downloading");
-        let mut progress = 0;
-
-        // Collect and ensure forwarded action contains expected info
-        loop {
-            let status = status_rx.recv().unwrap();
-
-            assert!(progress <= status.progress);
-            progress = status.progress;
-
-            if status.is_done() {
-                let fwd_action = status.done_response.unwrap();
-                let fwd = serde_json::from_str(&fwd_action.payload).unwrap();
-                assert_eq!(expected_forward, fwd);
-                break;
-            }
-        }
-    }
-
-    #[test]
-    // Once a file is downloaded FileDownloader must check it's checksum value against what is provided
-    fn checksum_of_file() {
-        let temp_dir = TempDir::new("file_checksum").unwrap();
-        let config = test_config(temp_dir.path(), "file_checksum");
-        let (bridge_tx, status_rx) = create_bridge();
-
-        // Create channels to forward and push action_status on
-        let (download_tx, download_rx) = bounded(1);
-        let (_, ctrl_rx) = bounded(1);
-        let downloader = FileDownloader::new(
-            Arc::new(config),
-            download_rx,
-            bridge_tx,
-            ctrl_rx,
-            Arc::new(Mutex::new(false)),
-        )
-        .unwrap();
-
-        // Start FileDownloader in separate thread
-        std::thread::spawn(|| downloader.start());
-
-        std::thread::sleep(Duration::from_millis(10));
-
-        // Correct firmware update action
-        let correct_update = DownloadFile {
-            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            content_length: 296658,
-            file_name: "logo.png".to_string(),
-            download_path: None,
-            checksum: Some(
-                "e22d4a7cf60ad13bf885c6d84af2f884f0c044faf0ee40b2e3c81896b226b2fc".to_string(),
-            ),
-        };
-        let correct_action = Action {
-            action_id: "1".to_string(),
-            name: "firmware_update".to_string(),
-            payload: json!(correct_update).to_string(),
-        };
-
-        // Send the correct action to FileDownloader
-        download_tx.try_send(correct_action).unwrap();
-
-        // Collect action_status and ensure it is as expected
-        let status = status_rx.recv().unwrap();
-        assert_eq!(status.state, "Downloading");
-        let mut progress = 0;
-
-        // Collect and ensure forwarded action contains expected info
-        loop {
-            let status = status_rx.recv().unwrap();
-
-            assert!(progress <= status.progress);
-            progress = status.progress;
-
-            if status.is_done() {
-                if status.state != "Downloaded" {
-                    panic!("unexpected status={status:?}")
-                }
-                break;
-            }
-        }
-
-        // Wrong firmware update action
-        let wrong_update = DownloadFile {
-            url: "https://github.com/bytebeamio/uplink/raw/main/docs/logo.png".to_string(),
-            content_length: 296658,
-            file_name: "logo.png".to_string(),
-            download_path: None,
-            checksum: Some("abcd1234efgh5678".to_string()),
-        };
-        let wrong_action = Action {
-            action_id: "1".to_string(),
-            name: "firmware_update".to_string(),
-            payload: json!(wrong_update).to_string(),
-        };
-
-        // Send the wrong action to FileDownloader
-        download_tx.try_send(wrong_action).unwrap();
-
-        // Collect action_status and ensure it is as expected
-        let status = status_rx.recv().unwrap();
-        assert_eq!(status.state, "Downloading");
-        let mut progress = 0;
-
-        // Collect and ensure forwarded action contains expected info
-        loop {
-            let status = status_rx.recv().unwrap();
-
-            assert!(progress <= status.progress);
-            progress = status.progress;
-
-            if status.is_done() {
-                assert!(status.is_failed());
-                assert_eq!(status.errors, vec!["Downloaded file has unexpected checksum"]);
-                break;
-            }
-        }
     }
 }

@@ -51,8 +51,9 @@ use log::error;
 pub mod base;
 pub mod collector;
 pub mod config;
+pub mod mock;
 
-use self::config::{ActionRoute, Config};
+use self::config::{ActionRoute, Config, DeviceConfig};
 pub use base::actions::{Action, ActionResponse};
 use base::bridge::{stream::Stream, Bridge, Package, Payload, Point, StreamMetrics};
 use base::monitor::Monitor;
@@ -84,6 +85,7 @@ where
 
 pub struct Uplink {
     config: Arc<Config>,
+    device_config: Arc<DeviceConfig>,
     action_rx: Receiver<Action>,
     action_tx: Sender<Action>,
     data_rx: Receiver<Box<dyn Package>>,
@@ -97,7 +99,7 @@ pub struct Uplink {
 }
 
 impl Uplink {
-    pub fn new(config: Arc<Config>) -> Result<Uplink, Error> {
+    pub fn new(config: Arc<Config>, device_config: Arc<DeviceConfig>) -> Result<Uplink, Error> {
         let (action_tx, action_rx) = bounded(10);
         let (data_tx, data_rx) = bounded(10);
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
@@ -106,6 +108,7 @@ impl Uplink {
 
         Ok(Uplink {
             config,
+            device_config,
             action_rx,
             action_tx,
             data_rx,
@@ -122,6 +125,7 @@ impl Uplink {
     pub fn configure_bridge(&mut self) -> Bridge {
         Bridge::new(
             self.config.clone(),
+            self.device_config.clone(),
             self.data_tx.clone(),
             self.stream_metrics_tx(),
             self.action_rx.clone(),
@@ -131,6 +135,7 @@ impl Uplink {
 
     pub fn spawn(
         &mut self,
+        device_config: &DeviceConfig,
         mut bridge: Bridge,
         downloader_disable: Arc<Mutex<bool>>,
         network_up: Arc<Mutex<bool>>,
@@ -138,8 +143,13 @@ impl Uplink {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
         let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
 
-        let mut mqtt =
-            Mqtt::new(self.config.clone(), self.action_tx.clone(), mqtt_metrics_tx, network_up);
+        let mut mqtt = Mqtt::new(
+            self.config.clone(),
+            device_config,
+            self.action_tx.clone(),
+            mqtt_metrics_tx,
+            network_up,
+        );
         let mqtt_client = mqtt.client();
         let ctrl_mqtt = mqtt.ctrl_tx();
 
@@ -159,6 +169,7 @@ impl Uplink {
             let actions_rx = bridge.register_action_routes(&self.config.downloader.actions)?;
             let file_downloader = FileDownloader::new(
                 self.config.clone(),
+                &device_config.authentication,
                 actions_rx,
                 bridge.bridge_tx(),
                 ctrl_rx,
