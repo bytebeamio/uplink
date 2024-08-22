@@ -1,4 +1,5 @@
 use flume::{bounded, Receiver, Sender};
+pub use metrics::StreamMetrics;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -16,9 +17,8 @@ pub use actions_lane::{CtrlTx as ActionsLaneCtrlTx, StatusTx};
 use data_lane::DataBridge;
 pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
-use crate::config::{ActionRoute, StreamConfig};
-use crate::{Action, ActionResponse, Config};
-pub use metrics::StreamMetrics;
+use crate::config::{ActionRoute, Config, DeviceConfig, StreamConfig};
+use crate::{Action, ActionResponse};
 
 pub trait Point: Send + Debug + Serialize + 'static {
     fn stream_name(&self) -> &str;
@@ -80,14 +80,26 @@ pub struct Bridge {
 impl Bridge {
     pub fn new(
         config: Arc<Config>,
+        device_config: Arc<DeviceConfig>,
         package_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
         shutdown_handle: Sender<()>,
     ) -> Self {
-        let data = DataBridge::new(config.clone(), package_tx.clone(), metrics_tx.clone());
-        let actions =
-            ActionsBridge::new(config, package_tx, actions_rx, shutdown_handle, metrics_tx);
+        let data = DataBridge::new(
+            config.clone(),
+            device_config.clone(),
+            package_tx.clone(),
+            metrics_tx.clone(),
+        );
+        let actions = ActionsBridge::new(
+            config,
+            device_config,
+            package_tx,
+            actions_rx,
+            shutdown_handle,
+            metrics_tx,
+        );
         Self { data, actions }
     }
 
