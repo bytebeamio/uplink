@@ -5,30 +5,29 @@ use tokio::{runtime::Runtime, select};
 
 use uplink::{
     base::bridge::{ActionsBridge, Package},
-    config::{ActionRoute, Config, StreamConfig, StreamMetricsConfig},
+    config::{ActionRoute, Config, DeviceConfig},
     Action, ActionResponse,
 };
 
-fn default_config() -> Config {
-    Config {
-        stream_metrics: StreamMetricsConfig {
-            enabled: false,
-            timeout: Duration::from_secs(10),
-            ..Default::default()
-        },
-        action_status: StreamConfig { flush_period: Duration::from_secs(2), ..Default::default() },
-        ..Default::default()
-    }
+fn default_configs() -> (Config, DeviceConfig) {
+    let mut config = Config::default();
+    config.stream_metrics.enabled = false;
+    config.stream_metrics.timeout = Duration::from_secs(10);
+    config.action_status.flush_period = Duration::from_secs(2);
+
+    (config, DeviceConfig::default())
 }
 
 fn create_bridge(
     config: Arc<Config>,
+    device_config: Arc<DeviceConfig>,
 ) -> (ActionsBridge, Sender<Action>, Receiver<Box<dyn Package>>) {
     let (data_tx, data_rx) = bounded(10);
     let (actions_tx, actions_rx) = bounded(10);
     let (shutdown_handle, _) = bounded(1);
     let (metrics_tx, _) = bounded(1);
-    let bridge = ActionsBridge::new(config, data_tx, actions_rx, shutdown_handle, metrics_tx);
+    let bridge =
+        ActionsBridge::new(config, device_config, data_tx, actions_rx, shutdown_handle, metrics_tx);
 
     (bridge, actions_tx, data_rx)
 }
@@ -60,8 +59,9 @@ impl Responses {
 async fn timeout_on_diff_routes() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
-    let config = Arc::new(default_config());
-    let (mut bridge, actions_tx, data_rx) = create_bridge(config);
+    let (config, device_config) = default_configs();
+    let (mut bridge, actions_tx, data_rx) =
+        create_bridge(Arc::new(config), Arc::new(device_config));
     let route_1 = ActionRoute {
         name: "route_1".to_string(),
         timeout: Duration::from_secs(10),
@@ -149,8 +149,9 @@ async fn timeout_on_diff_routes() {
 async fn recv_action_while_current_action_exists() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
-    let config = Arc::new(default_config());
-    let (mut bridge, actions_tx, data_rx) = create_bridge(config);
+    let (config, device_config) = default_configs();
+    let (mut bridge, actions_tx, data_rx) =
+        create_bridge(Arc::new(config), Arc::new(device_config));
 
     let test_route = ActionRoute {
         name: "test".to_string(),
@@ -201,8 +202,9 @@ async fn recv_action_while_current_action_exists() {
 async fn complete_response_on_no_redirection() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
-    let config = Arc::new(default_config());
-    let (mut bridge, actions_tx, data_rx) = create_bridge(config);
+    let (config, device_config) = default_configs();
+    let (mut bridge, actions_tx, data_rx) =
+        create_bridge(Arc::new(config), Arc::new(device_config));
 
     let test_route = ActionRoute {
         name: "test".to_string(),
@@ -250,9 +252,10 @@ async fn complete_response_on_no_redirection() {
 async fn no_complete_response_between_redirection() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
-    let mut config = default_config();
+    let (mut config, device_config) = default_configs();
     config.action_redirections.insert("test".to_string(), "redirect".to_string());
-    let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+    let (mut bridge, actions_tx, data_rx) =
+        create_bridge(Arc::new(config), Arc::new(device_config));
     let bridge_tx_1 = bridge.status_tx();
     let bridge_tx_2 = bridge.status_tx();
 
@@ -324,8 +327,9 @@ async fn no_complete_response_between_redirection() {
 async fn accept_regular_actions_during_tunshell() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
-    let config = default_config();
-    let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+    let (config, device_config) = default_configs();
+    let (mut bridge, actions_tx, data_rx) =
+        create_bridge(Arc::new(config), Arc::new(device_config));
     let bridge_tx_1 = bridge.status_tx();
     let bridge_tx_2 = bridge.status_tx();
 
@@ -418,8 +422,9 @@ async fn accept_regular_actions_during_tunshell() {
 async fn accept_tunshell_during_regular_action() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
-    let config = default_config();
-    let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+    let (config, device_config) = default_configs();
+    let (mut bridge, actions_tx, data_rx) =
+        create_bridge(Arc::new(config), Arc::new(device_config));
     let bridge_tx_1 = bridge.status_tx();
     let bridge_tx_2 = bridge.status_tx();
 
@@ -512,8 +517,9 @@ async fn accept_tunshell_during_regular_action() {
 async fn cancel_action() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
-    let config = default_config();
-    let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+    let (config, device_config) = default_configs();
+    let (mut bridge, actions_tx, data_rx) =
+        create_bridge(Arc::new(config), Arc::new(device_config));
 
     let bridge_tx_1 = bridge.status_tx();
     let (route_tx, action_rx_1) = bounded(1);
@@ -585,8 +591,8 @@ async fn cancel_action() {
 async fn cancel_action_failure_not_executing() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
-    let config = default_config();
-    let (bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+    let (config, device_config) = default_configs();
+    let (bridge, actions_tx, data_rx) = create_bridge(Arc::new(config), Arc::new(device_config));
 
     spawn_bridge(bridge);
 
@@ -612,8 +618,9 @@ async fn cancel_action_failure_not_executing() {
 async fn cancel_action_failure_on_completion() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
-    let config = default_config();
-    let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+    let (config, device_config) = default_configs();
+    let (mut bridge, actions_tx, data_rx) =
+        create_bridge(Arc::new(config), Arc::new(device_config));
 
     let bridge_tx_1 = bridge.status_tx();
     let (route_tx, action_rx_1) = bounded(1);
@@ -684,9 +691,10 @@ async fn cancel_action_failure_on_completion() {
 async fn cancel_action_between_redirect() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
-    let mut config = default_config();
+    let (mut config, device_config) = default_configs();
     config.action_redirections.insert("test".to_string(), "redirect".to_string());
-    let (mut bridge, actions_tx, data_rx) = create_bridge(Arc::new(config));
+    let (mut bridge, actions_tx, data_rx) =
+        create_bridge(Arc::new(config), Arc::new(device_config));
 
     let bridge_tx_1 = bridge.status_tx();
     let (route_tx, action_rx_1) = bounded(1);

@@ -889,9 +889,6 @@ pub mod tests {
 
     pub fn default_config() -> Config {
         Config {
-            broker: "localhost".to_owned(),
-            port: 1883,
-            device_id: "123".to_owned(),
             streams: HashMap::new(),
             mqtt: MqttConfig { max_packet_size: 1024 * 1024, ..Default::default() },
             ..Default::default()

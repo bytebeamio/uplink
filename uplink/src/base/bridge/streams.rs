@@ -4,15 +4,17 @@ use std::sync::Arc;
 use flume::Sender;
 use log::{error, info, trace};
 
-use super::stream::{self, StreamStatus};
-use super::{Point, StreamMetrics};
-use crate::config::StreamConfig;
-use crate::{Config, Package, Stream};
+use crate::config::{Config, DeviceConfig, StreamConfig};
 
-use super::delaymap::DelayMap;
+use super::{
+    delaymap::DelayMap,
+    stream::{self, Stream, StreamStatus},
+    Package, Point, StreamMetrics,
+};
 
 pub struct Streams<T> {
     config: Arc<Config>,
+    device_config: Arc<DeviceConfig>,
     data_tx: Sender<Box<dyn Package>>,
     metrics_tx: Sender<StreamMetrics>,
     map: HashMap<String, Stream<T>>,
@@ -22,10 +24,18 @@ pub struct Streams<T> {
 impl<T: Point> Streams<T> {
     pub fn new(
         config: Arc<Config>,
+        device_config: Arc<DeviceConfig>,
         data_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
-        Self { config, data_tx, metrics_tx, map: HashMap::new(), stream_timeouts: DelayMap::new() }
+        Self {
+            config,
+            device_config,
+            data_tx,
+            metrics_tx,
+            map: HashMap::new(),
+            stream_timeouts: DelayMap::new(),
+        }
     }
 
     pub fn config_streams(&mut self, streams_config: HashMap<String, StreamConfig>) {
@@ -47,8 +57,8 @@ impl<T: Point> Streams<T> {
 
             let stream = Stream::dynamic(
                 &stream_name,
-                &self.config.project_id,
-                &self.config.device_id,
+                &self.device_config.project_id,
+                &self.device_config.device_id,
                 self.data_tx.clone(),
             );
 

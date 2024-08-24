@@ -20,7 +20,7 @@ pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
 use uplink::config::{
-    ActionRoute, AppConfig, Config, StreamConfig, DEFAULT_TIMEOUT, MAX_BATCH_SIZE,
+    ActionRoute, AppConfig, Config, DeviceConfig, StreamConfig, DEFAULT_TIMEOUT, MAX_BATCH_SIZE,
 };
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
@@ -100,7 +100,7 @@ pub struct CommandLine {
 impl CommandLine {
     /// Reads config file to generate config struct and replaces places holders
     /// like bike id and data version
-    fn get_configs(&self) -> Result<Config, anyhow::Error> {
+    fn get_configs(&self) -> Result<(Config, DeviceConfig), anyhow::Error> {
         let mut config =
             config::Config::builder().add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml));
 
@@ -114,14 +114,6 @@ impl CommandLine {
             config = config.add_source(File::from_str(&read, FileFormat::Toml));
         }
 
-        let auth = read_to_string(&self.auth).map_err(|e| {
-            Error::msg(format!(
-                "Auth file couldn't be loaded from {:?}; error = {e}",
-                self.auth.display()
-            ))
-        })?;
-        config = config.add_source(File::from_str(&auth, FileFormat::Json));
-
         let mut config: Config =
             config.add_source(Environment::default()).build()?.try_deserialize()?;
 
@@ -133,9 +125,21 @@ impl CommandLine {
             ))
         })?;
 
+        let auth = read_to_string(&self.auth).map_err(|e| {
+            Error::msg(format!(
+                "Auth file couldn't be loaded from {:?}; error = {e}",
+                self.auth.display()
+            ))
+        })?;
+        let device_config: DeviceConfig = config::Config::builder()
+            .add_source(File::from_str(&auth, FileFormat::Json))
+            .add_source(Environment::default())
+            .build()?
+            .try_deserialize()?;
+
         // replace placeholders with device/tenant ID
-        let tenant_id = config.project_id.trim();
-        let device_id = config.device_id.trim();
+        let tenant_id = device_config.project_id.trim();
+        let device_id = device_config.device_id.trim();
 
         // Replace placeholders in topic strings with configured values for tenant_id and device_id
         // e.g. for tenant_id: "demo"; device_id: "123"
@@ -205,7 +209,7 @@ impl CommandLine {
             route.cancellable = true;
         }
 
-        Ok(config)
+        Ok((config, device_config))
     }
 
     fn initialize_logging(&self) -> ReloadHandle {
@@ -238,7 +242,7 @@ impl CommandLine {
         reload_handle
     }
 
-    fn banner(&self, config: &Config) {
+    fn banner(&self, config: &Config, device_config: &DeviceConfig) {
         const B: &str = r#"
         ░█░▒█░▄▀▀▄░█░░░▀░░█▀▀▄░█░▄
         ░█░▒█░█▄▄█░█░░░█▀░█░▒█░█▀▄
@@ -250,9 +254,9 @@ impl CommandLine {
         println!("    profile: {}", self.profile);
         println!("    commit_sha: {}", self.commit_sha);
         println!("    commit_date: {}", self.commit_date);
-        println!("    project_id: {}", config.project_id);
-        println!("    device_id: {}", config.device_id);
-        println!("    remote: {}:{}", config.broker, config.port);
+        println!("    project_id: {}", device_config.project_id);
+        println!("    device_id: {}", device_config.device_id);
+        println!("    remote: {}:{}", device_config.broker, device_config.port);
         println!("    persistence_path: {}", config.persistence_path.display());
         if !config.action_redirections.is_empty() {
             println!("    action redirections:");
@@ -266,7 +270,7 @@ impl CommandLine {
                 println!("\tname: {app:?}\n\tport: {port}\n\tactions: {actions:?}\n\t@");
             }
         }
-        println!("    secure_transport: {}", config.authentication.is_some());
+        println!("    secure_transport: {}", device_config.authentication.is_some());
         println!("    max_packet_size: {}", config.mqtt.max_packet_size);
         println!("    max_inflight_messages: {}", config.mqtt.max_inflight);
         println!("    keep_alive_timeout: {}", config.mqtt.keep_alive);
@@ -302,11 +306,12 @@ fn main() -> Result<(), Error> {
 
     let commandline: CommandLine = StructOpt::from_args();
     let reload_handle = commandline.initialize_logging();
-    let config = commandline.get_configs()?;
-    commandline.banner(&config);
+    let (config, device_config) = commandline.get_configs()?;
+    commandline.banner(&config, &device_config);
 
     let config = Arc::new(config);
-    let mut uplink = Uplink::new(config.clone())?;
+    let device_config = Arc::new(device_config);
+    let mut uplink = Uplink::new(config.clone(), device_config.clone())?;
     let mut bridge = uplink.configure_bridge();
     uplink.spawn_builtins(&mut bridge)?;
 
@@ -339,7 +344,8 @@ fn main() -> Result<(), Error> {
 
     let downloader_disable = Arc::new(Mutex::new(false));
     let network_up = Arc::new(Mutex::new(false));
-    let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone(), network_up.clone())?;
+    let ctrl_tx =
+        uplink.spawn(&device_config, bridge, downloader_disable.clone(), network_up.clone())?;
 
     if let Some(config) = config.simulator.clone() {
         spawn_named_thread("Simulator", || {

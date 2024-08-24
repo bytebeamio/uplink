@@ -48,6 +48,7 @@ fn download_file() {
     let (_, ctrl_rx) = bounded(1);
     let downloader = FileDownloader::new(
         Arc::new(config),
+        &None,
         download_rx,
         bridge_tx,
         ctrl_rx,
@@ -117,6 +118,7 @@ fn checksum_of_file() {
     let (_, ctrl_rx) = bounded(1);
     let downloader = FileDownloader::new(
         Arc::new(config),
+        &None,
         download_rx,
         bridge_tx,
         ctrl_rx,

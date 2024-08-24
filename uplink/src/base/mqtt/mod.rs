@@ -11,12 +11,14 @@ use std::io::Read;
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::{Action, Config};
 use rumqttc::{
     AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS,
     Request, TlsConfiguration, Transport,
 };
 use std::sync::Arc;
+
+use crate::config::{Config, DeviceConfig};
+use crate::Action;
 
 pub use self::metrics::MqttMetrics;
 
@@ -66,12 +68,13 @@ pub struct Mqtt {
 impl Mqtt {
     pub fn new(
         config: Arc<Config>,
+        device_config: &DeviceConfig,
         actions_tx: Sender<Action>,
         metrics_tx: Sender<MqttMetrics>,
         network_up: Arc<Mutex<bool>>,
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
-        let options = mqttoptions(&config);
+        let options = mqttoptions(&config, device_config);
         let (client, mut eventloop) = AsyncClient::new(options, 0);
         eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
         let (ctrl_tx, ctrl_rx) = bounded(1);
@@ -287,14 +290,15 @@ impl Mqtt {
     }
 }
 
-fn mqttoptions(config: &Config) -> MqttOptions {
+fn mqttoptions(config: &Config, device_config: &DeviceConfig) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
-    let mut mqttoptions = MqttOptions::new(&config.device_id, &config.broker, config.port);
+    let mut mqttoptions =
+        MqttOptions::new(&device_config.device_id, &device_config.broker, device_config.port);
     mqttoptions.set_max_packet_size(config.mqtt.max_packet_size, config.mqtt.max_packet_size);
     mqttoptions.set_keep_alive(Duration::from_secs(config.mqtt.keep_alive));
     mqttoptions.set_inflight(config.mqtt.max_inflight);
 
-    if let Some(auth) = config.authentication.clone() {
+    if let Some(auth) = device_config.authentication.clone() {
         let ca = auth.ca_certificate.into_bytes();
         let device_certificate = auth.device_certificate.into_bytes();
         let device_private_key = auth.device_private_key.into_bytes();
