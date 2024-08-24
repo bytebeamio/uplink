@@ -1,8 +1,9 @@
 use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
 use flume::{bounded, Sender};
+use futures_util::sink::SinkExt;
+use futures_util::StreamExt;
 use log::{error, info, LevelFilter};
 use rand::Rng;
-use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, Publish};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use simplelog::{
@@ -10,8 +11,10 @@ use simplelog::{
 };
 use structopt::StructOpt;
 use thiserror::Error;
-use tokio::spawn;
-use tokio::time::{interval, sleep};
+use tokio::net::TcpStream;
+use tokio::time::interval;
+use tokio::{select, spawn};
+use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use uplink::Action;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -37,8 +40,10 @@ pub struct CommandLine {
 pub enum Error {
     #[error("Io error {0}")]
     Io(#[from] io::Error),
-    #[error("Mqtt error {0}")]
-    Mqtt(#[from] rumqttc::ClientError),
+    #[error("Stream done")]
+    StreamDone,
+    #[error("Lines codec error {0}")]
+    Codec(#[from] LinesCodecError),
     #[error("Serde error {0}")]
     Json(#[from] serde_json::error::Error),
 }
@@ -146,42 +151,34 @@ pub fn spawn_data_simulators(device: DeviceData, tx: Sender<Payload>) {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Error> {
     let commandline = init();
+
+    let addr = format!("localhost:{}", commandline.port);
     let path = read_gps_path(&commandline.paths);
     let device = new_device_data(path);
+
+    let stream = TcpStream::connect(addr).await?;
+    let (mut data_tx, mut actions_rx) = Framed::new(stream, LinesCodec::new()).split();
 
     let (tx, rx) = bounded(10);
     spawn_data_simulators(device, tx.clone());
 
-    let options = MqttOptions::new("simulator", "127.0.0.1", commandline.port);
-    let (client, mut eventloop) = AsyncClient::new(options, 1);
+    loop {
+        select! {
+            line = actions_rx.next() => {
+                let line = line.ok_or(Error::StreamDone)??;
+                let action = serde_json::from_str(&line)?;
+                spawn(ActionResponse::simulate(action,  tx.clone()));
+            }
+            p = rx.recv_async() => {
+                let Ok(payload) = p else {
+                    error!("All generators have stopped!");
+                    return Ok(());
+                };
 
-    spawn(async move {
-        loop {
-            match eventloop.poll().await {
-                Ok(Event::Incoming(Incoming::Publish(Publish { payload, .. }))) => {
-                    let Ok(action) = serde_json::from_slice(&payload) else {
-                        error!("Failed to serialize");
-                        continue;
-                    };
-                    spawn(ActionResponse::simulate(action, tx.clone()));
-                }
-                Err(e) => {
-                    error!("{e}");
-                    sleep(Duration::from_secs(1)).await;
-                }
-                _ => {}
+                let text = serde_json::to_string(&payload)?;
+                data_tx.send(text).await?;
             }
         }
-    });
-    loop {
-        let Ok(payload) = rx.recv_async().await else {
-            error!("All generators have stopped!");
-            return Ok(());
-        };
-
-        let topic = format!("streams/{}", payload.stream);
-        let payload = serde_json::to_vec(&payload)?;
-        client.publish(topic, rumqttc::QoS::AtLeastOnce, false, payload).await?;
     }
 }
 
