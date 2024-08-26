@@ -158,10 +158,13 @@ impl Bus {
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) {
-        let (back_tx, back_rx) = bounded(0);
-        let mut router =
-            Router::new(self.config.joins.output_streams.clone(), self.bridge_tx.clone(), back_tx)
-                .await;
+        let (publish_back_tx, publish_back_rx) = bounded(0);
+        let mut router = Router::new(
+            self.config.joins.output_streams.clone(),
+            self.bridge_tx.clone(),
+            publish_back_tx,
+        )
+        .await;
         let mut input_streams = HashSet::new();
         for join in &self.config.joins.output_streams {
             for input in &join.construct_from {
@@ -206,7 +209,7 @@ impl Bus {
                     router.map(stream_name.to_owned(), data).await;
                 }
 
-                Ok(data) = back_rx.recv_async() => {
+                Ok(data) = publish_back_rx.recv_async() => {
                     if let Err(e) = self.tx.publish_data(data) {
                         error!("{e}");
                     }
