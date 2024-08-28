@@ -168,16 +168,14 @@ update_period = 30
 enabled = true
 port = 3333
 
-# Configurations associated with running uplink in simulator mode, if enabled
-# uplink will push simulated data for device_id 1..=num_devices and respond to any
-# actions triggered on the tenant connected to, with progress 0..=100.
-# NOTE: uplink bridge will hence be turned off.
+# Configurations associated with running uplink in simulator mode, if enabled uplink
+# will push simulated data for respond to actions listed with progress 0..=100.
 #
 # Required Parameters
-# - num_devices: number of devices to be simulated
+# - actions: action routes on which uplink simulator can accept actions
 # - gps_paths: path to directory containing files with gps paths to be used in simulation
 # [simulator]
-# num_devices = 10
+# actions = [{ name = "lock" }]
 # gps_paths = "./paths/"
 
 # Configuration of logger, journalctl in the case of linux. As configured, uplink will
@@ -201,3 +199,35 @@ port = 3333
 # - interval: time in seconds after which device-shadow is pushed onto platform, default value is 60
 [device_shadow]
 interval = 30
+
+# The on-device service bus exposes an MQTT interface for inter-process communication
+# Required Parameters
+# - port: the port on which the broker/server is listening for incoming service connections
+# - joins: description of how uplink will join incoming data and push outgoing data streams
+# - console_port: port on which the rumqttd console API is exposed
+[bus]
+port = 1883
+console_port = 3030
+joins = { output_streams = [
+    { name = "location", construct_from = [
+        { input_stream = "gps", select_fields = [
+            "latitude",
+            "longitude",
+        ] },
+        { input_stream = "altimeter", select_fields = [
+            "altitude",
+        ] },
+    ], push_interval_s = 60, no_data_action = "null", publish_on_service_bus = true },
+    { name = "device_shadow", construct_from = [
+        { input_stream = "device_shadow", select_fields = "all" },
+    ], push_interval_s = "on_new_data", no_data_action = "previous_value", publish_on_service_bus = true },
+    { name = "example", construct_from = [
+        { input_stream = "stream_one", select_fields = [
+            "field_x",
+            "field_y",
+        ] },
+        { input_stream = "stream_two", select_fields = [
+            { "field_z" = "field_x" },
+        ] },
+    ], push_interval_s = 120, no_data_action = "previous_value", publish_on_service_bus = false },
+] }
