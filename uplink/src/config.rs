@@ -14,10 +14,16 @@ use crate::collector::journalctl::JournalCtlConfig;
 use crate::collector::logcat::LogcatConfig;
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+pub const MAX_STREAM_COUNT: usize = 20;
 
 #[inline]
 fn default_timeout() -> Duration {
     DEFAULT_TIMEOUT
+}
+
+#[inline]
+fn default_stream_count() -> usize {
+    MAX_STREAM_COUNT
 }
 
 #[inline]
@@ -260,6 +266,8 @@ pub struct Config {
     #[serde(default = "default_tcpapps")]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
+    #[serde(default = "default_stream_count")]
+    pub max_stream_count: usize,
     #[serde(default)]
     pub processes: Vec<ActionRoute>,
     #[serde(default)]

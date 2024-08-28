@@ -17,6 +17,9 @@ persistence_path = "/tmp/uplink/"
 # Size of in-memory buffer for dynamically created streams. Used for backlog management.
 default_buf_size = 1024 # 1KB
 
+# Maximum number of data streams that can be accepted by uplink
+max_stream_count = 10
+
 # MQTT client configuration
 #
 # Required Parameters
