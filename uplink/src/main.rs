@@ -113,7 +113,7 @@ impl CommandLine {
                 Some(e) if e == "toml" => FileFormat::Toml,
                 _ => {
                     return Err(Error::msg(format!(
-                        "Auth file couldn't be loaded from {:?}; unsupported file extension",
+                        "Config file couldn't be loaded from {:?}; supported file extensions: [`.json`,`.toml`]",
                         path.display(),
                     )))
                 }
