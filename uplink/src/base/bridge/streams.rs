@@ -44,9 +44,7 @@ impl<T: Point> Streams<T> {
 
         // Create stream if it doesn't already exist
         if !self.map.contains_key(&stream_name) {
-            if self.config.simulator.is_none()
-                && self.map.keys().len() > self.config.max_stream_count
-            {
+            if self.map.keys().len() > self.config.max_stream_count {
                 error!(
                     "Failed to create {:?} stream. More than max {} streams",
                     stream_name, self.config.max_stream_count
