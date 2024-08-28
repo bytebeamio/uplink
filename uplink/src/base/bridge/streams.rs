@@ -28,14 +28,8 @@ impl<T: Point> Streams<T> {
         data_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
-        Self {
-            config,
-            device_config,
-            data_tx,
-            metrics_tx,
-            map: HashMap::new(),
-            stream_timeouts: DelayMap::new(),
-        }
+        let map = HashMap::with_capacity(config.max_stream_count);
+        Self { config, device_config, data_tx, metrics_tx, map, stream_timeouts: DelayMap::new() }
     }
 
     pub fn config_streams(&mut self, streams_config: HashMap<String, StreamConfig>) {
@@ -50,8 +44,13 @@ impl<T: Point> Streams<T> {
 
         // Create stream if it doesn't already exist
         if !self.map.contains_key(&stream_name) {
-            if self.config.simulator.is_none() && self.map.keys().len() > 20 {
-                error!("Failed to create {:?} stream. More than max 20 streams", stream_name);
+            if self.config.simulator.is_none()
+                && self.map.keys().len() > self.config.max_stream_count
+            {
+                error!(
+                    "Failed to create {:?} stream. More than max {} streams",
+                    stream_name, self.config.max_stream_count
+                );
                 return;
             }
 
