@@ -1,12 +1,10 @@
 [toolchain]
-channel = "1.78.0"
+channel = "1.80.0"
 targets = [
     "x86_64-linux-android",
     "i686-linux-android",
     "aarch64-linux-android",
-    "armv7-linux-androideabi"
+    "armv7-linux-androideabi",
 ]
 profile = "minimal"
-components = [
-    "clippy"
-]
+components = ["clippy"]
