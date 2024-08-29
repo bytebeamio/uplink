@@ -96,7 +96,7 @@ impl ActionsBridge {
         action_status.batch_size = 1;
 
         streams_config.insert("action_status".to_owned(), action_status);
-        let mut streams = Streams::new(config.clone(), device_config, package_tx, metrics_tx);
+        let mut streams = Streams::new(1, device_config, package_tx, metrics_tx);
         streams.config_streams(streams_config);
 
         Self {
