@@ -17,7 +17,7 @@ pub enum Error {
     Recv(#[from] flume::RecvError),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct JournalCtlConfig {
     #[serde(default)]
     pub tags: Vec<String>,

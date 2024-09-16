@@ -63,6 +63,7 @@ lazy_static = "1.4.0"
 tar = "0.4"
 # device_shadow
 surge-ping = "0.8"
+toml = "0.8.19"
 
 [target.'cfg(target_os = "android")'.dependencies]
 time = "0.3"
