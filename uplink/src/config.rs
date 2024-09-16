@@ -4,9 +4,11 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
-use std::{collections::HashMap, fmt::Debug};
+use std::{collections::HashMap, fmt};
 
-use serde::{Deserialize, Serialize};
+use serde::de::{self, Visitor};
+use serde::ser::{SerializeMap, SerializeSeq};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{serde_as, DurationSeconds};
 
 pub use crate::base::bridge::stream::MAX_BATCH_SIZE;
@@ -262,6 +264,227 @@ pub struct PreconditionCheckerConfig {
     pub actions: Vec<ActionRoute>,
 }
 
+#[derive(Debug, Clone)]
+pub struct Field {
+    pub original: String,
+    pub renamed: Option<String>,
+}
+
+struct FieldVisitor;
+
+impl<'de> Visitor<'de> for FieldVisitor {
+    type Value = Field;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(r#"a string or a map with a single key-value pair"#)
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(Field { original: value.to_string(), renamed: None })
+    }
+
+    fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+    where
+        M: serde::de::MapAccess<'de>,
+    {
+        let entry = map.next_entry::<String, String>()?;
+        if let Some((renamed, original)) = entry {
+            Ok(Field { original, renamed: Some(renamed) })
+        } else {
+            Err(de::Error::custom("Expected a single key-value pair in the map"))
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Field {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(FieldVisitor)
+    }
+}
+
+impl Serialize for Field {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match &self.renamed {
+            Some(renamed) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(renamed, &self.original)?;
+                map.end()
+            }
+            None => serializer.serialize_str(&self.original),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SelectConfig {
+    All,
+    Fields(Vec<Field>),
+}
+
+struct SelectVisitor;
+
+impl<'de> Visitor<'de> for SelectVisitor {
+    type Value = SelectConfig;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(r#"the string "all" or a list of `Field`s"#)
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        match value {
+            "all" => Ok(SelectConfig::All),
+            _ => Err(de::Error::custom(r#"Expected the string "all""#)),
+        }
+    }
+
+    fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+    where
+        S: serde::de::SeqAccess<'de>,
+    {
+        let mut fields = vec![];
+        while let Some(field) = seq.next_element()? {
+            fields.push(field);
+        }
+
+        Ok(SelectConfig::Fields(fields))
+    }
+}
+
+impl<'de> Deserialize<'de> for SelectConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(SelectVisitor)
+    }
+}
+
+impl Serialize for SelectConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            SelectConfig::All => serializer.serialize_str("all"),
+            SelectConfig::Fields(fields) => {
+                let mut seq = serializer.serialize_seq(Some(fields.len()))?;
+                for field in fields {
+                    seq.serialize_element(field)?;
+                }
+                seq.end()
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct InputConfig {
+    pub input_stream: String,
+    pub select_fields: SelectConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum NoDataAction {
+    #[default]
+    Null,
+    PreviousValue,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PushInterval {
+    OnNewData,
+    OnTimeout(Duration),
+}
+
+struct PushVisitor;
+
+impl<'de> Visitor<'de> for PushVisitor {
+    type Value = PushInterval;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(r#"the string "on_new_data" or a unsigned integer"#)
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        match value {
+            "on_new_data" => Ok(PushInterval::OnNewData),
+            _ => Err(de::Error::custom(r#"Expected the string "on_new_data""#)),
+        }
+    }
+
+    fn visit_u64<E>(self, secs: u64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(PushInterval::OnTimeout(Duration::from_secs(secs)))
+    }
+
+    fn visit_i64<E>(self, secs: i64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.visit_u64(secs as u64)
+    }
+}
+
+impl<'de> Deserialize<'de> for PushInterval {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(PushVisitor)
+    }
+}
+
+impl Serialize for PushInterval {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            PushInterval::OnNewData => serializer.serialize_str("on_new_data"),
+            PushInterval::OnTimeout(duration) => serializer.serialize_u64(duration.as_secs()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JoinConfig {
+    pub name: String,
+    pub construct_from: Vec<InputConfig>,
+    pub no_data_action: NoDataAction,
+    pub push_interval_s: PushInterval,
+    pub publish_on_service_bus: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JoinerConfig {
+    pub output_streams: Vec<JoinConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BusConfig {
+    pub port: u16,
+    pub console_port: u16,
+    pub joins: JoinerConfig,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct DeviceConfig {
     pub project_id: String,
@@ -312,6 +535,7 @@ pub struct Config {
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
     pub precondition_checks: Option<PreconditionCheckerConfig>,
+    pub bus: Option<BusConfig>,
 }
 
 impl Config {

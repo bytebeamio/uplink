@@ -42,7 +42,7 @@ pub trait Package: Send + Debug {
 
 // TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
 // TODO which cloud will double deserialize (Batch 1st and messages next)
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Payload {
     #[serde(skip_serializing)]
     pub stream: String,
@@ -147,5 +147,9 @@ impl BridgeTx {
 
     pub async fn send_action_response(&self, response: ActionResponse) {
         self.status_tx.send_action_response(response).await
+    }
+
+    pub fn send_action_response_sync(&self, response: ActionResponse) {
+        self.status_tx.send_action_response_sync(response)
     }
 }

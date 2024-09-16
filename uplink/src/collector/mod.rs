@@ -1,3 +1,5 @@
+#[cfg(feature = "bus")]
+pub mod bus;
 pub mod device_shadow;
 pub mod downloader;
 pub mod installer;
