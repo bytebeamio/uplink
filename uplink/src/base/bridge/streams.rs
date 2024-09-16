@@ -4,7 +4,7 @@ use std::sync::Arc;
 use flume::Sender;
 use log::{error, info, trace};
 
-use crate::config::{Config, DeviceConfig, StreamConfig};
+use crate::config::{DeviceConfig, StreamConfig};
 
 use super::{
     delaymap::DelayMap,
@@ -13,7 +13,7 @@ use super::{
 };
 
 pub struct Streams<T> {
-    config: Arc<Config>,
+    max_stream_count: usize,
     device_config: Arc<DeviceConfig>,
     data_tx: Sender<Box<dyn Package>>,
     metrics_tx: Sender<StreamMetrics>,
@@ -23,17 +23,18 @@ pub struct Streams<T> {
 
 impl<T: Point> Streams<T> {
     pub fn new(
-        config: Arc<Config>,
+        max_stream_count: usize,
         device_config: Arc<DeviceConfig>,
         data_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
+        let map = HashMap::with_capacity(max_stream_count);
         Self {
-            config,
+            max_stream_count,
             device_config,
             data_tx,
             metrics_tx,
-            map: HashMap::new(),
+            map,
             stream_timeouts: DelayMap::new(),
         }
     }
@@ -50,8 +51,11 @@ impl<T: Point> Streams<T> {
 
         // Create stream if it doesn't already exist
         if !self.map.contains_key(&stream_name) {
-            if self.config.simulator.is_none() && self.map.keys().len() > 20 {
-                error!("Failed to create {:?} stream. More than max 20 streams", stream_name);
+            if self.map.keys().len() > self.max_stream_count {
+                error!(
+                    "Failed to create {:?} stream. More than max {} streams",
+                    stream_name, self.max_stream_count
+                );
                 return;
             }
 

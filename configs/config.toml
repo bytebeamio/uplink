@@ -17,6 +17,9 @@ persistence_path = "/tmp/uplink/"
 # Size of in-memory buffer for dynamically created streams. Used for backlog management.
 default_buf_size = 1024 # 1KB
 
+# Maximum number of data streams that can be accepted by uplink
+max_stream_count = 10
+
 # MQTT client configuration
 #
 # Required Parameters
@@ -168,16 +171,14 @@ update_period = 30
 enabled = true
 port = 3333
 
-# Configurations associated with running uplink in simulator mode, if enabled
-# uplink will push simulated data for device_id 1..=num_devices and respond to any
-# actions triggered on the tenant connected to, with progress 0..=100.
-# NOTE: uplink bridge will hence be turned off.
+# Configurations associated with running uplink in simulator mode, if enabled uplink
+# will push simulated data for respond to actions listed with progress 0..=100.
 #
 # Required Parameters
-# - num_devices: number of devices to be simulated
+# - actions: action routes on which uplink simulator can accept actions
 # - gps_paths: path to directory containing files with gps paths to be used in simulation
 # [simulator]
-# num_devices = 10
+# actions = [{ name = "lock" }]
 # gps_paths = "./paths/"
 
 # Configuration of logger, journalctl in the case of linux. As configured, uplink will
