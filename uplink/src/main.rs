@@ -108,7 +108,17 @@ impl CommandLine {
                     path.display()
                 ))
             })?;
-            config = config.add_source(File::from_str(&read, FileFormat::Toml));
+            let file_format = match path.extension() {
+                Some(e) if e == "json" => FileFormat::Json,
+                Some(e) if e == "toml" => FileFormat::Toml,
+                _ => {
+                    return Err(Error::msg(format!(
+                        "Config file couldn't be loaded from {:?}; supported file extensions: [`.json`,`.toml`]",
+                        path.display(),
+                    )))
+                }
+            };
+            config = config.add_source(File::from_str(&read, file_format));
         }
 
         let mut config: Config =
