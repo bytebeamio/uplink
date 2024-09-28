@@ -72,10 +72,10 @@ impl Queue {
             .fetch_one(&mut self.conn)
             .await?;
 
-        let raw = row.raw as String;
-        let payload = serde_json::from_str(&raw)?;
+        let stream = row.stream;
+        let raw = row.raw;
 
-        Ok(payload)
+        Ok((stream, raw))
     }
 
     /// Forget messages acked by the broker
