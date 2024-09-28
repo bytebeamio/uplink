@@ -290,7 +290,7 @@ impl Mqtt {
     }
 }
 
-fn mqttoptions(config: &Config, device_config: &DeviceConfig) -> MqttOptions {
+pub fn mqttoptions(config: &Config, device_config: &DeviceConfig) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
     let mut mqttoptions =
         MqttOptions::new(&device_config.device_id, &device_config.broker, device_config.port);

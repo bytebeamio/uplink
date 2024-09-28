@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "CREATE TABLE IF NOT EXISTS payloads\n        (\n            id      INTEGER PRIMARY KEY AUTOINCREMENT,\n            stream  TEXT NOT NULL,\n            raw     TEXT NOT NULL\n        );",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "63178e327a5e110d8d31e4f2fbe9c21a70fe3d4a9335689b34a2a38dec3cf6b5"
+}

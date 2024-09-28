@@ -21,6 +21,7 @@ pub type ReloadHandle =
 
 #[cfg(feature = "bus")]
 use uplink::collector::bus::Bus;
+use uplink::collector::events;
 #[cfg(feature = "bus")]
 use uplink::config::{ActionRoute, DEFAULT_TIMEOUT};
 use uplink::config::{AppConfig, Config, DeviceConfig, StreamConfig, MAX_BATCH_SIZE};
@@ -388,6 +389,14 @@ fn main() -> Result<(), Error> {
         let ctrl_tx = ctrl_tx.clone();
         spawn_named_thread("Uplink Console", move || {
             console::start(port, reload_handle, ctrl_tx, downloader_disable, network_up)
+        });
+    }
+
+    if config.events.enabled {
+        let port = config.events.port;
+        let path = format!("sqlite://{}/events.db", config.persistence_path.display());
+        spawn_named_thread("Uplink Console", move || {
+            events::start(port, &path, config, device_config)
         });
     }
 

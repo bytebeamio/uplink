@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT stream, raw FROM payloads ORDER BY id ASC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "stream",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "raw",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "13369ca393c2d834e1eb6a88318937970562a7dd07a650966126e80038dca9cc"
+}

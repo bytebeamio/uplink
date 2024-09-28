@@ -2,6 +2,7 @@
 pub mod bus;
 pub mod device_shadow;
 pub mod downloader;
+pub mod events;
 pub mod installer;
 #[cfg(target_os = "linux")]
 pub mod journalctl;

@@ -495,6 +495,12 @@ pub struct DeviceConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct EventsConfig {
+    pub enabled: bool,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub console: ConsoleConfig,
@@ -536,6 +542,7 @@ pub struct Config {
     pub logging: Option<LogcatConfig>,
     pub precondition_checks: Option<PreconditionCheckerConfig>,
     pub bus: Option<BusConfig>,
+    pub events: EventsConfig,
 }
 
 impl Config {

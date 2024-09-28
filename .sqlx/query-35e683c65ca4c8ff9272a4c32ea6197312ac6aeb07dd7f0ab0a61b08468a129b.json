@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO payloads ( stream, raw )\n            VALUES ( ?1, ?2 );",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "35e683c65ca4c8ff9272a4c32ea6197312ac6aeb07dd7f0ab0a61b08468a129b"
+}
