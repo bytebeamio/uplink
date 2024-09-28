@@ -542,6 +542,7 @@ pub struct Config {
     pub logging: Option<LogcatConfig>,
     pub precondition_checks: Option<PreconditionCheckerConfig>,
     pub bus: Option<BusConfig>,
+    #[serde(default)]
     pub events: EventsConfig,
 }
 
