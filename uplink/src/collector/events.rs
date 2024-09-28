@@ -153,7 +153,7 @@ async fn push_to_broker_on_ack(
             device_config.project_id, device_config.device_id
         );
 
-        if let Err(e) = client.publish(topic, QoS::AtLeastOnce, false, text).await {
+        if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, false, text).await {
             error!("{e}");
         }
 
@@ -169,6 +169,8 @@ async fn push_to_broker_on_ack(
                             error!("{e}");
                             return;
                         }
+
+                        debug!("Event has reached broker on topic: {topic}");
                         continue 'outer;
                     } else {
                         warn!("Unexpected pkid");
