@@ -177,7 +177,9 @@ async fn push_to_broker_on_ack(
                     }
                 }
                 Err(e) => {
-                    error!("{e}");
+                    error!("error={e}; trying again in 5s");
+                    // Wait a second before trying again
+                    sleep(Duration::from_secs(1)).await;
                 }
                 _ => {}
             }
