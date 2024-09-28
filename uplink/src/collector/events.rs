@@ -1,12 +1,11 @@
-use std::{fs::metadata, sync::Arc};
+use std::{fs::metadata, sync::Arc, time::Duration};
 
 use axum::{extract::State, routing::post, Json, Router};
-use log::{error, info};
+use log::{debug, error, info, warn};
 use reqwest::StatusCode;
 use rumqttc::{AsyncClient, Event, Outgoing, Packet, PubAck, QoS};
 use sqlx::{migrate::MigrateDatabase, Connection, Sqlite, SqliteConnection};
-use tokio::{spawn, sync::Mutex};
-use tracing::warn;
+use tokio::{spawn, sync::Mutex, time::sleep};
 
 use crate::{
     base::{bridge::Payload, mqtt::mqttoptions},
@@ -111,7 +110,7 @@ pub async fn start(port: u16, path: &str, config: Arc<Config>, device_config: Ar
 }
 
 async fn event(State(queue): State<Arc<Mutex<Queue>>>, Json(payload): Json<Payload>) -> StatusCode {
-    info!("Event received");
+    info!("Event received on stream: {}", payload.stream);
 
     let mut queue = queue.lock().await;
     if let Err(e) = queue.push(&payload).await {
@@ -136,6 +135,12 @@ async fn push_to_broker_on_ack(
         let mut guard = queue.lock().await;
         let (stream, text) = match guard.peek().await {
             Ok(q) => q,
+            Err(Error::Sql(sqlx::Error::RowNotFound)) => {
+                debug!("Looks like event queue is handled for the time being, check again in 5s");
+                // Wait 5 seconds before asking for next
+                sleep(Duration::from_secs(5)).await;
+                continue 'outer;
+            }
             Err(e) => {
                 error!("{e}");
                 return;
