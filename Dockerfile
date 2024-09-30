@@ -5,7 +5,7 @@ WORKDIR "/usr/share/bytebeam/uplink"
 
 COPY uplink/ uplink
 COPY storage/ storage
-COPY tools/utils/ tools/utils
+COPY tools/ tools
 COPY Cargo.* .
 COPY .git/ .git
 

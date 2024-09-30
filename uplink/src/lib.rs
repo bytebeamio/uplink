@@ -135,7 +135,6 @@ impl Uplink {
 
     pub fn spawn(
         &mut self,
-        device_config: &DeviceConfig,
         mut bridge: Bridge,
         downloader_disable: Arc<Mutex<bool>>,
         network_up: Arc<Mutex<bool>>,
@@ -145,7 +144,7 @@ impl Uplink {
 
         let mut mqtt = Mqtt::new(
             self.config.clone(),
-            device_config,
+            &self.device_config,
             self.action_tx.clone(),
             mqtt_metrics_tx,
             network_up,
@@ -169,7 +168,7 @@ impl Uplink {
             let actions_rx = bridge.register_action_routes(&self.config.downloader.actions)?;
             let file_downloader = FileDownloader::new(
                 self.config.clone(),
-                &device_config.authentication,
+                &self.device_config.authentication,
                 actions_rx,
                 bridge.bridge_tx(),
                 ctrl_rx,

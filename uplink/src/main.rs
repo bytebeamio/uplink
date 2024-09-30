@@ -370,8 +370,7 @@ fn main() -> Result<(), Error> {
 
     let downloader_disable = Arc::new(Mutex::new(false));
     let network_up = Arc::new(Mutex::new(false));
-    let ctrl_tx =
-        uplink.spawn(&device_config, bridge, downloader_disable.clone(), network_up.clone())?;
+    let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone(), network_up.clone())?;
 
     #[cfg(feature = "bus")]
     if let Some(bus) = bus {
