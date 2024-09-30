@@ -108,7 +108,7 @@ impl Mqtt {
             .eventloop
             .pending
             .iter()
-            .filter_map(|request| match request {
+            .filter_map(|(request, _)| match request {
                 Request::Publish(publish) => Some(publish),
                 _ => None,
             })
@@ -148,7 +148,7 @@ impl Mqtt {
             // NOTE: This can fail when packet sizes > max_payload_size in config are written to disk.
             match Packet::read(&mut buf, max_packet_size) {
                 Ok(Packet::Publish(publish)) => {
-                    self.eventloop.pending.push_back(Request::Publish(publish))
+                    self.eventloop.pending.push_back((Request::Publish(publish), None))
                 }
                 Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
                 Err(rumqttc::Error::InsufficientBytes(_)) => break,

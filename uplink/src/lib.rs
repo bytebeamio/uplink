@@ -45,6 +45,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::Error;
+use collector::events;
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::error;
 
@@ -204,7 +205,7 @@ impl Uplink {
 
         let monitor = Monitor::new(
             self.config.clone(),
-            mqtt_client,
+            mqtt_client.clone(),
             self.stream_metrics_rx.clone(),
             self.serializer_metrics_rx.clone(),
             mqtt_metrics_rx,
@@ -244,6 +245,15 @@ impl Uplink {
                 }
             })
         });
+
+        if self.config.events.enabled {
+            let port = self.config.events.port;
+            let path = format!("sqlite://{}/events.db", self.config.persistence_path.display());
+            let device_config = self.device_config.clone();
+            spawn_named_thread("Events", move || {
+                events::start(port, &path, mqtt_client, device_config)
+            });
+        }
 
         Ok(CtrlTx {
             actions_lane: ctrl_actions_lane,

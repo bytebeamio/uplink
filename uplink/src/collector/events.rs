@@ -1,16 +1,13 @@
 use std::{fs::metadata, sync::Arc, time::Duration};
 
 use axum::{extract::State, routing::post, Json, Router};
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use reqwest::StatusCode;
-use rumqttc::{AsyncClient, Event, Outgoing, Packet, PubAck, QoS};
+use rumqttc::{AsyncClient, QoS};
 use sqlx::{migrate::MigrateDatabase, Connection, Sqlite, SqliteConnection};
 use tokio::{spawn, sync::Mutex, time::sleep};
 
-use crate::{
-    base::{bridge::Payload, mqtt::mqttoptions},
-    config::{Config, DeviceConfig},
-};
+use crate::{base::bridge::Payload, config::DeviceConfig};
 
 type StreamName = String;
 type RawPayload = String;
@@ -89,7 +86,7 @@ impl Queue {
 }
 
 #[tokio::main]
-pub async fn start(port: u16, path: &str, config: Arc<Config>, device_config: Arc<DeviceConfig>) {
+pub async fn start(port: u16, path: &str, client: AsyncClient, device_config: Arc<DeviceConfig>) {
     let address = format!("0.0.0.0:{port}");
     info!("Starting uplink event server: {address}");
 
@@ -102,7 +99,7 @@ pub async fn start(port: u16, path: &str, config: Arc<Config>, device_config: Ar
     };
     let state = Arc::new(Mutex::new(queue));
 
-    spawn(push_to_broker_on_ack(config, device_config, state.clone()));
+    spawn(push_to_broker_on_ack(client, device_config, state.clone()));
 
     let app = Router::new().route("/event", post(event)).with_state(state);
 
@@ -122,15 +119,10 @@ async fn event(State(queue): State<Arc<Mutex<Queue>>>, Json(payload): Json<Paylo
 }
 
 async fn push_to_broker_on_ack(
-    config: Arc<Config>,
+    client: AsyncClient,
     device_config: Arc<DeviceConfig>,
     queue: Arc<Mutex<Queue>>,
 ) {
-    // create a new eventloop and use it only for event data push
-    let options = mqttoptions(&config, &device_config);
-    let (client, mut eventloop) = AsyncClient::new(options, 1);
-    eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
-
     'outer: loop {
         let mut guard = queue.lock().await;
         let (stream, text) = match guard.peek().await {
@@ -153,36 +145,18 @@ async fn push_to_broker_on_ack(
             device_config.project_id, device_config.device_id
         );
 
-        if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, false, format!("[{text}]")).await {
-            error!("{e}");
-        }
-
-        let mut expected_pkid = None;
-        loop {
-            match eventloop.poll().await {
-                Ok(Event::Outgoing(Outgoing::Publish(pkid))) => expected_pkid = Some(pkid),
-                Ok(Event::Incoming(Packet::PubAck(PubAck { pkid }))) => {
-                    if expected_pkid.map_or(false, |p| p == pkid) {
-                        expected_pkid.take();
-                        let mut guard = queue.lock().await;
-                        if let Err(e) = guard.pop().await {
-                            error!("{e}");
-                            return;
-                        }
-
-                        debug!("Event has reached broker on topic: {topic}");
-                        continue 'outer;
-                    } else {
-                        warn!("Unexpected pkid");
-                    }
+        match client.publish(&topic, QoS::AtLeastOnce, false, format!("[{text}]")).await {
+            Ok(p) => {
+                // Block till publish is acknowledged, i.e. one publish at a time
+                if let Err(e) = p.await {
+                    error!("{e}")
                 }
-                Err(e) => {
-                    error!("error={e}; trying again in 5s");
-                    // Wait a second before trying again
-                    sleep(Duration::from_secs(1)).await;
+                // Pop acknowledged packet
+                if let Err(e) = queue.lock().await.pop().await {
+                    error!("{e}");
                 }
-                _ => {}
             }
+            Err(e) => error!("{e}"),
         }
     }
 }
