@@ -108,7 +108,7 @@ impl Mqtt {
             .eventloop
             .pending
             .iter()
-            .filter_map(|request| match request {
+            .filter_map(|(request, _)| match request {
                 Request::Publish(publish) => Some(publish),
                 _ => None,
             })
@@ -148,7 +148,7 @@ impl Mqtt {
             // NOTE: This can fail when packet sizes > max_payload_size in config are written to disk.
             match Packet::read(&mut buf, max_packet_size) {
                 Ok(Packet::Publish(publish)) => {
-                    self.eventloop.pending.push_back(Request::Publish(publish))
+                    self.eventloop.pending.push_back((Request::Publish(publish), None))
                 }
                 Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
                 Err(rumqttc::Error::InsufficientBytes(_)) => break,
@@ -290,7 +290,7 @@ impl Mqtt {
     }
 }
 
-fn mqttoptions(config: &Config, device_config: &DeviceConfig) -> MqttOptions {
+pub fn mqttoptions(config: &Config, device_config: &DeviceConfig) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
     let mut mqttoptions =
         MqttOptions::new(&device_config.device_id, &device_config.broker, device_config.port);
