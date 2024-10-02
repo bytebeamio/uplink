@@ -15,4 +15,3 @@ config/
 
 devices/
 uplink/src/bin/*
-.persistence/
