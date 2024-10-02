@@ -122,22 +122,20 @@ async fn push_to_broker_on_ack(
     device_config: Arc<DeviceConfig>,
     queue: Arc<Mutex<Queue>>,
 ) {
-    'outer: loop {
-        let mut guard = queue.lock().await;
-        let (id, stream, text) = match guard.peek().await {
+    loop {
+        let (id, stream, text) = match queue.lock().await.peek().await {
             Ok(q) => q,
             Err(Error::Sql(sqlx::Error::RowNotFound)) => {
                 debug!("Looks like event queue is handled for the time being, check again in 5s");
                 // Wait 5 seconds before asking for next
                 sleep(Duration::from_secs(5)).await;
-                continue 'outer;
+                continue;
             }
             Err(e) => {
                 error!("{e}");
                 return;
             }
         };
-        drop(guard);
 
         let topic = format!(
             "/tenants/{}/devices/{}/events/{stream}/jsonarry",
@@ -155,7 +153,10 @@ async fn push_to_broker_on_ack(
                     error!("{e}");
                 }
             }
-            Err(e) => error!("{e}"),
+            Err(e) => {
+                error!("Eventloop dropped: {e}");
+                break;
+            }
         }
     }
 }
