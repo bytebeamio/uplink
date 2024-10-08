@@ -4,7 +4,7 @@ use flume::{bounded, Receiver, RecvError, Sender};
 use log::{debug, error};
 use tokio::{select, time::interval};
 
-use crate::Config;
+use crate::config::{Config, DeviceConfig};
 
 use super::{streams::Streams, DataBridgeShutdown, Package, Payload, StreamMetrics};
 
@@ -30,13 +30,15 @@ pub struct DataBridge {
 impl DataBridge {
     pub fn new(
         config: Arc<Config>,
+        device_config: Arc<DeviceConfig>,
         package_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
         let (data_tx, data_rx) = bounded(10);
         let (ctrl_tx, ctrl_rx) = bounded(1);
 
-        let mut streams = Streams::new(config.clone(), package_tx, metrics_tx);
+        let mut streams =
+            Streams::new(config.max_stream_count, device_config, package_tx, metrics_tx);
         streams.config_streams(config.streams.clone());
 
         Self { data_tx, data_rx, config, streams, ctrl_rx, ctrl_tx }
@@ -88,7 +90,7 @@ impl DataBridge {
 /// Handle for apps to send action status to bridge
 #[derive(Debug, Clone)]
 pub struct DataTx {
-    pub(crate) inner: Sender<Payload>,
+    pub inner: Sender<Payload>,
 }
 
 impl DataTx {

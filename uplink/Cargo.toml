@@ -1,6 +1,6 @@
 [package]
 name = "uplink"
-version = "2.14.0"
+version = "2.15.0"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2021"
 
@@ -8,6 +8,7 @@ edition = "2021"
 bytes = { workspace = true }
 flume = { workspace = true }
 rumqttc = { workspace = true }
+rumqttd = { git = "https://github.com/bytebeamio/rumqtt", default-features = false, optional = true, branch = "console-response" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = "3.3.0"
@@ -63,6 +64,7 @@ lazy_static = "1.4.0"
 tar = "0.4"
 # device_shadow
 surge-ping = "0.8"
+toml = "0.8.19"
 
 # clickhouse
 clickhouse = "0.11.5"
@@ -76,3 +78,12 @@ vergen = { version = "7", features = ["git", "build", "time"] }
 
 [dev-dependencies]
 tempdir = { workspace = true }
+
+[features]
+default = ["bus"]
+bus = ["rumqttd"]
+
+[[test]]
+name = "joins"
+path = "tests/joins.rs"
+required-features = ["bus"]

@@ -4,17 +4,17 @@ use std::sync::Arc;
 use flume::Sender;
 use log::{error, info, trace};
 
-use super::stream::{self, StreamStatus};
-use super::{Point, StreamMetrics};
-use crate::config::StreamConfig;
-use crate::{Config, Package, Stream};
+use crate::config::{DeviceConfig, StreamConfig};
 
-use super::delaymap::DelayMap;
-
-const MAX_STREAM_COUNT: usize = 1000;
+use super::{
+    delaymap::DelayMap,
+    stream::{self, Stream, StreamStatus},
+    Package, Point, StreamMetrics,
+};
 
 pub struct Streams<T> {
-    config: Arc<Config>,
+    max_stream_count: usize,
+    device_config: Arc<DeviceConfig>,
     data_tx: Sender<Box<dyn Package>>,
     metrics_tx: Sender<StreamMetrics>,
     map: HashMap<String, Stream<T>>,
@@ -23,11 +23,20 @@ pub struct Streams<T> {
 
 impl<T: Point> Streams<T> {
     pub fn new(
-        config: Arc<Config>,
+        max_stream_count: usize,
+        device_config: Arc<DeviceConfig>,
         data_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
-        Self { config, data_tx, metrics_tx, map: HashMap::new(), stream_timeouts: DelayMap::new() }
+        let map = HashMap::with_capacity(max_stream_count);
+        Self {
+            max_stream_count,
+            device_config,
+            data_tx,
+            metrics_tx,
+            map,
+            stream_timeouts: DelayMap::new(),
+        }
     }
 
     pub fn config_streams(&mut self, streams_config: HashMap<String, StreamConfig>) {
@@ -42,15 +51,18 @@ impl<T: Point> Streams<T> {
 
         // Create stream if it doesn't already exist
         if !self.map.contains_key(&stream_name) {
-            if self.config.simulator.is_none() && self.map.keys().len() > MAX_STREAM_COUNT {
-                error!("Failed to create {stream_name} stream. More than max {MAX_STREAM_COUNT} streams");
+            if self.map.keys().len() > self.max_stream_count {
+                error!(
+                    "Failed to create {stream_name:?} stream. More than max {} streams",
+                    self.max_stream_count
+                );
                 return;
             }
 
             let stream = Stream::dynamic(
                 &stream_name,
-                &self.config.project_id,
-                &self.config.device_id,
+                &self.device_config.project_id,
+                &self.device_config.device_id,
                 self.data_tx.clone(),
             );
 

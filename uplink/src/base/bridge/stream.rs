@@ -148,27 +148,6 @@ where
 
         Ok(status)
     }
-
-    #[cfg(test)]
-    /// Push data into buffer and trigger sync channel send on max_batch_size.
-    /// Returns [`StreamStatus`].
-    pub fn push(&mut self, data: T) -> Result<StreamStatus, Error> {
-        if let Some(buf) = self.add(data)? {
-            self.tx.send(Box::new(buf))?;
-            return Ok(StreamStatus::Flushed);
-        }
-
-        let status = match self.len() {
-            1 => StreamStatus::Init(self.config.flush_period),
-            len => StreamStatus::Partial(len),
-        };
-
-        Ok(status)
-    }
-
-    // pub fn metrics(&self) -> StreamMetrics {
-    //     self.metrics.clone()
-    // }
 }
 
 /// Buffer is an abstraction of a collection that serializer receives.

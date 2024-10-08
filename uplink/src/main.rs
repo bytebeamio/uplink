@@ -9,6 +9,7 @@ use anyhow::Error;
 use config::{Environment, File, FileFormat};
 use log::info;
 use structopt::StructOpt;
+use tokio::select;
 use tokio::time::sleep;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
@@ -18,7 +19,11 @@ use tracing_subscriber::{EnvFilter, Registry};
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
-use uplink::config::{AppConfig, Config, StreamConfig, MAX_BATCH_SIZE};
+#[cfg(feature = "bus")]
+use uplink::collector::bus::Bus;
+#[cfg(feature = "bus")]
+use uplink::config::{ActionRoute, DEFAULT_TIMEOUT};
+use uplink::config::{AppConfig, Config, DeviceConfig, StreamConfig, MAX_BATCH_SIZE};
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
 const DEFAULT_CONFIG: &str = r#"
@@ -81,8 +86,8 @@ pub struct CommandLine {
     #[structopt(skip = env ! ("VERGEN_GIT_COMMIT_TIMESTAMP"))]
     pub commit_date: String,
     /// config file
-    #[structopt(short = "c", help = "Config file")]
-    pub config: Option<PathBuf>,
+    #[structopt(short = "c", help = "Config file", default_value = "uplink.config.toml")]
+    pub config: PathBuf,
     /// config file
     #[structopt(short = "a", help = "Authentication file")]
     pub auth: PathBuf,
@@ -97,27 +102,29 @@ pub struct CommandLine {
 impl CommandLine {
     /// Reads config file to generate config struct and replaces places holders
     /// like bike id and data version
-    fn get_configs(&self) -> Result<Config, anyhow::Error> {
+    fn get_configs(&self) -> Result<(Config, DeviceConfig), anyhow::Error> {
         let mut config =
             config::Config::builder().add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml));
 
-        if let Some(path) = &self.config {
-            let read = read_to_string(path).map_err(|e| {
+        if self.config.is_file() {
+            let read = read_to_string(&self.config).map_err(|e| {
                 Error::msg(format!(
                     "Config file couldn't be loaded from {:?}; error = {e}",
-                    path.display()
+                    self.config.display()
                 ))
             })?;
-            config = config.add_source(File::from_str(&read, FileFormat::Toml));
+            let file_format = match self.config.extension() {
+                Some(e) if e == "json" => FileFormat::Json,
+                Some(e) if e == "toml" => FileFormat::Toml,
+                _ => {
+                    return Err(Error::msg(format!(
+                        "Config file couldn't be loaded from {:?}; supported file extensions: [`.json`,`.toml`]",
+                        self.config.display(),
+                    )))
+                }
+            };
+            config = config.add_source(File::from_str(&read, file_format));
         }
-
-        let auth = read_to_string(&self.auth).map_err(|e| {
-            Error::msg(format!(
-                "Auth file couldn't be loaded from {:?}; error = {e}",
-                self.auth.display()
-            ))
-        })?;
-        config = config.add_source(File::from_str(&auth, FileFormat::Json));
 
         let mut config: Config =
             config.add_source(Environment::default()).build()?.try_deserialize()?;
@@ -130,9 +137,21 @@ impl CommandLine {
             ))
         })?;
 
+        let auth = read_to_string(&self.auth).map_err(|e| {
+            Error::msg(format!(
+                "Auth file couldn't be loaded from {:?}; error = {e}",
+                self.auth.display()
+            ))
+        })?;
+        let device_config: DeviceConfig = config::Config::builder()
+            .add_source(File::from_str(&auth, FileFormat::Json))
+            .add_source(Environment::default())
+            .build()?
+            .try_deserialize()?;
+
         // replace placeholders with device/tenant ID
-        let tenant_id = config.project_id.trim();
-        let device_id = config.device_id.trim();
+        let tenant_id = device_config.project_id.trim();
+        let device_id = device_config.device_id.trim();
 
         // Replace placeholders in topic strings with configured values for tenant_id and device_id
         // e.g. for tenant_id: "demo"; device_id: "123"
@@ -202,7 +221,7 @@ impl CommandLine {
             route.cancellable = true;
         }
 
-        Ok(config)
+        Ok((config, device_config))
     }
 
     fn initialize_logging(&self) -> ReloadHandle {
@@ -235,7 +254,7 @@ impl CommandLine {
         reload_handle
     }
 
-    fn banner(&self, config: &Config) {
+    fn banner(&self, config: &Config, device_config: &DeviceConfig) {
         const B: &str = r#"
         ░█░▒█░▄▀▀▄░█░░░▀░░█▀▀▄░█░▄
         ░█░▒█░█▄▄█░█░░░█▀░█░▒█░█▀▄
@@ -247,9 +266,9 @@ impl CommandLine {
         println!("    profile: {}", self.profile);
         println!("    commit_sha: {}", self.commit_sha);
         println!("    commit_date: {}", self.commit_date);
-        println!("    project_id: {}", config.project_id);
-        println!("    device_id: {}", config.device_id);
-        println!("    remote: {}:{}", config.broker, config.port);
+        println!("    project_id: {}", device_config.project_id);
+        println!("    device_id: {}", device_config.device_id);
+        println!("    remote: {}:{}", device_config.broker, device_config.port);
         println!("    persistence_path: {}", config.persistence_path.display());
         if !config.action_redirections.is_empty() {
             println!("    action redirections:");
@@ -263,7 +282,7 @@ impl CommandLine {
                 println!("\tname: {app:?}\n\tport: {port}\n\tactions: {actions:?}\n\t@");
             }
         }
-        println!("    secure_transport: {}", config.authentication.is_some());
+        println!("    secure_transport: {}", device_config.authentication.is_some());
         println!("    max_packet_size: {}", config.mqtt.max_packet_size);
         println!("    max_inflight_messages: {}", config.mqtt.max_inflight);
         println!("    keep_alive_timeout: {}", config.mqtt.keep_alive);
@@ -299,11 +318,12 @@ fn main() -> Result<(), Error> {
 
     let commandline: CommandLine = StructOpt::from_args();
     let reload_handle = commandline.initialize_logging();
-    let config = commandline.get_configs()?;
-    commandline.banner(&config);
+    let (config, device_config) = commandline.get_configs()?;
+    commandline.banner(&config, &device_config);
 
     let config = Arc::new(config);
-    let mut uplink = Uplink::new(config.clone())?;
+    let device_config = Arc::new(device_config);
+    let mut uplink = Uplink::new(config.clone(), device_config.clone())?;
     let mut bridge = uplink.configure_bridge();
     uplink.spawn_builtins(&mut bridge)?;
 
@@ -328,9 +348,33 @@ fn main() -> Result<(), Error> {
         _ => None,
     };
 
+    #[cfg(feature = "bus")]
+    let bus = config.bus.as_ref().map(|cfg| {
+        let actions_rx = bridge
+            .register_action_routes([ActionRoute {
+                name: "*".to_string(),
+                timeout: DEFAULT_TIMEOUT,
+                cancellable: false,
+            }])
+            .unwrap();
+
+        Bus::new(cfg.clone(), bridge_tx.clone(), actions_rx)
+    });
+
+    let update_config_actions = bridge.register_action_route(ActionRoute {
+        name: "update_uplink_config".to_owned(),
+        timeout: DEFAULT_TIMEOUT,
+        cancellable: false,
+    })?;
+
     let downloader_disable = Arc::new(Mutex::new(false));
     let network_up = Arc::new(Mutex::new(false));
     let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone(), network_up.clone())?;
+
+    #[cfg(feature = "bus")]
+    if let Some(bus) = bus {
+        spawn_named_thread("Bus Interface", move || bus.start())
+    };
 
     if let Some(config) = config.simulator.clone() {
         spawn_named_thread("Simulator", || {
@@ -360,6 +404,7 @@ fn main() -> Result<(), Error> {
             });
         }
 
+        let config_path = commandline.config.clone();
         #[cfg(unix)]
         tokio::spawn(async move {
             use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
@@ -367,11 +412,28 @@ fn main() -> Result<(), Error> {
             use tokio_stream::StreamExt;
 
             let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT]).unwrap();
-            // Handle a shutdown signal from POSIX
-            while let Some(signal) = signals.next().await {
-                match signal {
-                    SIGTERM | SIGINT | SIGQUIT => ctrl_tx.trigger_shutdown().await,
-                    s => error!("Couldn't handle signal: {s}"),
+            loop {
+                select! {
+                    Ok(action) = update_config_actions.recv_async() => {
+                        // NOTE: this will log an error until #356 isn't merged
+                        let config: Config = match serde_json::from_str(&action.payload) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                error!("unexpected config: {}; error = {e}", action.payload);
+                                continue;
+                            },
+                        };
+                        if let Err(e) = config.write_file(&config_path) {
+                            error!("couldn't write file to: {}; error = {e}", config_path.display());
+                        }
+                    }
+                    // Handle a shutdown signal from POSIX
+                    Some(signal) = signals.next() => {
+                        match signal {
+                            SIGTERM | SIGINT | SIGQUIT => ctrl_tx.trigger_shutdown().await,
+                            s => error!("Couldn't handle signal: {s}"),
+                        }
+                    }
                 }
             }
         });
