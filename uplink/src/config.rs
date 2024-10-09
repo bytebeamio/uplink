@@ -147,9 +147,77 @@ pub struct Authentication {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Stats {
     pub enabled: bool,
-    pub process_names: Vec<String>,
+    pub process_names: Processes,
     pub update_period: u64,
     pub stream_size: Option<usize>,
+}
+
+type ProcessName = String;
+
+#[derive(Debug, Clone, Default)]
+pub enum Processes {
+    #[default]
+    All,
+    List(Vec<ProcessName>),
+}
+
+struct ProcessesVisitor;
+
+impl<'de> Visitor<'de> for ProcessesVisitor {
+    type Value = Processes;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(r#"the string "all" or a list of `ProcessName`s"#)
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        match value {
+            "all" => Ok(Processes::All),
+            _ => Err(de::Error::custom(r#"Expected the string "all""#)),
+        }
+    }
+
+    fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+    where
+        S: serde::de::SeqAccess<'de>,
+    {
+        let mut names = vec![];
+        while let Some(process) = seq.next_element()? {
+            names.push(process);
+        }
+
+        Ok(Processes::List(names))
+    }
+}
+
+impl<'de> Deserialize<'de> for Processes {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(ProcessesVisitor)
+    }
+}
+
+impl Serialize for Processes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Processes::All => serializer.serialize_str("all"),
+            Processes::List(processes) => {
+                let mut seq = serializer.serialize_seq(Some(processes.len()))?;
+                for process in processes {
+                    seq.serialize_element(process)?;
+                }
+                seq.end()
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]

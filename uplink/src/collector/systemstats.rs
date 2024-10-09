@@ -13,7 +13,7 @@ use crate::{
         bridge::{BridgeTx, Payload},
         clock,
     },
-    Config,
+    config::{Config, Processes},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -613,10 +613,13 @@ impl StatCollector {
         for (&id, p) in self.sys.processes() {
             let name = p.cmd().first().map(|s| s.to_string()).unwrap_or(p.name().to_string());
 
-            if self.config.system_stats.process_names.contains(&name) {
-                let payload = self.processes.push(id.as_u32(), p, name, timestamp);
-                self.bridge_tx.send_payload_sync(payload);
+            match &self.config.system_stats.process_names {
+                Processes::List(processes) if !processes.contains(&name) => continue,
+                _ => {}
             }
+
+            let payload = self.processes.push(id.as_u32(), p, name, timestamp);
+            self.bridge_tx.send_payload_sync(payload);
         }
 
         Ok(())

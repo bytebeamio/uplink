@@ -159,7 +159,8 @@ path = "/var/tmp/ota-file"
 #
 # Required Parameters
 # - enabled: A boolean to determine if the feature must be enabled
-# - process_names: List of process names that are to be tracked with system stats
+# - process_names: List of process names that are to be tracked with system stats,
+#   use "all" to collect for all processes
 # - update_period: Time in seconds between each collection/publish of system stats
 [system_stats]
 enabled = false
