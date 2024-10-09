@@ -1,4 +1,4 @@
-FROM rust:alpine as builder
+FROM rust:alpine AS builder
 
 RUN apk add build-base libressl-dev
 WORKDIR "/usr/share/bytebeam/uplink"
@@ -28,4 +28,3 @@ CMD ["/usr/bin/runsvdir", "/etc/runit"]
 
 COPY paths/ paths
 COPY simulator.sh .
-
