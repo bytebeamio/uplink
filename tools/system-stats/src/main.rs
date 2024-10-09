@@ -20,7 +20,7 @@ pub struct CommandLine {
     pub verbose: u8,
     /// name of processes to be monitored
     #[structopt(short = "P", help = "processes")]
-    pub process_names: Vec<String>,
+    pub process_names: Option<Vec<String>>,
     /// time between updates
     #[structopt(short = "t", help = "update period", default_value = "30")]
     pub update_period: u64,

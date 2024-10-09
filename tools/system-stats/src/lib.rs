@@ -457,7 +457,7 @@ impl ProcessStats {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
-    pub process_names: Vec<String>,
+    pub process_names: Option<Vec<String>>,
     pub update_period: u64,
 }
 
@@ -621,11 +621,13 @@ impl StatCollector {
         for (&id, p) in self.sys.processes() {
             let name = p.cmd().first().map(|s| s.to_string()).unwrap_or(p.name().to_string());
 
-            if self.config.process_names.contains(&name) {
-                let payload = self.processes.push(id.as_u32(), p, name, timestamp);
-                let payload = serde_json::to_string(&payload)?;
-                self.client.send(payload).await?;
+            match &self.config.process_names {
+                Some(list) if !list.contains(&name) && !list.is_empty() => continue,
+                _ => {}
             }
+            let payload = self.processes.push(id.as_u32(), p, name, timestamp);
+            let payload = serde_json::to_string(dbg!(&payload))?;
+            self.client.send(payload).await?;
         }
 
         Ok(())
