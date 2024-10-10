@@ -153,7 +153,9 @@ impl ActionsBridge {
     pub async fn start(&mut self) -> Result<(), Error> {
         let mut metrics_timeout = interval(self.config.stream_metrics.timeout);
         let mut end: Pin<Box<Sleep>> = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
-        self.load_saved_action()?;
+        if let Err(e) = self.load_saved_action() {
+            error!("Couldn't load saved action: {e}");
+        }
 
         loop {
             select! {
