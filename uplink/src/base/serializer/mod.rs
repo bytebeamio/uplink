@@ -257,40 +257,33 @@ impl StorageHandler {
         let storages = self.map.iter_mut();
 
         for (stream, storage) in storages {
-            match (storage.reload_on_eof(), &mut self.read_stream) {
-                // Done reading all pending files for a persisted stream
-                (Ok(true), Some(curr_stream)) => {
-                    if curr_stream == stream {
-                        self.read_stream.take();
-                        debug!("Completed reading from: {}", stream.topic);
+            match storage.reload_on_eof() {
+                Ok(true) => {
+                    if self.read_stream.take_if(|s| s == stream).is_some() {
+                        debug!("Done reading from: {}", stream.topic);
+                    }
+                }
+                // Reading from a non-empty persisted stream
+                Ok(false) => {
+                    if self.read_stream.is_none() {
+                        self.read_stream.replace(stream.clone());
+                        debug!("Started reading from: {}", stream.topic);
+                    } else {
+                        trace!("Reading from: {}", stream.topic);
                     }
 
-                    continue;
-                }
-                // Persisted stream is empty
-                (Ok(true), _) => continue,
-                // Reading from a newly loaded non-empty persisted stream
-                (Ok(false), None) => {
-                    debug!("Reading from: {}", stream.topic);
-                    self.read_stream = Some(stream.to_owned());
                     let Some(publish) = storage.read(self.config.mqtt.max_packet_size) else {
                         continue;
                     };
-                    return Ok(Some((stream.clone(), publish)));
-                }
-                // Continuing to read from persisted stream loaded earlier
-                (Ok(false), _) => {
-                    let Some(publish) = storage.read(self.config.mqtt.max_packet_size) else {
-                        continue;
-                    };
+                    metrics.add_batch();
+
                     return Ok(Some((stream.clone(), publish)));
                 }
                 // Reload again on encountering a corrupted file
-                (Err(e), _) => {
+                Err(e) => {
                     metrics.increment_errors();
                     metrics.increment_lost_segments();
                     error!("Failed to reload from storage. Error = {e}");
-                    continue;
                 }
             }
         }
