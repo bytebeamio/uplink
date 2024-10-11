@@ -20,6 +20,11 @@ default_buf_size = 1024 # 1KB
 # Maximum number of data streams that can be accepted by uplink
 max_stream_count = 10
 
+# All streams will first push the latest packet before pushing historical data in
+# FIFO order, defaults to false. This solves the problem of bad networks leading to
+# data being pushed so slow that it is practically impossible to track the device.
+live_data_first = true
+
 # MQTT client configuration
 #
 # Required Parameters
