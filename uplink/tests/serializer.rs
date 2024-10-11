@@ -7,14 +7,32 @@ use tempdir::TempDir;
 use tokio::spawn;
 
 use uplink::{
-    base::{
-        bridge::Payload,
-        serializer::{write_to_storage, Serializer},
-    },
+    base::{bridge::Payload, serializer::Serializer},
     config::{Config, Persistence, StreamConfig},
     mock::{MockClient, MockCollector},
     Storage,
 };
+
+fn publish(topic: String, i: u32) -> Publish {
+    Publish {
+        dup: false,
+        qos: QoS::AtMostOnce,
+        retain: false,
+        topic,
+        pkid: 0,
+        payload: {
+            let serialized = serde_json::to_vec(&vec![Payload {
+                stream: Default::default(),
+                sequence: i,
+                timestamp: 0,
+                payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}").unwrap(),
+            }])
+            .unwrap();
+
+            Bytes::from(serialized)
+        },
+    }
+}
 
 #[tokio::test]
 // Ensures that the data of streams are removed based on preference
@@ -56,24 +74,6 @@ async fn preferential_send_on_network() {
         ),
     ]);
 
-    let publish = |topic: String, i: u32| Publish {
-        dup: false,
-        qos: QoS::AtMostOnce,
-        retain: false,
-        topic,
-        pkid: 0,
-        payload: {
-            let serialized = serde_json::to_vec(&vec![Payload {
-                stream: Default::default(),
-                sequence: i,
-                timestamp: 0,
-                payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}").unwrap(),
-            }])
-            .unwrap();
-
-            Bytes::from(serialized)
-        },
-    };
     let persistence_path = |path: &PathBuf, stream_name: &str| {
         let mut path = path.to_owned();
         path.push(stream_name);
@@ -85,19 +85,19 @@ async fn preferential_send_on_network() {
     // write packets for one, two and top onto disk
     let mut one = Storage::new("topic/one", 1024 * 1024);
     one.set_persistence(persistence_path(&config.persistence_path, "one"), 1).unwrap();
-    write_to_storage(publish("topic/one".to_string(), 4), &mut one).unwrap();
-    write_to_storage(publish("topic/one".to_string(), 5), &mut one).unwrap();
+    one.write(publish("topic/one".to_string(), 4)).unwrap();
+    one.write(publish("topic/one".to_string(), 5)).unwrap();
     one.flush().unwrap();
 
     let mut two = Storage::new("topic/two", 1024 * 1024);
     two.set_persistence(persistence_path(&config.persistence_path, "two"), 1).unwrap();
-    write_to_storage(publish("topic/two".to_string(), 3), &mut two).unwrap();
+    two.write(publish("topic/two".to_string(), 3)).unwrap();
     two.flush().unwrap();
 
     let mut top = Storage::new("topic/top", 1024 * 1024);
     top.set_persistence(persistence_path(&config.persistence_path, "top"), 1).unwrap();
-    write_to_storage(publish("topic/top".to_string(), 1), &mut top).unwrap();
-    write_to_storage(publish("topic/top".to_string(), 2), &mut top).unwrap();
+    top.write(publish("topic/top".to_string(), 1)).unwrap();
+    top.write(publish("topic/top".to_string(), 2)).unwrap();
     top.flush().unwrap();
 
     let config = Arc::new(config);

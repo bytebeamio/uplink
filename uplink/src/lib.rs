@@ -58,6 +58,7 @@ pub use base::actions::{Action, ActionResponse};
 use base::bridge::{stream::Stream, Bridge, Package, Payload, Point, StreamMetrics};
 use base::monitor::Monitor;
 use base::mqtt::Mqtt;
+pub use base::serializer::Storage;
 use base::serializer::{Serializer, SerializerMetrics};
 use base::CtrlTx;
 use collector::device_shadow::DeviceShadow;
@@ -73,7 +74,6 @@ use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
 pub use collector::{simulator, tcpjson::TcpJson};
-pub use storage::Storage;
 
 /// Spawn a named thread to run the function f on
 pub fn spawn_named_thread<F>(name: &str, f: F)
