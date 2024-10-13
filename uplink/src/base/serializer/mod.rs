@@ -225,12 +225,7 @@ impl StorageHandler {
     }
 
     // Selects the right read buffer for storage and serializes received data as a Publish packet into it.
-    fn store(
-        &mut self,
-        stream: Arc<StreamConfig>,
-        publish: Publish,
-        metrics: &mut Metrics,
-    ) -> Result<(), Error> {
+    fn store(&mut self, stream: Arc<StreamConfig>, publish: Publish, metrics: &mut Metrics) {
         match self
             .map
             .entry(stream.to_owned())
@@ -247,8 +242,6 @@ impl StorageHandler {
             }
             _ => {}
         }
-
-        Ok(())
     }
 
     fn next(&mut self, metrics: &mut Metrics) -> Option<(Arc<StreamConfig>, Publish)> {
@@ -424,7 +417,7 @@ impl<C: MqttClient> Serializer<C> {
 
             let stream = data.stream_config();
             let publish = construct_publish(data, &mut self.stream_metrics)?;
-            self.storage_handler.store(stream, publish, &mut self.metrics)?;
+            self.storage_handler.store(stream, publish, &mut self.metrics);
         }
     }
 
@@ -435,14 +428,14 @@ impl<C: MqttClient> Serializer<C> {
         stream: Arc<StreamConfig>,
     ) -> Result<Status, Error> {
         // Write failed publish to disk first, metrics don't matter
-        self.storage_handler.store(stream, publish, &mut self.metrics)?;
+        self.storage_handler.store(stream, publish, &mut self.metrics);
 
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
             let stream = data.stream_config();
             let publish = construct_publish(data, &mut self.stream_metrics)?;
-            self.storage_handler.store(stream, publish, &mut self.metrics)?;
+            self.storage_handler.store(stream, publish, &mut self.metrics);
         }
     }
 
@@ -466,7 +459,7 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
                     let stream = data.stream_config();
                     let publish = construct_publish(data, &mut self.stream_metrics)?;
-                    self.storage_handler.store(stream, publish, &mut self.metrics)?;
+                    self.storage_handler.store(stream, publish, &mut self.metrics);
                 }
                 o = &mut publish => match o {
                     Ok(_) => break Ok(Status::EventLoopReady),
@@ -520,7 +513,7 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
                     let stream = data.stream_config();
                     let publish = construct_publish(data, &mut self.stream_metrics)?;
-                    self.storage_handler.store(stream, publish, &mut self.metrics)?;
+                    self.storage_handler.store(stream, publish, &mut self.metrics);
                 }
                 o = &mut send => {
                     self.metrics.add_sent_size(last_publish_payload_size);
