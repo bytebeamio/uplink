@@ -218,7 +218,7 @@ impl StorageHandler {
                     path.display()
                 );
             }
-            map.insert(Arc::new(stream_config.clone()), storage);
+            map.insert(Arc::new(stream_config), storage);
         }
 
         Ok(Self { config, map, read_stream: None })
@@ -258,7 +258,7 @@ impl StorageHandler {
                 // Reading from a non-empty persisted stream
                 Ok(false) => {
                     if self.read_stream.is_none() {
-                        self.read_stream.replace(stream.clone());
+                        self.read_stream.replace(stream.to_owned());
                         debug!("Started reading from: {}", stream.topic);
                     } else {
                         trace!("Reading from: {}", stream.topic);
@@ -657,10 +657,8 @@ fn construct_publish(
     let batch_latency = data.latency();
     trace!("Data received on stream: {stream_name}; message count = {point_count}; batching latency = {batch_latency}");
 
-    let topic = stream_config.topic.clone();
-
     let metrics = stream_metrics
-        .entry(stream_name.clone())
+        .entry(stream_name.to_owned())
         .or_insert_with(|| StreamMetrics::new(&stream_name));
 
     let serialization_start = Instant::now();
@@ -682,7 +680,7 @@ fn construct_publish(
 
     metrics.add_serialized_sizes(data_size, compressed_data_size);
 
-    Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
+    Ok(Publish::new(&stream_config.topic, QoS::AtLeastOnce, payload))
 }
 
 // Updates serializer metrics and logs it, but doesn't push to network
