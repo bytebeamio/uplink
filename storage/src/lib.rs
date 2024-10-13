@@ -584,4 +584,35 @@ mod test {
         let files = get_file_ids(&backup.path(), 10).unwrap();
         assert_eq!(files, vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
     }
+
+    #[test]
+    fn ensure_current_read_file_is_not_lost() {
+        let backup = init_backup_folders();
+        let mut storage = Storage::new("test", 10 * 1036);
+        storage.set_persistence(backup.path(), 10).unwrap();
+        // partially fill write buffer
+        write_n_publishes(&mut storage, 1);
+
+        // Nothing written to disk
+        assert!(storage.persistence.as_ref().unwrap().backlog_files.is_empty());
+
+        // Trigger swap of read and write buffers, ensure packets in read buffer
+        storage.reload_on_eof().unwrap();
+        assert!(!storage.current_read_file.is_empty());
+        assert!(storage.persistence.as_ref().unwrap().current_read_file_id.is_none());
+
+        // Trigger flush onto disk, and drop storage
+        storage.flush().unwrap();
+        drop(storage);
+
+        // reload storage
+        let mut storage = Storage::new("test", 10 * 1036);
+        storage.set_persistence(backup.path(), 10).unwrap();
+
+        // verify read buffer was persisted by reading a single packet
+        read_n_publishes(&mut storage, 1);
+        assert_eq!(storage.file_count(), 1);
+        let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
+        assert_eq!(file_id, 0);
+    }
 }
