@@ -194,8 +194,8 @@ fn id(path: &Path) -> Result<u64, Error> {
 
 /// Gets list of file ids in the disk. Id of file backup@10 is 10.
 /// Storing ids instead of full paths enables efficient indexing
-fn get_file_ids(path: &Path) -> Result<VecDeque<u64>, Error> {
-    let mut file_ids = Vec::new();
+fn get_file_ids(path: &Path, max_file_count: usize) -> Result<VecDeque<u64>, Error> {
+    let mut file_ids = Vec::with_capacity(max_file_count);
     let files = fs::read_dir(path)?;
     for file in files {
         let path = file?.path();
@@ -322,7 +322,7 @@ struct Persistence {
 impl Persistence {
     fn new<P: Into<PathBuf>>(path: P, max_file_count: usize) -> Result<Self, Error> {
         let path = path.into();
-        let backlog_files = get_file_ids(&path)?;
+        let backlog_files = get_file_ids(&path, max_file_count)?;
         info!("List of file ids loaded from disk: {backlog_files:?}");
 
         let bytes_occupied = backlog_files.iter().fold(0, |acc, id| {
@@ -462,7 +462,7 @@ mod test {
         assert_eq!(storage.writer().len(), 1036);
 
         // other messages on disk
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(&backup.path(), 10).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
@@ -475,14 +475,14 @@ mod test {
         // 11 files created. 10 on disk
         write_n_publishes(&mut storage, 110);
 
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(&backup.path(), 10).unwrap();
         assert_eq!(files, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
         // 11 files created. 10 on disk
         write_n_publishes(&mut storage, 10);
 
         assert_eq!(storage.writer().len(), 0);
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(&backup.path(), 10).unwrap();
         assert_eq!(files, vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
 
@@ -535,7 +535,7 @@ mod test {
         assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
         // Ensure unread files are all present before read
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(&backup.path(), 10).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
         // Successfully read 10 files with files still in storage after 10 reads
@@ -544,7 +544,7 @@ mod test {
             let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
             assert_eq!(file_id, i);
             // Ensure partially read file is still present in backup dir
-            let files = get_file_ids(&backup.path()).unwrap();
+            let files = get_file_ids(&backup.path(), 10).unwrap();
             assert!(files.contains(&i));
         }
 
@@ -553,7 +553,7 @@ mod test {
         assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
         // Ensure read files are all present before read
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(&backup.path(), 10).unwrap();
         assert_eq!(files, vec![]);
     }
 
@@ -574,14 +574,14 @@ mod test {
         assert_eq!(file_id, 0);
 
         // Ensure all persistance files still exist
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(&backup.path(), 10).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
         // Write 10 more files onto disk, 10 publishes per file
         write_n_publishes(&mut storage, 100);
 
         // Ensure none of the earlier files exist on disk
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(&backup.path(), 10).unwrap();
         assert_eq!(files, vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
     }
 }
