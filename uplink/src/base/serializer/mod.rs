@@ -304,6 +304,25 @@ impl StorageHandler {
             }
         }
     }
+
+    fn update_metrics(&self, metrics: &mut Metrics) {
+        let mut inmemory_write_size = 0;
+        let mut inmemory_read_size = 0;
+        let mut file_count = 0;
+        let mut disk_utilized = 0;
+
+        for storage in self.map.values() {
+            inmemory_write_size += storage.inner.inmemory_write_size();
+            inmemory_read_size += storage.inner.inmemory_read_size();
+            file_count += storage.inner.file_count();
+            disk_utilized += storage.inner.disk_utilized();
+        }
+
+        metrics.set_write_memory(inmemory_write_size);
+        metrics.set_read_memory(inmemory_read_size);
+        metrics.set_disk_files(file_count);
+        metrics.set_disk_utilized(disk_utilized);
+    }
 }
 
 /// The uplink Serializer is the component that deals with serializing, compressing and writing data onto disk or Network.
@@ -678,23 +697,8 @@ fn check_metrics(
     storage_handler: &StorageHandler,
 ) {
     use pretty_bytes::converter::convert;
-    let mut inmemory_write_size = 0;
-    let mut inmemory_read_size = 0;
-    let mut file_count = 0;
-    let mut disk_utilized = 0;
 
-    for storage in storage_handler.map.values() {
-        inmemory_read_size += storage.inner.inmemory_read_size();
-        inmemory_write_size += storage.inner.inmemory_write_size();
-        file_count += storage.inner.file_count();
-        disk_utilized += storage.inner.disk_utilized();
-    }
-
-    metrics.set_write_memory(inmemory_write_size);
-    metrics.set_read_memory(inmemory_read_size);
-    metrics.set_disk_files(file_count);
-    metrics.set_disk_utilized(disk_utilized);
-
+    storage_handler.update_metrics(metrics);
     info!(
         "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
         metrics.mode,
@@ -726,23 +730,7 @@ fn save_and_prepare_next_metrics(
     stream_metrics: &mut HashMap<String, StreamMetrics>,
     storage_handler: &StorageHandler,
 ) {
-    let mut inmemory_write_size = 0;
-    let mut inmemory_read_size = 0;
-    let mut file_count = 0;
-    let mut disk_utilized = 0;
-
-    for storage in storage_handler.map.values() {
-        inmemory_write_size += storage.inner.inmemory_write_size();
-        inmemory_read_size += storage.inner.inmemory_read_size();
-        file_count += storage.inner.file_count();
-        disk_utilized += storage.inner.disk_utilized();
-    }
-
-    metrics.set_write_memory(inmemory_write_size);
-    metrics.set_read_memory(inmemory_read_size);
-    metrics.set_disk_files(file_count);
-    metrics.set_disk_utilized(disk_utilized);
-
+    storage_handler.update_metrics(metrics);
     let m = Box::new(metrics.clone());
     pending.push_back(SerializerMetrics::Main(m));
     metrics.prepare_next();
@@ -764,23 +752,7 @@ fn check_and_flush_metrics(
 ) -> Result<(), TrySendError<SerializerMetrics>> {
     use pretty_bytes::converter::convert;
 
-    let mut inmemory_write_size = 0;
-    let mut inmemory_read_size = 0;
-    let mut file_count = 0;
-    let mut disk_utilized = 0;
-
-    for storage in storage_handler.map.values() {
-        inmemory_write_size += storage.inner.inmemory_write_size();
-        inmemory_read_size += storage.inner.inmemory_read_size();
-        file_count += storage.inner.file_count();
-        disk_utilized += storage.inner.disk_utilized();
-    }
-
-    metrics.set_write_memory(inmemory_write_size);
-    metrics.set_read_memory(inmemory_read_size);
-    metrics.set_disk_files(file_count);
-    metrics.set_disk_utilized(disk_utilized);
-
+    storage_handler.update_metrics(metrics);
     // Send pending metrics. This signifies state change
     while let Some(metrics) = pending.front() {
         match metrics {
