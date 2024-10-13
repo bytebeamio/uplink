@@ -449,8 +449,7 @@ impl<C: MqttClient> Serializer<C> {
 
         // Note: self.client.publish() is executing code before await point
         // in publish method every time. Verify this behaviour later
-        let payload = Bytes::copy_from_slice(&publish.payload[..]);
-        let publish = send_publish(self.client.clone(), publish.topic, payload);
+        let publish = send_publish(self.client.clone(), publish);
         tokio::pin!(publish);
 
         let v: Result<Status, Error> = loop {
@@ -504,7 +503,7 @@ impl<C: MqttClient> Serializer<C> {
             return Ok(Status::Normal);
         };
         let mut last_publish_payload_size = publish.payload.len();
-        let send = send_publish(self.client.clone(), publish.topic, publish.payload);
+        let send = send_publish(self.client.clone(), publish);
         tokio::pin!(send);
 
         let v: Result<Status, Error> = loop {
@@ -533,8 +532,8 @@ impl<C: MqttClient> Serializer<C> {
                         };
 
                     last_publish_payload_size = publish.payload.len();
-                    last_publish_stream = stream.clone();
-                    send.set(send_publish(client, publish.topic, publish.payload));
+                    last_publish_stream = stream;
+                    send.set(send_publish(client, publish));
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
@@ -623,11 +622,10 @@ impl<C: MqttClient> Serializer<C> {
     }
 }
 
-async fn send_publish<C: MqttClient>(
-    client: C,
-    topic: String,
-    payload: Bytes,
-) -> Result<C, MqttError> {
+// Used to construct a future that resolves if request is sent to the MQTT handler or errors
+async fn send_publish<C: MqttClient>(client: C, publish: Publish) -> Result<C, MqttError> {
+    let payload = Bytes::copy_from_slice(&publish.payload[..]);
+    let topic = publish.topic;
     debug!("publishing on {topic} with size = {}", payload.len());
     client.publish(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
