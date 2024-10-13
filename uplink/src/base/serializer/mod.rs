@@ -251,10 +251,7 @@ impl StorageHandler {
         Ok(())
     }
 
-    fn next(
-        &mut self,
-        metrics: &mut Metrics,
-    ) -> Result<Option<(Arc<StreamConfig>, Publish)>, Error> {
+    fn next(&mut self, metrics: &mut Metrics) -> Option<(Arc<StreamConfig>, Publish)> {
         let storages = self.map.iter_mut();
 
         for (stream, storage) in storages {
@@ -278,7 +275,7 @@ impl StorageHandler {
                     };
                     metrics.add_batch();
 
-                    return Ok(Some((stream.clone(), publish)));
+                    return Some((stream.to_owned(), publish));
                 }
                 // Reload again on encountering a corrupted file
                 Err(e) => {
@@ -289,7 +286,7 @@ impl StorageHandler {
             }
         }
 
-        Ok(None)
+        None
     }
 
     fn flush_all(&mut self) {
@@ -509,8 +506,7 @@ impl<C: MqttClient> Serializer<C> {
         let mut interval = interval(METRICS_INTERVAL);
         self.metrics.set_mode("catchup");
 
-        let Some((mut last_publish_stream, publish)) =
-            self.storage_handler.next(&mut self.metrics)?
+        let Some((mut last_publish_stream, publish)) = self.storage_handler.next(&mut self.metrics)
         else {
             return Ok(Status::Normal);
         };
@@ -538,7 +534,7 @@ impl<C: MqttClient> Serializer<C> {
                         Err(e) => unreachable!("Unexpected error: {e}"),
                     };
 
-                    let Some((stream, publish)) = self.storage_handler.next(&mut self.metrics)?
+                    let Some((stream, publish)) = self.storage_handler.next(&mut self.metrics)
                         else {
                             return Ok(Status::Normal);
                         };
