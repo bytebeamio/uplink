@@ -160,12 +160,12 @@ impl Storage {
         self.inner.flush_on_overflow()
     }
 
-    // Ensures read-buffer is ready to read from, exchanges buffers if required, returns true if empty.
+    // Ensures read-buffer is ready to be read from, exchanges buffers if required, returns true if empty.
     pub fn reload_on_eof(&mut self) -> Result<bool, storage::Error> {
         self.inner.reload_on_eof()
     }
 
-    // Deserializes publish packets from storage, returns None when it fails.
+    // Deserializes publish packets from storage, returns None when it fails, i.e read buffer is empty.
     //
     // ## Panic
     // When any packet other than a publish is deserialized.
@@ -224,7 +224,7 @@ impl StorageHandler {
         Ok(Self { config, map, read_stream: None })
     }
 
-    // Selects the right read buffer for storage and serializes received data as a Publish packet into it.
+    // Selects the right storage for to write into and serializes received data as a Publish packet into it.
     fn store(&mut self, stream: Arc<StreamConfig>, publish: Publish, metrics: &mut Metrics) {
         match self
             .map
@@ -244,6 +244,7 @@ impl StorageHandler {
         }
     }
 
+    // Extracts a publish packet from storage if any exist, else returns None
     fn next(&mut self, metrics: &mut Metrics) -> Option<(Arc<StreamConfig>, Publish)> {
         let storages = self.map.iter_mut();
 
@@ -282,6 +283,8 @@ impl StorageHandler {
         None
     }
 
+    // Force flushes all in-memory buffers to ensure zero packet loss during uplink restart.
+    // TODO: Ensure packets in read-buffer but not on disk are not lost.
     fn flush_all(&mut self) {
         for (stream_config, storage) in self.map.iter_mut() {
             match storage.flush() {
@@ -295,6 +298,7 @@ impl StorageHandler {
         }
     }
 
+    // Update Metrics about all storages being handled
     fn update_metrics(&self, metrics: &mut Metrics) {
         let mut inmemory_write_size = 0;
         let mut inmemory_read_size = 0;
@@ -489,7 +493,7 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Write new collector data to disk while sending existing data on
     /// disk to mqtt eventloop. Collector rx is selected with blocking
-    /// `publish` instead of `try publish` to ensure that transient back
+    /// `publish` instead of `try_publish` to ensure that transient back
     /// pressure due to a lot of data on disk doesn't switch state to
     /// `Status::SlowEventLoop`
     async fn catchup(&mut self) -> Result<Status, Error> {
@@ -521,14 +525,14 @@ impl<C: MqttClient> Serializer<C> {
                     let client = match o {
                         Ok(c) => c,
                         Err(MqttError::Send(Request::Publish(publish))) => {
-                            break Ok(Status::EventLoopCrash(publish, last_publish_stream.clone()))
+                            break Ok(Status::EventLoopCrash(publish, last_publish_stream))
                         }
                         Err(e) => unreachable!("Unexpected error: {e}"),
                     };
 
                     let Some((stream, publish)) = self.storage_handler.next(&mut self.metrics)
                         else {
-                            return Ok(Status::Normal);
+                            break Ok(Status::Normal);
                         };
 
                     last_publish_payload_size = publish.payload.len();
@@ -539,9 +543,9 @@ impl<C: MqttClient> Serializer<C> {
                 _ = interval.tick() => {
                     let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler);
                 }
-                // Transition into crash mode when uplink is shutting down
+                // Transition into shutdown mode when uplink is shutting down
                 Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
-                    return Ok(Status::Shutdown)
+                    break Ok(Status::Shutdown)
                 }
             }
         };
@@ -556,6 +560,10 @@ impl<C: MqttClient> Serializer<C> {
         v
     }
 
+    /// Tries to serialize and directly write all incoming data packets
+    /// to network, will transition to 'slow' mode if `try_publish` fails.
+    /// Every few seconds pushes serializer metrics. Transitions to
+    /// `shutdown` mode if commanded to do so by control signals.
     async fn normal(&mut self) -> Result<Status, Error> {
         let mut interval = interval(METRICS_INTERVAL);
         self.metrics.set_mode("normal");
@@ -579,18 +587,16 @@ impl<C: MqttClient> Serializer<C> {
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish, stream)),
                         Err(e) => unreachable!("Unexpected error: {e}"),
                     }
-
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
                     // Check in storage stats every tick. TODO: Make storage object always
                     // available. It can be inmemory storage
-
                     if let Err(e) = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler) {
                         debug!("Failed to flush serializer metrics (normal). Error = {e}");
                     }
                 }
-                // Transition into crash mode when uplink is shutting down
+                // Transition into shutdown mode when uplink is shutting down
                 Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
                     return Ok(Status::Shutdown)
                 }
@@ -631,6 +637,7 @@ async fn send_publish<C: MqttClient>(client: C, publish: Publish) -> Result<C, M
     Ok(client)
 }
 
+// Updates payload with compressed content
 fn lz4_compress(payload: &mut Vec<u8>) -> Result<(), Error> {
     let mut compressor = FrameEncoder::new(vec![]);
     compressor.write_all(payload)?;
@@ -678,6 +685,7 @@ fn construct_publish(
     Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
 }
 
+// Updates serializer metrics and logs it, but doesn't push to network
 fn check_metrics(
     metrics: &mut Metrics,
     stream_metrics: &mut HashMap<String, StreamMetrics>,
@@ -711,6 +719,7 @@ fn check_metrics(
     }
 }
 
+// Updates serializer metrics and adds it into a queue to push later
 fn save_and_prepare_next_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut Metrics,
@@ -730,7 +739,7 @@ fn save_and_prepare_next_metrics(
     }
 }
 
-// // Enable actual metrics timers when there is data. This method is called every minute by the bridge
+// Updates serializer metrics and pushes it directly to network
 fn check_and_flush_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut Metrics,
