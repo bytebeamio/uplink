@@ -161,7 +161,7 @@ impl Storage {
     }
 
     // Ensures read-buffer is ready to be read from, exchanges buffers if required, returns true if empty.
-    pub fn reload_on_eof(&mut self) -> Result<bool, storage::Error> {
+    pub fn reload_on_eof(&mut self) -> Result<(), storage::Error> {
         self.inner.reload_on_eof()
     }
 
@@ -250,13 +250,8 @@ impl StorageHandler {
 
         for (stream, storage) in storages {
             match storage.reload_on_eof() {
-                Ok(true) => {
-                    if self.read_stream.take_if(|s| s == stream).is_some() {
-                        debug!("Done reading from: {}", stream.topic);
-                    }
-                }
                 // Reading from a non-empty persisted stream
-                Ok(false) => {
+                Ok(_) => {
                     if self.read_stream.is_none() {
                         self.read_stream.replace(stream.to_owned());
                         debug!("Started reading from: {}", stream.topic);
@@ -270,6 +265,12 @@ impl StorageHandler {
                     metrics.add_batch();
 
                     return Some((stream.to_owned(), publish));
+                }
+                // All packets read from storage
+                Err(storage::Error::Done) => {
+                    if self.read_stream.take_if(|s| s == stream).is_some() {
+                        debug!("Done reading from: {}", stream.topic);
+                    }
                 }
                 // Reload again on encountering a corrupted file
                 Err(e) => {
@@ -834,7 +835,7 @@ pub mod tests {
     use super::*;
 
     fn read_from_storage(storage: &mut Storage, max_packet_size: usize) -> Publish {
-        if storage.reload_on_eof().unwrap() {
+        if let Err(storage::Error::Done) = storage.reload_on_eof() {
             panic!("No publishes found in storage");
         }
 
