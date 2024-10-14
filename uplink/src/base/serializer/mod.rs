@@ -205,8 +205,7 @@ impl Storage {
         if let Some(mut publish) = self.latest_data.take() {
             publish.pkid = 1;
             if let Err(e) = publish.write(self.inner.writer()) {
-                error!("Failed to fill disk buffer. Error = {e}");
-                return Ok(None);
+                error!("Failed to serialize into write buffer. Error = {e}");
             }
         }
 
