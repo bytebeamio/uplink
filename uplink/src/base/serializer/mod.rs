@@ -183,10 +183,8 @@ impl Storage {
     // ## Panic
     // When any packet other than a publish is deserialized.
     pub fn read(&mut self, max_packet_size: usize) -> Option<Publish> {
-        if self.live_data_first && self.latest_data.is_some() {
-            return self.latest_data.take();
-        } else if self.latest_data.is_some() {
-            warn!("Latest data should be unoccupied if not using the live data first scheme");
+        if let Some(publish) = self.latest_data.take() {
+            return Some(publish);
         }
 
         // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
