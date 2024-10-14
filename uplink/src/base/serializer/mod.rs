@@ -2,15 +2,15 @@ mod metrics;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::time::Instant;
 use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
-use storage::Storage;
 use thiserror::Error;
 use tokio::{select, time::interval};
 
@@ -131,6 +131,89 @@ impl MqttClient for AsyncClient {
     }
 }
 
+pub struct Storage {
+    inner: storage::Storage,
+    live_data_first: bool,
+    latest_data: Option<Publish>,
+}
+
+impl Storage {
+    pub fn new(name: impl Into<String>, max_file_size: usize, live_data_first: bool) -> Self {
+        Self {
+            inner: storage::Storage::new(name, max_file_size),
+            live_data_first,
+            latest_data: None,
+        }
+    }
+
+    pub fn set_persistence(
+        &mut self,
+        backup_path: impl Into<PathBuf>,
+        max_file_count: usize,
+    ) -> Result<(), storage::Error> {
+        self.inner.set_persistence(backup_path.into(), max_file_count)
+    }
+
+    // Stores the provided publish packet by serializing it into storage, after setting its pkid to 1.
+    // If the write buffer is full, it is flushed/written onto disk based on config.
+    pub fn write(&mut self, mut publish: Publish) -> Result<Option<u64>, storage::Error> {
+        if self.live_data_first {
+            let Some(previous) = self.latest_data.replace(publish) else { return Ok(None) };
+            publish = previous;
+        } else if self.latest_data.is_some() {
+            warn!("Latest data should be unoccupied if not using the live data first scheme");
+        }
+
+        publish.pkid = 1;
+        if let Err(e) = publish.write(self.inner.writer()) {
+            error!("Failed to fill disk buffer. Error = {e}");
+            return Ok(None);
+        }
+
+        self.inner.flush_on_overflow()
+    }
+
+    // Ensures read-buffer is ready to be read from, exchanges buffers if required, returns true if empty.
+    pub fn reload_on_eof(&mut self) -> Result<(), storage::Error> {
+        self.inner.reload_on_eof()
+    }
+
+    // Deserializes publish packets from storage, returns None when it fails, i.e read buffer is empty.
+    //
+    // ## Panic
+    // When any packet other than a publish is deserialized.
+    pub fn read(&mut self, max_packet_size: usize) -> Option<Publish> {
+        if let Some(publish) = self.latest_data.take() {
+            return Some(publish);
+        }
+
+        // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
+        // This leads to force switching to normal mode. Increasing max_payload_size to bypass this
+        match Packet::read(self.inner.reader(), max_packet_size) {
+            Ok(Packet::Publish(publish)) => Some(publish),
+            Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+            Err(e) => {
+                error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
+                None
+            }
+        }
+    }
+
+    // Ensures all data is written into persistence, when configured.
+    pub fn flush(&mut self) -> Result<Option<u64>, storage::Error> {
+        // Write live cache to disk when flushing
+        if let Some(mut publish) = self.latest_data.take() {
+            publish.pkid = 1;
+            if let Err(e) = publish.write(self.inner.writer()) {
+                error!("Failed to fill disk buffer. Error = {e}");
+                return Ok(None);
+            }
+        }
+
+        self.inner.flush()
+    }
+}
+
 struct StorageHandler {
     config: Arc<Config>,
     map: BTreeMap<Arc<StreamConfig>, Storage>,
@@ -145,8 +228,11 @@ impl StorageHandler {
         // NOTE: persist action_status if not configured otherwise
         streams.insert("action_status".into(), config.action_status.clone());
         for (stream_name, stream_config) in streams {
-            let mut storage =
-                Storage::new(&stream_config.topic, stream_config.persistence.max_file_size);
+            let mut storage = Storage::new(
+                &stream_config.topic,
+                stream_config.persistence.max_file_size,
+                stream_config.live_data_first,
+            );
             if stream_config.persistence.max_file_count > 0 {
                 let mut path = config.persistence_path.clone();
                 path.push(&stream_name);
@@ -161,48 +247,71 @@ impl StorageHandler {
                     path.display()
                 );
             }
-            map.insert(Arc::new(stream_config.clone()), storage);
+            map.insert(Arc::new(stream_config), storage);
         }
 
         Ok(Self { config, map, read_stream: None })
     }
 
-    fn select(&mut self, stream: &Arc<StreamConfig>) -> &mut Storage {
-        self.map
+    // Selects the right storage for to write into and serializes received data as a Publish packet into it.
+    fn store(&mut self, stream: Arc<StreamConfig>, publish: Publish, metrics: &mut Metrics) {
+        match self
+            .map
             .entry(stream.to_owned())
-            .or_insert_with(|| Storage::new(&stream.topic, self.config.default_buf_size))
+            .or_insert_with(|| {
+                Storage::new(
+                    &stream.topic,
+                    self.config.default_buf_size,
+                    self.config.default_live_data_first,
+                )
+            })
+            .write(publish)
+        {
+            Ok(Some(deleted)) => {
+                debug!("Lost segment = {deleted}");
+                metrics.increment_lost_segments();
+            }
+            Err(e) => {
+                error!("Crash loop: write error = {e}");
+                metrics.increment_errors();
+            }
+            _ => {}
+        }
     }
 
-    fn next(&mut self, metrics: &mut Metrics) -> Option<(&Arc<StreamConfig>, &mut Storage)> {
+    // Extracts a publish packet from storage if any exist, else returns None
+    fn next(&mut self, metrics: &mut Metrics) -> Option<(Arc<StreamConfig>, Publish)> {
         let storages = self.map.iter_mut();
 
         for (stream, storage) in storages {
-            match (storage.reload_on_eof(), &mut self.read_stream) {
-                // Done reading all pending files for a persisted stream
-                (Ok(true), Some(curr_stream)) => {
-                    if curr_stream == stream {
-                        self.read_stream.take();
-                        debug!("Completed reading from: {}", stream.topic);
+            match storage.reload_on_eof() {
+                // Reading from a non-empty persisted stream
+                Ok(_) => {
+                    if self.read_stream.is_none() {
+                        self.read_stream.replace(stream.to_owned());
+                        debug!("Started reading from: {}", stream.topic);
+                    } else {
+                        trace!("Reading from: {}", stream.topic);
                     }
 
-                    continue;
+                    let Some(publish) = storage.read(self.config.mqtt.max_packet_size) else {
+                        continue;
+                    };
+                    metrics.add_batch();
+
+                    return Some((stream.to_owned(), publish));
                 }
-                // Persisted stream is empty
-                (Ok(true), _) => continue,
-                // Reading from a newly loaded non-empty persisted stream
-                (Ok(false), None) => {
-                    debug!("Reading from: {}", stream.topic);
-                    self.read_stream = Some(stream.to_owned());
-                    return Some((stream, storage));
+                // All packets read from storage
+                Err(storage::Error::Done) => {
+                    if self.read_stream.take_if(|s| s == stream).is_some() {
+                        debug!("Done reading from: {}", stream.topic);
+                    }
                 }
-                // Continuing to read from persisted stream loaded earlier
-                (Ok(false), _) => return Some((stream, storage)),
                 // Reload again on encountering a corrupted file
-                (Err(e), _) => {
+                Err(e) => {
                     metrics.increment_errors();
                     metrics.increment_lost_segments();
                     error!("Failed to reload from storage. Error = {e}");
-                    continue;
                 }
             }
         }
@@ -210,6 +319,8 @@ impl StorageHandler {
         None
     }
 
+    // Force flushes all in-memory buffers to ensure zero packet loss during uplink restart.
+    // TODO: Ensure packets in read-buffer but not on disk are not lost.
     fn flush_all(&mut self) {
         for (stream_config, storage) in self.map.iter_mut() {
             match storage.flush() {
@@ -221,6 +332,26 @@ impl StorageHandler {
                 ),
             }
         }
+    }
+
+    // Update Metrics about all storages being handled
+    fn update_metrics(&self, metrics: &mut Metrics) {
+        let mut inmemory_write_size = 0;
+        let mut inmemory_read_size = 0;
+        let mut file_count = 0;
+        let mut disk_utilized = 0;
+
+        for storage in self.map.values() {
+            inmemory_write_size += storage.inner.inmemory_write_size();
+            inmemory_read_size += storage.inner.inmemory_read_size();
+            file_count += storage.inner.file_count();
+            disk_utilized += storage.inner.disk_utilized();
+        }
+
+        metrics.set_write_memory(inmemory_write_size);
+        metrics.set_read_memory(inmemory_read_size);
+        metrics.set_disk_files(file_count);
+        metrics.set_disk_utilized(disk_utilized);
     }
 }
 
@@ -269,7 +400,6 @@ impl StorageHandler {
 /// [`try_publish()`]: AsyncClient::try_publish
 /// [`publish()`]: AsyncClient::publish
 pub struct Serializer<C: MqttClient> {
-    config: Arc<Config>,
     collector_rx: Receiver<Box<dyn Package>>,
     client: C,
     storage_handler: StorageHandler,
@@ -291,11 +421,10 @@ impl<C: MqttClient> Serializer<C> {
         client: C,
         metrics_tx: Sender<SerializerMetrics>,
     ) -> Result<Serializer<C>, Error> {
-        let storage_handler = StorageHandler::new(config.clone())?;
+        let storage_handler = StorageHandler::new(config)?;
         let (ctrl_tx, ctrl_rx) = bounded(1);
 
         Ok(Serializer {
-            config,
             collector_rx,
             client,
             storage_handler,
@@ -325,14 +454,10 @@ impl<C: MqttClient> Serializer<C> {
                 self.storage_handler.flush_all();
                 return Ok(());
             };
-            let stream_config = data.stream_config();
+
+            let stream = data.stream_config();
             let publish = construct_publish(data, &mut self.stream_metrics)?;
-            let storage = self.storage_handler.select(&stream_config);
-            match write_to_storage(publish, storage) {
-                Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
-                Ok(_) => {}
-                Err(e) => error!("Shutdown: write error = {e}"),
-            }
+            self.storage_handler.store(stream, publish, &mut self.metrics);
         }
     }
 
@@ -342,24 +467,15 @@ impl<C: MqttClient> Serializer<C> {
         publish: Publish,
         stream: Arc<StreamConfig>,
     ) -> Result<Status, Error> {
-        let storage = self.storage_handler.select(&stream);
         // Write failed publish to disk first, metrics don't matter
-        match write_to_storage(publish, storage) {
-            Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
-            Ok(_) => {}
-            Err(e) => error!("Crash loop: write error = {e}"),
-        }
+        self.storage_handler.store(stream, publish, &mut self.metrics);
 
         loop {
             // Collect next data packet and write to disk
             let data = self.collector_rx.recv_async().await?;
+            let stream = data.stream_config();
             let publish = construct_publish(data, &mut self.stream_metrics)?;
-            let storage = self.storage_handler.select(&stream);
-            match write_to_storage(publish, storage) {
-                Ok(Some(deleted)) => debug!("Lost segment = {deleted}"),
-                Ok(_) => {}
-                Err(e) => error!("Crash loop: write error = {e}"),
-            }
+            self.storage_handler.store(stream, publish, &mut self.metrics);
         }
     }
 
@@ -373,8 +489,7 @@ impl<C: MqttClient> Serializer<C> {
 
         // Note: self.client.publish() is executing code before await point
         // in publish method every time. Verify this behaviour later
-        let payload = Bytes::copy_from_slice(&publish.payload[..]);
-        let publish = send_publish(self.client.clone(), publish.topic, payload);
+        let publish = send_publish(self.client.clone(), publish);
         tokio::pin!(publish);
 
         let v: Result<Status, Error> = loop {
@@ -383,21 +498,7 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
                     let stream = data.stream_config();
                     let publish = construct_publish(data, &mut self.stream_metrics)?;
-                    let storage = self.storage_handler.select(&stream);
-                    match write_to_storage(publish, storage) {
-                        Ok(Some(deleted)) => {
-                            debug!("Lost segment = {deleted}");
-                            self.metrics.increment_lost_segments();
-                        }
-                        Ok(_) => {},
-                        Err(e) => {
-                            error!("Storage write error = {e}");
-                            self.metrics.increment_errors();
-                        }
-                    };
-
-                    // Update metrics
-                    self.metrics.add_batch();
+                    self.storage_handler.store(stream, publish, &mut self.metrics);
                 }
                 o = &mut publish => match o {
                     Ok(_) => break Ok(Status::EventLoopReady),
@@ -428,7 +529,7 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Write new collector data to disk while sending existing data on
     /// disk to mqtt eventloop. Collector rx is selected with blocking
-    /// `publish` instead of `try publish` to ensure that transient back
+    /// `publish` instead of `try_publish` to ensure that transient back
     /// pressure due to a lot of data on disk doesn't switch state to
     /// `Status::SlowEventLoop`
     async fn catchup(&mut self) -> Result<Status, Error> {
@@ -437,34 +538,12 @@ impl<C: MqttClient> Serializer<C> {
         let mut interval = interval(METRICS_INTERVAL);
         self.metrics.set_mode("catchup");
 
-        let max_packet_size = self.config.mqtt.max_packet_size;
-        let client = self.client.clone();
-
-        let Some((stream, storage)) = self.storage_handler.next(&mut self.metrics) else {
+        let Some((mut last_publish_stream, publish)) = self.storage_handler.next(&mut self.metrics)
+        else {
             return Ok(Status::Normal);
         };
-
-        // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
-        // This leads to force switching to normal mode. Increasing max_payload_size to bypass this
-        let publish = match Packet::read(storage.reader(), max_packet_size) {
-            Ok(Packet::Publish(publish)) => publish,
-            Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
-            Err(e) => {
-                self.metrics.increment_errors();
-                error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
-                save_and_prepare_next_metrics(
-                    &mut self.pending_metrics,
-                    &mut self.metrics,
-                    &mut self.stream_metrics,
-                    &self.storage_handler,
-                );
-                return Ok(Status::Normal);
-            }
-        };
-
         let mut last_publish_payload_size = publish.payload.len();
-        let mut last_publish_stream = stream.clone();
-        let send = send_publish(client, publish.topic, publish.payload);
+        let send = send_publish(self.client.clone(), publish);
         tokio::pin!(send);
 
         let v: Result<Status, Error> = loop {
@@ -473,21 +552,7 @@ impl<C: MqttClient> Serializer<C> {
                     let data = data?;
                     let stream = data.stream_config();
                     let publish = construct_publish(data, &mut self.stream_metrics)?;
-                    let storage = self.storage_handler.select(&stream);
-                    match write_to_storage(publish, storage) {
-                        Ok(Some(deleted)) => {
-                            debug!("Lost segment = {deleted}");
-                            self.metrics.increment_lost_segments();
-                        }
-                        Ok(_) => {},
-                        Err(e) => {
-                            error!("Storage write error = {e}");
-                            self.metrics.increment_errors();
-                        }
-                    };
-
-                    // Update metrics
-                    self.metrics.add_batch();
+                    self.storage_handler.store(stream, publish, &mut self.metrics);
                 }
                 o = &mut send => {
                     self.metrics.add_sent_size(last_publish_payload_size);
@@ -495,37 +560,28 @@ impl<C: MqttClient> Serializer<C> {
                     // indefinitely write to disk to not loose data
                     let client = match o {
                         Ok(c) => c,
-                        Err(MqttError::Send(Request::Publish(publish))) => break Ok(Status::EventLoopCrash(publish, last_publish_stream.clone())),
+                        Err(MqttError::Send(Request::Publish(publish))) => {
+                            break Ok(Status::EventLoopCrash(publish, last_publish_stream))
+                        }
                         Err(e) => unreachable!("Unexpected error: {e}"),
                     };
 
-                    let Some((stream, storage)) = self.storage_handler.next(&mut self.metrics) else {
-                        return Ok(Status::Normal);
-                    };
+                    let Some((stream, publish)) = self.storage_handler.next(&mut self.metrics)
+                        else {
+                            break Ok(Status::Normal);
+                        };
 
-                    let publish = match Packet::read(storage.reader(), max_packet_size) {
-                        Ok(Packet::Publish(publish)) => publish,
-                        Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
-                        Err(e) => {
-                            error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
-                            break Ok(Status::Normal)
-                        }
-                    };
-
-                    self.metrics.add_batch();
-
-                    let payload = publish.payload;
-                    last_publish_payload_size = payload.len();
-                    last_publish_stream = stream.clone();
-                    send.set(send_publish(client, publish.topic, payload));
+                    last_publish_payload_size = publish.payload.len();
+                    last_publish_stream = stream;
+                    send.set(send_publish(client, publish));
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
                     let _ = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler);
                 }
-                // Transition into crash mode when uplink is shutting down
+                // Transition into shutdown mode when uplink is shutting down
                 Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
-                    return Ok(Status::Shutdown)
+                    break Ok(Status::Shutdown)
                 }
             }
         };
@@ -540,6 +596,10 @@ impl<C: MqttClient> Serializer<C> {
         v
     }
 
+    /// Tries to serialize and directly write all incoming data packets
+    /// to network, will transition to 'slow' mode if `try_publish` fails.
+    /// Every few seconds pushes serializer metrics. Transitions to
+    /// `shutdown` mode if commanded to do so by control signals.
     async fn normal(&mut self) -> Result<Status, Error> {
         let mut interval = interval(METRICS_INTERVAL);
         self.metrics.set_mode("normal");
@@ -563,18 +623,16 @@ impl<C: MqttClient> Serializer<C> {
                         Err(MqttError::TrySend(Request::Publish(publish))) => return Ok(Status::SlowEventloop(publish, stream)),
                         Err(e) => unreachable!("Unexpected error: {e}"),
                     }
-
                 }
                 // On a regular interval, forwards metrics information to network
                 _ = interval.tick() => {
                     // Check in storage stats every tick. TODO: Make storage object always
                     // available. It can be inmemory storage
-
                     if let Err(e) = check_and_flush_metrics(&mut self.pending_metrics, &mut self.metrics, &self.metrics_tx, &self.storage_handler) {
                         debug!("Failed to flush serializer metrics (normal). Error = {e}");
                     }
                 }
-                // Transition into crash mode when uplink is shutting down
+                // Transition into shutdown mode when uplink is shutting down
                 Ok(SerializerShutdown) = self.ctrl_rx.recv_async() => {
                     return Ok(Status::Shutdown)
                 }
@@ -606,16 +664,16 @@ impl<C: MqttClient> Serializer<C> {
     }
 }
 
-async fn send_publish<C: MqttClient>(
-    client: C,
-    topic: String,
-    payload: Bytes,
-) -> Result<C, MqttError> {
+// Used to construct a future that resolves if request is sent to the MQTT handler or errors
+async fn send_publish<C: MqttClient>(client: C, publish: Publish) -> Result<C, MqttError> {
+    let payload = Bytes::copy_from_slice(&publish.payload[..]);
+    let topic = publish.topic;
     debug!("publishing on {topic} with size = {}", payload.len());
     client.publish(topic, QoS::AtLeastOnce, false, payload).await?;
     Ok(client)
 }
 
+// Updates payload with compressed content
 fn lz4_compress(payload: &mut Vec<u8>) -> Result<(), Error> {
     let mut compressor = FrameEncoder::new(vec![]);
     compressor.write_all(payload)?;
@@ -635,10 +693,8 @@ fn construct_publish(
     let batch_latency = data.latency();
     trace!("Data received on stream: {stream_name}; message count = {point_count}; batching latency = {batch_latency}");
 
-    let topic = stream_config.topic.clone();
-
     let metrics = stream_metrics
-        .entry(stream_name.clone())
+        .entry(stream_name.to_owned())
         .or_insert_with(|| StreamMetrics::new(&stream_name));
 
     let serialization_start = Instant::now();
@@ -660,48 +716,18 @@ fn construct_publish(
 
     metrics.add_serialized_sizes(data_size, compressed_data_size);
 
-    Ok(Publish::new(topic, QoS::AtLeastOnce, payload))
+    Ok(Publish::new(&stream_config.topic, QoS::AtLeastOnce, payload))
 }
 
-// Writes the provided publish packet to [Storage], after setting its pkid to 1.
-// If the write buffer is full, it is flushed/written onto disk based on config.
-pub fn write_to_storage(
-    mut publish: Publish,
-    storage: &mut Storage,
-) -> Result<Option<u64>, storage::Error> {
-    publish.pkid = 1;
-    if let Err(e) = publish.write(storage.writer()) {
-        error!("Failed to fill disk buffer. Error = {e}");
-        return Ok(None);
-    }
-
-    let deleted = storage.flush_on_overflow()?;
-    Ok(deleted)
-}
-
+// Updates serializer metrics and logs it, but doesn't push to network
 fn check_metrics(
     metrics: &mut Metrics,
     stream_metrics: &mut HashMap<String, StreamMetrics>,
     storage_handler: &StorageHandler,
 ) {
     use pretty_bytes::converter::convert;
-    let mut inmemory_write_size = 0;
-    let mut inmemory_read_size = 0;
-    let mut file_count = 0;
-    let mut disk_utilized = 0;
 
-    for storage in storage_handler.map.values() {
-        inmemory_read_size += storage.inmemory_read_size();
-        inmemory_write_size += storage.inmemory_write_size();
-        file_count += storage.file_count();
-        disk_utilized += storage.disk_utilized();
-    }
-
-    metrics.set_write_memory(inmemory_write_size);
-    metrics.set_read_memory(inmemory_read_size);
-    metrics.set_disk_files(file_count);
-    metrics.set_disk_utilized(disk_utilized);
-
+    storage_handler.update_metrics(metrics);
     info!(
         "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
         metrics.mode,
@@ -727,29 +753,14 @@ fn check_metrics(
     }
 }
 
+// Updates serializer metrics and adds it into a queue to push later
 fn save_and_prepare_next_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut Metrics,
     stream_metrics: &mut HashMap<String, StreamMetrics>,
     storage_handler: &StorageHandler,
 ) {
-    let mut inmemory_write_size = 0;
-    let mut inmemory_read_size = 0;
-    let mut file_count = 0;
-    let mut disk_utilized = 0;
-
-    for storage in storage_handler.map.values() {
-        inmemory_write_size += storage.inmemory_write_size();
-        inmemory_read_size += storage.inmemory_read_size();
-        file_count += storage.file_count();
-        disk_utilized += storage.disk_utilized();
-    }
-
-    metrics.set_write_memory(inmemory_write_size);
-    metrics.set_read_memory(inmemory_read_size);
-    metrics.set_disk_files(file_count);
-    metrics.set_disk_utilized(disk_utilized);
-
+    storage_handler.update_metrics(metrics);
     let m = Box::new(metrics.clone());
     pending.push_back(SerializerMetrics::Main(m));
     metrics.prepare_next();
@@ -762,7 +773,7 @@ fn save_and_prepare_next_metrics(
     }
 }
 
-// // Enable actual metrics timers when there is data. This method is called every minute by the bridge
+// Updates serializer metrics and pushes it directly to network
 fn check_and_flush_metrics(
     pending: &mut VecDeque<SerializerMetrics>,
     metrics: &mut Metrics,
@@ -771,23 +782,7 @@ fn check_and_flush_metrics(
 ) -> Result<(), TrySendError<SerializerMetrics>> {
     use pretty_bytes::converter::convert;
 
-    let mut inmemory_write_size = 0;
-    let mut inmemory_read_size = 0;
-    let mut file_count = 0;
-    let mut disk_utilized = 0;
-
-    for storage in storage_handler.map.values() {
-        inmemory_write_size += storage.inmemory_write_size();
-        inmemory_read_size += storage.inmemory_read_size();
-        file_count += storage.file_count();
-        disk_utilized += storage.disk_utilized();
-    }
-
-    metrics.set_write_memory(inmemory_write_size);
-    metrics.set_read_memory(inmemory_read_size);
-    metrics.set_disk_files(file_count);
-    metrics.set_disk_utilized(disk_utilized);
-
+    storage_handler.update_metrics(metrics);
     // Send pending metrics. This signifies state change
     while let Some(metrics) = pending.front() {
         match metrics {
@@ -875,11 +870,11 @@ pub mod tests {
     use super::*;
 
     fn read_from_storage(storage: &mut Storage, max_packet_size: usize) -> Publish {
-        if storage.reload_on_eof().unwrap() {
+        if let Err(storage::Error::Done) = storage.reload_on_eof() {
             panic!("No publishes found in storage");
         }
 
-        match Packet::read(storage.reader(), max_packet_size) {
+        match Packet::read(storage.inner.reader(), max_packet_size) {
             Ok(Packet::Publish(publish)) => return publish,
             v => {
                 panic!("Failed to read publish from storage. read: {:?}", v);
@@ -947,18 +942,15 @@ pub mod tests {
     fn read_write_storage() {
         let config = Arc::new(default_config());
 
-        let (serializer, _, _) = defaults(config);
-        let mut storage = Storage::new("hello/world", 1024);
-
+        let mut storage = Storage::new("hello/world", 1024, false);
         let mut publish = Publish::new(
             "hello/world",
             QoS::AtLeastOnce,
             "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_storage(publish.clone(), &mut storage).unwrap();
+        storage.write(publish.clone()).unwrap();
 
-        let stored_publish =
-            read_from_storage(&mut storage, serializer.config.mqtt.max_packet_size);
+        let stored_publish = read_from_storage(&mut storage, config.mqtt.max_packet_size);
 
         // Ensure publish.pkid is 1, as written to disk
         publish.pkid = 1;
@@ -1063,11 +1055,11 @@ pub mod tests {
 
         let (mut serializer, data_tx, net_rx) = defaults(config);
 
-        let mut storage = serializer
+        let storage = serializer
             .storage_handler
             .map
             .entry(Arc::new(Default::default()))
-            .or_insert(Storage::new("hello/world", 1024));
+            .or_insert(Storage::new("hello/world", 1024, false));
 
         let (stream_name, stream_config) = (
             "hello",
@@ -1105,7 +1097,7 @@ pub mod tests {
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_storage(publish.clone(), &mut storage).unwrap();
+        storage.write(publish.clone()).unwrap();
 
         let status = serializer.catchup().await.unwrap();
         assert_eq!(status, Status::Normal);
@@ -1118,14 +1110,14 @@ pub mod tests {
 
         let (mut serializer, data_tx, _) = defaults(config);
 
-        let mut storage = serializer
+        let storage = serializer
             .storage_handler
             .map
             .entry(Arc::new(StreamConfig {
                 topic: "hello/world".to_string(),
                 ..Default::default()
             }))
-            .or_insert(Storage::new("hello/world", 1024));
+            .or_insert(Storage::new("hello/world", 1024, false));
 
         let (stream_name, stream_config) = (
             "hello",
@@ -1146,7 +1138,7 @@ pub mod tests {
             QoS::AtLeastOnce,
             "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
         );
-        write_to_storage(publish.clone(), &mut storage).unwrap();
+        storage.write(publish.clone()).unwrap();
 
         match serializer.catchup().await.unwrap() {
             Status::EventLoopCrash(Publish { topic, payload, .. }, _) => {
@@ -1194,7 +1186,7 @@ pub mod tests {
             payload: Bytes::from(i.to_string()),
         };
 
-        let mut one = serializer
+        let one = serializer
             .storage_handler
             .map
             .entry(Arc::new(StreamConfig {
@@ -1203,8 +1195,8 @@ pub mod tests {
                 ..Default::default()
             }))
             .or_insert_with(|| unreachable!());
-        write_to_storage(publish("topic/one".to_string(), 1), &mut one).unwrap();
-        write_to_storage(publish("topic/one".to_string(), 10), &mut one).unwrap();
+        one.write(publish("topic/one".to_string(), 1)).unwrap();
+        one.write(publish("topic/one".to_string(), 10)).unwrap();
 
         let top = serializer
             .storage_handler
@@ -1215,8 +1207,8 @@ pub mod tests {
                 ..Default::default()
             }))
             .or_insert_with(|| unreachable!());
-        write_to_storage(publish("topic/top".to_string(), 100), top).unwrap();
-        write_to_storage(publish("topic/top".to_string(), 1000), top).unwrap();
+        top.write(publish("topic/top".to_string(), 100)).unwrap();
+        top.write(publish("topic/top".to_string(), 1000)).unwrap();
 
         let two = serializer
             .storage_handler
@@ -1227,9 +1219,9 @@ pub mod tests {
                 ..Default::default()
             }))
             .or_insert_with(|| unreachable!());
-        write_to_storage(publish("topic/two".to_string(), 3), two).unwrap();
+        two.write(publish("topic/two".to_string(), 3)).unwrap();
 
-        let mut default = serializer
+        let default = serializer
             .storage_handler
             .map
             .entry(Arc::new(StreamConfig {
@@ -1237,9 +1229,9 @@ pub mod tests {
                 priority: 0,
                 ..Default::default()
             }))
-            .or_insert(Storage::new("topic/default", 1024));
-        write_to_storage(publish("topic/default".to_string(), 0), &mut default).unwrap();
-        write_to_storage(publish("topic/default".to_string(), 2), &mut default).unwrap();
+            .or_insert(Storage::new("topic/default", 1024, false));
+        default.write(publish("topic/default".to_string(), 0)).unwrap();
+        default.write(publish("topic/default".to_string(), 2)).unwrap();
 
         // run serializer in the background
         spawn(async { serializer.start().await.unwrap() });

@@ -1,20 +1,38 @@
-use std::{fs::create_dir_all, path::PathBuf, sync::Arc, time::Duration};
+use std::{fs::create_dir_all, path::PathBuf, sync::Arc, thread, time::Duration};
 
 use bytes::Bytes;
 use flume::bounded;
 use rumqttc::{Publish, QoS, Request};
 use tempdir::TempDir;
-use tokio::spawn;
+use tokio::{runtime::Runtime, spawn, time::sleep};
 
 use uplink::{
-    base::{
-        bridge::Payload,
-        serializer::{write_to_storage, Serializer},
-    },
+    base::{bridge::Payload, serializer::Serializer},
     config::{Config, Persistence, StreamConfig},
     mock::{MockClient, MockCollector},
     Storage,
 };
+
+fn publish(topic: String, i: u32) -> Publish {
+    Publish {
+        dup: false,
+        qos: QoS::AtMostOnce,
+        retain: false,
+        topic,
+        pkid: 0,
+        payload: {
+            let serialized = serde_json::to_vec(&vec![Payload {
+                stream: Default::default(),
+                sequence: i,
+                timestamp: 0,
+                payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}").unwrap(),
+            }])
+            .unwrap();
+
+            Bytes::from(serialized)
+        },
+    }
+}
 
 #[tokio::test]
 // Ensures that the data of streams are removed based on preference
@@ -56,24 +74,6 @@ async fn preferential_send_on_network() {
         ),
     ]);
 
-    let publish = |topic: String, i: u32| Publish {
-        dup: false,
-        qos: QoS::AtMostOnce,
-        retain: false,
-        topic,
-        pkid: 0,
-        payload: {
-            let serialized = serde_json::to_vec(&vec![Payload {
-                stream: Default::default(),
-                sequence: i,
-                timestamp: 0,
-                payload: serde_json::from_str("{\"msg\": \"Hello, World!\"}").unwrap(),
-            }])
-            .unwrap();
-
-            Bytes::from(serialized)
-        },
-    };
     let persistence_path = |path: &PathBuf, stream_name: &str| {
         let mut path = path.to_owned();
         path.push(stream_name);
@@ -83,21 +83,21 @@ async fn preferential_send_on_network() {
     };
 
     // write packets for one, two and top onto disk
-    let mut one = Storage::new("topic/one", 1024 * 1024);
+    let mut one = Storage::new("topic/one", 1024 * 1024, false);
     one.set_persistence(persistence_path(&config.persistence_path, "one"), 1).unwrap();
-    write_to_storage(publish("topic/one".to_string(), 4), &mut one).unwrap();
-    write_to_storage(publish("topic/one".to_string(), 5), &mut one).unwrap();
+    one.write(publish("topic/one".to_string(), 4)).unwrap();
+    one.write(publish("topic/one".to_string(), 5)).unwrap();
     one.flush().unwrap();
 
-    let mut two = Storage::new("topic/two", 1024 * 1024);
+    let mut two = Storage::new("topic/two", 1024 * 1024, false);
     two.set_persistence(persistence_path(&config.persistence_path, "two"), 1).unwrap();
-    write_to_storage(publish("topic/two".to_string(), 3), &mut two).unwrap();
+    two.write(publish("topic/two".to_string(), 3)).unwrap();
     two.flush().unwrap();
 
-    let mut top = Storage::new("topic/top", 1024 * 1024);
+    let mut top = Storage::new("topic/top", 1024 * 1024, false);
     top.set_persistence(persistence_path(&config.persistence_path, "top"), 1).unwrap();
-    write_to_storage(publish("topic/top".to_string(), 1), &mut top).unwrap();
-    write_to_storage(publish("topic/top".to_string(), 2), &mut top).unwrap();
+    top.write(publish("topic/top".to_string(), 1)).unwrap();
+    top.write(publish("topic/top".to_string(), 2)).unwrap();
     top.flush().unwrap();
 
     let config = Arc::new(config);
@@ -166,4 +166,105 @@ async fn preferential_send_on_network() {
     };
     assert_eq!(topic, "topic/default");
     assert_eq!(payload, "[{\"sequence\":7,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+}
+
+#[tokio::test]
+// Ensures that data pushed maintains FIFO order
+async fn fifo_data_push() {
+    let mut config = Config::default();
+    config.default_buf_size = 1024 * 1024;
+    config.mqtt.max_packet_size = 1024 * 1024;
+    let config = Arc::new(config);
+    let (data_tx, data_rx) = bounded(1);
+    let (net_tx, req_rx) = bounded(1);
+    let (metrics_tx, _metrics_rx) = bounded(1);
+    let client = MockClient { net_tx };
+    let serializer = Serializer::new(config, data_rx, client, metrics_tx).unwrap();
+
+    // start serializer in the background
+    thread::spawn(|| _ = Runtime::new().unwrap().block_on(serializer.start()));
+
+    spawn(async {
+        let mut default = MockCollector::new(
+            "default",
+            StreamConfig { topic: "topic/default".to_owned(), batch_size: 1, ..Default::default() },
+            data_tx,
+        );
+        for i in 0.. {
+            default.send(i).await.unwrap();
+        }
+    });
+
+    let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(topic, "topic/default");
+    assert_eq!(payload, "[{\"sequence\":0,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+
+    let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(topic, "topic/default");
+    assert_eq!(payload, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+
+    let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(topic, "topic/default");
+    assert_eq!(payload, "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+}
+
+#[tokio::test]
+// Ensures that live data is pushed first if configured to do so
+async fn prefer_live_data() {
+    let mut config = Config::default();
+    config.default_buf_size = 1024 * 1024;
+    config.mqtt.max_packet_size = 1024 * 1024;
+    config.default_live_data_first = true;
+    let config = Arc::new(config);
+    let (data_tx, data_rx) = bounded(0);
+    let (net_tx, req_rx) = bounded(0);
+    let (metrics_tx, _metrics_rx) = bounded(1);
+    let client = MockClient { net_tx };
+    let serializer = Serializer::new(config, data_rx, client, metrics_tx).unwrap();
+
+    // start serializer in the background
+    thread::spawn(|| _ = Runtime::new().unwrap().block_on(serializer.start()));
+
+    spawn(async {
+        let mut default = MockCollector::new(
+            "default",
+            StreamConfig { topic: "topic/default".to_owned(), batch_size: 1, ..Default::default() },
+            data_tx,
+        );
+        for i in 0.. {
+            default.send(i).await.unwrap();
+            sleep(Duration::from_millis(250)).await;
+        }
+    });
+
+    sleep(Duration::from_millis(750)).await;
+    let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(topic, "topic/default");
+    assert_eq!(payload, "[{\"sequence\":0,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+
+    let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(topic, "topic/default");
+    assert_eq!(payload, "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+
+    let Request::Publish(Publish { topic, payload, .. }) = req_rx.recv_async().await.unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(topic, "topic/default");
+    assert_eq!(payload, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
 }
