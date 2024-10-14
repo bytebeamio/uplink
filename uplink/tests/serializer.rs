@@ -87,18 +87,18 @@ async fn preferential_send_on_network() {
     one.set_persistence(persistence_path(&config.persistence_path, "one"), 1).unwrap();
     one.write(publish("topic/one".to_string(), 4)).unwrap();
     one.write(publish("topic/one".to_string(), 5)).unwrap();
-    one.flush().unwrap();
+    one.flush();
 
     let mut two = Storage::new("topic/two", 1024 * 1024);
     two.set_persistence(persistence_path(&config.persistence_path, "two"), 1).unwrap();
     two.write(publish("topic/two".to_string(), 3)).unwrap();
-    two.flush().unwrap();
+    two.flush();
 
     let mut top = Storage::new("topic/top", 1024 * 1024);
     top.set_persistence(persistence_path(&config.persistence_path, "top"), 1).unwrap();
     top.write(publish("topic/top".to_string(), 1)).unwrap();
     top.write(publish("topic/top".to_string(), 2)).unwrap();
-    top.flush().unwrap();
+    top.flush();
 
     let config = Arc::new(config);
     let (data_tx, data_rx) = bounded(1);
