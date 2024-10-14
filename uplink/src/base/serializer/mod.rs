@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
 use thiserror::Error;
@@ -133,11 +133,17 @@ impl MqttClient for AsyncClient {
 
 pub struct Storage {
     inner: storage::Storage,
+    live_data_first: bool,
+    latest_data: Option<Publish>,
 }
 
 impl Storage {
-    pub fn new(name: impl Into<String>, max_file_size: usize) -> Self {
-        Self { inner: storage::Storage::new(name, max_file_size) }
+    pub fn new(name: impl Into<String>, max_file_size: usize, live_data_first: bool) -> Self {
+        Self {
+            inner: storage::Storage::new(name, max_file_size),
+            live_data_first,
+            latest_data: None,
+        }
     }
 
     pub fn set_persistence(
@@ -151,6 +157,13 @@ impl Storage {
     // Stores the provided publish packet by serializing it into storage, after setting its pkid to 1.
     // If the write buffer is full, it is flushed/written onto disk based on config.
     pub fn write(&mut self, mut publish: Publish) -> Result<Option<u64>, storage::Error> {
+        if self.live_data_first {
+            let Some(previous) = self.latest_data.replace(publish) else { return Ok(None) };
+            publish = previous;
+        } else if self.latest_data.is_some() {
+            warn!("Latest data should be unoccupied if not using the live data first scheme");
+        }
+
         publish.pkid = 1;
         if let Err(e) = publish.write(self.inner.writer()) {
             error!("Failed to fill disk buffer. Error = {e}");
@@ -170,6 +183,10 @@ impl Storage {
     // ## Panic
     // When any packet other than a publish is deserialized.
     pub fn read(&mut self, max_packet_size: usize) -> Option<Publish> {
+        if let Some(publish) = self.latest_data.take() {
+            return Some(publish);
+        }
+
         // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
         // This leads to force switching to normal mode. Increasing max_payload_size to bypass this
         match Packet::read(self.inner.reader(), max_packet_size) {
@@ -184,6 +201,16 @@ impl Storage {
 
     // Ensures all data is written into persistence, when configured.
     pub fn flush(&mut self) {
+        // Write live cache to disk when flushing
+        if let Some(mut publish) = self.latest_data.take() {
+            publish.pkid = 1;
+            if let Err(e) = publish.write(self.inner.writer()) {
+                error!("Failed to fill disk buffer. Error = {e}");
+                return Ok(None);
+            }
+        }
+
+        // Save contents of read buffer to disk if required
         match self.inner.save_read_buffer() {
             Ok(()) => trace!("Force flushed read buffer onto disk; stream = {}", self.inner.name),
             Err(storage::Error::NoWrites) => {}
@@ -191,6 +218,8 @@ impl Storage {
                 error!("Error = {e}; storage = {}", self.inner.name)
             }
         }
+
+        // Flush contents of write buffer to disk if required
         match self.inner.flush() {
             Ok(_) => trace!("Force flushed write buffer onto disk; stream = {}", self.inner.name),
             Err(storage::Error::NoWrites) => {}
@@ -215,8 +244,11 @@ impl StorageHandler {
         // NOTE: persist action_status if not configured otherwise
         streams.insert("action_status".into(), config.action_status.clone());
         for (stream_name, stream_config) in streams {
-            let mut storage =
-                Storage::new(&stream_config.topic, stream_config.persistence.max_file_size);
+            let mut storage = Storage::new(
+                &stream_config.topic,
+                stream_config.persistence.max_file_size,
+                stream_config.live_data_first,
+            );
             if stream_config.persistence.max_file_count > 0 {
                 let mut path = config.persistence_path.clone();
                 path.push(&stream_name);
@@ -242,7 +274,13 @@ impl StorageHandler {
         match self
             .map
             .entry(stream.to_owned())
-            .or_insert_with(|| Storage::new(&stream.topic, self.config.default_buf_size))
+            .or_insert_with(|| {
+                Storage::new(
+                    &stream.topic,
+                    self.config.default_buf_size,
+                    self.config.default_live_data_first,
+                )
+            })
             .write(publish)
         {
             Ok(Some(deleted)) => {
@@ -913,7 +951,7 @@ pub mod tests {
     fn read_write_storage() {
         let config = Arc::new(default_config());
 
-        let mut storage = Storage::new("hello/world", 1024);
+        let mut storage = Storage::new("hello/world", 1024, false);
         let mut publish = Publish::new(
             "hello/world",
             QoS::AtLeastOnce,
@@ -1030,7 +1068,7 @@ pub mod tests {
             .storage_handler
             .map
             .entry(Arc::new(Default::default()))
-            .or_insert(Storage::new("hello/world", 1024));
+            .or_insert(Storage::new("hello/world", 1024, false));
 
         let (stream_name, stream_config) = (
             "hello",
@@ -1088,7 +1126,7 @@ pub mod tests {
                 topic: "hello/world".to_string(),
                 ..Default::default()
             }))
-            .or_insert(Storage::new("hello/world", 1024));
+            .or_insert(Storage::new("hello/world", 1024, false));
 
         let (stream_name, stream_config) = (
             "hello",
@@ -1200,7 +1238,7 @@ pub mod tests {
                 priority: 0,
                 ..Default::default()
             }))
-            .or_insert(Storage::new("topic/default", 1024));
+            .or_insert(Storage::new("topic/default", 1024, false));
         default.write(publish("topic/default".to_string(), 0)).unwrap();
         default.write(publish("topic/default".to_string(), 2)).unwrap();
 
