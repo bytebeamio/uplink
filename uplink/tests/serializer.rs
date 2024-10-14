@@ -223,7 +223,7 @@ async fn prefer_live_data() {
     let mut config = Config::default();
     config.default_buf_size = 1024 * 1024;
     config.mqtt.max_packet_size = 1024 * 1024;
-    config.live_data_first = true;
+    config.default_live_data_first = true;
     let config = Arc::new(config);
     let (data_tx, data_rx) = bounded(0);
     let (net_tx, req_rx) = bounded(0);

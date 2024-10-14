@@ -93,6 +93,8 @@ pub struct StreamConfig {
     pub persistence: Persistence,
     #[serde(default)]
     pub priority: u8,
+    #[serde(default)]
+    pub live_data_first: bool,
 }
 
 impl Default for StreamConfig {
@@ -104,6 +106,7 @@ impl Default for StreamConfig {
             compression: Compression::Disabled,
             persistence: Persistence::default(),
             priority: 0,
+            live_data_first: false,
         }
     }
 }
@@ -537,7 +540,7 @@ pub struct Config {
     pub precondition_checks: Option<PreconditionCheckerConfig>,
     pub bus: Option<BusConfig>,
     #[serde(default)]
-    pub live_data_first: bool,
+    pub default_live_data_first: bool,
 }
 
 impl Config {

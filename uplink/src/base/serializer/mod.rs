@@ -233,7 +233,7 @@ impl StorageHandler {
             let mut storage = Storage::new(
                 &stream_config.topic,
                 stream_config.persistence.max_file_size,
-                config.live_data_first,
+                stream_config.live_data_first,
             );
             if stream_config.persistence.max_file_count > 0 {
                 let mut path = config.persistence_path.clone();
@@ -264,7 +264,7 @@ impl StorageHandler {
                 Storage::new(
                     &stream.topic,
                     self.config.default_buf_size,
-                    self.config.live_data_first,
+                    self.config.default_live_data_first,
                 )
             })
             .write(publish)

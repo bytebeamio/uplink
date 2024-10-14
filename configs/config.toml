@@ -23,7 +23,7 @@ max_stream_count = 10
 # All streams will first push the latest packet before pushing historical data in
 # FIFO order, defaults to false. This solves the problem of bad networks leading to
 # data being pushed so slow that it is practically impossible to track the device.
-live_data_first = true
+default_live_data_first = true
 
 # MQTT client configuration
 #
@@ -89,13 +89,19 @@ blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 #   used when there is a network/system failure.
 # - priority(optional, u8): Higher prioirity streams get to push their data
 #   onto the network first.
+# - live_data_first(optional, bool): All streams will first push the latest packet
+#   before pushing historical data in FIFO order, defaults to false. This solves the
+#   problem of bad networks leading to data being pushed so slow that it is practically
+#   impossible to track the device.
 #
 # In the following config for the device_shadow stream we set batch_size to 1 and mark
-# it as non-persistent. streams are internally constructed as a map of Name -> Config
+# it as non-persistent, also setting up live_data_first to enable quick delivery of stats.
+# Streams are internally constructed as a map of Name -> Config
 [streams.device_shadow]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
 flush_period = 5
 priority = 75
+live_data_first = true
 
 # Example using compression
 [streams.imu]
