@@ -498,6 +498,12 @@ pub struct DeviceConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct EventsConfig {
+    pub enabled: bool,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub console: ConsoleConfig,
@@ -541,6 +547,8 @@ pub struct Config {
     pub bus: Option<BusConfig>,
     #[serde(default)]
     pub default_live_data_first: bool,
+    #[serde(default)]
+    pub events: EventsConfig,
 }
 
 impl Config {
