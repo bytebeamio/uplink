@@ -200,17 +200,32 @@ impl Storage {
     }
 
     // Ensures all data is written into persistence, when configured.
-    pub fn flush(&mut self) -> Result<Option<u64>, storage::Error> {
+    pub fn flush(&mut self) {
         // Write live cache to disk when flushing
         if let Some(mut publish) = self.latest_data.take() {
             publish.pkid = 1;
             if let Err(e) = publish.write(self.inner.writer()) {
-                error!("Failed to fill disk buffer. Error = {e}");
-                return Ok(None);
+                error!("Failed to serialize into write buffer. Error = {e}");
             }
         }
 
-        self.inner.flush()
+        // Save contents of read buffer to disk if required
+        match self.inner.save_read_buffer() {
+            Ok(()) => trace!("Force flushed read buffer onto disk; stream = {}", self.inner.name),
+            Err(storage::Error::NoWrites) => {}
+            Err(e) => {
+                error!("Error = {e}; storage = {}", self.inner.name)
+            }
+        }
+
+        // Flush contents of write buffer to disk if required
+        match self.inner.flush() {
+            Ok(_) => trace!("Force flushed write buffer onto disk; stream = {}", self.inner.name),
+            Err(storage::Error::NoWrites) => {}
+            Err(e) => {
+                error!("Error = {e}; storage = {}", self.inner.name)
+            }
+        }
     }
 }
 
@@ -322,15 +337,8 @@ impl StorageHandler {
     // Force flushes all in-memory buffers to ensure zero packet loss during uplink restart.
     // TODO: Ensure packets in read-buffer but not on disk are not lost.
     fn flush_all(&mut self) {
-        for (stream_config, storage) in self.map.iter_mut() {
-            match storage.flush() {
-                Ok(_) => trace!("Force flushed stream = {} onto disk", stream_config.topic),
-                Err(storage::Error::NoWrites) => {}
-                Err(e) => error!(
-                    "Error when force flushing storage = {}; error = {e}",
-                    stream_config.topic
-                ),
-            }
+        for storage in self.map.values_mut() {
+            storage.flush();
         }
     }
 
