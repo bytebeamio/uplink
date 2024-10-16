@@ -128,7 +128,6 @@ impl Uplink {
             self.data_tx.clone(),
             self.stream_metrics_tx(),
             self.action_rx.clone(),
-            self.shutdown_tx.clone(),
         )
     }
 
@@ -139,7 +138,7 @@ impl Uplink {
         network_up: Arc<Mutex<bool>>,
     ) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
-        let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
+        let ctrl_data_lane = bridge.ctrl_tx();
 
         let mut mqtt = Mqtt::new(
             self.config.clone(),
@@ -227,6 +226,7 @@ impl Uplink {
             let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
             rt.block_on(async move {
+                // let mut actions_lane = Box::pin(actions_lane);
                 if let Err(e) = actions_lane.start().await {
                     error!("Actions lane stopped!! Error = {e}");
                 }
@@ -245,7 +245,6 @@ impl Uplink {
         });
 
         Ok(CtrlTx {
-            actions_lane: ctrl_actions_lane,
             data_lane: ctrl_data_lane,
             mqtt: ctrl_mqtt,
             serializer: ctrl_serializer,

@@ -1,14 +1,10 @@
-use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
+use flume::{bounded, Receiver, Sender, TrySendError};
 use log::{debug, error, info, warn};
-use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio::time::{interval};
 
-use std::collections::HashSet;
-use std::fs;
-use std::path::PathBuf;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
-
+use std::fmt::{Display, Formatter};
 use crate::base::actions::Cancellation;
 use crate::config::{ActionRoute, Config, DeviceConfig};
 use crate::{Action, ActionResponse};
@@ -16,40 +12,24 @@ use crate::{Action, ActionResponse};
 use super::streams::Streams;
 use super::{ActionBridgeShutdown, Package, StreamMetrics};
 
-const TUNSHELL_ACTION: &str = "launch_shell";
-
-#[derive(thiserror::Error, Debug)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("Receiver error {0}")]
-    Recv(#[from] RecvError),
-    #[error("Io error {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Serde error {0}")]
-    Serde(#[from] serde_json::Error),
-    #[error("Action receiver busy or down")]
-    UnresponsiveReceiver,
-    #[error("No route for action {0}")]
-    NoRoute(String),
-    #[error("Action timedout")]
-    ActionTimeout,
-    #[error("Another action is currently being processed")]
-    Busy,
-    #[error("Action Route clash: {0:?}")]
-    ActionRouteClash(String),
-    #[error("Cancellation request received for action currently not in execution!")]
-    UnexpectedCancellation,
-    #[error("Cancellation request for action in execution, but names don't match!")]
-    CorruptedCancellation,
-    #[error("Cancellation request failed as action completed execution!")]
-    FailedCancellation,
-    #[error("Action cancelled by action_id: {0}")]
-    Cancelled(String),
-    #[error("Uplink restarted before action response")]
-    Restart,
+    DuplicateActionRoutes { action_name: String },
+    InvalidActionName { action_name: String }
 }
 
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(self, f)
+    }
+}
+
+impl std::error::Error for Error {}
+
+pub const RESERVED_ACTION_NAMES: [&str; 3] = ["*", "launch_shell", "cancel_action"];
+
 pub struct ActionsBridge {
-    /// All configuration
+    /// Full configuration
     config: Arc<Config>,
     /// Tx handle to give to apps
     status_tx: Sender<ActionResponse>,
@@ -65,12 +45,6 @@ pub struct ActionsBridge {
     action_routes: HashMap<String, ActionRouter>,
     /// Action redirections
     action_redirections: HashMap<String, String>,
-    /// Current action that is being processed
-    current_action: Option<CurrentAction>,
-    parallel_actions: HashSet<String>,
-    ctrl_rx: Receiver<ActionBridgeShutdown>,
-    ctrl_tx: Sender<ActionBridgeShutdown>,
-    shutdown_handle: Sender<()>,
 }
 
 impl ActionsBridge {
@@ -79,12 +53,10 @@ impl ActionsBridge {
         device_config: Arc<DeviceConfig>,
         package_tx: Sender<Box<dyn Package>>,
         actions_rx: Receiver<Action>,
-        shutdown_handle: Sender<()>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
         let (status_tx, status_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
-        let (ctrl_tx, ctrl_rx) = bounded(1);
 
         let mut streams_config = HashMap::new();
         let mut action_status = config.action_status.clone();
@@ -105,13 +77,8 @@ impl ActionsBridge {
             config,
             actions_rx,
             streams,
-            action_routes: HashMap::with_capacity(10),
+            action_routes: HashMap::with_capacity(16),
             action_redirections,
-            current_action: None,
-            parallel_actions: HashSet::new(),
-            shutdown_handle,
-            ctrl_rx,
-            ctrl_tx,
         }
     }
 
@@ -121,8 +88,11 @@ impl ActionsBridge {
         actions_tx: Sender<Action>,
     ) -> Result<(), Error> {
         let action_router = ActionRouter { actions_tx, cancellable };
+        if RESERVED_ACTION_NAMES.iter().find(|&&n| n == name).is_some() {
+            return Err(Error::InvalidActionName { action_name: name });
+        }
         if self.action_routes.insert(name.clone(), action_router).is_some() {
-            return Err(Error::ActionRouteClash(name));
+            return Err(Error::DuplicateActionRoutes { action_name: name });
         }
 
         Ok(())
@@ -145,32 +115,26 @@ impl ActionsBridge {
         StatusTx { inner: self.status_tx.clone() }
     }
 
-    /// Handle to send action lane control messages
-    pub fn ctrl_tx(&self) -> CtrlTx {
-        CtrlTx { inner: self.ctrl_tx.clone() }
-    }
+    pub async fn start(&mut self) -> Result<(), String> {
 
-    pub async fn start(&mut self) -> Result<(), Error> {
         let mut metrics_timeout = interval(self.config.stream_metrics.timeout);
-        if let Err(e) = self.load_saved_action() {
-            error!("Couldn't load saved action: {e}");
-        }
 
         loop {
             select! {
                 action = self.actions_rx.recv_async() => {
-                    let action = action?;
+                    let action = action.map_err(|e| format!("Encountered error when receiving action from broker: {e:?}"))?;
 
-                    if action.name == "cancel_action" {
-                        self.handle_cancellation(action).await?;
-                        continue
-                    }
+                    // Reactlabs setup processes logs generated by uplink
+                    info!("Received action: {:?}", action);
+                    self.forward_action_response(
+                        ActionResponse::progress(action.action_id.as_str(), "ReceivedByUplink", 0)
+                    ).await;
 
-                    self.handle_action(action).await;
+                    self.handle_incoming_action(action).await;
                 }
 
                 response = self.status_rx.recv_async() => {
-                    let response = response?;
+                    let response = response.map_err(|e| format!("Encountered error when receiving status from a collector: {e:?}"))?;
                     self.forward_action_response(response).await;
                 }
 
@@ -189,318 +153,70 @@ impl ActionsBridge {
                     }
                 }
 
-                // Handle a shutdown signal
-                _ = self.ctrl_rx.recv_async() => {
-                    if let Err(e) = self.save_current_action() {
-                        error!("Failed to save current action: {e}");
+            }
+        }
+    }
+
+    async fn handle_incoming_action(&mut self, action: Action) {
+        Box::pin(async move {
+            if action.name == "cancel_action" {
+                match serde_json::from_str::<Cancellation>(action.payload.as_str()) {
+                    Ok(payload) => {
+                        self.try_route_action(payload.action_name.as_str(), action).await;
                     }
-
-                    // NOTE: marks parallel actions still in execution as failed
-                    // (serializer will persist on disk even if network is down)
-                    let parallel_actions: Vec<String> = self.parallel_actions.drain().collect();
-                    for action_id in parallel_actions {
-                        self.forward_action_error(&action_id, Error::Restart).await
+                    Err(_) => {
+                        log::error!("Invalid cancel action payload: {:#?}", action.payload);
+                        self.forward_action_response(
+                            ActionResponse::failure(action.action_id.as_str(), format!("Invalid cancel action payload: {:#?}", action.payload))
+                        ).await;
                     }
-
-                    // NOTE: there might be events still waiting for recv on bridge_rx
-                    self.shutdown_handle.send(()).unwrap();
-
-                    return Ok(())
                 }
+            } else {
+                self.try_route_action(action.name.as_str(), action.clone()).await;
             }
-        }
-    }
-
-    async fn handle_action(&mut self, action: Action) {
-        let action_id = action.action_id.clone();
-        // Reactlabs setup processes logs generated by uplink
-        info!("Received action: {:?}", action);
-
-        if let Some(current_action) = &self.current_action {
-            if action.name != TUNSHELL_ACTION {
-                warn!(
-                    "Another action is currently occupying uplink; action_id = {}",
-                    current_action.action.action_id
-                );
-                self.forward_action_error(&action.action_id, Error::Busy).await;
-                return;
-            }
-        }
-
-        // NOTE: Don't do any blocking operations here
-        // TODO: Remove blocking here. Audit all blocking functions here
-        let Err(error) = self.try_route_action(action.clone()) else {
-            let response = ActionResponse::progress(&action_id, "Received", 0);
-            self.streams.forward(response).await;
-            return;
-        };
-
-        // Remove action because it couldn't be routed
-        self.current_action.take();
-
-        // Ignore sending failure status to backend. This makes
-        // backend retry action.
-        //
-        // TODO: Do we need this? Shouldn't backend have an easy way to
-        // retry failed actions in bulk?
-        if self.config.ignore_actions_if_no_clients {
-            error!("No clients connected, ignoring action = {:?}", action_id);
-            return;
-        }
-
-        error!("Failed to route action to app. Error = {:?}", error);
-        self.forward_action_error(&action.action_id, error).await;
-    }
-
-    /// Forwards cancellation request to the handler if it can handle the same,
-    /// else marks the current action as cancelled and avoids further redirections
-    async fn handle_cancellation(&mut self, action: Action) -> Result<(), Error> {
-        let action_id = action.action_id.clone();
-        let Some(current_action) = self.current_action.as_ref() else {
-            self.forward_action_error(&action_id, Error::UnexpectedCancellation).await;
-            return Ok(());
-        };
-        let mut cancellation: Cancellation = serde_json::from_str(&action.payload)?;
-        if cancellation.action_id != current_action.action.action_id {
-            warn!("Unexpected cancellation: {cancellation:?}");
-            self.forward_action_error(&action_id, Error::UnexpectedCancellation).await;
-            return Ok(());
-        }
-
-        info!("Received action cancellation: {:?}", cancellation);
-        if cancellation.action_name != current_action.action.name {
-            debug!(
-                "Action was redirected: {} ~> {}",
-                cancellation.action_name, current_action.action.name
-            );
-            current_action.action.name.clone_into(&mut cancellation.action_name);
-        }
-
-        let route = self
-            .action_routes
-            .get(&cancellation.action_name)
-            .expect("Action shouldn't be in execution if it can't be routed!");
-
-        // Ensure that action redirections for the action are turned off,
-        // action will be cancelled on next attempt to redirect
-        self.current_action.as_mut().unwrap().cancelled_by = Some(action_id.clone());
-
-        if route.is_cancellable() {
-            if let Err(e) = route.try_send(action).map_err(|_| Error::UnresponsiveReceiver) {
-                self.forward_action_error(&action_id, e).await;
-                return Ok(());
-            }
-        }
-        let response = ActionResponse::progress(&action_id, "Received", 0);
-        self.streams.forward(response).await;
-
-        Ok(())
-    }
-
-    /// Save current action information in persistence
-    fn save_current_action(&mut self) -> Result<(), Error> {
-        let Some(current_action) = self.current_action.take() else { return Ok(()) };
-        let mut path = self.config.persistence_path.clone();
-        path.push("current_action");
-        info!("Storing current action in persistence; path: {}", path.display());
-        current_action.write_to_disk(path)?;
-
-        Ok(())
-    }
-
-    /// Load a saved action from persistence, performed on startup
-    fn load_saved_action(&mut self) -> Result<(), Error> {
-        let mut path = self.config.persistence_path.clone();
-        path.push("current_action");
-
-        if path.is_file() {
-            let current_action = CurrentAction::read_from_disk(path)?;
-            info!(
-                "Loading saved action from persistence; action_id: {}",
-                current_action.action.action_id
-            );
-            self.current_action = Some(current_action)
-        }
-
-        Ok(())
+        }).await;
     }
 
     /// Handle received actions
-    fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
-        let Some(route) = self.action_routes.get(&action.name) else {
-            self
-                .action_routes
-                .get("*")
-                .ok_or_else(|| Error::NoRoute(action.name.clone()))?
-                .try_send(action.clone())
-                .map_err(|_| Error::UnresponsiveReceiver)?;
-            debug!("Action routed to broker");
-
-            self.current_action = Some(CurrentAction::new(action));
-
-            return Ok(());
-        };
-
-        route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
-        // current action left unchanged in case of new tunshell action
-        if action.name == TUNSHELL_ACTION {
-            self.parallel_actions.insert(action.action_id);
-            return Ok(());
-        }
-
-        self.current_action = Some(CurrentAction::new(action));
-
-        Ok(())
-    }
-
-    async fn forward_action_response(&mut self, mut response: ActionResponse) {
-        info!("Action response = {:?}", response);
-
-        // Don't forward responses to timeout action
-        if response.action_id == "timeout" {
-            return;
-        }
-
-        // Forward all other responses
-        self.streams.forward(response.clone()).await;
-
-        // Response to parallel actions shouldn't do anything
-        if self.parallel_actions.contains(&response.action_id) {
-            if response.is_completed() || response.is_failed() {
-                self.parallel_actions.remove(&response.action_id);
-            }
-            return;
-        }
-
-        let Some(inflight_action) = &mut self.current_action else {
-            warn!("Action id({}) timed out already/not present", response.action_id);
-            return;
-        };
-
-        if !inflight_action.is_executing(&response.action_id)
-            && !inflight_action.is_cancelled_by(&response.action_id)
-        {
-            warn!(
-                "response id({}) != active action({})",
-                response.action_id, inflight_action.action.action_id
-            );
-            return;
-        }
-
-        if response.is_completed() || response.is_failed() {
-            if let Some(CurrentAction { cancelled_by: Some(cancel_action), .. }) =
-                self.current_action.take()
-            {
-                if response.is_failed() {
-                    // NOTE: action need not actually have been cancelled
-                    let response = ActionResponse::success(&cancel_action);
-                    self.streams.forward(response).await;
-                } else {
-                    // Marks the cancellation as a failure as action has reached completion without being cancelled
-                    self.forward_action_error(&cancel_action, Error::FailedCancellation).await
+    async fn try_route_action(&mut self, route_id: &str, action: Action) {
+        match self.action_routes.get(route_id) {
+            Some(route) => {
+                if let Err(e) = route.try_send(action.clone()) {
+                    log::error!("Could not forward action to collector: {e}");
+                    self.forward_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not forward action to collector: {e}"))).await;
                 }
             }
-
-            return;
-        }
-
-        // Forward actions included in the config to the appropriate forward route, when
-        // they have reached 100% progress but haven't been marked as "Completed"/"Finished".
-        if response.is_done() && self.current_action.is_some() {
-            let CurrentAction { action, .. } = self.current_action.as_mut().unwrap();
-            if let Some(a) = response.done_response.take() {
-                *action = a;
+            None => {
+                match self
+                    .action_routes
+                    .get("*") {
+                    Some(bus_route) => {
+                        if let Err(e) = bus_route.try_send(action.clone()) {
+                            log::error!("Could not forward action to collector: {e}");
+                            self.forward_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not forward action to collector: {e}"))).await;
+                        } else {
+                            debug!("Action routed to broker");
+                        }
+                    }
+                    None => {
+                        self.forward_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Uplink isn't configured to handle actions of type {route_id}"))).await;
+                    }
+                }
             }
-
-            self.redirect_current_action().await;
         }
     }
 
-    async fn redirect_current_action(&mut self) {
-        let CurrentAction { mut action, cancelled_by, .. } = self.current_action.take().unwrap();
+    async fn forward_action_response(&mut self, response: ActionResponse) {
+        info!("Action response = {:?}", response);
 
-        let Some(fwd_name) = self.action_redirections.get(&action.name) else {
-            // NOTE: send success reponse for actions that don't have redirections configured
-            warn!("Action redirection is not configured for: {:?}", action);
-            let response = ActionResponse::success(&action.action_id);
-            self.streams.forward(response).await;
+        self.streams.forward(response.clone()).await;
 
-            if let Some(cancel_action) = cancelled_by {
-                // Marks the cancellation as a failure as action has reached completion without being cancelled
-                self.forward_action_error(&cancel_action, Error::FailedCancellation).await
+        if let Some(mut redirected_action) = response.done_response {
+            if let Some(target_action) = self.action_redirections.get(redirected_action.name.as_str()) {
+                target_action.clone_into(&mut redirected_action.name);
+                self.handle_incoming_action(redirected_action).await;
             }
-            return;
-        };
-
-        // Cancelled action should not be redirected
-        if let Some(cancel_action) = cancelled_by {
-            let response = ActionResponse::success(&cancel_action);
-            self.streams.forward(response).await;
-
-            self.forward_action_error(&action.action_id, Error::Cancelled(cancel_action)).await;
-
-            return;
         }
-
-        debug!(
-            "Redirecting action: {} ~> {fwd_name}; action_id = {}",
-            action.name, action.action_id,
-        );
-
-        fwd_name.clone_into(&mut action.name);
-        if let Err(e) = self.try_route_action(action.clone()) {
-            self.forward_action_error(&action.action_id, e).await
-        }
-    }
-
-    async fn forward_action_error(&mut self, action_id: &str, error: Error) {
-        let response = ActionResponse::failure(action_id, error.to_string());
-
-        self.streams.forward(response).await;
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct SaveAction {
-    pub action: Action,
-}
-
-struct CurrentAction {
-    pub action: Action,
-    // cancel_action request
-    pub cancelled_by: Option<String>,
-}
-
-impl CurrentAction {
-    pub fn new(action: Action) -> CurrentAction {
-        CurrentAction { action, cancelled_by: None }
-    }
-
-    pub fn write_to_disk(self, path: PathBuf) -> Result<(), Error> {
-        let save_action = SaveAction { action: self.action };
-        let json = serde_json::to_string(&save_action)?;
-        fs::write(path, json)?;
-
-        Ok(())
-    }
-
-    pub fn read_from_disk(path: PathBuf) -> Result<Self, Error> {
-        let read = fs::read(&path)?;
-        let json: SaveAction = serde_json::from_slice(&read)?;
-        fs::remove_file(path)?;
-
-        Ok(CurrentAction {
-            action: json.action,
-            cancelled_by: None,
-        })
-    }
-
-    fn is_executing(&self, action_id: &str) -> bool {
-        self.action.action_id == action_id
-    }
-
-    fn is_cancelled_by(&self, action_id: &str) -> bool {
-        self.cancelled_by.as_ref().is_some_and(|id| id == action_id)
     }
 }
 
