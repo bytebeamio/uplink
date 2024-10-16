@@ -3,13 +3,13 @@ mod console;
 use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use anyhow::Error;
 use config::{Environment, File, FileFormat};
 use log::info;
 use structopt::StructOpt;
 use tokio::time::sleep;
+use tokio::select;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
 use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
@@ -343,10 +343,31 @@ fn main() -> Result<(), Error> {
         _ => None,
     };
 
+    #[cfg(feature = "bus")]
+    let bus = config.bus.as_ref().map(|cfg| {
+        let actions_rx = bridge
+            .register_action_routes([ActionRoute {
+                name: "*".to_string(),
+                cancellable: false,
+            }])
+            .unwrap();
+
+        Bus::new(cfg.clone(), bridge_tx.clone(), actions_rx)
+    });
+
+    let update_config_actions = bridge.register_action_route(ActionRoute {
+        name: "update_uplink_config".to_owned(),
+        cancellable: false,
+    })?;
+
     let downloader_disable = Arc::new(Mutex::new(false));
     let network_up = Arc::new(Mutex::new(false));
-    let ctrl_tx =
-        uplink.spawn(&device_config, bridge, downloader_disable.clone(), network_up.clone())?;
+    let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone(), network_up.clone())?;
+
+    #[cfg(feature = "bus")]
+    if let Some(bus) = bus {
+        spawn_named_thread("Bus Interface", move || bus.start())
+    };
 
     if let Some(config) = config.simulator.clone() {
         spawn_named_thread("Simulator", || {

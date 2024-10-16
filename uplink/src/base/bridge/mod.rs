@@ -84,7 +84,6 @@ impl Bridge {
         package_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
-        shutdown_handle: Sender<()>,
     ) -> Self {
         let data = DataBridge::new(
             config.clone(),
@@ -97,7 +96,6 @@ impl Bridge {
             device_config,
             package_tx,
             actions_rx,
-            shutdown_handle,
             metrics_tx,
         );
         Self { data, actions }
@@ -108,8 +106,8 @@ impl Bridge {
         BridgeTx { data_tx: self.data.data_tx(), status_tx: self.actions.status_tx() }
     }
 
-    pub(crate) fn ctrl_tx(&self) -> (actions_lane::CtrlTx, data_lane::CtrlTx) {
-        (self.actions.ctrl_tx(), self.data.ctrl_tx())
+    pub(crate) fn ctrl_tx(&self) -> data_lane::CtrlTx {
+        self.data.ctrl_tx()
     }
 
     pub fn register_action_route(&mut self, route: ActionRoute) -> Result<Receiver<Action>, Error> {
