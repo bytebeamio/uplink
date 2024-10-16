@@ -81,8 +81,8 @@ pub struct CommandLine {
     #[structopt(skip = env ! ("VERGEN_GIT_COMMIT_TIMESTAMP"))]
     pub commit_date: String,
     /// config file
-    #[structopt(short = "c", help = "Config file")]
-    pub config: Option<PathBuf>,
+    #[structopt(short = "c", help = "Config file", default_value = "uplink.config.toml")]
+    pub config: PathBuf,
     /// config file
     #[structopt(short = "a", help = "Authentication file")]
     pub auth: PathBuf,
@@ -101,14 +101,24 @@ impl CommandLine {
         let mut config =
             config::Config::builder().add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml));
 
-        if let Some(path) = &self.config {
-            let read = read_to_string(path).map_err(|e| {
+        if self.config.is_file() {
+            let read = read_to_string(&self.config).map_err(|e| {
                 Error::msg(format!(
                     "Config file couldn't be loaded from {:?}; error = {e}",
-                    path.display()
+                    self.config.display()
                 ))
             })?;
-            config = config.add_source(File::from_str(&read, FileFormat::Toml));
+            let file_format = match self.config.extension() {
+                Some(e) if e == "json" => FileFormat::Json,
+                Some(e) if e == "toml" => FileFormat::Toml,
+                _ => {
+                    return Err(Error::msg(format!(
+                        "Config file couldn't be loaded from {:?}; supported file extensions: [`.json`,`.toml`]",
+                        self.config.display(),
+                    )))
+                }
+            };
+            config = config.add_source(File::from_str(&read, file_format));
         }
 
         let mut config: Config =
@@ -366,6 +376,7 @@ fn main() -> Result<(), Error> {
             });
         }
 
+        let config_path = commandline.config.clone();
         #[cfg(unix)]
         tokio::spawn(async move {
             use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
@@ -373,11 +384,28 @@ fn main() -> Result<(), Error> {
             use tokio_stream::StreamExt;
 
             let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT]).unwrap();
-            // Handle a shutdown signal from POSIX
-            while let Some(signal) = signals.next().await {
-                match signal {
-                    SIGTERM | SIGINT | SIGQUIT => ctrl_tx.trigger_shutdown().await,
-                    s => error!("Couldn't handle signal: {s}"),
+            loop {
+                select! {
+                    Ok(action) = update_config_actions.recv_async() => {
+                        // NOTE: this will log an error until #356 isn't merged
+                        let config: Config = match serde_json::from_str(&action.payload) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                error!("unexpected config: {}; error = {e}", action.payload);
+                                continue;
+                            },
+                        };
+                        if let Err(e) = config.write_file(&config_path) {
+                            error!("couldn't write file to: {}; error = {e}", config_path.display());
+                        }
+                    }
+                    // Handle a shutdown signal from POSIX
+                    Some(signal) = signals.next() => {
+                        match signal {
+                            SIGTERM | SIGINT | SIGQUIT => ctrl_tx.trigger_shutdown().await,
+                            s => error!("Couldn't handle signal: {s}"),
+                        }
+                    }
                 }
             }
         });

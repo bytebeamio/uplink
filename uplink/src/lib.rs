@@ -42,7 +42,6 @@
 //! [`name`]: Action#structfield.name
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 
 use anyhow::Error;
 use flume::{bounded, Receiver, RecvError, Sender};
@@ -260,7 +259,6 @@ impl Uplink {
 
         let route = ActionRoute {
             name: "launch_shell".to_owned(),
-            timeout: Duration::from_secs(10),
             cancellable: false,
         };
         let actions_rx = bridge.register_action_route(route)?;
@@ -281,7 +279,6 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
-                timeout: Duration::from_secs(10),
                 cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
@@ -297,7 +294,6 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
-                timeout: Duration::from_secs(10),
                 cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;

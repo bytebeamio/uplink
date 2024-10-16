@@ -2,12 +2,12 @@ use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use tokio::select;
-use tokio::time::{self, interval, Instant, Sleep};
+use tokio::time::{interval};
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
-use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 use crate::base::actions::Cancellation;
 use crate::config::{ActionRoute, Config, DeviceConfig};
@@ -117,10 +117,10 @@ impl ActionsBridge {
 
     pub fn register_action_route(
         &mut self,
-        ActionRoute { name, timeout: duration, cancellable }: ActionRoute,
+        ActionRoute { name, cancellable }: ActionRoute,
         actions_tx: Sender<Action>,
     ) -> Result<(), Error> {
-        let action_router = ActionRouter { actions_tx, duration, cancellable };
+        let action_router = ActionRouter { actions_tx, cancellable };
         if self.action_routes.insert(name.clone(), action_router).is_some() {
             return Err(Error::ActionRouteClash(name));
         }
@@ -152,8 +152,9 @@ impl ActionsBridge {
 
     pub async fn start(&mut self) -> Result<(), Error> {
         let mut metrics_timeout = interval(self.config.stream_metrics.timeout);
-        let mut end: Pin<Box<Sleep>> = Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
-        self.load_saved_action()?;
+        if let Err(e) = self.load_saved_action() {
+            error!("Couldn't load saved action: {e}");
+        }
 
         loop {
             select! {
@@ -171,44 +172,6 @@ impl ActionsBridge {
                 response = self.status_rx.recv_async() => {
                     let response = response?;
                     self.forward_action_response(response).await;
-                }
-
-                _ = &mut self.current_action.as_mut().map(|a| &mut a.timeout).unwrap_or(&mut end) => {
-                    let curret_action = self.current_action.as_mut().unwrap();
-                    let action_id = curret_action.action.action_id.clone();
-                    let action_name = curret_action.action.name.clone();
-
-                    let route = self
-                        .action_routes
-                        .get(&action_name)
-                        .expect("Action shouldn't be in execution if it can't be routed!");
-
-                    if !route.is_cancellable() {
-                        // Directly send timeout failure response if handler doesn't allow action cancellation
-                        error!("Timeout waiting for action response. Action ID = {action_id}");
-                        self.forward_action_error(&action_id, Error::ActionTimeout).await;
-
-                        // Remove action because it timedout
-                        self.current_action.take();
-                        continue;
-                    }
-
-                    let cancellation = Cancellation { action_id,  action_name };
-                    let payload = serde_json::to_string(&cancellation)?;
-                    let cancel_action = Action {
-                        action_id: "timeout".to_owned(), // Describes cause of action cancellation. NOTE: Action handler shouldn't expect an integer.
-                        name: "cancel_action".to_owned(),
-                        payload,
-                    };
-                    if route.try_send(cancel_action).is_err() {
-                        error!("Couldn't cancel action ({}) on timeout", cancellation.action_id);
-                        // Remove action anyways
-                        self.current_action.take();
-                        continue;
-                    }
-
-                    // set timeout to end of time in wait of cancellation response
-                    curret_action.timeout =  Box::pin(time::sleep(Duration::from_secs(u64::MAX)));
                 }
 
                 // Flush streams that timeout
@@ -365,17 +328,27 @@ impl ActionsBridge {
     /// Handle received actions
     fn try_route_action(&mut self, action: Action) -> Result<(), Error> {
         let Some(route) = self.action_routes.get(&action.name) else {
-            return Err(Error::NoRoute(action.name));
+            self
+                .action_routes
+                .get("*")
+                .ok_or_else(|| Error::NoRoute(action.name.clone()))?
+                .try_send(action.clone())
+                .map_err(|_| Error::UnresponsiveReceiver)?;
+            debug!("Action routed to broker");
+
+            self.current_action = Some(CurrentAction::new(action));
+
+            return Ok(());
         };
 
-        let deadline = route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
+        route.try_send(action.clone()).map_err(|_| Error::UnresponsiveReceiver)?;
         // current action left unchanged in case of new tunshell action
         if action.name == TUNSHELL_ACTION {
             self.parallel_actions.insert(action.action_id);
             return Ok(());
         }
 
-        self.current_action = Some(CurrentAction::new(action, deadline));
+        self.current_action = Some(CurrentAction::new(action));
 
         Ok(())
     }
@@ -490,24 +463,21 @@ impl ActionsBridge {
 #[derive(Debug, Deserialize, Serialize)]
 struct SaveAction {
     pub action: Action,
-    pub timeout: Duration,
 }
 
 struct CurrentAction {
     pub action: Action,
-    pub timeout: Pin<Box<Sleep>>,
     // cancel_action request
     pub cancelled_by: Option<String>,
 }
 
 impl CurrentAction {
-    pub fn new(action: Action, deadline: Instant) -> CurrentAction {
-        CurrentAction { action, timeout: Box::pin(time::sleep_until(deadline)), cancelled_by: None }
+    pub fn new(action: Action) -> CurrentAction {
+        CurrentAction { action, cancelled_by: None }
     }
 
     pub fn write_to_disk(self, path: PathBuf) -> Result<(), Error> {
-        let timeout = self.timeout.as_ref().deadline() - Instant::now();
-        let save_action = SaveAction { action: self.action, timeout };
+        let save_action = SaveAction { action: self.action };
         let json = serde_json::to_string(&save_action)?;
         fs::write(path, json)?;
 
@@ -521,7 +491,6 @@ impl CurrentAction {
 
         Ok(CurrentAction {
             action: json.action,
-            timeout: Box::pin(time::sleep(json.timeout)),
             cancelled_by: None,
         })
     }
@@ -538,18 +507,15 @@ impl CurrentAction {
 #[derive(Debug)]
 pub struct ActionRouter {
     pub(crate) actions_tx: Sender<Action>,
-    duration: Duration,
     cancellable: bool,
 }
 
 impl ActionRouter {
     #[allow(clippy::result_large_err)]
     /// Forwards action to the appropriate application and returns the instance in time at which it should be timedout if incomplete
-    pub fn try_send(&self, action: Action) -> Result<Instant, TrySendError<Action>> {
-        let deadline = Instant::now() + self.duration;
+    pub fn try_send(&self, action: Action) -> Result<(), TrySendError<Action>> {
         self.actions_tx.try_send(action)?;
-
-        Ok(deadline)
+        Ok(())
     }
 
     pub fn is_cancellable(&self) -> bool {
@@ -566,6 +532,10 @@ pub struct StatusTx {
 impl StatusTx {
     pub async fn send_action_response(&self, response: ActionResponse) {
         self.inner.send_async(response).await.unwrap()
+    }
+
+    pub fn send_action_response_sync(&self, response: ActionResponse) {
+        self.inner.send(response).unwrap()
     }
 }
 
