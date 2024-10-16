@@ -23,7 +23,6 @@ fn test_config(temp_dir: &Path, test_name: &str) -> Config {
     config.downloader = DownloaderConfig {
         actions: vec![ActionRoute {
             name: "firmware_update".to_owned(),
-            timeout: Duration::from_secs(10),
             cancellable: true,
         }],
         path,

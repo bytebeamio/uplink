@@ -22,7 +22,7 @@ pub type ReloadHandle =
 #[cfg(feature = "bus")]
 use uplink::collector::bus::Bus;
 #[cfg(feature = "bus")]
-use uplink::config::{ActionRoute, DEFAULT_TIMEOUT};
+use uplink::config::ActionRoute;
 use uplink::config::{AppConfig, Config, DeviceConfig, StreamConfig, MAX_BATCH_SIZE};
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
@@ -353,7 +353,6 @@ fn main() -> Result<(), Error> {
         let actions_rx = bridge
             .register_action_routes([ActionRoute {
                 name: "*".to_string(),
-                timeout: DEFAULT_TIMEOUT,
                 cancellable: false,
             }])
             .unwrap();
@@ -363,7 +362,6 @@ fn main() -> Result<(), Error> {
 
     let update_config_actions = bridge.register_action_route(ActionRoute {
         name: "update_uplink_config".to_owned(),
-        timeout: DEFAULT_TIMEOUT,
         cancellable: false,
     })?;
 

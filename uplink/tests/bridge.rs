@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use flume::{bounded, Receiver, Sender};
-use tokio::{runtime::Runtime, select};
+use tokio::{runtime::Runtime};
 
 use uplink::{
     base::bridge::{ActionsBridge, Package},
@@ -56,96 +56,6 @@ impl Responses {
 }
 
 #[tokio::test]
-async fn timeout_on_diff_routes() {
-    let tmpdir = tempdir::TempDir::new("bridge").unwrap();
-    std::env::set_current_dir(&tmpdir).unwrap();
-    let (config, device_config) = default_configs();
-    let (mut bridge, actions_tx, data_rx) =
-        create_bridge(Arc::new(config), Arc::new(device_config));
-    let route_1 = ActionRoute {
-        name: "route_1".to_string(),
-        timeout: Duration::from_secs(10),
-        cancellable: false,
-    };
-
-    let (route_tx, route_1_rx) = bounded(1);
-    bridge.register_action_route(route_1, route_tx).unwrap();
-
-    let (route_tx, route_2_rx) = bounded(1);
-    let route_2 = ActionRoute {
-        name: "route_2".to_string(),
-        timeout: Duration::from_secs(30),
-        cancellable: false,
-    };
-    bridge.register_action_route(route_2, route_tx).unwrap();
-
-    spawn_bridge(bridge);
-
-    std::thread::spawn(move || {
-        let rt = Runtime::new().unwrap();
-        rt.block_on(async {
-            loop {
-                select! {
-                    action = route_1_rx.recv_async() => {
-                        let action = action.unwrap();
-                        assert_eq!(action.action_id, "1".to_owned());
-                    }
-
-                    action = route_2_rx.recv_async() => {
-                        let action = action.unwrap();
-                        assert_eq!(action.action_id, "2".to_owned());
-                    }
-                }
-            }
-        });
-    });
-
-    std::thread::sleep(Duration::from_secs(1));
-
-    let action_1 = Action {
-        action_id: "1".to_string(),
-        name: "route_1".to_string(),
-        payload: "test".to_string(),
-    };
-    actions_tx.send(action_1).unwrap();
-
-    let mut responses = Responses { rx: data_rx, responses: vec![] };
-
-    let status = responses.next();
-    assert_eq!(status.state, "Received".to_owned());
-    let start = status.timestamp;
-
-    let status = responses.next();
-    // verify response is timeout failure
-    assert!(status.is_failed());
-    assert_eq!(status.action_id, "1".to_owned());
-    assert_eq!(status.errors, ["Action timedout"]);
-    let elapsed = status.timestamp - start;
-    // verify timeout in 10s
-    assert_eq!(elapsed / 1000, 10);
-
-    let action_2 = Action {
-        action_id: "2".to_string(),
-        name: "route_2".to_string(),
-        payload: "test".to_string(),
-    };
-    actions_tx.send(action_2).unwrap();
-
-    let status = responses.next();
-    assert_eq!(status.state, "Received".to_owned());
-    let start = status.timestamp;
-
-    let status = responses.next();
-    // verify response is timeout failure
-    assert!(status.is_failed());
-    assert_eq!(status.action_id, "2".to_owned());
-    assert_eq!(status.errors, ["Action timedout"]);
-    let elapsed = status.timestamp - start;
-    // verify timeout in 30s
-    assert_eq!(elapsed / 1000, 30);
-}
-
-#[tokio::test]
 async fn recv_action_while_current_action_exists() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
@@ -155,7 +65,6 @@ async fn recv_action_while_current_action_exists() {
 
     let test_route = ActionRoute {
         name: "test".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: false,
     };
 
@@ -208,7 +117,6 @@ async fn complete_response_on_no_redirection() {
 
     let test_route = ActionRoute {
         name: "test".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: false,
     };
 
@@ -262,7 +170,6 @@ async fn no_complete_response_between_redirection() {
     let (route_tx, action_rx_1) = bounded(1);
     let test_route = ActionRoute {
         name: "test".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: false,
     };
     bridge.register_action_route(test_route, route_tx).unwrap();
@@ -270,7 +177,6 @@ async fn no_complete_response_between_redirection() {
     let (route_tx, action_rx_2) = bounded(1);
     let redirect_route = ActionRoute {
         name: "redirect".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: false,
     };
     bridge.register_action_route(redirect_route, route_tx).unwrap();
@@ -336,7 +242,6 @@ async fn accept_regular_actions_during_tunshell() {
     let (route_tx, action_rx_1) = bounded(1);
     let tunshell_route = ActionRoute {
         name: "launch_shell".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: false,
     };
     bridge.register_action_route(tunshell_route, route_tx).unwrap();
@@ -344,7 +249,6 @@ async fn accept_regular_actions_during_tunshell() {
     let (route_tx, action_rx_2) = bounded(1);
     let test_route = ActionRoute {
         name: "test".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: false,
     };
     bridge.register_action_route(test_route, route_tx).unwrap();
@@ -431,7 +335,6 @@ async fn accept_tunshell_during_regular_action() {
     let (route_tx, action_rx_1) = bounded(1);
     let test_route = ActionRoute {
         name: "test".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: false,
     };
     bridge.register_action_route(test_route, route_tx).unwrap();
@@ -439,7 +342,6 @@ async fn accept_tunshell_during_regular_action() {
     let (route_tx, action_rx_2) = bounded(1);
     let tunshell_route = ActionRoute {
         name: "launch_shell".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: false,
     };
     bridge.register_action_route(tunshell_route, route_tx).unwrap();
@@ -525,7 +427,6 @@ async fn cancel_action() {
     let (route_tx, action_rx_1) = bounded(1);
     let test_route = ActionRoute {
         name: "test".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: true,
     };
     bridge.register_action_route(test_route, route_tx).unwrap();
@@ -626,7 +527,6 @@ async fn cancel_action_failure_on_completion() {
     let (route_tx, action_rx_1) = bounded(1);
     let test_route = ActionRoute {
         name: "test".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: false,
     };
     bridge.register_action_route(test_route, route_tx).unwrap();
@@ -700,7 +600,6 @@ async fn cancel_action_between_redirect() {
     let (route_tx, action_rx_1) = bounded(1);
     let test_route = ActionRoute {
         name: "test".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: false,
     };
     bridge.register_action_route(test_route, route_tx).unwrap();
@@ -709,7 +608,6 @@ async fn cancel_action_between_redirect() {
     let (route_tx, action_rx_2) = bounded(1);
     let test_route = ActionRoute {
         name: "redirect".to_string(),
-        timeout: Duration::from_secs(30),
         cancellable: false,
     };
     bridge.register_action_route(test_route, route_tx).unwrap();
