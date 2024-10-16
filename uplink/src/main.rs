@@ -3,13 +3,14 @@ mod console;
 use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-
+use std::time::Duration;
 use anyhow::Error;
 use config::{Environment, File, FileFormat};
 use log::info;
 use structopt::StructOpt;
 use tokio::time::sleep;
 use tokio::select;
+use tokio::time::sleep;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
 use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
@@ -431,7 +432,6 @@ fn main() -> Result<(), Error> {
             }
         });
 
-        uplink.resolve_on_shutdown().await.unwrap();
         info!("Uplink shutting down...");
         // NOTE: wait 5s to allow serializer to write to network/disk
         sleep(Duration::from_secs(10)).await;

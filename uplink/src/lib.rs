@@ -44,7 +44,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use anyhow::Error;
-use flume::{bounded, Receiver, RecvError, Sender};
+use flume::{bounded, Receiver, Sender};
 use log::error;
 
 pub mod base;
@@ -93,8 +93,6 @@ pub struct Uplink {
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
     serializer_metrics_rx: Receiver<SerializerMetrics>,
-    shutdown_tx: Sender<()>,
-    shutdown_rx: Receiver<()>,
 }
 
 impl Uplink {
@@ -103,7 +101,6 @@ impl Uplink {
         let (data_tx, data_rx) = bounded(10);
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
-        let (shutdown_tx, shutdown_rx) = bounded(1);
 
         Ok(Uplink {
             config,
@@ -116,8 +113,6 @@ impl Uplink {
             stream_metrics_rx,
             serializer_metrics_tx,
             serializer_metrics_rx,
-            shutdown_tx,
-            shutdown_rx,
         })
     }
 
@@ -227,7 +222,6 @@ impl Uplink {
             let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
             rt.block_on(async move {
-                // let mut actions_lane = Box::pin(actions_lane);
                 if let Err(e) = actions_lane.start().await {
                     error!("Actions lane stopped!! Error = {e}");
                 }
@@ -352,9 +346,5 @@ impl Uplink {
 
     pub fn serializer_metrics_tx(&self) -> Sender<SerializerMetrics> {
         self.serializer_metrics_tx.clone()
-    }
-
-    pub async fn resolve_on_shutdown(&self) -> Result<(), RecvError> {
-        self.shutdown_rx.recv_async().await
     }
 }
