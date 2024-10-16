@@ -26,8 +26,6 @@ impl Display for Error {
 
 impl std::error::Error for Error {}
 
-pub const RESERVED_ACTION_NAMES: [&str; 3] = ["*", "launch_shell", "cancel_action"];
-
 pub struct ActionsBridge {
     /// Full configuration
     config: Arc<Config>,
@@ -88,9 +86,6 @@ impl ActionsBridge {
         actions_tx: Sender<Action>,
     ) -> Result<(), Error> {
         let action_router = ActionRouter { actions_tx, cancellable };
-        if RESERVED_ACTION_NAMES.iter().find(|&&n| n == name).is_some() {
-            return Err(Error::InvalidActionName { action_name: name });
-        }
         if self.action_routes.insert(name.clone(), action_router).is_some() {
             return Err(Error::DuplicateActionRoutes { action_name: name });
         }

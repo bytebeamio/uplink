@@ -112,6 +112,6 @@ pub struct CtrlTx {
 impl CtrlTx {
     /// Triggers shutdown of `bridge::data_lane`
     pub async fn trigger_shutdown(&self) {
-        self.inner.send_async(DataBridgeShutdown).await.unwrap()
+        let _ = self.inner.send_async(DataBridgeShutdown).await;
     }
 }

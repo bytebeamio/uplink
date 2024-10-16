@@ -9,7 +9,6 @@ use config::{Environment, File, FileFormat};
 use log::info;
 use structopt::StructOpt;
 use tokio::select;
-use tokio::time::sleep;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
 use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
@@ -403,7 +402,7 @@ fn main() -> Result<(), Error> {
 
         let config_path = commandline.config.clone();
         #[cfg(unix)]
-        tokio::spawn(async move {
+        {
             use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
             use signal_hook_tokio::Signals;
             use tokio_stream::StreamExt;
@@ -427,18 +426,21 @@ fn main() -> Result<(), Error> {
                     // Handle a shutdown signal from POSIX
                     Some(signal) = signals.next() => {
                         match signal {
-                            SIGTERM | SIGINT | SIGQUIT => ctrl_tx.trigger_shutdown().await,
+                            SIGTERM | SIGINT | SIGQUIT => {
+                                ctrl_tx.trigger_shutdown().await;
+                                break;
+                            },
                             s => error!("Couldn't handle signal: {s}"),
                         }
                     }
                 }
             }
-        });
-
-        info!("Uplink shutting down...");
-        // NOTE: wait 5s to allow serializer to write to network/disk
-        sleep(Duration::from_secs(10)).await;
+        };
     });
+
+    info!("Uplink shutting down...");
+    // NOTE: wait 5s to allow serializer to write to network/disk
+    std::thread::sleep(Duration::from_secs(3));
 
     Ok(())
 }
