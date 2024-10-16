@@ -855,7 +855,7 @@ pub struct CtrlTx {
 impl CtrlTx {
     /// Triggers shutdown of `Serializer`
     pub async fn trigger_shutdown(&self) {
-        self.inner.send_async(SerializerShutdown).await.unwrap()
+        let _ = self.inner.send_async(SerializerShutdown).await;
     }
 }
 
