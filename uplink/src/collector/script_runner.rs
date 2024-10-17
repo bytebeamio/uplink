@@ -13,6 +13,7 @@ use crate::{Action, ActionResponse, Package};
 use std::io;
 use std::path::PathBuf;
 use std::process::Stdio;
+use anyhow::Context;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -84,17 +85,31 @@ impl ScriptRunner {
                 }
                 // Send a success status at the end of execution
                 status = child.wait() => {
-                    info!("Action done!! Status = {:?}", status);
+                    info!("Script finished!! Status = {:?}", status);
                     self.forward_status(ActionResponse::success(id)).await;
                     break;
                 },
                 // Cancel script run on receiving cancel action, e.g. on action timeout
                 Ok(action) = self.actions_rx.recv_async() => {
-                    let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
-
-                    trace!("Cancelling script: '{}'", cancellation.action_id);
-                    let status = ActionResponse::failure(id, Error::Cancelled(action.action_id).to_string());
-                    self.bridge_tx.send_action_response(status).await;
+                    match serde_json::from_str::<Cancellation>(&action.payload)
+                        .context("Invalid cancel action payload")
+                        .and_then(|cancellation| {
+                            if cancellation.action_id == id {
+                                Ok(())
+                            } else {
+                                Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active script action id ({})", cancellation.action_id, id)))
+                            }
+                        }) {
+                        Ok(_) => {
+                            // TODO: send stop signal, wait for a few seconds, then send kill signal, updating cancel action status at each step
+                            let _ = child.kill().await;
+                            self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
+                            self.bridge_tx.send_action_response(ActionResponse::failure(id, "Action cancelled")).await;
+                        },
+                        Err(e) => {
+                            self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop script: {e:?}"))).await;
+                        },
+                    }
                 },
             }
         }
