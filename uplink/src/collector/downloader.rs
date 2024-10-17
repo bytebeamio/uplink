@@ -68,7 +68,7 @@ use std::{
     path::Path,
 };
 use std::{io::Write, path::PathBuf};
-
+use anyhow::Context;
 use crate::base::actions::Cancellation;
 use crate::config::{Authentication, Config, DownloaderConfig};
 use crate::{base::bridge::BridgeTx, Action, ActionResponse};
@@ -213,14 +213,28 @@ impl FileDownloader {
         select! {
             // Wait till download completes
             o = self.continuous_retry(state) => o?,
-            // Cancel download on receiving cancel action, e.g. on action timeout
             Ok(action) = self.actions_rx.recv_async() => {
-                let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
-
-                trace!("Deleting partially downloaded file: {cancellation:?}");
-                state.clean()?;
-
-                return Err(Error::Cancelled(action.action_id));
+                match serde_json::from_str::<Cancellation>(&action.payload)
+                    .context("Invalid cancel action payload")
+                    .and_then(|cancellation| {
+                        if cancellation.action_id == self.action_id {
+                            Ok(())
+                        } else {
+                            Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, self.action_id)))
+                        }
+                    })
+                    .and_then(|_| {
+                        state.clean()
+                            .context("Couldn't couldn't perform cleanup")
+                    }) {
+                    Ok(_) => {
+                        self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
+                        return Err(Error::Cancelled(action.action_id));
+                    },
+                    Err(e) => {
+                        self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
+                    },
+                }
             },
 
             Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {

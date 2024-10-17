@@ -1,16 +1,16 @@
 use flume::{bounded, Receiver, Sender, TrySendError};
 use log::{debug, error, info, warn};
 use tokio::select;
-use tokio::time::{interval};
-
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
-use std::fmt::{Display, Formatter};
-use crate::base::actions::Cancellation;
-use crate::config::{ActionRoute, Config, DeviceConfig};
-use crate::{Action, ActionResponse};
+use tokio::time::interval;
 
 use super::streams::Streams;
 use super::{ActionBridgeShutdown, Package, StreamMetrics};
+use crate::base::actions::Cancellation;
+use crate::config::{ActionRoute, Config, DeviceConfig};
+use crate::utils::LimitedArrayMap;
+use crate::{Action, ActionResponse};
+use std::fmt::{Display, Formatter};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 #[derive(Debug)]
 pub enum Error {
@@ -43,6 +43,19 @@ pub struct ActionsBridge {
     action_routes: HashMap<String, ActionRouter>,
     /// Action redirections
     action_redirections: HashMap<String, String>,
+    /// A mapping from action ids to their routes
+    /// Ideally we shouldn't have to maintain this state but fixing this would require
+    /// changing the uplink config format by removing the redirection clause
+    /// We only ever redirect from downloader to other apps
+    /// There is no point in forcing users to configure this behavior
+    /// Downloading can be an inner feature of tcpapps, installer, and script runner
+    ///
+    /// Right now this will malfunction if:
+    /// * An action is triggered
+    /// * Device receives 64 actions after it
+    /// * The user tries cancelling the first action
+    /// * The cancel action will fail
+    actions_routing_cache: LimitedArrayMap<String, String>,
 }
 
 impl ActionsBridge {
@@ -77,6 +90,7 @@ impl ActionsBridge {
             streams,
             action_routes: HashMap::with_capacity(16),
             action_redirections,
+            actions_routing_cache: LimitedArrayMap::new(64),
         }
     }
 
@@ -157,7 +171,13 @@ impl ActionsBridge {
             if action.name == "cancel_action" {
                 match serde_json::from_str::<Cancellation>(action.payload.as_str()) {
                     Ok(payload) => {
-                        self.try_route_action(payload.action_name.as_str(), action).await;
+                        if let Some(route_id) = self.actions_routing_cache.get(&payload.action_id).map(|e| e.clone()) {
+                            self.try_route_action(route_id.as_str(), action).await;
+                        } else {
+                            self.forward_action_response(
+                                ActionResponse::failure(action.action_id.as_str(), format!("Action {} is not executing on device", payload.action_id))
+                            ).await;
+                        }
                     }
                     Err(_) => {
                         log::error!("Invalid cancel action payload: {:#?}", action.payload);
@@ -179,6 +199,10 @@ impl ActionsBridge {
                 if let Err(e) = route.try_send(action.clone()) {
                     log::error!("Could not forward action to collector: {e}");
                     self.forward_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not forward action to collector: {e}"))).await;
+                } else {
+                    if let Some((action_id, app_name)) = self.actions_routing_cache.set(action.action_id.to_owned(), route_id.to_owned()) {
+                        log::warn!("Dropping routing info about action_id: {action_id} executed on app: {app_name}");
+                    }
                 }
             }
             None => {

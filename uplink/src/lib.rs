@@ -51,6 +51,7 @@ pub mod base;
 pub mod collector;
 pub mod config;
 pub mod mock;
+pub mod utils;
 
 use self::config::{ActionRoute, Config, DeviceConfig};
 pub use base::actions::{Action, ActionResponse};

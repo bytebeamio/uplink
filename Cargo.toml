@@ -22,9 +22,9 @@ tokio-stream = "0.1.15"
 tokio-util = { version = "0.7", features = ["codec", "time"] }
 
 [profile.dev]
-opt-level = 1
+opt-level = 0
 debug = true
-strip = true
+strip = false
 panic = "unwind"
 
 [profile.release]
