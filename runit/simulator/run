@@ -2,6 +2,11 @@
 
 cd /usr/share/bytebeam/uplink
 
+NODE_ID=$(echo -n $HOSTNAME | tail -c 1)
+ORIGIN=$((NODE_ID * COUNT))
+START_ID=$((ORIGIN + 1))
+END_ID=$((ORIGIN + COUNT))
+
 exec ./simulator.sh start_devices $START_ID $END_ID
 echo "Check devices directory for uplink and simulator logs"
 echo "Run ./simulator.sh kill_devices to stop simulator"
