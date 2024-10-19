@@ -211,29 +211,41 @@ impl FileDownloader {
     async fn download(&mut self, state: &mut DownloadState) -> Result<(), Error> {
         let shutdown_rx = self.shutdown_rx.clone();
         select! {
-            // Wait till download completes
             o = self.continuous_retry(state) => o?,
             Ok(action) = self.actions_rx.recv_async() => {
-                match serde_json::from_str::<Cancellation>(&action.payload)
-                    .context("Invalid cancel action payload")
-                    .and_then(|cancellation| {
-                        if cancellation.action_id == self.action_id {
-                            Ok(())
-                        } else {
-                            Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, self.action_id)))
-                        }
-                    })
-                    .and_then(|_| {
-                        state.clean()
-                            .context("Couldn't couldn't perform cleanup")
-                    }) {
-                    Ok(_) => {
-                        self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
-                        return Err(Error::Cancelled(action.action_id));
-                    },
-                    Err(e) => {
-                        self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
-                    },
+                if action.action_id == self.action_id {
+                    // This handles the edge case when the device is able to receive actions
+                    // from the broker but for something goes wrong when pushing action statuses back to the backend
+                    // In this case the backend will try sending the same action again
+                    //
+                    // TODO: Right now we use the action status pushed by device as confirmation that it
+                    // has received the action. It is not very reliable because as of now the action status pipeline can drop messages.
+                    // Would it be better if the backend used MQTT Ack of the action message instead?
+                    log::error!("Backend tried sending the same action again!");
+                } else if action.name != "cancel_action" {
+                    self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), "Downloader is already occupied")).await;
+                } else {
+                    match serde_json::from_str::<Cancellation>(&action.payload)
+                        .context("Invalid cancel action payload")
+                        .and_then(|cancellation| {
+                            if cancellation.action_id == self.action_id {
+                                Ok(())
+                            } else {
+                                Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, self.action_id)))
+                            }
+                        })
+                        .and_then(|_| {
+                            state.clean()
+                                .context("Couldn't couldn't perform cleanup")
+                        }) {
+                        Ok(_) => {
+                            self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
+                            return Err(Error::Cancelled(action.action_id));
+                        },
+                        Err(e) => {
+                            self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
+                        },
+                    }
                 }
             },
 

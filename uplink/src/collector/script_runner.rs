@@ -91,24 +91,30 @@ impl ScriptRunner {
                 },
                 // Cancel script run on receiving cancel action, e.g. on action timeout
                 Ok(action) = self.actions_rx.recv_async() => {
-                    match serde_json::from_str::<Cancellation>(&action.payload)
-                        .context("Invalid cancel action payload")
-                        .and_then(|cancellation| {
-                            if cancellation.action_id == id {
-                                Ok(())
-                            } else {
-                                Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active script action id ({})", cancellation.action_id, id)))
-                            }
-                        }) {
-                        Ok(_) => {
-                            // TODO: send stop signal, wait for a few seconds, then send kill signal, updating cancel action status at each step
-                            let _ = child.kill().await;
-                            self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
-                            self.bridge_tx.send_action_response(ActionResponse::failure(id, "Action cancelled")).await;
-                        },
-                        Err(e) => {
-                            self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop script: {e:?}"))).await;
-                        },
+                    if action.action_id == id {
+                        log::error!("Backend tried sending the same action again!");
+                    } else if action.name != "cancel_action" {
+                        self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), "Script runner is already occupied")).await;
+                    } else {
+                        match serde_json::from_str::<Cancellation>(&action.payload)
+                            .context("Invalid cancel action payload")
+                            .and_then(|cancellation| {
+                                if cancellation.action_id == id {
+                                    Ok(())
+                                } else {
+                                    Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active script action id ({})", cancellation.action_id, id)))
+                                }
+                            }) {
+                            Ok(_) => {
+                                // TODO: send stop signal, wait for a few seconds, then send kill signal, updating cancel action status at each step
+                                let _ = child.kill().await;
+                                self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
+                                self.bridge_tx.send_action_response(ActionResponse::failure(id, "Script killed")).await;
+                            },
+                            Err(e) => {
+                                self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop script: {e:?}"))).await;
+                            },
+                        }
                     }
                 },
             }
