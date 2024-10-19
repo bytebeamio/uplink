@@ -44,6 +44,16 @@ impl<K: Eq + Clone + Debug, V> LimitedArrayMap<K, V> {
     }
 }
 
+pub fn lerp<T: Ord>(mn: T, val: T, mx: T) -> T {
+    if val < mn {
+        mn
+    } else if val > mx {
+        mx
+    } else {
+        val
+    }
+}
+
 #[test]
 fn t1() {
     let mut m = LimitedArrayMap::new(64);
