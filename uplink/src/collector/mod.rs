@@ -14,3 +14,4 @@ pub mod simulator;
 pub mod systemstats;
 pub mod tcpjson;
 pub mod tunshell;
+mod new_downloader;
