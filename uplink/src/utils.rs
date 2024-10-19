@@ -29,9 +29,7 @@ impl<K: Eq + Clone + Debug, V> LimitedArrayMap<K, V> {
                         result = Some(oldest_entry);
                     }
                 }
-                dbg!(self.map.len());
                 self.map.push_back((key, value));
-                dbg!(self.map.len());
             }
         }
         result

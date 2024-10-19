@@ -99,6 +99,12 @@ pub enum Error {
     Cancelled(String),
 }
 
+enum DownloadResult {
+    Ok,
+    Err(String),
+    Suspended,
+}
+
 /// This struct contains the necessary components to download and store file as notified by a download file
 /// [`Action`], while also sending periodic [`ActionResponse`]s to update progress and finally forwarding
 /// the download [`Action`], updated with information regarding where the file is stored in the file-system
@@ -170,15 +176,20 @@ impl FileDownloader {
             let status = ActionResponse::progress(&self.action_id, "Downloading", 0);
             self.bridge_tx.send_action_response(status).await;
 
-            if let Err(e) = self.download(&mut state).await {
-                self.forward_error(e).await;
-                continue;
+            match self.download(&mut state).await {
+                DownloadResult::Ok => {
+                    // Forward updated action as part of response
+                    let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
+                    let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
+                    self.bridge_tx.send_action_response(status).await;
+                }
+                DownloadResult::Err(e) => {
+                    self.bridge_tx.send_action_response(ActionResponse::failure(&self.action_id, e)).await;
+                }
+                DownloadResult::Suspended => {
+                    break
+                }
             }
-
-            // Forward updated action as part of response
-            let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
-            let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
-            self.bridge_tx.send_action_response(status).await;
         }
 
         error!("Downloader thread stopped");
@@ -196,44 +207,61 @@ impl FileDownloader {
         };
         state.current.action.action_id.clone_into(&mut self.action_id);
 
-        if let Err(e) = self.download(&mut state).await {
-            self.forward_error(e).await;
-            return;
+        match self.download(&mut state).await {
+            DownloadResult::Ok => {
+                // Forward updated action as part of response
+                let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
+                let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
+                self.bridge_tx.send_action_response(status).await;
+            }
+            DownloadResult::Err(e) => {
+                self.bridge_tx.send_action_response(ActionResponse::failure(&self.action_id, e)).await;
+            }
+            DownloadResult::Suspended => {}
         }
-
-        // Forward updated action as part of response
-        let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
-        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
-        self.bridge_tx.send_action_response(status).await;
     }
 
     // Accepts `DownloadState`, sets a timeout for the action
-    async fn download(&mut self, state: &mut DownloadState) -> Result<(), Error> {
+    async fn download(&mut self, state: &mut DownloadState) -> DownloadResult {
         let shutdown_rx = self.shutdown_rx.clone();
         select! {
-            // Wait till download completes
-            o = self.continuous_retry(state) => o?,
+            o = self.continuous_retry(state) => if let Err(e) = o {
+                return DownloadResult::Err(e.to_string());
+            },
             Ok(action) = self.actions_rx.recv_async() => {
-                match serde_json::from_str::<Cancellation>(&action.payload)
-                    .context("Invalid cancel action payload")
-                    .and_then(|cancellation| {
-                        if cancellation.action_id == self.action_id {
-                            Ok(())
-                        } else {
-                            Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, self.action_id)))
-                        }
-                    })
-                    .and_then(|_| {
-                        state.clean()
-                            .context("Couldn't couldn't perform cleanup")
-                    }) {
-                    Ok(_) => {
-                        self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
-                        return Err(Error::Cancelled(action.action_id));
-                    },
-                    Err(e) => {
-                        self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
-                    },
+                if action.action_id == self.action_id {
+                    // This handles the edge case when the device is able to receive actions
+                    // from the broker but for something goes wrong when pushing action statuses back to the backend
+                    // In this case the backend will try sending the same action again
+                    //
+                    // TODO: Right now we use the action status pushed by device as confirmation that it
+                    // has received the action. It is not very reliable because as of now the action status pipeline can drop messages.
+                    // Would it be better if the backend used MQTT Ack of the action message instead?
+                    log::error!("Backend tried sending the same action again!");
+                } else if action.name != "cancel_action" {
+                    self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), "Downloader is already occupied")).await;
+                } else {
+                    match serde_json::from_str::<Cancellation>(&action.payload)
+                        .context("Invalid cancel action payload")
+                        .and_then(|cancellation| {
+                            if cancellation.action_id == self.action_id {
+                                Ok(())
+                            } else {
+                                Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, self.action_id)))
+                            }
+                        })
+                        .and_then(|_| {
+                            state.clean()
+                                .context("Couldn't couldn't perform cleanup")
+                        }) {
+                        Ok(_) => {
+                            self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
+                            return DownloadResult::Err(format!("action has been cancelled!"));
+                        },
+                        Err(e) => {
+                            self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
+                        },
+                    }
                 }
             },
 
@@ -242,15 +270,22 @@ impl FileDownloader {
                     error!("Error saving current_download: {e}");
                 }
 
-                return Ok(());
+                return DownloadResult::Suspended;
             },
         }
 
-        state.current.meta.verify_checksum()?;
+        if let Err(e) = state.current.meta.verify_checksum() {
+            return DownloadResult::Err(e.to_string());
+        }
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
-        state.current.action.payload = serde_json::to_string(&state.current.meta)?;
+        state.current.action.payload = match serde_json::to_string(&state.current.meta) {
+            Ok(p) => p,
+            Err(e) => {
+                return DownloadResult::Err(e.to_string());
+            }
+        };
 
-        Ok(())
+        DownloadResult::Ok
     }
 
     // A download must be retried with Range header when HTTP/reqwest errors are faced

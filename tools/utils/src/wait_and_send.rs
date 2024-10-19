@@ -53,11 +53,11 @@ async fn main() {
         let action_s = framed.next().await.unwrap().unwrap();
         println!("Received: {action_s}");
         let action = serde_json::from_str::<Action>(action_s.as_str()).unwrap();
-        sleep(Duration::from_secs(3));
+        sleep(Duration::from_secs(30));
         respond(&mut framed, &mut idx, action.action_id.as_str(), "Working", 33).await;
-        sleep(Duration::from_secs(3));
+        sleep(Duration::from_secs(30));
         respond(&mut framed, &mut idx, action.action_id.as_str(), "Working", 66).await;
-        sleep(Duration::from_secs(3));
+        sleep(Duration::from_secs(30));
         respond(&mut framed, &mut idx, action.action_id.as_str(), final_state.as_str(), 100).await;
     }
 }

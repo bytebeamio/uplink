@@ -13,7 +13,7 @@ pub mod stream;
 mod streams;
 
 pub use actions_lane::{ActionsBridge, Error};
-pub use actions_lane::{CtrlTx as ActionsLaneCtrlTx, StatusTx};
+pub use actions_lane::StatusTx;
 use data_lane::DataBridge;
 pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 

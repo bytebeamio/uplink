@@ -15,7 +15,6 @@ use std::{collections::HashMap, fmt::Debug, sync::Arc};
 #[derive(Debug)]
 pub enum Error {
     DuplicateActionRoutes { action_name: String },
-    InvalidActionName { action_name: String }
 }
 
 impl Display for Error {
@@ -271,18 +270,5 @@ impl StatusTx {
 
     pub fn send_action_response_sync(&self, response: ActionResponse) {
         self.inner.send(response).unwrap()
-    }
-}
-
-/// Handle to send control messages to action lane
-#[derive(Debug, Clone)]
-pub struct CtrlTx {
-    pub(crate) inner: Sender<ActionBridgeShutdown>,
-}
-
-impl CtrlTx {
-    /// Triggers shutdown of `bridge::actions_lane`
-    pub async fn trigger_shutdown(&self) {
-        self.inner.send_async(ActionBridgeShutdown).await.unwrap()
     }
 }
