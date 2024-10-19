@@ -67,7 +67,6 @@ impl ScriptRunner {
     ) -> Result<(), Error> {
         let stdout = child.stdout.take().ok_or(Error::NoStdout)?;
         let mut stdout = BufReader::new(stdout).lines();
-
         loop {
             select! {
                 Ok(Some(line)) = stdout.next_line() => {
@@ -86,7 +85,18 @@ impl ScriptRunner {
                 // Send a success status at the end of execution
                 status = child.wait() => {
                     info!("Script finished!! Status = {:?}", status);
-                    self.forward_status(ActionResponse::success(id)).await;
+                    match status {
+                        Ok(status) => {
+                            if status.success() {
+                                self.forward_status(ActionResponse::success(id)).await;
+                            } else {
+                                self.forward_status(ActionResponse::failure(id, format!("Script failed with status: {status}"))).await;
+                            }
+                        }
+                        Err(e) => {
+                            self.forward_status(ActionResponse::failure(id, format!("Error: {e}"))).await;
+                        }
+                    }
                     break;
                 },
                 // Cancel script run on receiving cancel action, e.g. on action timeout
@@ -119,6 +129,7 @@ impl ScriptRunner {
                 },
             }
         }
+
 
         Ok(())
     }
