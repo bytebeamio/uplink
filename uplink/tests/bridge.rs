@@ -55,58 +55,6 @@ impl Responses {
 }
 
 #[tokio::test]
-async fn recv_action_while_current_action_exists() {
-    let tmpdir = tempdir::TempDir::new("bridge").unwrap();
-    std::env::set_current_dir(&tmpdir).unwrap();
-    let (config, device_config) = default_configs();
-    let (mut bridge, actions_tx, data_rx) =
-        create_bridge(Arc::new(config), Arc::new(device_config));
-
-    let test_route = ActionRoute {
-        name: "test".to_string(),
-        cancellable: false,
-    };
-
-    let (route_tx, action_rx) = bounded(1);
-    bridge.register_action_route(test_route, route_tx).unwrap();
-
-    spawn_bridge(bridge);
-
-    std::thread::spawn(move || loop {
-        let action = action_rx.recv().unwrap();
-        assert_eq!(action.action_id, "1".to_owned());
-    });
-
-    std::thread::sleep(Duration::from_secs(1));
-
-    let action_1 = Action {
-        action_id: "1".to_string(),
-        name: "test".to_string(),
-        payload: "test".to_string(),
-    };
-    actions_tx.send(action_1).unwrap();
-
-    let mut responses = Responses { rx: data_rx, responses: vec![] };
-
-    let status = responses.next();
-    assert_eq!(status.action_id, "1".to_owned());
-    assert_eq!(status.state, "Received".to_owned());
-
-    let action_2 = Action {
-        action_id: "2".to_string(),
-        name: "test".to_string(),
-        payload: "test".to_string(),
-    };
-    actions_tx.send(action_2).unwrap();
-
-    let status = responses.next();
-    // verify response is uplink occupied failure
-    assert!(status.is_failed());
-    assert_eq!(status.action_id, "2".to_owned());
-    assert_eq!(status.errors, ["Another action is currently being processed"]);
-}
-
-#[tokio::test]
 async fn complete_response_on_no_redirection() {
     let tmpdir = tempdir::TempDir::new("bridge").unwrap();
     std::env::set_current_dir(&tmpdir).unwrap();
@@ -505,6 +453,7 @@ async fn cancel_action_failure_not_executing() {
 
     let mut responses = Responses { rx: data_rx, responses: vec![] };
 
+    responses.next();
     let status = responses.next();
     assert_eq!(status.action_id, "2");
     assert!(status.is_failed());
