@@ -4,7 +4,7 @@ use tokio::select;
 use tokio::time::interval;
 
 use super::streams::Streams;
-use super::{ActionBridgeShutdown, Package, StreamMetrics};
+use super::{Package, StreamMetrics};
 use crate::base::actions::Cancellation;
 use crate::config::{ActionRoute, Config, DeviceConfig};
 use crate::utils::LimitedArrayMap;

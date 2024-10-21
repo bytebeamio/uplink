@@ -80,6 +80,7 @@ impl TcpJson {
             };
 
             if let Some(handle) = handle {
+                error!("Dropped old tcp client");
                 handle.abort();
             }
 

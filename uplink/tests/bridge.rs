@@ -24,10 +24,9 @@ fn create_bridge(
 ) -> (ActionsBridge, Sender<Action>, Receiver<Box<dyn Package>>) {
     let (data_tx, data_rx) = bounded(10);
     let (actions_tx, actions_rx) = bounded(10);
-    let (shutdown_handle, _) = bounded(1);
     let (metrics_tx, _) = bounded(1);
     let bridge =
-        ActionsBridge::new(config, device_config, data_tx, actions_rx, shutdown_handle, metrics_tx);
+        ActionsBridge::new(config, device_config, data_tx, actions_rx, metrics_tx);
 
     (bridge, actions_tx, data_rx)
 }

@@ -1,5 +1,5 @@
 use flume::{Receiver, RecvError, SendError};
-use log::{debug, error, info, trace};
+use log::{debug, error, info};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
