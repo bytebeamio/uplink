@@ -297,6 +297,7 @@ fn mqttoptions(config: &Config, device_config: &DeviceConfig) -> MqttOptions {
     mqttoptions.set_max_packet_size(config.mqtt.max_packet_size, config.mqtt.max_packet_size);
     mqttoptions.set_keep_alive(Duration::from_secs(config.mqtt.keep_alive));
     mqttoptions.set_inflight(config.mqtt.max_inflight);
+    mqttoptions.set_clean_session(false);
 
     if let Some(auth) = device_config.authentication.clone() {
         let ca = auth.ca_certificate.into_bytes();
