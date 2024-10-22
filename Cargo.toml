@@ -12,7 +12,7 @@ flume = "0.10"
 futures-util = "0.3"
 log = "0.4"
 rand = "0.8"
-rumqttc = { git = "https://github.com/bytebeamio/rumqtt" }
+rumqttc = { git = "https://github.com/bytebeamio/rumqtt", rev = "c5bfdd74a535cadd518c12f7667e64f1ec68858c" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 tempdir = "0.3"

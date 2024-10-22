@@ -675,12 +675,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fixedbitset"
-version = "0.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
-
-[[package]]
 name = "flume"
 version = "0.10.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2258,10 +2252,9 @@ dependencies = [
 [[package]]
 name = "rumqttc"
 version = "0.24.0"
-source = "git+https://github.com/bytebeamio/rumqtt#2377e4e2c57bbcbdb1b2d5372556f8b3977b03b5"
+source = "git+https://github.com/bytebeamio/rumqtt?rev=c5bfdd74a535cadd518c12f7667e64f1ec68858c#c5bfdd74a535cadd518c12f7667e64f1ec68858c"
 dependencies = [
  "bytes 1.7.1",
- "fixedbitset",
  "flume 0.11.0",
  "futures-util",
  "log",
