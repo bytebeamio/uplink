@@ -147,8 +147,10 @@ impl Uplink {
         let mqtt_client = mqtt.client();
         let ctrl_mqtt = mqtt.ctrl_tx();
 
+        let tenant_filter = format!("/tenants/{}/", device_config.project_id);
         let serializer = Serializer::new(
             self.config.clone(),
+            tenant_filter,
             self.data_rx.clone(),
             mqtt_client.clone(),
             self.serializer_metrics_tx(),
