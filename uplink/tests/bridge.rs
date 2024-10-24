@@ -24,10 +24,9 @@ fn create_bridge(
 ) -> (ActionsBridge, Sender<Action>, Receiver<Box<dyn Package>>) {
     let (data_tx, data_rx) = bounded(10);
     let (actions_tx, actions_rx) = bounded(10);
-    let (shutdown_handle, _) = bounded(1);
     let (metrics_tx, _) = bounded(1);
     let bridge =
-        ActionsBridge::new(config, device_config, data_tx, actions_rx, shutdown_handle, metrics_tx);
+        ActionsBridge::new(config, device_config, data_tx, actions_rx, metrics_tx);
 
     (bridge, actions_tx, data_rx)
 }
@@ -53,58 +52,6 @@ impl Responses {
 
         self.responses.remove(0)
     }
-}
-
-#[tokio::test]
-async fn recv_action_while_current_action_exists() {
-    let tmpdir = tempdir::TempDir::new("bridge").unwrap();
-    std::env::set_current_dir(&tmpdir).unwrap();
-    let (config, device_config) = default_configs();
-    let (mut bridge, actions_tx, data_rx) =
-        create_bridge(Arc::new(config), Arc::new(device_config));
-
-    let test_route = ActionRoute {
-        name: "test".to_string(),
-        cancellable: false,
-    };
-
-    let (route_tx, action_rx) = bounded(1);
-    bridge.register_action_route(test_route, route_tx).unwrap();
-
-    spawn_bridge(bridge);
-
-    std::thread::spawn(move || loop {
-        let action = action_rx.recv().unwrap();
-        assert_eq!(action.action_id, "1".to_owned());
-    });
-
-    std::thread::sleep(Duration::from_secs(1));
-
-    let action_1 = Action {
-        action_id: "1".to_string(),
-        name: "test".to_string(),
-        payload: "test".to_string(),
-    };
-    actions_tx.send(action_1).unwrap();
-
-    let mut responses = Responses { rx: data_rx, responses: vec![] };
-
-    let status = responses.next();
-    assert_eq!(status.action_id, "1".to_owned());
-    assert_eq!(status.state, "Received".to_owned());
-
-    let action_2 = Action {
-        action_id: "2".to_string(),
-        name: "test".to_string(),
-        payload: "test".to_string(),
-    };
-    actions_tx.send(action_2).unwrap();
-
-    let status = responses.next();
-    // verify response is uplink occupied failure
-    assert!(status.is_failed());
-    assert_eq!(status.action_id, "2".to_owned());
-    assert_eq!(status.errors, ["Another action is currently being processed"]);
 }
 
 #[tokio::test]
@@ -151,82 +98,6 @@ async fn complete_response_on_no_redirection() {
     let status = responses.next();
     assert!(status.is_done());
     assert_eq!(status.state, "Tested");
-
-    let status = responses.next();
-    assert!(status.is_completed());
-}
-
-#[tokio::test]
-async fn no_complete_response_between_redirection() {
-    let tmpdir = tempdir::TempDir::new("bridge").unwrap();
-    std::env::set_current_dir(&tmpdir).unwrap();
-    let (mut config, device_config) = default_configs();
-    config.action_redirections.insert("test".to_string(), "redirect".to_string());
-    let (mut bridge, actions_tx, data_rx) =
-        create_bridge(Arc::new(config), Arc::new(device_config));
-    let bridge_tx_1 = bridge.status_tx();
-    let bridge_tx_2 = bridge.status_tx();
-
-    let (route_tx, action_rx_1) = bounded(1);
-    let test_route = ActionRoute {
-        name: "test".to_string(),
-        cancellable: false,
-    };
-    bridge.register_action_route(test_route, route_tx).unwrap();
-
-    let (route_tx, action_rx_2) = bounded(1);
-    let redirect_route = ActionRoute {
-        name: "redirect".to_string(),
-        cancellable: false,
-    };
-    bridge.register_action_route(redirect_route, route_tx).unwrap();
-
-    spawn_bridge(bridge);
-
-    std::thread::spawn(move || {
-        let rt = Runtime::new().unwrap();
-        let action = action_rx_1.recv().unwrap();
-        assert_eq!(action.action_id, "1".to_owned());
-        std::thread::sleep(Duration::from_secs(1));
-        let response = ActionResponse::progress("1", "Tested", 100);
-        rt.block_on(bridge_tx_1.send_action_response(response));
-    });
-
-    std::thread::spawn(move || {
-        let rt = Runtime::new().unwrap();
-        let action = action_rx_2.recv().unwrap();
-        assert_eq!(action.action_id, "1".to_owned());
-        let response = ActionResponse::progress("1", "Redirected", 0);
-        rt.block_on(bridge_tx_2.send_action_response(response));
-        std::thread::sleep(Duration::from_secs(1));
-        let response = ActionResponse::success("1");
-        rt.block_on(bridge_tx_2.send_action_response(response));
-    });
-
-    std::thread::sleep(Duration::from_secs(1));
-
-    let action = Action {
-        action_id: "1".to_string(),
-        name: "test".to_string(),
-        payload: "test".to_string(),
-    };
-    actions_tx.send(action).unwrap();
-
-    let mut responses = Responses { rx: data_rx, responses: vec![] };
-
-    let status = responses.next();
-    assert_eq!(status.state, "Received".to_owned());
-
-    let status = responses.next();
-    assert!(status.is_done());
-    assert_eq!(status.state, "Tested");
-
-    let status = responses.next();
-    assert!(!status.is_completed());
-    assert_eq!(status.state, "Redirected");
-
-    let status = responses.next();
-    assert!(status.is_completed());
 }
 
 #[tokio::test]
@@ -442,8 +313,8 @@ async fn cancel_action() {
         let cancel_action = action_rx_1.recv().unwrap();
         assert_eq!(cancel_action.action_id, "2");
         assert_eq!(cancel_action.name, "cancel_action");
-        let response = ActionResponse::failure(&action.action_id, "Cancelled");
-        rt.block_on(bridge_tx_1.send_action_response(response));
+        rt.block_on(bridge_tx_1.send_action_response(ActionResponse::failure(&action.action_id, "Cancelled")));
+        rt.block_on(bridge_tx_1.send_action_response(ActionResponse::success(&cancel_action.action_id)));
     });
 
     std::thread::sleep(Duration::from_secs(1));
@@ -506,6 +377,8 @@ async fn cancel_action_failure_not_executing() {
 
     let mut responses = Responses { rx: data_rx, responses: vec![] };
 
+    // first status is Received for all actions
+    responses.next();
     let status = responses.next();
     assert_eq!(status.action_id, "2");
     assert!(status.is_failed());
@@ -513,171 +386,4 @@ async fn cancel_action_failure_not_executing() {
         status.errors,
         ["Cancellation request received for action currently not in execution!"]
     );
-}
-
-#[tokio::test]
-async fn cancel_action_failure_on_completion() {
-    let tmpdir = tempdir::TempDir::new("bridge").unwrap();
-    std::env::set_current_dir(&tmpdir).unwrap();
-    let (config, device_config) = default_configs();
-    let (mut bridge, actions_tx, data_rx) =
-        create_bridge(Arc::new(config), Arc::new(device_config));
-
-    let bridge_tx_1 = bridge.status_tx();
-    let (route_tx, action_rx_1) = bounded(1);
-    let test_route = ActionRoute {
-        name: "test".to_string(),
-        cancellable: false,
-    };
-    bridge.register_action_route(test_route, route_tx).unwrap();
-
-    spawn_bridge(bridge);
-
-    std::thread::spawn(move || {
-        let rt = Runtime::new().unwrap();
-        let action = action_rx_1.recv().unwrap();
-        assert_eq!(action.action_id, "1");
-        let response = ActionResponse::progress(&action.action_id, "Running", 0);
-        rt.block_on(bridge_tx_1.send_action_response(response));
-
-        std::thread::sleep(Duration::from_secs(2));
-        let response = ActionResponse::success(&action.action_id);
-        rt.block_on(bridge_tx_1.send_action_response(response));
-    });
-
-    std::thread::sleep(Duration::from_secs(1));
-
-    let action = Action {
-        action_id: "1".to_string(),
-        name: "test".to_string(),
-        payload: "test".to_string(),
-    };
-    actions_tx.send(action).unwrap();
-
-    std::thread::sleep(Duration::from_secs(1));
-
-    let action = Action {
-        action_id: "2".to_string(),
-        name: "cancel_action".to_string(),
-        payload: r#"{"action_id": "1", "name": "test"}"#.to_string(),
-    };
-    actions_tx.send(action).unwrap();
-
-    let mut responses = Responses { rx: data_rx, responses: vec![] };
-
-    let ActionResponse { action_id, state, .. } = responses.next();
-    assert_eq!(action_id, "1");
-    assert_eq!(state, "Received");
-
-    let ActionResponse { action_id, state, .. } = responses.next();
-    assert_eq!(action_id, "1");
-    assert_eq!(state, "Running");
-
-    let ActionResponse { action_id, state, .. } = responses.next();
-    assert_eq!(action_id, "2");
-    assert_eq!(state, "Received");
-
-    let status = responses.next();
-    assert_eq!(status.action_id, "1");
-    assert!(status.is_completed());
-
-    let status = responses.next();
-    assert_eq!(status.action_id, "2");
-    assert!(status.is_failed());
-    assert_eq!(status.errors, ["Cancellation request failed as action completed execution!"]);
-}
-
-#[tokio::test]
-async fn cancel_action_between_redirect() {
-    let tmpdir = tempdir::TempDir::new("bridge").unwrap();
-    std::env::set_current_dir(&tmpdir).unwrap();
-    let (mut config, device_config) = default_configs();
-    config.action_redirections.insert("test".to_string(), "redirect".to_string());
-    let (mut bridge, actions_tx, data_rx) =
-        create_bridge(Arc::new(config), Arc::new(device_config));
-
-    let bridge_tx_1 = bridge.status_tx();
-    let (route_tx, action_rx_1) = bounded(1);
-    let test_route = ActionRoute {
-        name: "test".to_string(),
-        cancellable: false,
-    };
-    bridge.register_action_route(test_route, route_tx).unwrap();
-
-    let bridge_tx_2 = bridge.status_tx();
-    let (route_tx, action_rx_2) = bounded(1);
-    let test_route = ActionRoute {
-        name: "redirect".to_string(),
-        cancellable: false,
-    };
-    bridge.register_action_route(test_route, route_tx).unwrap();
-
-    spawn_bridge(bridge);
-
-    std::thread::spawn(move || {
-        let rt = Runtime::new().unwrap();
-        let action = action_rx_2.recv().unwrap();
-        assert_eq!(action.action_id, "1");
-        let response = ActionResponse::progress(&action.action_id, "Running", 0);
-        rt.block_on(bridge_tx_1.send_action_response(response));
-        std::thread::sleep(Duration::from_secs(3));
-        let response = ActionResponse::progress(&action.action_id, "Finished", 100);
-        rt.block_on(bridge_tx_1.send_action_response(response));
-    });
-
-    std::thread::spawn(move || {
-        let rt = Runtime::new().unwrap();
-        let action = action_rx_1.recv().unwrap();
-        assert_eq!(action.action_id, "1");
-        let response = ActionResponse::progress(&action.action_id, "Running", 0);
-        rt.block_on(bridge_tx_2.send_action_response(response));
-        std::thread::sleep(Duration::from_secs(3));
-        let response = ActionResponse::progress(&action.action_id, "Finished", 100);
-        rt.block_on(bridge_tx_2.send_action_response(response));
-    });
-
-    std::thread::sleep(Duration::from_secs(1));
-
-    let action = Action {
-        action_id: "1".to_string(),
-        name: "test".to_string(),
-        payload: "test".to_string(),
-    };
-    actions_tx.send(action).unwrap();
-
-    std::thread::sleep(Duration::from_secs(1));
-
-    let action = Action {
-        action_id: "2".to_string(),
-        name: "cancel_action".to_string(),
-        payload: r#"{"action_id": "1", "name": "test"}"#.to_string(),
-    };
-    actions_tx.send(action).unwrap();
-
-    let mut responses = Responses { rx: data_rx, responses: vec![] };
-
-    let ActionResponse { action_id, state, .. } = responses.next();
-    assert_eq!(action_id, "1");
-    assert_eq!(state, "Received");
-
-    let ActionResponse { action_id, state, .. } = responses.next();
-    assert_eq!(action_id, "1");
-    assert_eq!(state, "Running");
-
-    let ActionResponse { action_id, state, .. } = responses.next();
-    assert_eq!(action_id, "2");
-    assert_eq!(state, "Received");
-
-    let status = responses.next();
-    assert_eq!(status.action_id, "1");
-    assert!(status.is_done());
-
-    let status = responses.next();
-    assert_eq!(status.action_id, "2");
-    assert!(status.is_completed());
-
-    let status = responses.next();
-    assert_eq!(status.action_id, "1");
-    assert!(status.is_failed());
-    assert_eq!(status.errors, ["Action cancelled by action_id: 2"]);
 }

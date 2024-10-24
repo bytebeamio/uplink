@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
-use bytes::buf::Limit;
 
 /// Map with a maximum size
 ///

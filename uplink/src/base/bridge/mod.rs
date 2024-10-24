@@ -66,9 +66,6 @@ impl Point for Payload {
     }
 }
 
-/// Commands that can be used to remotely trigger action_lane shutdown
-pub(crate) struct ActionBridgeShutdown;
-
 /// Commands that can be used to remotely trigger data_lane shutdown
 pub(crate) struct DataBridgeShutdown;
 

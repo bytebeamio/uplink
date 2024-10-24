@@ -9,7 +9,6 @@ use anyhow::Error;
 use config::{Environment, File, FileFormat};
 use log::info;
 use structopt::StructOpt;
-use tokio::time::sleep;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
 use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
@@ -375,7 +374,10 @@ fn main() -> Result<(), Error> {
             let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT]).unwrap();
             while let Some(signal) = signals.next().await {
                 match signal {
-                    SIGTERM | SIGINT | SIGQUIT => ctrl_tx.trigger_shutdown().await,
+                    SIGTERM | SIGINT | SIGQUIT => {
+                        ctrl_tx.trigger_shutdown().await;
+                        break;
+                    },
                     s => error!("Couldn't handle signal: {s}"),
                 }
             }
