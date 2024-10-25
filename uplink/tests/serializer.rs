@@ -105,7 +105,7 @@ async fn preferential_send_on_network() {
     let (net_tx, req_rx) = bounded(1);
     let (metrics_tx, _metrics_rx) = bounded(1);
     let client = MockClient { net_tx };
-    let serializer = Serializer::new(config, data_rx, client, metrics_tx).unwrap();
+    let serializer = Serializer::new(config, String::new(), data_rx, client, metrics_tx).unwrap();
 
     // start serializer in the background
     spawn(async { serializer.start().await.unwrap() });

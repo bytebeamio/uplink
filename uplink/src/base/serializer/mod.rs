@@ -920,7 +920,7 @@ pub mod tests {
         let (metrics_tx, _metrics_rx) = bounded(1);
         let client = MockClient { net_tx };
 
-        (Serializer::new(config, data_rx, client, metrics_tx).unwrap(), data_tx, net_rx)
+        (Serializer::new(config, String::new(), data_rx, client, metrics_tx).unwrap(), data_tx, net_rx)
     }
 
     #[tokio::test]
