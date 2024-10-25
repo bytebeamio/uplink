@@ -274,6 +274,7 @@ impl FileDownloader {
             },
         }
 
+        self.bridge_tx.send_action_response(ActionResponse::progress(self.action_id.as_str(), "VerifyingChecksum", 99)).await;
         if let Err(e) = state.current.meta.verify_checksum() {
             return DownloadResult::Err(e.to_string());
         }

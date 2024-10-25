@@ -11,6 +11,8 @@ use crate::utils::LimitedArrayMap;
 use crate::{Action, ActionResponse};
 use std::fmt::{Display, Formatter};
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::path::Path;
+use anyhow::Context;
 
 #[derive(Debug)]
 pub enum Error {
@@ -84,12 +86,43 @@ impl ActionsBridge {
         Self {
             status_tx,
             status_rx,
+            actions_routing_cache: Self::load_actions_routing_cache(config.persistence_path.as_path()),
             config,
             actions_rx,
             streams,
             action_routes: HashMap::with_capacity(16),
             action_redirections,
-            actions_routing_cache: LimitedArrayMap::new(64),
+        }
+    }
+
+    fn load_actions_routing_cache(persistence: &Path) -> LimitedArrayMap<String, String> {
+        let save_file = persistence.join("actions_routing_cache.json");
+        if std::fs::metadata(&save_file).is_err() {
+            return LimitedArrayMap::new(64);
+        }
+        let mut result = std::fs::read(&save_file)
+            .context("")
+            .and_then(|data| serde_json::from_slice::<LimitedArrayMap<String, String>>(data.as_slice())
+                .context("actions_routing_cache.json has invalid data")).unwrap_or_else(|e| {
+            warn!("Couldn't read actions_routing_cache.json: {e}, resetting to default");
+            if let Err(e) = std::fs::remove_file(&save_file) {
+                log::warn!("Couldn't remove a file in persistence directory: {e}. Does the uplink process have right permissions?");
+            }
+            LimitedArrayMap::new(64)
+        });
+        result.map.reserve(64);
+        result
+    }
+
+    async fn persist_actions_routing_cache(&self) {
+        let save_file = self.config.persistence_path.join("actions_routing_cache.json");
+        if let Err(e) = std::fs::write(
+            &save_file,
+            serde_json::to_vec(&self.actions_routing_cache)
+                // this unwrap is safe as per serde_json::to_vec_pretty requirements
+                .unwrap(),
+        ) {
+            log::error!("Couldn't write to a file in persistence directory: {e}. Does the uplink process have right permissions?");
         }
     }
 
@@ -200,8 +233,9 @@ impl ActionsBridge {
                     self.forward_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not forward action to collector: {e}"))).await;
                 } else {
                     if let Some((action_id, app_name)) = self.actions_routing_cache.set(action.action_id.to_owned(), route_id.to_owned()) {
-                        log::warn!("Dropping routing info about action_id: {action_id} executed on app: {app_name}");
+                        log::info!("Dropping routing info about action_id: {action_id} executed on app: {app_name}");
                     }
+                    self.persist_actions_routing_cache().await;
                 }
             }
             None => {

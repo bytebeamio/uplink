@@ -3,8 +3,8 @@ use std::fmt::Debug;
 
 /// Map with a maximum size
 ///
-/// If too many rows are inserted, the oldest entry will be deleted
-#[derive(Debug)]
+/// If too many items are inserted, the oldest entry will be deleted
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct LimitedArrayMap<K, V> {
     pub(crate) map: VecDeque<(K, V)>,
 }
@@ -18,7 +18,7 @@ impl<K: Eq + Clone + Debug, V> LimitedArrayMap<K, V> {
 
     pub fn set(&mut self, key: K, value: V) -> Option<(K, V)> {
         let mut result = None;
-        match self.map.iter_mut().find(|(k, _)| k == &key) {
+        match self.map.iter_mut().rev().find(|(k, _)| k == &key) {
             Some((k, v)) => {
                 result = Some((k.clone(), std::mem::replace(v, value)));
             }
@@ -35,7 +35,7 @@ impl<K: Eq + Clone + Debug, V> LimitedArrayMap<K, V> {
     }
 
     pub fn get(&self, key: &K) -> Option<&V> {
-        self.map.iter()
+        self.map.iter().rev()
             .find(|(k, _)| k == key)
             .map(|(_, v)| v)
     }
