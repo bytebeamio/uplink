@@ -6,7 +6,8 @@ WORKDIR "/usr/share/bytebeam/uplink"
 COPY uplink/ uplink
 COPY storage/ storage
 COPY tools/utils/ tools/utils
-COPY Cargo.* .
+COPY tools/system-stats/ tools/system-stats
+COPY Cargo.* ./
 COPY .git/ .git
 
 RUN mkdir -p /usr/share/bytebeam/uplink/bin
