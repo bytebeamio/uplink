@@ -3586,6 +3586,7 @@ dependencies = [
  "futures-util",
  "serde",
  "serde_json",
+ "structopt",
  "tokio 1.39.3",
  "tokio-stream",
  "tokio-util 0.7.11",
