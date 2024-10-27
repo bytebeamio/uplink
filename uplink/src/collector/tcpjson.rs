@@ -1,6 +1,6 @@
 use flume::{Receiver, RecvError};
 use futures_util::SinkExt;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
@@ -82,7 +82,7 @@ impl TcpJson {
             if let Some(existing_connection) = existing_connection.take() {
                 existing_connection.abort();
                 let _ = existing_connection.await;
-                error!("Dropping previous connection to tcpapp({}) because another connection was initiated", self.name);
+                warn!("Dropping previous connection to tcpapp({}) because another connection was initiated", self.name);
             }
 
             {
