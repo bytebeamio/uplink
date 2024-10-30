@@ -7,7 +7,7 @@ use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use lz4_flex::frame::FrameEncoder;
 use rumqttc::*;
 use storage::Storage;
@@ -280,6 +280,7 @@ pub struct Serializer<C: MqttClient> {
     /// Control handles
     ctrl_rx: Receiver<SerializerShutdown>,
     ctrl_tx: Sender<SerializerShutdown>,
+    tenant_filter: String,
 }
 
 impl<C: MqttClient> Serializer<C> {
@@ -287,6 +288,7 @@ impl<C: MqttClient> Serializer<C> {
     /// the handle to an MQTT client(This is constructed as such for testing purposes) and a handle to update serailizer metrics.
     pub fn new(
         config: Arc<Config>,
+        tenant_filter: String,
         collector_rx: Receiver<Box<dyn Package>>,
         client: C,
         metrics_tx: Sender<SerializerMetrics>,
@@ -296,6 +298,7 @@ impl<C: MqttClient> Serializer<C> {
 
         Ok(Serializer {
             config,
+            tenant_filter,
             collector_rx,
             client,
             storage_handler,
@@ -447,7 +450,14 @@ impl<C: MqttClient> Serializer<C> {
         // TODO(RT): This can fail when packet sizes > max_payload_size in config are written to disk.
         // This leads to force switching to normal mode. Increasing max_payload_size to bypass this
         let publish = match Packet::read(storage.reader(), max_packet_size) {
-            Ok(Packet::Publish(publish)) => publish,
+            Ok(Packet::Publish(publish)) => {
+                if publish.topic.starts_with(&self.tenant_filter) {
+                    publish
+                } else {
+                    warn!("found data for wrong tenant in persistence!");
+                    return Ok(Status::EventLoopReady);
+                }
+            },
             Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
             Err(e) => {
                 self.metrics.increment_errors();
@@ -504,7 +514,14 @@ impl<C: MqttClient> Serializer<C> {
                     };
 
                     let publish = match Packet::read(storage.reader(), max_packet_size) {
-                        Ok(Packet::Publish(publish)) => publish,
+                        Ok(Packet::Publish(publish)) => {
+                            if publish.topic.starts_with(&self.tenant_filter) {
+                                publish
+                            } else {
+                                warn!("found data for wrong tenant in persistence!!");
+                                continue;
+                            }
+                        },
                         Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
                         Err(e) => {
                             error!("Failed to read from storage. Forcing into Normal mode. Error = {e}");
@@ -903,7 +920,7 @@ pub mod tests {
         let (metrics_tx, _metrics_rx) = bounded(1);
         let client = MockClient { net_tx };
 
-        (Serializer::new(config, data_rx, client, metrics_tx).unwrap(), data_tx, net_rx)
+        (Serializer::new(config, String::new(), data_rx, client, metrics_tx).unwrap(), data_tx, net_rx)
     }
 
     #[tokio::test]

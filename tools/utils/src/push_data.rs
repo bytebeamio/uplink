@@ -10,10 +10,15 @@ struct ShadowPayload {
     stream: String,
     sequence: u32,
     timestamp: u64,
-    a: bool,
-    b: bool,
-    c: bool,
-    d: String,
+    can_id: u32,
+    byte1: u8,
+    byte2: u8,
+    byte3: u8,
+    byte4: u8,
+    byte5: u8,
+    byte6: u8,
+    byte7: u8,
+    byte8: u8,
 }
 
 #[tokio::main]
@@ -25,17 +30,21 @@ async fn main() {
         idx += 1;
         // calculate and send consecutive squares
         let data = ShadowPayload {
-            stream: "device_shadow".to_string(),
+            stream: "c2c_can".to_string(),
             sequence: idx,
             timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
-            a: idx % 2 == 0,
-            b: idx % 3 == 0,
-            c: idx % 5 == 0,
-            d: idx.to_string(),
+            can_id: idx % 1024,
+            byte1: ((idx + 0) % 256) as u8,
+            byte2: ((idx + 1) % 256) as u8,
+            byte3: ((idx + 2) % 256) as u8,
+            byte4: ((idx + 3) % 256) as u8,
+            byte5: ((idx + 4) % 256) as u8,
+            byte6: ((idx + 5) % 256) as u8,
+            byte7: ((idx + 6) % 256) as u8,
+            byte8: ((idx + 7) % 256) as u8,
         };
         let data_s = serde_json::to_string(&data).unwrap();
-        println!("Sending: {data_s}");
         framed.send(data_s).await.unwrap();
-        sleep(Duration::from_secs(3)).await;
+        sleep(Duration::from_micros(500)).await;
     }
 }
