@@ -118,7 +118,7 @@ impl Bridge {
         &mut self,
         routes: V,
     ) -> Result<Receiver<Action>, Error> {
-        let (actions_tx, actions_rx) = bounded(1);
+        let (actions_tx, actions_rx) = bounded(16);
         self.actions.register_action_routes(routes, actions_tx)?;
 
         Ok(actions_rx)
