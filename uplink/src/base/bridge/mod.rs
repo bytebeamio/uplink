@@ -13,7 +13,7 @@ pub mod stream;
 mod streams;
 
 pub use actions_lane::{ActionsBridge, Error};
-pub use actions_lane::{CtrlTx as ActionsLaneCtrlTx, StatusTx};
+pub use actions_lane::StatusTx;
 use data_lane::DataBridge;
 pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
@@ -66,9 +66,6 @@ impl Point for Payload {
     }
 }
 
-/// Commands that can be used to remotely trigger action_lane shutdown
-pub(crate) struct ActionBridgeShutdown;
-
 /// Commands that can be used to remotely trigger data_lane shutdown
 pub(crate) struct DataBridgeShutdown;
 
@@ -84,7 +81,6 @@ impl Bridge {
         package_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
-        shutdown_handle: Sender<()>,
     ) -> Self {
         let data = DataBridge::new(
             config.clone(),
@@ -97,7 +93,6 @@ impl Bridge {
             device_config,
             package_tx,
             actions_rx,
-            shutdown_handle,
             metrics_tx,
         );
         Self { data, actions }
@@ -108,8 +103,8 @@ impl Bridge {
         BridgeTx { data_tx: self.data.data_tx(), status_tx: self.actions.status_tx() }
     }
 
-    pub(crate) fn ctrl_tx(&self) -> (actions_lane::CtrlTx, data_lane::CtrlTx) {
-        (self.actions.ctrl_tx(), self.data.ctrl_tx())
+    pub(crate) fn ctrl_tx(&self) -> data_lane::CtrlTx {
+        self.data.ctrl_tx()
     }
 
     pub fn register_action_route(&mut self, route: ActionRoute) -> Result<Receiver<Action>, Error> {
@@ -123,7 +118,7 @@ impl Bridge {
         &mut self,
         routes: V,
     ) -> Result<Receiver<Action>, Error> {
-        let (actions_tx, actions_rx) = bounded(1);
+        let (actions_tx, actions_rx) = bounded(16);
         self.actions.register_action_routes(routes, actions_tx)?;
 
         Ok(actions_rx)

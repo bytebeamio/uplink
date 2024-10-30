@@ -42,16 +42,16 @@
 //! [`name`]: Action#structfield.name
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 
 use anyhow::Error;
-use flume::{bounded, Receiver, RecvError, Sender};
+use flume::{bounded, Receiver, Sender};
 use log::error;
 
 pub mod base;
 pub mod collector;
 pub mod config;
 pub mod mock;
+pub mod utils;
 
 use self::config::{ActionRoute, Config, DeviceConfig};
 pub use base::actions::{Action, ActionResponse};
@@ -94,8 +94,6 @@ pub struct Uplink {
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
     serializer_metrics_rx: Receiver<SerializerMetrics>,
-    shutdown_tx: Sender<()>,
-    shutdown_rx: Receiver<()>,
 }
 
 impl Uplink {
@@ -104,7 +102,6 @@ impl Uplink {
         let (data_tx, data_rx) = bounded(10);
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
-        let (shutdown_tx, shutdown_rx) = bounded(1);
 
         Ok(Uplink {
             config,
@@ -117,8 +114,6 @@ impl Uplink {
             stream_metrics_rx,
             serializer_metrics_tx,
             serializer_metrics_rx,
-            shutdown_tx,
-            shutdown_rx,
         })
     }
 
@@ -129,7 +124,6 @@ impl Uplink {
             self.data_tx.clone(),
             self.stream_metrics_tx(),
             self.action_rx.clone(),
-            self.shutdown_tx.clone(),
         )
     }
 
@@ -141,7 +135,7 @@ impl Uplink {
         network_up: Arc<Mutex<bool>>,
     ) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
-        let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
+        let ctrl_data_lane = bridge.ctrl_tx();
 
         let mut mqtt = Mqtt::new(
             self.config.clone(),
@@ -249,7 +243,6 @@ impl Uplink {
         });
 
         Ok(CtrlTx {
-            actions_lane: ctrl_actions_lane,
             data_lane: ctrl_data_lane,
             mqtt: ctrl_mqtt,
             serializer: ctrl_serializer,
@@ -262,7 +255,6 @@ impl Uplink {
 
         let route = ActionRoute {
             name: "launch_shell".to_owned(),
-            timeout: Duration::from_secs(10),
             cancellable: false,
         };
         let actions_rx = bridge.register_action_route(route)?;
@@ -283,7 +275,6 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
-                timeout: Duration::from_secs(10),
                 cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
@@ -299,7 +290,6 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
-                timeout: Duration::from_secs(10),
                 cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
@@ -359,9 +349,5 @@ impl Uplink {
 
     pub fn serializer_metrics_tx(&self) -> Sender<SerializerMetrics> {
         self.serializer_metrics_tx.clone()
-    }
-
-    pub async fn resolve_on_shutdown(&self) -> Result<(), RecvError> {
-        self.shutdown_rx.recv_async().await
     }
 }

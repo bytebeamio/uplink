@@ -52,7 +52,7 @@ impl PreconditionChecker {
                 continue;
             }
 
-            let response = ActionResponse::progress(&action.action_id, "Checked OK", 100);
+            let response = ActionResponse::done(&action.action_id, "Checked OK", Some(action.clone()));
             self.bridge_tx.send_action_response(response).await;
         }
     }

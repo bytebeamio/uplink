@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::join;
 
-use self::bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
+use self::bridge::DataLaneCtrlTx;
 use self::mqtt::CtrlTx as MqttCtrlTx;
 use self::serializer::CtrlTx as SerializerCtrlTx;
 use crate::collector::downloader::CtrlTx as DownloaderCtrlTx;
@@ -23,7 +23,6 @@ pub fn clock() -> u128 {
 /// components simultaneously with a join.
 #[derive(Debug, Clone)]
 pub struct CtrlTx {
-    pub actions_lane: ActionsLaneCtrlTx,
     pub data_lane: DataLaneCtrlTx,
     pub mqtt: MqttCtrlTx,
     pub serializer: SerializerCtrlTx,
@@ -33,7 +32,6 @@ pub struct CtrlTx {
 impl CtrlTx {
     pub async fn trigger_shutdown(&self) {
         join!(
-            self.actions_lane.trigger_shutdown(),
             self.data_lane.trigger_shutdown(),
             self.mqtt.trigger_shutdown(),
             self.serializer.trigger_shutdown(),

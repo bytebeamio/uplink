@@ -1,5 +1,5 @@
 use flume::{Receiver, RecvError, SendError};
-use log::{debug, error, info, trace};
+use log::{debug, error, info};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
@@ -11,6 +11,7 @@ use crate::{Action, ActionResponse, Package};
 
 use std::io;
 use std::process::Stdio;
+use anyhow::Context;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -82,11 +83,30 @@ impl ProcessHandler {
                 },
                 // Cancel process on receiving cancel action, e.g. on action timeout
                 Ok(action) = self.actions_rx.recv_async() => {
-                    let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
-
-                    trace!("Cancelling process: '{}'", cancellation.action_id);
-                    let status = ActionResponse::failure(action_id, Error::Cancelled(action.action_id).to_string());
-                    self.bridge_tx.send_action_response(status).await;
+                    if action.action_id == action_id {
+                        log::error!("Backend tried sending the same action again!");
+                    } else if action.name != "cancel_action" {
+                        self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), "Process runner is already occupied")).await;
+                    } else {
+                        match serde_json::from_str::<Cancellation>(&action.payload)
+                            .context("Invalid cancel action payload")
+                            .and_then(|cancellation| {
+                                if cancellation.action_id == action_id {
+                                    Ok(())
+                                } else {
+                                    Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active process action id ({})", cancellation.action_id, action_id)))
+                                }
+                            }) {
+                            Ok(_) => {
+                                let _ = child.kill().await;
+                                self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
+                                self.bridge_tx.send_action_response(ActionResponse::failure(action_id, "Process killed")).await;
+                            },
+                            Err(e) => {
+                                self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop process: {e:?}"))).await;
+                            },
+                        }
+                    }
                 },
             }
         }

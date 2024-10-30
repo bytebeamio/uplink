@@ -339,6 +339,6 @@ pub struct CtrlTx {
 impl CtrlTx {
     /// Triggers shutdown of `Mqtt`
     pub async fn trigger_shutdown(&self) {
-        self.inner.send_async(MqttShutdown).await.unwrap()
+        let _ = self.inner.send_async(MqttShutdown).await;
     }
 }
