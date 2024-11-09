@@ -29,7 +29,7 @@ structopt = "0.3"
 async-trait = "0.1"
 lz4_flex = "0.10"
 pretty-bytes = "0.2.2"
-storage = { path = "../storage" }
+seahash = "4.1.0"
 
 # logging
 log = { workspace = true }

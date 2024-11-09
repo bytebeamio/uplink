@@ -1,4 +1,5 @@
-use std::collections::VecDeque;
+use std::collections::btree_map::IterMut;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Debug;
 
 /// Map with a maximum size
@@ -41,18 +42,35 @@ impl<K: Eq + Clone + Debug, V> LimitedArrayMap<K, V> {
     }
 }
 
-#[test]
-fn t1() {
-    let mut m = LimitedArrayMap::new(64);
-    dbg!(m.set("a".to_owned(), "A".to_owned()));
-    dbg!(m.set("b".to_owned(), "B".to_owned()));
-    dbg!(m);
+/// An iterator that allows user to access the current element
+/// under the cursor
+pub struct BTreeCursorMut<'a, K, V> {
+    iter: IterMut<'a, K, V>,
+    pub current: Option<(&'a K, &'a mut V)>,
 }
 
-#[test]
-fn t2() {
-    let mut m = LimitedArrayMap::new(64);
-    dbg!(m.set("a".to_owned(), "A".to_owned()));
-    dbg!(m.set("b".to_owned(), "B".to_owned()));
-    dbg!(m.get(&"a".to_owned()));
+impl<'a, K: Ord, V> BTreeCursorMut<'a, K, V> {
+    pub fn new(map: &'a mut BTreeMap<K, V>) -> Self {
+        let mut iter = map.iter_mut();
+        let current = iter.next();
+        BTreeCursorMut { iter, current }
+    }
+
+    pub fn bump(&mut self) {
+        self.current = self.iter.next();
+    }
 }
+
+// Spawn a task in a new thread
+// The task will be given a Receiver<()>
+// It should perform cleanup and shutdown when data is sent on that receiver
+// Calling the closure returned by this function will send shutdown notification to the task and
+// block until the task is finished
+// pub fn spawn_task(task: fn(flume::Receiver<()>)) -> Box<dyn Fn()> {
+//     let (ctrl_tx, ctrl_rx) = flume::bounded::<()>(1);
+//     let thread = std::thread::spawn(move || task(ctrl_rx));
+//     Box::new(move || {
+//         let _ = ctrl_tx.send(());
+//         let _ = thread.join();
+//     })
+// }

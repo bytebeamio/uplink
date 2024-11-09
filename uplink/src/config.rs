@@ -65,6 +65,9 @@ pub enum Compression {
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct StreamConfig {
+    #[serde(default)]
+    #[serde(skip_deserializing)]
+    pub name: String,
     pub topic: String,
     #[serde(default = "max_batch_size")]
     pub batch_size: usize,
@@ -84,7 +87,8 @@ pub struct StreamConfig {
 impl Default for StreamConfig {
     fn default() -> Self {
         Self {
-            topic: "".to_string(),
+            name: "".to_owned(),
+            topic: "".to_owned(),
             batch_size: MAX_BATCH_SIZE,
             flush_period: default_timeout(),
             compression: Compression::Disabled,
