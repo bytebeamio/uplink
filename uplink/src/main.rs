@@ -1,3 +1,4 @@
+#[cfg(not(feature="stripped"))]
 mod console;
 
 use std::fs::read_to_string;
@@ -18,7 +19,9 @@ pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
 use uplink::config::{AppConfig, Config, DeviceConfig, StreamConfig, MAX_BATCH_SIZE};
-use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
+use uplink::{spawn_named_thread, TcpJson, Uplink};
+#[cfg(not(feature = "stripped"))]
+use uplink::simulator;
 
 const DEFAULT_CONFIG: &str = r#"
     [mqtt]
@@ -176,6 +179,7 @@ impl CommandLine {
         }
 
         #[cfg(any(target_os = "linux", target_os = "android"))]
+        #[cfg(not(feature = "stripped"))]
         if let Some(batch_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
             let stream_config =
                 config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
@@ -337,12 +341,14 @@ fn main() -> Result<(), Error> {
     let ctrl_tx =
         uplink.spawn(&device_config, bridge, downloader_disable.clone(), network_up.clone())?;
 
+    #[cfg(not(feature = "stripped"))]
     if let Some(config) = config.simulator.clone() {
         spawn_named_thread("Simulator", || {
             simulator::start(config, bridge_tx, simulator_actions).unwrap();
         });
     }
 
+    #[cfg(not(feature = "stripped"))]
     if config.console.enabled {
         let port = config.console.port;
         let ctrl_tx = ctrl_tx.clone();

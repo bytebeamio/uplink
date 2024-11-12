@@ -9,6 +9,7 @@ use serde_with::{serde_as, DurationSeconds};
 
 pub use crate::base::bridge::stream::MAX_BATCH_SIZE;
 #[cfg(target_os = "linux")]
+#[cfg(not(feature = "stripped"))]
 use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(target_os = "android")]
 use crate::collector::logcat::LogcatConfig;
@@ -293,6 +294,7 @@ pub struct Config {
     #[serde(default)]
     pub ignore_actions_if_no_clients: bool,
     #[cfg(target_os = "linux")]
+    #[cfg(not(feature = "stripped"))]
     pub logging: Option<JournalCtlConfig>,
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,

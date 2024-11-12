@@ -50,6 +50,7 @@ use log::error;
 pub mod base;
 pub mod collector;
 pub mod config;
+#[cfg(not(feature="stripped"))]
 pub mod mock;
 pub mod utils;
 
@@ -60,19 +61,30 @@ use base::monitor::Monitor;
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
 use base::CtrlTx;
+#[cfg(not(feature = "stripped"))]
 use collector::device_shadow::DeviceShadow;
 use collector::downloader::{CtrlTx as DownloaderCtrlTx, FileDownloader};
+#[cfg(not(feature = "stripped"))]
 use collector::installer::OTAInstaller;
 #[cfg(target_os = "linux")]
+#[cfg(not(feature = "stripped"))]
 use collector::journalctl::JournalCtl;
 #[cfg(target_os = "android")]
+#[cfg(not(feature = "stripped"))]
 use collector::logcat::Logcat;
+#[cfg(not(feature = "stripped"))]
 use collector::preconditions::PreconditionChecker;
+#[cfg(not(feature = "stripped"))]
 use collector::process::ProcessHandler;
+#[cfg(not(feature = "stripped"))]
 use collector::script_runner::ScriptRunner;
+#[cfg(not(feature = "stripped"))]
 use collector::systemstats::StatCollector;
+#[cfg(not(feature = "stripped"))]
 use collector::tunshell::TunshellClient;
-pub use collector::{simulator, tcpjson::TcpJson};
+#[cfg(not(feature = "stripped"))]
+pub use collector::simulator;
+pub use collector::tcpjson::TcpJson;
 pub use storage::Storage;
 
 /// Spawn a named thread to run the function f on
@@ -258,12 +270,20 @@ impl Uplink {
             cancellable: false,
         };
         let actions_rx = bridge.register_action_route(route)?;
-        let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
-        spawn_named_thread("Tunshell Client", move || tunshell_client.start());
 
-        let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
-        spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
+        #[cfg(not(feature = "stripped"))]
+        {
+            let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
+            spawn_named_thread("Tunshell Client", move || tunshell_client.start());
+        }
 
+        #[cfg(not(feature = "stripped"))]
+        {
+            let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
+            spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
+        }
+
+        #[cfg(not(feature = "stripped"))]
         if !self.config.ota_installer.actions.is_empty() {
             let actions_rx = bridge.register_action_routes(&self.config.ota_installer.actions)?;
             let ota_installer =
@@ -272,6 +292,7 @@ impl Uplink {
         }
 
         #[cfg(target_os = "linux")]
+        #[cfg(not(feature = "stripped"))]
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
@@ -301,11 +322,13 @@ impl Uplink {
             });
         }
 
+        #[cfg(not(feature = "stripped"))]
         if self.config.system_stats.enabled {
             let stat_collector = StatCollector::new(self.config.clone(), bridge_tx.clone());
             spawn_named_thread("Stat Collector", || stat_collector.start());
         };
 
+        #[cfg(not(feature = "stripped"))]
         if !self.config.processes.is_empty() {
             let actions_rx = bridge.register_action_routes(&self.config.processes)?;
             let process_handler = ProcessHandler::new(actions_rx, bridge_tx.clone());
@@ -316,6 +339,7 @@ impl Uplink {
             });
         }
 
+        #[cfg(not(feature = "stripped"))]
         if !self.config.script_runner.is_empty() {
             let actions_rx = bridge.register_action_routes(&self.config.script_runner)?;
             let script_runner = ScriptRunner::new(actions_rx, bridge_tx.clone());
@@ -326,6 +350,7 @@ impl Uplink {
             });
         }
 
+        #[cfg(not(feature = "stripped"))]
         if let Some(checker_config) = &self.config.precondition_checks {
             let actions_rx = bridge.register_action_routes(&checker_config.actions)?;
             let checker = PreconditionChecker::new(self.config.clone(), actions_rx, bridge_tx);

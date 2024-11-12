@@ -18,7 +18,7 @@ tokio-util = { workspace = true }
 
 # binary utils
 anyhow = "1"
-axum = "0.6"
+axum = { version = "0.6", optional = true}
 config = { version = "0.13.2", default-features = false, features = [
     "toml",
     "json",
@@ -33,17 +33,16 @@ storage = { path = "../storage" }
 
 # logging
 log = { workspace = true }
-regex = "1.7.1"
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 # built-in collectors
 # tunshell
-tokio-compat-02 = "0.2.0"
-tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch" }
+tokio-compat-02 = { version = "0.2.0", optional = true}
+tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch", optional = true }
 # simulator
-fake = { version = "2.5.0", features = ["derive"] }
-rand = { workspace = true }
+fake = { version = "2.5.0", features = ["derive"], optional = true }
+rand = { workspace = true, optional = true }
 # downloader
 fs2 = "0.4"
 futures-util = { workspace = true }
@@ -55,16 +54,16 @@ reqwest = { version = "0.11", default-features = false, features = [
 ] }
 rsa = { version = "0.9.6", features = ["sha2"] }
 # systemstats
-sysinfo = "0.26"
-# logcat
-lazy_static = "1.4.0"
+sysinfo = { version = "0.26", optional = true}
 # installer
-tar = "0.4"
+tar = { version = "0.4", optional = true}
 # device_shadow
-surge-ping = "0.8"
+surge-ping = { version = "0.8", optional = true}
 
 [target.'cfg(target_os = "android")'.dependencies]
+regex = "1.7.1"
 time = "0.3"
+lazy_static = "1.4.0"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
@@ -75,3 +74,7 @@ vergen = { version = "7", features = ["git", "build", "time"] }
 
 [dev-dependencies]
 tempdir = { workspace = true }
+
+[features]
+default = ["tar", "sysinfo", "fake", "rand", "tunshell-client", "tokio-compat-02", "axum", "surge-ping"]
+stripped = []
