@@ -3,9 +3,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::join;
 
-use self::bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
-use self::mqtt::CtrlTx as MqttCtrlTx;
-use self::serializer::CtrlTx as SerializerCtrlTx;
 use crate::collector::downloader::CtrlTx as DownloaderCtrlTx;
 
 pub mod actions;
@@ -13,6 +10,10 @@ pub mod bridge;
 pub mod monitor;
 pub mod mqtt;
 pub mod serializer;
+
+use bridge::{ActionsLaneCtrlTx, DataLaneCtrlTx};
+use mqtt::CtrlTx as MqttCtrlTx;
+use serializer::CtrlTx as SerializerCtrlTx;
 
 pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()

@@ -1,13 +1,15 @@
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
+
 use flume::{bounded, Receiver, RecvError, Sender, TrySendError};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio::time::{self, interval, Instant, Sleep};
-
-use std::collections::HashSet;
-use std::fs;
-use std::path::PathBuf;
-use std::{collections::HashMap, fmt::Debug, pin::Pin, sync::Arc, time::Duration};
 
 use crate::base::actions::Cancellation;
 use crate::config::{ActionRoute, Config, DeviceConfig};
@@ -96,8 +98,7 @@ impl ActionsBridge {
         action_status.batch_size = 1;
 
         streams_config.insert("action_status".to_owned(), action_status);
-        let mut streams = Streams::new(1, device_config, package_tx, metrics_tx);
-        streams.config_streams(streams_config);
+        let streams = Streams::new(1, device_config, streams_config, package_tx, metrics_tx);
 
         Self {
             status_tx,

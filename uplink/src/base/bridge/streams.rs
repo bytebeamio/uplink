@@ -25,24 +25,23 @@ impl<T: Point> Streams<T> {
     pub fn new(
         max_stream_count: usize,
         device_config: Arc<DeviceConfig>,
+        streams_config: HashMap<String, StreamConfig>,
         data_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
-        let map = HashMap::with_capacity(max_stream_count);
+        let mut map = HashMap::with_capacity(max_stream_count);
+        for (name, stream) in streams_config {
+            let stream = Stream::new(&name, stream, data_tx.clone());
+            map.insert(name.to_owned(), stream);
+        }
+
         Self {
             max_stream_count,
             device_config,
             data_tx,
             metrics_tx,
             map,
-            stream_timeouts: DelayMap::new(),
-        }
-    }
-
-    pub fn config_streams(&mut self, streams_config: HashMap<String, StreamConfig>) {
-        for (name, stream) in streams_config {
-            let stream = Stream::new(&name, stream, self.data_tx.clone());
-            self.map.insert(name.to_owned(), stream);
+            stream_timeouts: DelayMap::default(),
         }
     }
 

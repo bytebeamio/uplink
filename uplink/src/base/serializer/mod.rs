@@ -1,5 +1,3 @@
-mod metrics;
-
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -16,6 +14,9 @@ use tokio::{select, time::interval};
 
 use crate::config::{Compression, StreamConfig};
 use crate::{Config, Package};
+
+mod metrics;
+
 pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
 
 const METRICS_INTERVAL: Duration = Duration::from_secs(10);
@@ -151,7 +152,7 @@ impl Storage {
         backup_path: impl Into<PathBuf>,
         max_file_count: usize,
     ) -> Result<(), storage::Error> {
-        self.inner.set_persistence(backup_path.into(), max_file_count)
+        self.inner.enable_persistence(backup_path, max_file_count)
     }
 
     // Stores the provided publish packet by serializing it into storage, after setting its pkid to 1.
@@ -302,7 +303,7 @@ impl StorageHandler {
                     return Some((stream.to_owned(), publish));
                 }
                 // All packets read from storage
-                Err(storage::Error::Done) => {
+                Err(storage::Error::NoMoreBackups) => {
                     if self.read_stream.take_if(|s| s == stream).is_some() {
                         debug!("Done reading from: {}", stream.topic);
                     }
@@ -325,7 +326,7 @@ impl StorageHandler {
         for (stream_config, storage) in self.map.iter_mut() {
             match storage.flush() {
                 Ok(_) => trace!("Force flushed stream = {} onto disk", stream_config.topic),
-                Err(storage::Error::NoWrites) => {}
+                Err(storage::Error::EmptyWriteBuffer) => {}
                 Err(e) => error!(
                     "Error when force flushing storage = {}; error = {e}",
                     stream_config.topic
@@ -342,10 +343,10 @@ impl StorageHandler {
         let mut disk_utilized = 0;
 
         for storage in self.map.values() {
-            inmemory_write_size += storage.inner.inmemory_write_size();
+            inmemory_write_size += storage.inner.inmemory_read_size();
             inmemory_read_size += storage.inner.inmemory_read_size();
             file_count += storage.inner.file_count();
-            disk_utilized += storage.inner.disk_utilized();
+            disk_utilized += storage.inner.disk_usage();
         }
 
         metrics.set_write_memory(inmemory_write_size);
@@ -818,7 +819,7 @@ fn check_and_flush_metrics(
         }
     }
 
-    if metrics.batches() > 0 {
+    if metrics.get_batch_count() > 0 {
         info!(
             "{:>17}: batches = {:<3} errors = {} lost = {} disk_files = {:<3} disk_utilized = {} write_memory = {} read_memory = {}",
             metrics.mode,
@@ -870,7 +871,7 @@ pub mod tests {
     use super::*;
 
     fn read_from_storage(storage: &mut Storage, max_packet_size: usize) -> Publish {
-        if let Err(storage::Error::Done) = storage.reload_on_eof() {
+        if let Err(storage::Error::NoMoreBackups) = storage.reload_on_eof() {
             panic!("No publishes found in storage");
         }
 

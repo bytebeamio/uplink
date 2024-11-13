@@ -1,36 +1,47 @@
-use std::{fmt::Debug, mem, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use flume::{SendError, Sender};
 use log::{debug, trace};
 use serde::Serialize;
 
-use super::{Package, Point, StreamMetrics};
 use crate::config::StreamConfig;
 
-/// Signals status of stream buffer
+use super::{Package, Point, StreamMetrics};
+
+/// Represents the status of the stream buffer at various stages.
 #[derive(Debug)]
 pub enum StreamStatus {
+    // Partially filled buffer(count of elements).
     Partial(usize),
+    // Buffer has been flushed.
     Flushed,
+    // Stream is initializing with a flush period.
     Init(Duration),
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Send error {0}")]
-    Send(#[from] SendError<Box<dyn Package>>),
+    Send(#[from] SendError<Box<dyn Package>>), // Error encountered while sending data.
 }
 
+/// A threshold to define the maximum size a batch can reach before forced flush.
 pub const MAX_BATCH_SIZE: usize = 100;
 
+/// `Stream` buffers incoming data points and flushes them as a batch when the buffer is full.
 #[derive(Debug)]
 pub struct Stream<T> {
     pub name: Arc<String>,
     pub config: Arc<StreamConfig>,
+    // Last seen sequence for anomaly detection.
     last_sequence: u32,
+    // Last seen timestamp for anomaly detection.
     last_timestamp: u64,
+    // The internal buffer that holds data points.
     buffer: Buffer<T>,
+    // Channel to send flushed data to the next stage.
     tx: Sender<Box<dyn Package>>,
+    // Collects and reports metrics for the stream.
     pub metrics: StreamMetrics,
 }
 
@@ -39,6 +50,7 @@ where
     T: Point,
     Buffer<T>: Package,
 {
+    /// Creates a new `Stream` with specified configuration and channel.
     pub fn new(
         stream_name: impl Into<String>,
         stream_config: StreamConfig,
@@ -52,6 +64,7 @@ where
         Stream { name, config, last_sequence: 0, last_timestamp: 0, buffer, tx, metrics }
     }
 
+    /// Dynamically configures a new stream based on `project_id`, `device_id`, and `stream_name`.
     pub fn dynamic(
         stream_name: impl Into<String>,
         project_id: impl Into<String>,
@@ -62,6 +75,7 @@ where
         let project_id = project_id.into();
         let device_id = device_id.into();
 
+        // Generate a topic from project and device details.
         let topic =
             format!("/tenants/{project_id}/devices/{device_id}/events/{stream_name}/jsonarray");
         let config = StreamConfig { topic, ..Default::default() };
@@ -69,78 +83,75 @@ where
         Stream::new(stream_name, config, tx)
     }
 
+    /// Adds data to the buffer, detecting any sequence/timestamp anomalies. Triggers a flush if full.
     fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
         let current_sequence = data.sequence();
         let current_timestamp = data.timestamp();
-        let last_sequence = self.last_sequence;
-        let last_timestamp = self.last_timestamp;
 
-        // Fill buffer with data
+        // Push data into the buffer.
         self.buffer.buffer.push(data);
         self.metrics.add_point();
 
-        // Anomaly detection
+        // Check for sequence anomalies.
         if current_sequence <= self.last_sequence {
-            debug!("Sequence number anomaly! [{current_sequence}, {last_sequence}");
+            debug!("Sequence number anomaly detected!");
             self.buffer.add_sequence_anomaly(self.last_sequence, current_sequence);
         }
 
+        // Check for timestamp anomalies.
         if current_timestamp < self.last_timestamp {
-            debug!("Timestamp anomaly!! [{current_timestamp}, {last_timestamp}]",);
+            debug!("Timestamp anomaly detected!");
             self.buffer.add_timestamp_anomaly(self.last_timestamp, current_timestamp);
         }
 
+        // Update for next check.
         self.last_sequence = current_sequence;
         self.last_timestamp = current_timestamp;
 
-        // if max_bATCH_size is breached, flush
-        let buf = if self.buffer.buffer.len() >= self.config.batch_size {
+        // Flush buffer if batch size is reached.
+        if self.buffer.buffer.len() >= self.config.batch_size {
             self.metrics.add_batch();
-            Some(self.take_buffer())
-        } else {
-            None
-        };
-
-        Ok(buf)
+            return Ok(Some(self.take_buffer()));
+        }
+        Ok(None)
     }
 
-    // Returns buffer content, replacing with empty buffer in-place
+    /// Retrieves the buffer’s contents, replacing it with a new empty buffer.
     fn take_buffer(&mut self) -> Buffer<T> {
         let name = self.name.clone();
         let config = self.config.clone();
-        trace!("Flushing stream name: {name}, topic: {}", config.topic);
+        trace!("Flushing stream buffer for topic: {}", config.topic);
 
-        mem::replace(&mut self.buffer, Buffer::new(name, config))
+        std::mem::replace(&mut self.buffer, Buffer::new(name, config))
     }
 
-    /// Triggers flush and async channel send if not empty
+    /// Forces a flush if the buffer is not empty.
     pub async fn flush(&mut self) -> Result<(), Error> {
         if !self.is_empty() {
             let buf = self.take_buffer();
             self.tx.send_async(Box::new(buf)).await?;
         }
-
         Ok(())
     }
 
-    /// Returns number of elements in Stream buffer
+    /// Returns the current number of elements in the buffer.
     pub fn len(&self) -> usize {
         self.buffer.buffer.len()
     }
 
-    /// Check if Stream buffer is empty
+    /// Checks if the buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Fill buffer with data and trigger async channel send on breaching max_batch_size.
-    /// Returns [`StreamStatus`].
+    /// Adds data to the buffer and flushes if the maximum batch size is exceeded.
     pub async fn fill(&mut self, data: T) -> Result<StreamStatus, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
             return Ok(StreamStatus::Flushed);
         }
 
+        // Status when buffer is not full.
         let status = match self.len() {
             1 => StreamStatus::Init(self.config.flush_period),
             len => StreamStatus::Partial(len),
@@ -150,10 +161,7 @@ where
     }
 }
 
-/// Buffer is an abstraction of a collection that serializer receives.
-/// It also contains meta data to understand the type of data
-/// e.g stream to mqtt topic mapping
-/// Buffer doesn't put any restriction on type of `T`
+/// `Buffer` collects data points and detects any anomalies in sequence or timestamp.
 #[derive(Debug)]
 pub struct Buffer<T> {
     pub stream_name: Arc<String>,
@@ -164,6 +172,7 @@ pub struct Buffer<T> {
 }
 
 impl<T> Buffer<T> {
+    /// Creates a new buffer with specified stream name and configuration.
     pub fn new(stream_name: Arc<String>, stream_config: Arc<StreamConfig>) -> Buffer<T> {
         Buffer {
             buffer: Vec::with_capacity(stream_config.batch_size),
@@ -174,32 +183,20 @@ impl<T> Buffer<T> {
         }
     }
 
+    /// Logs a sequence anomaly.
     pub fn add_sequence_anomaly(&mut self, last: u32, current: u32) {
         self.anomaly_count += 1;
-        if self.anomalies.len() >= 100 {
-            return;
+        if self.anomalies.len() < 100 {
+            self.anomalies.push_str(&format!("{}.sequence: {last}, {current}", self.stream_name));
         }
-
-        let error = format!("{}.sequence: {last}, {current}", self.stream_name);
-        self.anomalies.push_str(&error)
     }
 
+    /// Logs a timestamp anomaly.
     pub fn add_timestamp_anomaly(&mut self, last: u64, current: u64) {
         self.anomaly_count += 1;
-        if self.anomalies.len() >= 100 {
-            return;
+        if self.anomalies.len() < 100 {
+            self.anomalies.push_str(&format!("timestamp: {last}, {current}"));
         }
-
-        let error = format!("timestamp: {last}, {current}");
-        self.anomalies.push_str(&error)
-    }
-
-    pub fn anomalies(&self) -> Option<(String, usize)> {
-        if self.anomalies.is_empty() {
-            return None;
-        }
-
-        Some((self.anomalies.clone(), self.anomaly_count))
     }
 }
 
@@ -221,7 +218,11 @@ where
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
+        if self.anomalies.is_empty() {
+            return None;
+        }
+
+        Some((self.anomalies.clone(), self.anomaly_count))
     }
 
     fn len(&self) -> usize {
