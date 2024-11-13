@@ -298,3 +298,6 @@ impl Persistence {
         }
     }
 }
+
+#[cfg(test)]
+mod test;
