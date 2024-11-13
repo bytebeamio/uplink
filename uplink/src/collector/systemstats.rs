@@ -1,5 +1,4 @@
 use log::error;
-use serde::Serialize;
 use serde_json::json;
 use sysinfo::{
     ComponentExt, CpuExt, DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, SystemExt,
@@ -24,7 +23,7 @@ pub enum Error {
 
 type Pid = u32;
 
-#[derive(Debug, Default, Serialize, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct System {
     sequence: u32,
     timestamp: u64,
@@ -112,14 +111,13 @@ impl SystemStats {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Clone)]
 struct Network {
     sequence: u32,
     timestamp: u64,
     name: String,
     incoming_data_rate: f64,
     outgoing_data_rate: f64,
-    #[serde(skip_serializing)]
     timer: Instant,
 }
 
@@ -184,7 +182,7 @@ impl NetworkStats {
     }
 }
 
-#[derive(Debug, Serialize, Default, Clone)]
+#[derive(Debug, Default, Clone)]
 struct Disk {
     sequence: u32,
     timestamp: u64,
@@ -243,7 +241,7 @@ impl DiskStats {
     }
 }
 
-#[derive(Debug, Default, Serialize, Clone)]
+#[derive(Debug, Default, Clone)]
 struct Processor {
     sequence: u32,
     timestamp: u64,
@@ -298,7 +296,7 @@ impl ProcessorStats {
     }
 }
 
-#[derive(Debug, Default, Serialize, Clone)]
+#[derive(Debug, Default, Clone)]
 struct Component {
     sequence: u32,
     timestamp: u64,
@@ -350,7 +348,7 @@ impl ComponentStats {
     }
 }
 
-#[derive(Debug, Default, Serialize, Clone)]
+#[derive(Debug, Default, Clone)]
 struct Process {
     sequence: u32,
     timestamp: u64,
