@@ -1,51 +1,66 @@
-//! Contains the handler and definitions necessary to download files such as OTA updates, as notified by a download file [`Action`]
+//! Manages file downloads(such as OTA updates) triggered by download actions.
 //!
-//! The thread running [`Bridge`] forwards the appropriate `Action`s to the [`FileDownloader`].
+//! The [`Bridge`] component sends specific download-related actions to the [`FileDownloader`], which manages the download process, including
+//! handling cancellations and resuming partially completed downloads from previous sessions.
 //!
-//! Download file `Action`s contain JSON formatted [`payload`] which can be deserialized into an object of type [`DownloadFile`].
-//! This object contains information such as the `url` where the download file is accessible from, the `file_name` or `version` number
-//! associated with the downloaded file and a field which must be updated with the location in file-system where the file is stored into.
+//! ## Download Actions and File Information
+//! Download actions contain JSON-formatted [`payload`] data, which can be deserialized into a [`DownloadFile`] struct. This struct provides
+//! necessary details, including the `url` to download the file from, along with the `file_name`, `version`, and fields for tracking the final
+//! file location on the filesystem. During download, the `FileDownloader` updates this information to include the filesystem path where the
+//! downloaded file is saved.
 //!
-//! The `FileDownloader` also updates the state of a downloading `Action` using periodic [`ActionResponse`]s containing
-//! progress information. On completion of a download, the received `Action`'s `payload` is updated to contain information
-//! about where the file was downloaded into, within the file-system. This action is then sent back to bridge as part of
-//! the final "Completed" response through use of the [`done_response`].
+//! ## Single Download Constraint and Cancellations
+//! The `FileDownloader` runs only one download at a time, ensuring focused resource management. However, it can respond to a cancel action
+//! at any point during a download, stopping the current download gracefully and sending a cancelation response back to the bridge. This cancel
+//! action can be initiated through a dedicated cancel request with the associated `action_id`.
 //!
-//! As illustrated in the following diagram, the [`Bridge`] forwards download actions to the [`FileDownloader`] where it is downloaded and
-//! intermediate [`ActionResponse`]s are sent back to bridge as progress notifications. On completion of a download, the action response
-//! also includes a modified action with the [`done_response`], where the action received by the downloader is suitably modified to include
-//! information such as the path into which the file was downloaded. As seen in the diagram, two actions with [`action_id`] `"1"` and `"3"` are
-//! forwarded from bridge. In the case of `action_id = 1` we can see that 3 action responses containing progress information are sent back
-//! to bridge and on completion of download, action response containing the done_response is also sent to the bridge from where it might be
-//! forwarded with help of [`action_redirections`]. The same is repeated in the case of `action_id = 3`.
+//! ## Persistence and Resuming Partial Downloads
+//! If a download is partially completed before an instance restart, the `FileDownloader` stores its state in a file named `current_download`.
+//! On a restart, it loads this file, resuming the download from where it left off. This ensures continuity and avoids repeated downloads for
+//! large files across sessions. Similarly, downloads that failed to complete because of a non HTTP-status error response are retried until cancelled.
+//!
+//! ## Progress Updates and Completion Handling
+//! While downloading, `FileDownloader` sends periodic [`ActionResponse`] updates to the bridge, reporting progress. Once the download completes,
+//! it sends a final `ActionResponse` that includes a modified action (in the [`done_response`] field), where the `DownloadFile` struct is updated
+//! to include the download path. The bridge may then forward this completion response, potentially using [`action_redirections`] for further processing.
+//!
+//! ## Overview of the Download Process
+//! The diagram below illustrates the process. Actions with unique `action_id`s, such as `"1"` and `"3"`, are processed by the `FileDownloader`
+//! sequentially. For each action, progress updates are sent as `ActionResponse`s. When a download completes, a `done_response` is sent back with
+//! the updated action. If a cancel-action arrives (e.g., `action_id = 3`), it stops the download and sends a cancelation response.
 //!
 //! ```text
-//!                                 ┌──────────────┐
-//!                                 │FileDownloader│
-//!                                 └──────┬───────┘
-//!                                        │
-//!                          .recv_async() │
-//!     ┌──────┐    ┌────────────────┐  1  │
-//!     │Bridge├────►Receiver<Action>├────►├───────┐
-//!     └───▲──┘    └───────┬────────┘     │       │
-//!         │               │              ├───────┤
-//!         │               │              │       | progress = x%
-//!         │               │              ├───────┤
-//!         │               │              ├-------┼-----┐
-//!         │               │              │   1   │     '
-//!         │               │     3        │       │     '
-//!         │               └─────────────►├───────┤     ' done_response = Some(action)
-//!         │                              │       │     '
-//!         │                              ├───────┘     '
-//!         └───────ActionResponse─────────┴-------------┘
-//!                                                3
+//!                                     ┌──────────────┐
+//!                                     │FileDownloader│
+//!                                     └──────┬───────┘
+//!                                            │
+//!                              .recv_async() │
+//!   ┌────────────┐    ┌────────────────┐  1  │ download_action
+//!   │ActionBridge├────►Receiver<Action>├────►├───────┐
+//!   └─────▲──────┘    └────┬───┬───────┘     │       │
+//!         │                │   │             ├───────┤
+//!         │                │   │             │       │ progress = x%
+//!         │                │   │             ├───────┤
+//!         │                │   │             ├-------┼ done_response = Some(action)
+//!         │                │   │             │   1   │
+//!         │                │   │      2      │       │
+//!         │                │   └────────────►├───────┤
+//!         │                │                 │       │
+//!         │                │       3         │       │
+//!         │                └────────────────►│       │
+//!         │                  cancel_action   │       │
+//!         │                                  ├───────┘
+//!         └───────ActionResponse─────────────┘ cancellation response
+//!                                                2
 //! ```
 //!
 //! [`Bridge`]: crate::Bridge
-//! [`action_id`]: Action#structfield.action_id
-//! [`payload`]: Action#structfield.payload
+//! [`DownloadFile`]: crate::DownloadFile
+//! [`Action`]: crate::Action
+//! [`ActionResponse`]: crate::ActionResponse
 //! [`done_response`]: ActionResponse#structfield.done_response
 //! [`action_redirections`]: Config#structfield.action_redirections
+//! [`current_download`]: `current_download` file in the persistence path
 
 use bytes::BytesMut;
 use flume::{Receiver, Sender};
@@ -214,6 +229,8 @@ impl FileDownloader {
             // Wait till download completes
             o = self.continuous_retry(state) => o?,
             // Cancel download on receiving cancel action, e.g. on action timeout
+            // NOTE: ensure that bridge doesn't send any other action but a `cancel_action`
+            //       when another is in execution.
             Ok(action) = self.actions_rx.recv_async() => {
                 let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
 
