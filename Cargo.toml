@@ -28,6 +28,8 @@ strip = false
 panic = "unwind"
 
 [profile.release]
-opt-level = "s"
+opt-level = "z"
+lto = true
+codegen-units = 1
 strip = true
 panic = "unwind"
