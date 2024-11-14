@@ -217,7 +217,7 @@ where
     }
 
     fn serialize(&self) -> Vec<u8> {
-        /// This unwrap is safe because our data meets the requirements of `to_vec`
+        // This unwrap is safe because our data meets the requirements of `to_vec`
         serde_json::to_vec(&self.buffer).unwrap()
     }
 

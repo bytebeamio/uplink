@@ -207,16 +207,17 @@ impl<C: MqttClient> Serializer<C> {
 
     fn create_storage_for_stream(&self, config: &StreamConfig) -> Box<dyn storage::Storage> {
         if config.persistence.max_file_count == 0 {
-            Box::new(storage::InMemoryStorage::new(config.name.as_str(), config.persistence.max_file_size))
+            Box::new(storage::InMemoryStorage::new(config.name.as_str(), config.persistence.max_file_size, self.config.mqtt.max_packet_size))
         } else {
             match storage::DirectoryStorage::new(
                 self.config.persistence_path.join(config.name.as_str()),
                 config.persistence.max_file_size, config.persistence.max_file_count,
+                self.config.mqtt.max_packet_size,
             ) {
                 Ok(s) => Box::new(s),
                 Err(e) => {
                     log::error!("Failed to initialize disk backed storage for {} : {e}, falling back to in memory persistence", config.name);
-                    Box::new(storage::InMemoryStorage::new(config.name.as_str(), config.persistence.max_file_size))
+                    Box::new(storage::InMemoryStorage::new(config.name.as_str(), config.persistence.max_file_size, self.config.mqtt.max_packet_size))
                 }
             }
         }
@@ -293,7 +294,7 @@ impl<C: MqttClient> Serializer<C> {
         metrics.lost_segments = 0;
         metrics.read_memory = 0;
         metrics.write_memory = 0;
-        /// calculate parameters derived from storage
+        // calculate parameters derived from storage
         for storage in self.sorted_storages.values() {
             let sm = storage.metrics();
             metrics.disk_files += sm.files_count as usize;
@@ -559,8 +560,8 @@ async fn send_publish<C: MqttClient>(
 
 fn lz4_compress(payload: &mut Vec<u8>) {
     let mut compressor = FrameEncoder::new(vec![]);
-    /// Below functions fail in case of IO errors
-    /// so these unwraps are safe because we are doing in memory compression
+    // Below functions fail in case of IO errors
+    // so these unwraps are safe because we are doing in memory compression
     compressor.write_all(payload).unwrap();
     *payload = compressor.finish().unwrap();
 }

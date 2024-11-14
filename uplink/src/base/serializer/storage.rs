@@ -49,16 +49,18 @@ pub struct InMemoryStorage {
     read_buffer: BytesMut,
     write_buffer: BytesMut,
     buf_size: usize,
+    max_packet_size: usize,
     lost_files: u32,
 }
 
 impl InMemoryStorage {
-    pub fn new<S: Into<String>>(name: S, buf_size: usize) -> Self {
+    pub fn new<S: Into<String>>(name: S, buf_size: usize, max_packet_size: usize) -> Self {
         InMemoryStorage {
             name: name.into(),
             read_buffer: BytesMut::with_capacity(buf_size + buf_size / 2),
             write_buffer: BytesMut::with_capacity(buf_size + buf_size / 2),
             buf_size,
+            max_packet_size,
             lost_files: 0,
         }
     }
@@ -78,7 +80,7 @@ impl Storage for InMemoryStorage {
                 return self.read_packet();
             }
         }
-        match Packet::read(&mut self.read_buffer, self.buf_size) {
+        match Packet::read(&mut self.read_buffer, self.max_packet_size) {
             Ok(Packet::Publish(packet)) => {
                 return Ok(packet);
             }
@@ -94,7 +96,7 @@ impl Storage for InMemoryStorage {
 
     fn write_packet(&mut self, packet: Publish) -> Result<(), StorageWriteError> {
         // TODO: this is off by a few bytes
-        if packet.size() > self.buf_size {
+        if packet.size() >= self.buf_size {
             return Err(StorageWriteError::InvalidPacket(rumqttc::Error::OutgoingPacketTooLarge { pkt_size: packet.size(), max: self.buf_size }));
         } else {
             if self.write_buffer.len() + packet.size() > self.buf_size {
@@ -130,7 +132,7 @@ impl Storage for InMemoryStorage {
             write_buffer_size: self.write_buffer.len() as _,
             bytes_on_disk: 0,
             files_count: 0,
-            /// lost files for in memory storage is the number of times non-empty read buffer had to be cleared
+            // lost files for in memory storage is the number of times non-empty read buffer had to be cleared
             lost_files: self.lost_files,
         };
         result
@@ -146,12 +148,13 @@ pub struct DirectoryStorage {
     read_buffer: BytesMut,
     max_file_size: usize,
     max_file_count: usize,
+    max_packet_size: usize,
     bytes_on_disk: u64,
     lost_files: u32,
 }
 
 impl DirectoryStorage {
-    pub fn new(dir: PathBuf, max_file_size: usize, max_file_count: usize) -> anyhow::Result<Self> {
+    pub fn new(dir: PathBuf, max_file_size: usize, max_file_count: usize, max_packet_size: usize) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&dir)
             .context(format!("couldn't create persistence directory: {dir:?}"))?;
         let mut result = Self {
@@ -161,6 +164,7 @@ impl DirectoryStorage {
             write_buffer: BytesMut::with_capacity(max_file_size + max_file_size / 2),
             max_file_size,
             max_file_count,
+            max_packet_size,
             bytes_on_disk: 0,
             lost_files: 0,
         };
@@ -253,7 +257,7 @@ impl Storage for DirectoryStorage {
                 }
             }
         }
-        match Packet::read(&mut self.read_buffer, self.max_file_size) {
+        match Packet::read(&mut self.read_buffer, self.max_packet_size) {
             Ok(Packet::Publish(packet)) => {
                 Ok(packet)
             }
@@ -276,7 +280,7 @@ impl Storage for DirectoryStorage {
     /// }
     /// append_to_write_buffer();
     fn write_packet(&mut self, packet: Publish) -> Result<(), StorageWriteError> {
-        if self.write_buffer.len() > self.max_file_size {
+        if self.write_buffer.len() >= self.max_file_size {
             if self.files_queue.len() >= self.max_file_count {
                 self.read_buffer.clear();
                 self.lost_files += 1;
@@ -295,10 +299,11 @@ impl Storage for DirectoryStorage {
             }
             let next_id = self.files_queue.iter().last().map(|id| id + 1).unwrap_or(1);
             let pf = PersistenceFile::new(self.dir.as_path(), format!("backup@{next_id}"));
+            log::info!("Flushing data to disk ({}):({})", self.name(), pf.file_name);
             match pf.write(&mut self.write_buffer) {
                 Ok(_) => {
-                    log::info!("Flushing data to disk ({}):({})", self.name(), pf.file_name);
-                    self.bytes_on_disk += self.write_buffer.len() as u64;
+                    self.bytes_on_disk += self.write_buffer.len() as u64 + 8;
+                    self.write_buffer.clear();
                     self.files_queue.push_back(next_id);
                 }
                 Err(e) => {
@@ -342,6 +347,7 @@ impl Storage for DirectoryStorage {
             read_buffer: self.read_buffer.clone(),
             write_buffer: self.write_buffer.clone(),
             buf_size: self.max_file_size,
+            max_packet_size: self.max_packet_size,
             lost_files: self.lost_files,
         })
     }
@@ -395,7 +401,6 @@ impl Storage for LiveDataPrioritizingStorage {
     }
 
     fn flush(&mut self) -> Result<(), StorageFlushError> {
-        /// This is fine because backend can handle data coming in out of order
         if let Some(packet) = self.latest_data.take() {
             if let Err(e) = self.inner.write_packet(packet) {
                 log::error!("(Storage::{}) failed to save live data when flushing: {e:?}", self.name());
