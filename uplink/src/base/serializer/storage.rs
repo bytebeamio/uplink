@@ -333,7 +333,7 @@ impl Storage for DirectoryStorage {
             }
         }
         if ! self.write_buffer.is_empty() {
-            let write_file_id = self.files_queue.iter().next().cloned().unwrap_or(1) + 1;
+            let write_file_id = self.files_queue.iter().last().cloned().unwrap_or(1) + 1;
             if let Err(e) = PersistenceFile::new(self.dir.as_path(), format!("backup@{write_file_id}"))
                 .write(&mut self.write_buffer) {
                 result = Err(StorageFlushError::FileSystemError(e));
