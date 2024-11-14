@@ -95,23 +95,21 @@ impl Storage for InMemoryStorage {
     }
 
     fn write_packet(&mut self, packet: Publish) -> Result<(), StorageWriteError> {
-        // TODO: this is off by a few bytes
-        if packet.size() >= self.buf_size {
-            return Err(StorageWriteError::InvalidPacket(rumqttc::Error::OutgoingPacketTooLarge { pkt_size: packet.size(), max: self.buf_size }));
-        } else {
-            if self.write_buffer.len() + packet.size() > self.buf_size {
-                log::info!("Storage::write_packet({}) Full! Rotating in memory buffers.", self.name);
-                std::mem::swap(&mut self.read_buffer, &mut self.write_buffer);
-                if !self.write_buffer.is_empty() {
-                    self.lost_files += 1;
-                }
-                self.write_buffer.clear();
+        if packet.size() >= self.max_packet_size {
+            return Err(StorageWriteError::InvalidPacket(rumqttc::Error::OutgoingPacketTooLarge { pkt_size: packet.size(), max: self.max_packet_size }));
+        }
+        if self.write_buffer.len() + packet.size() > self.buf_size {
+            log::info!("Storage::write_packet({}) Full! Rotating in memory buffers.", self.name);
+            std::mem::swap(&mut self.read_buffer, &mut self.write_buffer);
+            if !self.write_buffer.is_empty() {
+                self.lost_files += 1;
             }
-            match packet.write(&mut self.write_buffer) {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    Err(StorageWriteError::InvalidPacket(e))
-                }
+            self.write_buffer.clear();
+        }
+        match packet.write(&mut self.write_buffer) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                Err(StorageWriteError::InvalidPacket(e))
             }
         }
     }
@@ -280,6 +278,9 @@ impl Storage for DirectoryStorage {
     /// }
     /// append_to_write_buffer();
     fn write_packet(&mut self, packet: Publish) -> Result<(), StorageWriteError> {
+        if packet.size() >= self.max_packet_size {
+            return Err(StorageWriteError::InvalidPacket(rumqttc::Error::OutgoingPacketTooLarge { pkt_size: packet.size(), max: self.max_packet_size }));
+        }
         if self.write_buffer.len() >= self.max_file_size {
             if self.files_queue.len() >= self.max_file_count {
                 self.read_buffer.clear();
