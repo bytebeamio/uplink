@@ -27,6 +27,7 @@ impl MqttClient for MockClient {
     {
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
+        publish.pkid = 1;
         let publish_request = Request::Publish(publish.clone());
         self.net_tx.send_async(publish_request).await.map_err(|_e| MqttError::Send(publish))?;
         Ok(())

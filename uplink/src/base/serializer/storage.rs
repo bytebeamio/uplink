@@ -10,7 +10,7 @@ use rumqttc::{Packet, Publish};
 /// Data coming from system is written to it using `write_packet`
 /// `read_packet` is used to pull data from it and send to the mqtt module
 /// There are three implementations, in memory, disk backed, and a wrapper for prioritizing live data
-pub trait Storage {
+pub trait Storage: Send {
     fn name(&self) -> &str;
 
     /// Read a packet from the queue, returning an error if it's empty
