@@ -612,22 +612,7 @@ pub mod tests {
     use tokio::{spawn, time::sleep};
 
     use crate::{config::MqttConfig, mock::{MockClient, MockCollector}, spawn_named_thread};
-    use crate::base::bridge::stream::Buffer;
     use super::*;
-
-    fn read_from_storage<T>(storage: &mut T, max_packet_size: usize) -> Publish {
-        // if storage.reload_on_eof().unwrap() {
-        //     panic!("No publishes found in storage");
-        // }
-        //
-        // match Packet::read(storage.reader(), max_packet_size) {
-        //     Ok(Packet::Publish(publish)) => return publish,
-        //     v => {
-        //         panic!("Failed to read publish from storage. read: {:?}", v);
-        //     }
-        // }
-        Publish::new("my/topic", QoS::AtLeastOnce, "test payload")
-    }
 
     pub fn default_config() -> Config {
         Config {
@@ -649,42 +634,42 @@ pub mod tests {
         (Serializer::new(config, String::new(), data_rx, client, metrics_tx, ctrl_rx), data_tx, net_rx)
     }
 
-    // #[tokio::test]
-    // // Force runs serializer in normal mode, without persistence
-    // async fn normal_to_slow() {
-    //     let config = default_config();
-    //     let (mut serializer, data_tx, net_rx) = defaults(Arc::new(config));
-    //
-    //     // Slow Network, takes packets only once in 10s
-    //     spawn(async move {
-    //         loop {
-    //             sleep(Duration::from_secs(10)).await;
-    //             net_rx.recv_async().await.unwrap();
-    //         }
-    //     });
-    //
-    //     let (stream_name, stream_config) = (
-    //         "hello",
-    //         StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
-    //     );
-    //     let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
-    //     spawn(async move {
-    //         for i in 1..3 {
-    //             collector.send(i).await.unwrap();
-    //         }
-    //     });
-    //
-    //     match serializer.normal().await {
-    //         Status::SlowEventloop(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }, _) => {
-    //             assert_eq!(topic, "hello/world");
-    //             let recvd: Value = serde_json::from_slice(&payload).unwrap();
-    //             let obj = &recvd.as_array().unwrap()[0];
-    //             assert_eq!(obj.get("msg"), Some(&Value::from("Hello, World!")));
-    //         }
-    //         s => panic!("Unexpected status: {:?}", s),
-    //     }
-    // }
-    //
+    #[tokio::test]
+    // Force runs serializer in normal mode, without persistence
+    async fn normal_to_slow() {
+        let config = default_config();
+        let (mut serializer, data_tx, net_rx) = defaults(Arc::new(config));
+
+        // Slow Network, takes packets only once in 10s
+        spawn(async move {
+            loop {
+                sleep(Duration::from_secs(10)).await;
+                net_rx.recv_async().await.unwrap();
+            }
+        });
+
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
+        spawn(async move {
+            for i in 1..3 {
+                collector.send(i).await.unwrap();
+            }
+        });
+
+        match serializer.normal().await {
+            Status::SlowEventloop(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }, _) => {
+                assert_eq!(topic, "hello/world");
+                let recvd: Value = serde_json::from_slice(&payload).unwrap();
+                let obj = &recvd.as_array().unwrap()[0];
+                assert_eq!(obj.get("msg"), Some(&Value::from("Hello, World!")));
+            }
+            s => panic!("Unexpected status: {:?}", s),
+        }
+    }
+
     // #[test]
     // // Force write publish to storage and verify by reading back
     // fn read_write_storage() {
@@ -707,159 +692,157 @@ pub mod tests {
     //     publish.pkid = 1;
     //     assert_eq!(publish, stored_publish);
     // }
-    //
-    // #[tokio::test]
-    // // Force runs serializer in disk mode, with network returning
-    // async fn disk_to_catchup() {
-    //     let config = Arc::new(default_config());
-    //
-    //     let (mut serializer, data_tx, net_rx) = defaults(config);
-    //
-    //     // Slow Network, takes packets only once in 10s
-    //     spawn(async move {
-    //         loop {
-    //             sleep(Duration::from_secs(5)).await;
-    //             net_rx.recv_async().await.unwrap();
-    //         }
-    //     });
-    //
-    //     let (stream_name, stream_config) = (
-    //         "hello",
-    //         StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
-    //     );
-    //     let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
-    //     // Faster collector, send data every 5s
-    //     spawn(async move {
-    //         for i in 1..10 {
-    //             collector.send(i).await.unwrap();
-    //             sleep(Duration::from_secs(3)).await;
-    //         }
-    //     });
-    //
-    //     let publish = Publish::new(
-    //         "hello/world",
-    //         QoS::AtLeastOnce,
-    //         "[{{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}}]".as_bytes(),
-    //     );
-    //     let status = serializer.slow(publish, Arc::new(Default::default())).await.unwrap();
-    //
-    //     assert_eq!(status, Status::EventLoopReady);
-    // }
-    //
-    // #[tokio::test]
-    // // Force runs serializer in disk mode, with crashed network
-    // async fn disk_to_crash() {
-    //     let config = Arc::new(default_config());
-    //     let (mut serializer, data_tx, _) = defaults(config);
-    //
-    //     let (stream_name, stream_config) = (
-    //         "hello",
-    //         StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
-    //     );
-    //     let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
-    //     // Faster collector, send data every 5s
-    //     spawn(async move {
-    //         for i in 1..10 {
-    //             collector.send(i).await.unwrap();
-    //             sleep(Duration::from_secs(3)).await;
-    //         }
-    //     });
-    //
-    //     let publish = Publish::new(
-    //         "hello/world",
-    //         QoS::AtLeastOnce,
-    //         "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
-    //     );
-    //
-    //     match serializer
-    //         .slow(
-    //             publish,
-    //             Arc::new(StreamConfig { topic: "hello/world".to_string(), ..Default::default() }),
-    //         )
-    //         .await
-    //         .unwrap()
-    //     {
-    //         Status::EventLoopCrash(Publish { qos: QoS::AtLeastOnce, topic, payload, .. }, _) => {
-    //             assert_eq!(topic, "hello/world");
-    //             let recvd = std::str::from_utf8(&payload).unwrap();
-    //             assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
-    //         }
-    //         s => panic!("Unexpected status: {:?}", s),
-    //     }
-    // }
-    //
-    // #[tokio::test]
-    // // Force runs serializer in catchup mode, with empty persistence
-    // async fn catchup_to_normal_empty_persistence() {
-    //     let config = Arc::new(default_config());
-    //
-    //     let (mut serializer, _, _) = defaults(config);
-    //
-    //     let status = serializer.catchup().await.unwrap();
-    //     assert_eq!(status, Status::Normal);
-    // }
-    //
-    // #[tokio::test]
-    // // Force runs serializer in catchup mode, with data already in persistence
-    // async fn catchup_to_normal_with_persistence() {
-    //     let config = Arc::new(default_config());
-    //
-    //     let (mut serializer, data_tx, net_rx) = defaults(config);
-    //
-    //     let mut storage = serializer
-    //         .storage_handler
-    //         .map
-    //         .entry(Arc::new(Default::default()))
-    //         .or_insert(Storage::new("hello/world", 1024));
-    //
-    //     let (stream_name, stream_config) = (
-    //         "hello",
-    //         StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
-    //     );
-    //     let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
-    //     // Run a collector practically once
-    //     spawn(async move {
-    //         for i in 2..6 {
-    //             collector.send(i).await.unwrap();
-    //             sleep(Duration::from_secs(100)).await;
-    //         }
-    //     });
-    //
-    //     // Decent network that lets collector push data once into storage
-    //     spawn(async move {
-    //         sleep(Duration::from_secs(5)).await;
-    //         for i in 1..6 {
-    //             match net_rx.recv_async().await.unwrap() {
-    //                 Request::Publish(Publish { payload, .. }) => {
-    //                     let recvd = String::from_utf8(payload.to_vec()).unwrap();
-    //                     let expected = format!(
-    //                         "[{{\"sequence\":{i},\"timestamp\":0,\"msg\":\"Hello, World!\"}}]",
-    //                     );
-    //                     assert_eq!(recvd, expected)
-    //                 }
-    //                 r => unreachable!("Unexpected request: {:?}", r),
-    //             }
-    //         }
-    //     });
-    //
-    //     // Force write a publish into storage
-    //     let publish = Publish::new(
-    //         "hello/world",
-    //         QoS::AtLeastOnce,
-    //         "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
-    //     );
-    //     write_to_storage(publish.clone(), &mut storage).unwrap();
-    //
-    //     let status = serializer.catchup().await.unwrap();
-    //     assert_eq!(status, Status::Normal);
-    // }
+
+    #[tokio::test]
+    // Force runs serializer in disk mode, with network returning
+    async fn disk_to_catchup() {
+        let config = Arc::new(default_config());
+
+        let (mut serializer, data_tx, net_rx) = defaults(config);
+
+        // Slow Network, takes packets only once in 10s
+        spawn(async move {
+            loop {
+                sleep(Duration::from_secs(5)).await;
+                net_rx.recv_async().await.unwrap();
+            }
+        });
+
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config, data_tx);
+        // Faster collector, send data every 5s
+        spawn(async move {
+            for i in 1..10 {
+                collector.send(i).await.unwrap();
+                sleep(Duration::from_secs(3)).await;
+            }
+        });
+
+        let publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}}]".as_bytes(),
+        );
+        let status = serializer.slow(publish, Arc::new(Default::default())).await;
+
+        assert_eq!(status, Status::EventLoopReady);
+    }
+
+    #[tokio::test]
+    // Force runs serializer in disk mode, with crashed network
+    async fn disk_to_crash() {
+        let config = Arc::new(default_config());
+        let (mut serializer, data_tx, _) = defaults(config);
+
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config.clone(), data_tx);
+        spawn(async move {
+            for i in 1..10 {
+                collector.send(i).await.unwrap();
+                sleep(Duration::from_secs(3)).await;
+            }
+        });
+
+        let publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+        );
+
+        match serializer
+            .slow(
+                publish,
+                Arc::new(StreamConfig { topic: "hello/world".to_string(), ..Default::default() }),
+            )
+            .await
+        {
+            Status::EventLoopCrash => {
+                let mut last_packet = None;
+                while let Some((publish, _)) = serializer.fetch_next_packet_from_storage() {
+                    last_packet = Some(publish);
+                }
+                assert!(last_packet.is_some());
+                let Publish { topic, payload, ..} = last_packet.unwrap();
+                assert_eq!(topic, "hello/world");
+                let recvd = std::str::from_utf8(&payload).unwrap();
+                assert_eq!(recvd, "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]");
+            }
+            s => panic!("Unexpected status: {:?}", s),
+        }
+    }
+
+    #[tokio::test]
+    // Force runs serializer in catchup mode, with empty persistence
+    async fn catchup_to_normal_empty_persistence() {
+        let config = Arc::new(default_config());
+
+        let (mut serializer, _, _) = defaults(config);
+
+        let status = serializer.catchup().await;
+        assert_eq!(status, Status::Normal);
+    }
+
+    #[tokio::test]
+    // Force runs serializer in catchup mode, with data already in persistence
+    async fn catchup_to_normal_with_persistence() {
+        let config = Arc::new(default_config());
+
+        let (mut serializer, data_tx, net_rx) = defaults(config);
+
+        let (stream_name, stream_config) = (
+            "hello",
+            StreamConfig { topic: "hello/world".to_string(), batch_size: 1, ..Default::default() },
+        );
+        let mut collector = MockCollector::new(stream_name, stream_config.clone(), data_tx);
+        // Run a collector practically once
+        spawn(async move {
+            for i in 2..6 {
+                collector.send(i).await.unwrap();
+                sleep(Duration::from_secs(100)).await;
+            }
+        });
+
+        // Decent network that lets collector push data once into storage
+        spawn(async move {
+            sleep(Duration::from_secs(5)).await;
+            for i in 1..6 {
+                match net_rx.recv_async().await.unwrap() {
+                    Request::Publish(Publish { payload, .. }) => {
+                        let recvd = String::from_utf8(payload.to_vec()).unwrap();
+                        let expected = format!(
+                            "[{{\"sequence\":{i},\"timestamp\":0,\"msg\":\"Hello, World!\"}}]",
+                        );
+                        assert_eq!(recvd, expected)
+                    }
+                    r => unreachable!("Unexpected request: {:?}", r),
+                }
+            }
+        });
+
+        // Force write a publish into storage
+        let publish = Publish::new(
+            "hello/world",
+            QoS::AtLeastOnce,
+            "[{\"sequence\":1,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
+        );
+        serializer.write_publish_to_storage(Arc::new(stream_config), publish);
+
+        let status = serializer.catchup().await;
+        assert_eq!(status, Status::Normal);
+    }
 
     #[tokio::test]
     // Force runs serializer in catchup mode, with persistence and crashed network
     async fn catchup_to_crash_with_persistence() {
         let config = Arc::new(default_config());
 
-        let (mut serializer, data_tx, _) = defaults(config);
+        let (mut serializer, _data_tx, _) = defaults(config);
         let sk = Arc::new(StreamConfig {
             topic: "test/topic".to_string(),
             ..Default::default()

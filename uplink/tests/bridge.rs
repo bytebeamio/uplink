@@ -46,7 +46,7 @@ struct Responses {
 impl Responses {
     fn next(&mut self) -> ActionResponse {
         if self.responses.is_empty() {
-            let status = self.rx.recv().unwrap().serialize().unwrap();
+            let status = self.rx.recv().unwrap().serialize();
             self.responses = serde_json::from_slice(&status).unwrap();
         }
 
