@@ -1,6 +1,9 @@
 use std::collections::btree_map::IterMut;
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Debug;
+use std::thread::JoinHandle;
+use flume::Sender;
+use tracing::Instrument;
 
 /// Map with a maximum size
 ///
@@ -61,16 +64,26 @@ impl<'a, K: Ord, V> BTreeCursorMut<'a, K, V> {
     }
 }
 
-// Spawn a task in a new thread
-// The task will be given a Receiver<()>
-// It should perform cleanup and shutdown when data is sent on that receiver
-// Calling the closure returned by this function will send shutdown notification to the task and
-// block until the task is finished
-// pub fn spawn_task(task: fn(flume::Receiver<()>)) -> Box<dyn Fn()> {
-//     let (ctrl_tx, ctrl_rx) = flume::bounded::<()>(1);
-//     let thread = std::thread::spawn(move || task(ctrl_rx));
-//     Box::new(move || {
-//         let _ = ctrl_tx.send(());
-//         let _ = thread.join();
-//     })
-// }
+pub struct AsyncTaskContext {
+    thread: JoinHandle<()>,
+    ctrl_tx: Sender<()>,
+}
+
+impl AsyncTaskContext {
+    pub fn join(self) {
+        let _ = self.ctrl_tx.send(());
+        let _ = self.thread.join();
+    }
+}
+
+/// Spawn a task in a new thread
+/// The task will be given a Receiver<()>
+/// The task must perform cleanup and shutdown when data is sent on that receiver
+/// Calling the closure returned by this function will send shutdown notification to the task and
+/// block until the task is finished
+pub fn spawn_task_with_type(task: fn(flume::Receiver<()>)) -> AsyncTaskContext {
+    let (ctrl_tx, ctrl_rx) = flume::bounded::<()>(1);
+    let thread = std::thread::spawn(move || task(ctrl_rx));
+    AsyncTaskContext { thread, ctrl_tx }
+}
+
