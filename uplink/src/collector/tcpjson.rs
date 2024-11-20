@@ -112,6 +112,8 @@ struct ClientConnection {
 
 impl ClientConnection {
     pub async fn start(&mut self, mut client: Framed<TcpStream, LinesCodec>) -> anyhow::Result<()> {
+        let (_dummy_action_tx, dummy_action_rx) = flume::bounded(0);
+        let actions_rx = self.actions_rx.as_ref().unwrap_or_else(|| &dummy_action_rx);
         loop {
             select! {
                 line = client.next() => {
@@ -120,7 +122,7 @@ impl ClientConnection {
                         error!("Error handling incoming line = {e}, app = {}", self.app_name);
                     }
                 }
-                action = self.actions_rx.as_ref().unwrap().recv_async(), if self.actions_rx.is_some() => {
+                action = actions_rx.recv_async() => {
                     let action = action?;
                     if action.name == "cancel_action" {
                         if !self.supports_cancellation {
