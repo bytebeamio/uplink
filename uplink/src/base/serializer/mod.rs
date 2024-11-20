@@ -567,7 +567,7 @@ fn lz4_compress(payload: &mut Vec<u8>) {
 }
 
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
-fn construct_publish(
+pub fn construct_publish(
     data: Box<dyn Package>,
     stream_metrics: &mut HashMap<String, StreamMetrics>,
 ) -> Publish {
@@ -607,11 +607,16 @@ fn construct_publish(
 
 #[cfg(test)]
 pub mod tests {
+    use std::path::PathBuf;
     use flume::bounded;
+    use serde::{Deserialize, Serialize};
     use serde_json::Value;
     use tokio::{spawn, time::sleep};
 
-    use crate::{config::MqttConfig, mock::{MockClient, MockCollector}, spawn_named_thread};
+    use crate::{config::MqttConfig, hashmap, mock::{MockClient, MockCollector}, spawn_named_thread};
+    use crate::base::bridge::Payload;
+    use crate::base::bridge::stream::Buffer;
+    use crate::config::Persistence;
     use super::*;
 
     pub fn default_config() -> Config {
@@ -670,28 +675,97 @@ pub mod tests {
         }
     }
 
-    // #[test]
-    // // Force write publish to storage and verify by reading back
-    // fn read_write_storage() {
-    //     let config = Arc::new(default_config());
-    //
-    //     let (serializer, _, _) = defaults(config);
-    //     let mut storage = Storage::new("hello/world", 1024);
-    //
-    //     let mut publish = Publish::new(
-    //         "hello/world",
-    //         QoS::AtLeastOnce,
-    //         "[{\"sequence\":2,\"timestamp\":0,\"msg\":\"Hello, World!\"}]".as_bytes(),
-    //     );
-    //     write_to_storage(publish.clone(), &mut storage).unwrap();
-    //
-    //     let stored_publish =
-    //         read_from_storage(&mut storage, serializer.config.mqtt.max_packet_size);
-    //
-    //     // Ensure publish.pkid is 1, as written to disk
-    //     publish.pkid = 1;
-    //     assert_eq!(publish, stored_publish);
-    // }
+    #[tokio::test]
+    async fn directory_storage_queue_behavior() {
+        stream_queue_behavior(10240000, 100, 100000).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_storage_queue_behavior() {
+        stream_queue_behavior(10000, 0, 150).await;
+    }
+
+    fn create_test_buffer(i: u32, sk: Arc<StreamConfig>) -> Buffer<Payload> {
+        let mut buffer = Buffer::<Payload>::new(Arc::new("test_stream".to_owned()), sk);
+        buffer.buffer.push(Payload {
+            stream: Default::default(),
+            sequence: i,
+            timestamp: 0,
+            payload: serde_json::json!({ "msg": "Hello, World!" }),
+        });
+        buffer
+    }
+
+    async fn stream_queue_behavior(max_file_size: usize, max_file_count: usize, number_of_samples: u32) {
+        let temp_dir = tempdir::TempDir::new("uplink").unwrap();
+        let sk = Arc::new(StreamConfig {
+            name: "test_stream".to_string(),
+            topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
+            batch_size: 2,
+            flush_period: Duration::from_secs(1),
+            compression: Compression::Disabled,
+            persistence: Persistence {
+                max_file_size,
+                max_file_count,
+            },
+            priority: 0,
+        });
+        let config = Config {
+            persistence_path: temp_dir.path().to_owned(),
+            streams: hashmap!(
+                "test_stream".to_owned() => sk.as_ref().clone()
+            ),
+            mqtt: MqttConfig {
+                max_packet_size: 25600,
+                max_inflight: 10,
+                keep_alive: 30,
+                network_timeout: 30,
+            },
+            ..Default::default()
+        };
+        let config = Arc::new(config);
+
+        let (serializer, data_tx, net_rx) = defaults(config);
+
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .thread_name("mock serializer")
+                .build()
+                .unwrap()
+                .block_on(serializer.start());
+        });
+
+        for i in 0..number_of_samples {
+            data_tx.send(Box::new(create_test_buffer(i, sk.clone()))).unwrap();
+        }
+
+        for i in 0..number_of_samples {
+            let result = net_rx.recv().unwrap();
+            match result {
+                Request::Publish(publish) => {
+                    // unsafe { dbg!(std::str::from_utf8_unchecked(publish.payload.as_ref())); }
+                    #[derive(Deserialize)]
+                    struct SerializedPayload {
+                        pub sequence: u32,
+                        pub timestamp: u64,
+                        #[serde(flatten)]
+                        pub payload: Value,
+                    }
+                    let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
+                    assert_eq!(payloads.len(), 1);
+                    let payload = payloads.get(0).unwrap();
+                    assert_eq!(payload.sequence, i);
+                    assert_eq!(payload.payload, serde_json::json!({ "msg": "Hello, World!" }));
+                }
+                _ => {
+                    log::error!("invalid packet at sequence {i}");
+                    assert!(false);
+                }
+            }
+        }
+    }
 
     #[tokio::test]
     // Force runs serializer in disk mode, with network returning

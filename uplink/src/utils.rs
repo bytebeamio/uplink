@@ -87,3 +87,13 @@ pub fn spawn_task_with_type(task: fn(flume::Receiver<()>)) -> AsyncTaskContext {
     AsyncTaskContext { thread, ctrl_tx }
 }
 
+#[macro_export]
+macro_rules! hashmap {
+    ($( $key:expr => $value:expr ),* $(,)?) => {{
+        let mut map = std::collections::HashMap::new();
+        $(
+            map.insert($key, $value);
+        )*
+        map
+    }};
+}

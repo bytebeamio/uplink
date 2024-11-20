@@ -214,8 +214,7 @@ impl DirectoryStorage {
 
 impl Storage for DirectoryStorage {
     fn name(&self) -> &str {
-        self.dir.file_name()
-            .and_then(|c| c.to_str())
+        self.dir.to_str()
             .unwrap_or("{}")
     }
 

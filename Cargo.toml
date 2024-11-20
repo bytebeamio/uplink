@@ -25,8 +25,8 @@ tokio-util = { version = "0.7", features = ["codec", "time"] }
 opt-level = 0
 # for faster compile, run cycle
 # remove if you want to use the debugger
-debug = 0
-strip = "debuginfo"
+#debug = 0
+#strip = "debuginfo"
 panic = "unwind"
 
 [profile.release]
