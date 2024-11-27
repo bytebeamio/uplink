@@ -25,6 +25,10 @@ struct ShadowPayload {
 async fn main() {
     let stream = std::env::args().nth(1).unwrap_or_else(|| "c2c_can".to_string());
     let port = std::env::args().nth(2).unwrap_or_else(|| "127.0.0.1:5050".to_string());
+    let rate = std::env::args().nth(3)
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(1000);
+    let interval = Duration::from_micros(1_000_000 / rate);
     let mut framed = Framed::new(TcpStream::connect(port).await.unwrap(), LinesCodec::new());
     let mut idx = 0;
     loop {
@@ -46,6 +50,6 @@ async fn main() {
         };
         let data_s = serde_json::to_string(&data).unwrap();
         framed.send(data_s).await.unwrap();
-        sleep(Duration::from_micros(500)).await;
+        sleep(interval).await;
     }
 }
