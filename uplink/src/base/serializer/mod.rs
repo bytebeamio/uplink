@@ -230,7 +230,7 @@ impl<C: MqttClient> Serializer<C> {
 
     /// Returns None if nothing is left (time to move to normal mode)
     /// Prioritize live data over saved data
-    /// Prioritize both live data and saved data based on stream priorities
+    /// Prioritize old live data over new live data, to ensure live data for all the streams is pushed
     fn fetch_next_packet_from_storage(&mut self) -> Option<(Publish, Arc<StreamConfig>)> {
         if let Some((sk, (_, live_data, _))) = self.sorted_storages.iter_mut()
             .filter(|(_, (_, live_data, _))| live_data.is_some())
