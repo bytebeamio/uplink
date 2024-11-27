@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Debug;
 use std::thread::JoinHandle;
 use flume::Sender;
-use tracing::Instrument;
 
 /// Map with a maximum size
 ///
@@ -46,7 +45,7 @@ impl<K: Eq + Clone + Debug, V> LimitedArrayMap<K, V> {
 }
 
 /// An iterator that allows user to access the current element
-/// under the cursor
+/// under the cursor of a BTreeMap
 pub struct BTreeCursorMut<'a, K, V> {
     iter: IterMut<'a, K, V>,
     pub current: Option<(&'a K, &'a mut V)>,

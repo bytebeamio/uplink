@@ -5,7 +5,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::time::Instant;
 use std::{sync::Arc, time::Duration};
-use bytes::Bytes;
 use flume::{Receiver, Sender};
 use lz4_flex::frame::FrameEncoder;
 use pretty_bytes::converter::convert;
@@ -168,7 +167,12 @@ pub struct Serializer<C: MqttClient> {
     /// Updated in `construct_publish` function
     /// Read and reset in `send_stream_metrics`
     stream_metrics: HashMap<String, StreamMetrics>,
-    sorted_storages: BTreeMap<Arc<StreamConfig>, (Box<dyn storage::Storage>, Option<Publish>)>,
+    /// a monotonically increasing counter
+    /// assigned to each packet placed in the live data slot
+    /// when fetching packets, we sort by this and return the oldest live data
+    /// if this isn't done, live data for a high frequency stream can block live data for other streams
+    live_data_counter: usize,
+    sorted_storages: BTreeMap<Arc<StreamConfig>, (Box<dyn storage::Storage>, Option<Publish>, usize)>,
     ctrl_rx: Receiver<()>,
 }
 
@@ -191,6 +195,7 @@ impl<C: MqttClient> Serializer<C> {
             metrics_tx,
             metrics: Metrics::new("catchup"),
             stream_metrics: Default::default(),
+            live_data_counter: 0,
             sorted_storages: BTreeMap::new(),
             ctrl_rx,
         };
@@ -199,9 +204,9 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     fn initialize_storages(&mut self) {
-        self.sorted_storages.insert(Arc::new(self.config.action_status.clone()), (self.create_storage_for_stream(&self.config.action_status), None));
+        self.sorted_storages.insert(Arc::new(self.config.action_status.clone()), (self.create_storage_for_stream(&self.config.action_status), None, 0));
         for stream_config in self.config.streams.values() {
-            self.sorted_storages.insert(Arc::new(stream_config.clone()), (self.create_storage_for_stream(&stream_config), None));
+            self.sorted_storages.insert(Arc::new(stream_config.clone()), (self.create_storage_for_stream(&stream_config), None, 0));
         }
     }
 
@@ -227,13 +232,13 @@ impl<C: MqttClient> Serializer<C> {
     /// Prioritize live data over saved data
     /// Prioritize both live data and saved data based on stream priorities
     fn fetch_next_packet_from_storage(&mut self) -> Option<(Publish, Arc<StreamConfig>)> {
-        for (sk, (_, last_value)) in self.sorted_storages.iter_mut() {
-            if let Some(publish) = last_value.take() {
-                return Some((publish, sk.clone()));
-            }
+        if let Some((sk, (_, live_data, _))) = self.sorted_storages.iter_mut()
+            .filter(|(_, (_, live_data, _))| live_data.is_some())
+            .min_by_key(|(_, (_, _, live_data_version))| *live_data_version) {
+            return Some((live_data.take().unwrap(), sk.clone()));
         }
         let mut cursor = BTreeCursorMut::new(&mut self.sorted_storages);
-        while let Some((sk, (storage, _))) = cursor.current.as_mut() {
+        while let Some((sk, (storage, _, _))) = cursor.current.as_mut() {
             match storage.read_packet() {
                 Ok(packet) => {
                     return Some((packet, sk.clone()));
@@ -258,28 +263,30 @@ impl<C: MqttClient> Serializer<C> {
 
     fn write_package_to_storage(&mut self, data: Box<dyn Package>) {
         let stream_config = data.stream_config();
-        let mut publish = construct_publish(data, &mut self.stream_metrics);
+        let publish = construct_publish(data, &mut self.stream_metrics);
         self.write_publish_to_storage(stream_config, publish);
     }
 
     fn write_publish_to_storage(&mut self, sk: Arc<StreamConfig>, mut publish: Publish) {
         publish.pkid = 1;
+        self.live_data_counter += 1;
         if ! self.sorted_storages.contains_key(&sk) {
-            self.sorted_storages.insert(sk.clone(), (self.create_storage_for_stream(&sk), None));
+            self.sorted_storages.insert(sk.clone(), (self.create_storage_for_stream(&sk), None, 0));
         }
 
         let mut packet_to_write = Some(publish);
-        let (storage, live_data) = self.sorted_storages.get_mut(&sk).unwrap();
+        let (storage, live_data, live_data_version) = self.sorted_storages.get_mut(&sk).unwrap();
         if false {
             std::mem::swap(&mut packet_to_write, live_data);
+            *live_data_version = self.live_data_counter;
         }
         if let Some(publish) = packet_to_write {
             match storage.write_packet(publish) {
                 Ok(_) => {}
                 Err(storage::StorageWriteError::FileSystemError(e)) => {
                     log::error!("Encountered file system error when reading packet for stream({}): {e}, falling back to in memory persistence", sk.name);
-                    let (old_storage, old_last_value) = self.sorted_storages.remove(&sk).unwrap();
-                    self.sorted_storages.insert(sk.clone(), (old_storage.to_in_memory(), old_last_value));
+                    let (old_storage, old_last_value, old_live_data_version) = self.sorted_storages.remove(&sk).unwrap();
+                    self.sorted_storages.insert(sk.clone(), (old_storage.to_in_memory(), old_last_value, old_live_data_version));
                 }
                 Err(storage::StorageWriteError::InvalidPacket(e)) => {
                     log::error!("Found invalid packet when writing to storage for stream({}): {e}", sk.name);
@@ -289,7 +296,7 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     fn flush_storage(&mut self) {
-        for (_, (storage, live_data)) in self.sorted_storages.iter_mut() {
+        for (_, (storage, live_data, _)) in self.sorted_storages.iter_mut() {
             if let Some(publish) = live_data.take() {
                 if let Err(e) = storage.write_packet(publish) {
                     log::error!("Couldn't write live data to storage while flushing for stream({}) : {e:?}", storage.name());
@@ -314,7 +321,7 @@ impl<C: MqttClient> Serializer<C> {
         metrics.read_memory = 0;
         metrics.write_memory = 0;
         // calculate parameters derived from storage
-        for (storage, _) in self.sorted_storages.values() {
+        for (storage, _, _) in self.sorted_storages.values() {
             let sm = storage.metrics();
             metrics.disk_files += sm.files_count as usize;
             metrics.disk_utilized += sm.bytes_on_disk as usize;
