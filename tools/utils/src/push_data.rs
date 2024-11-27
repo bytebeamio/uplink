@@ -23,6 +23,7 @@ struct ShadowPayload {
 
 #[tokio::main]
 async fn main() {
+    let stream = std::env::args().nth(1).unwrap_or_else(|| "c2c_can".to_string());
     let port = std::env::args().nth(2).unwrap_or_else(|| "127.0.0.1:5050".to_string());
     let mut framed = Framed::new(TcpStream::connect(port).await.unwrap(), LinesCodec::new());
     let mut idx = 0;
@@ -30,7 +31,7 @@ async fn main() {
         idx += 1;
         // calculate and send consecutive squares
         let data = ShadowPayload {
-            stream: "c2c_can".to_string(),
+            stream: stream.clone(),
             sequence: idx,
             timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
             can_id: idx % 1024,

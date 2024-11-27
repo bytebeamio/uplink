@@ -301,4 +301,6 @@ pub struct Config {
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
     pub precondition_checks: Option<PreconditionCheckerConfig>,
+    #[serde(default)]
+    pub prioritize_live_data: bool,
 }

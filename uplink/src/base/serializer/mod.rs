@@ -276,7 +276,7 @@ impl<C: MqttClient> Serializer<C> {
 
         let mut packet_to_write = Some(publish);
         let (storage, live_data, live_data_version) = self.sorted_storages.get_mut(&sk).unwrap();
-        if false {
+        if self.config.prioritize_live_data {
             std::mem::swap(&mut packet_to_write, live_data);
             *live_data_version = self.live_data_counter;
         }
@@ -637,6 +637,7 @@ pub fn construct_publish(
 #[cfg(test)]
 pub mod tests {
     use std::path::PathBuf;
+    use bytes::Bytes;
     use flume::bounded;
     use serde::{Deserialize, Serialize};
     use serde_json::Value;
