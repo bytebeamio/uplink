@@ -168,7 +168,7 @@ pub struct Serializer<C: MqttClient> {
     /// Updated in `construct_publish` function
     /// Read and reset in `send_stream_metrics`
     stream_metrics: HashMap<String, StreamMetrics>,
-    sorted_storages: BTreeMap<Arc<StreamConfig>, Box<dyn storage::Storage>>,
+    sorted_storages: BTreeMap<Arc<StreamConfig>, (Box<dyn storage::Storage>, Option<Publish>)>,
     ctrl_rx: Receiver<()>,
 }
 
@@ -199,9 +199,9 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     fn initialize_storages(&mut self) {
-        self.sorted_storages.insert(Arc::new(self.config.action_status.clone()), self.create_storage_for_stream(&self.config.action_status));
+        self.sorted_storages.insert(Arc::new(self.config.action_status.clone()), (self.create_storage_for_stream(&self.config.action_status), None));
         for stream_config in self.config.streams.values() {
-            self.sorted_storages.insert(Arc::new(stream_config.clone()), self.create_storage_for_stream(&stream_config));
+            self.sorted_storages.insert(Arc::new(stream_config.clone()), (self.create_storage_for_stream(&stream_config), None));
         }
     }
 
@@ -224,9 +224,16 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     /// Returns None if nothing is left (time to move to normal mode)
+    /// Prioritize live data over saved data
+    /// Prioritize both live data and saved data based on stream priorities
     fn fetch_next_packet_from_storage(&mut self) -> Option<(Publish, Arc<StreamConfig>)> {
+        for (sk, (_, last_value)) in self.sorted_storages.iter_mut() {
+            if let Some(publish) = last_value.take() {
+                return Some((publish, sk.clone()));
+            }
+        }
         let mut cursor = BTreeCursorMut::new(&mut self.sorted_storages);
-        while let Some((sk, storage)) = cursor.current.as_mut() {
+        while let Some((sk, (storage, _))) = cursor.current.as_mut() {
             match storage.read_packet() {
                 Ok(packet) => {
                     return Some((packet, sk.clone()));
@@ -236,7 +243,7 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 Err(storage::StorageReadError::FileSystemError(e)) => {
                     log::error!("Encountered file system error when reading packet for stream({}): {e}, falling back to in memory persistence", storage.name());
-                    **storage = storage.to_in_memory()
+                    *storage = storage.to_in_memory()
                 }
                 Err(storage::StorageReadError::InvalidPacket(e)) => {
                     log::error!("Found invalid packet when reading from storage for stream({}): {e}", storage.name());
@@ -258,24 +265,36 @@ impl<C: MqttClient> Serializer<C> {
     fn write_publish_to_storage(&mut self, sk: Arc<StreamConfig>, mut publish: Publish) {
         publish.pkid = 1;
         if ! self.sorted_storages.contains_key(&sk) {
-            self.sorted_storages.insert(sk.clone(), self.create_storage_for_stream(&sk));
+            self.sorted_storages.insert(sk.clone(), (self.create_storage_for_stream(&sk), None));
         }
 
-        match self.sorted_storages.get_mut(&sk).unwrap().write_packet(publish) {
-            Ok(_) => {}
-            Err(storage::StorageWriteError::FileSystemError(e)) => {
-                log::error!("Encountered file system error when reading packet for stream({}): {e}, falling back to in memory persistence", sk.name);
-                let old_value = self.sorted_storages.remove(&sk).unwrap();
-                self.sorted_storages.insert(sk.clone(), old_value.to_in_memory());
-            }
-            Err(storage::StorageWriteError::InvalidPacket(e)) => {
-                log::error!("Found invalid packet when writing to storage for stream({}): {e}", sk.name);
-            }
-        };
+        let mut packet_to_write = Some(publish);
+        let (storage, live_data) = self.sorted_storages.get_mut(&sk).unwrap();
+        if false {
+            std::mem::swap(&mut packet_to_write, live_data);
+        }
+        if let Some(publish) = packet_to_write {
+            match storage.write_packet(publish) {
+                Ok(_) => {}
+                Err(storage::StorageWriteError::FileSystemError(e)) => {
+                    log::error!("Encountered file system error when reading packet for stream({}): {e}, falling back to in memory persistence", sk.name);
+                    let (old_storage, old_last_value) = self.sorted_storages.remove(&sk).unwrap();
+                    self.sorted_storages.insert(sk.clone(), (old_storage.to_in_memory(), old_last_value));
+                }
+                Err(storage::StorageWriteError::InvalidPacket(e)) => {
+                    log::error!("Found invalid packet when writing to storage for stream({}): {e}", sk.name);
+                }
+            };
+        }
     }
 
     fn flush_storage(&mut self) {
-        for (_, storage) in self.sorted_storages.iter_mut() {
+        for (_, (storage, live_data)) in self.sorted_storages.iter_mut() {
+            if let Some(publish) = live_data.take() {
+                if let Err(e) = storage.write_packet(publish) {
+                    log::error!("Couldn't write live data to storage while flushing for stream({}) : {e:?}", storage.name());
+                }
+            }
             if let Err(storage::StorageFlushError::FileSystemError(e)) = storage.flush() {
                 log::error!("Couldn't flush storage for stream({}) : {e}", storage.name());
             }
@@ -295,7 +314,7 @@ impl<C: MqttClient> Serializer<C> {
         metrics.read_memory = 0;
         metrics.write_memory = 0;
         // calculate parameters derived from storage
-        for storage in self.sorted_storages.values() {
+        for (storage, _) in self.sorted_storages.values() {
             let sm = storage.metrics();
             metrics.disk_files += sm.files_count as usize;
             metrics.disk_utilized += sm.bytes_on_disk as usize;

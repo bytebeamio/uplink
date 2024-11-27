@@ -365,66 +365,6 @@ impl Storage for DirectoryStorage {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-pub struct LiveDataPrioritizingStorage {
-    inner: Box<dyn Storage>,
-    latest_data: Option<Publish>,
-}
-
-impl LiveDataPrioritizingStorage {
-    pub fn wrap(inner: Box<dyn Storage>) -> Self {
-        Self {
-            inner,
-            latest_data: None,
-        }
-    }
-}
-
-impl Storage for LiveDataPrioritizingStorage {
-    fn name(&self) -> &str {
-        self.inner.name()
-    }
-
-    fn read_packet(&mut self) -> Result<Publish, StorageReadError> {
-        if let Some(packet) = self.latest_data.take() {
-            Ok(packet)
-        } else {
-            self.inner.read_packet()
-        }
-    }
-
-    fn write_packet(&mut self, new_packet: Publish) -> Result<(), StorageWriteError> {
-        if let Some(last_packet) = self.latest_data.replace(new_packet) {
-            self.inner.write_packet(last_packet)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn flush(&mut self) -> Result<(), StorageFlushError> {
-        if let Some(packet) = self.latest_data.take() {
-            if let Err(e) = self.inner.write_packet(packet) {
-                log::error!("(Storage::{}) failed to save live data when flushing: {e:?}", self.name());
-            }
-        }
-        self.inner.flush()
-    }
-
-    fn to_in_memory(&self) -> Box<dyn Storage> {
-        Box::new(
-            Self {
-                latest_data: self.latest_data.clone(),
-                inner: self.inner.to_in_memory(),
-            }
-        )
-    }
-
-    fn metrics(&self) -> StorageMetrics {
-        self.inner.metrics()
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
 #[derive(Debug)]
 pub enum StorageReadError {
     /// Nothing left in storage, poll the storage with lower priority
