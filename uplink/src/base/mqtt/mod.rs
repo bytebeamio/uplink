@@ -9,14 +9,12 @@ use tokio::{select, task};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Mutex;
 
-use rumqttc::{
-    AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS,
-    Request, TlsConfiguration, Transport,
-};
+use rumqttc::{AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS, Request, TlsConfiguration, Transport};
 use std::sync::Arc;
-
+use flume::r#async::SendFut;
 use crate::config::{Config, DeviceConfig};
 use crate::Action;
 
@@ -171,7 +169,55 @@ impl Mqtt {
             error!("Error recovering data from inflight file: {e}");
         }
 
+        enum EventPushStateHolio<'a> {
+            Init,
+            WaitingForEvents(tokio::time::Timeout<()>),
+            SendingEvent(SendFut<'a, Packet>),
+            WaitingForPubAck(tokio::time::Timeout<()>),
+        }
+        impl<'a> EventPushStateHolio<'a> {
+            fn do_the_thang(&mut self) -> Box<dyn std::future::Future<Output = ()>> {
+                dbg!("ding");
+                match self {
+                    EventPushStateHolio::Init => {}
+                    EventPushStateHolio::WaitingForEvents(_) => {}
+                    EventPushStateHolio::SendingEvent(_) => {}
+                    EventPushStateHolio::WaitingForPubAck(_) => {}
+                }
+                Box::new(tokio::time::sleep(Duration::from_secs(3)))
+            }
+        }
+        let mut event_push_state = EventPushStateHolio::Init;
+        let mut event_wait: Pin<Box<dyn std::future::Future<Output=()>>> = Box::pin(tokio::time::sleep(Duration::MAX));
+        /// * Init
+        ///   * Go to step 3 if an event is available, otherwise go to step 2
+        /// * waiting for events
+        ///   * sleep and go to step 1
+        /// * sending event
+        ///   * wait for request_tx.send() and go to step 4
+        /// * waiting for puback
+        ///   * if correct puback arrives, pop event and go to step 1
+        ///   * if timeout, go to step 1
+
         loop {
+            // if pushing_event {
+            //     let (stream, payload) = pull_next_publish();
+            //     let mut publish = Publish::new(self.create_topic(&stream), QoS::AtLeastOnce, payload);
+            //     publish.pkid = RESERVED_EVENT_PKID;
+            //     match self.client.request_tx.send_async(Request::Publish(publish)) {
+            //         Ok(_) => {
+            //             pushing_event = true;
+            //             event_push_timeout = tokio::time::timeout(Duration::from_secs(EVENT_PUSH_TIMEOUT), ());
+            //         }
+            //         Err(TrySendError::Full(_)) => {
+            //             // we wait for a while and try
+            //             pushing_event = true;
+            //             event_push_timeout = tokio::time::timeout(Duration::from_secs(EVENT_PUSH_TIMEOUT), ());
+            //         }
+            //         Err(TrySendError::Disconnected(_)) => {} // the event loop should stop soon
+            //     }
+            // }
+
             select! {
                 event = self.eventloop.poll() => {
                     match event {
@@ -201,7 +247,15 @@ impl Mqtt {
                         Ok(Event::Incoming(packet)) => {
                             debug!("Incoming = {:?}", packet);
                             match packet {
-                                rumqttc::Packet::PubAck(_) => self.metrics.add_puback(),
+                                rumqttc::Packet::PubAck(puback) => {
+                                    if let EventPushStateHolio::WaitingForPubAck(_) = &event_push_state {
+                                        if puback.pkid == RESERVED_EVENT_PKID {
+                                            // self.pop_event();
+                                            event_push_state = EventPushStateHolio::Init;
+                                        }
+                                    }
+                                    self.metrics.add_puback();
+                                }
                                 rumqttc::Packet::PingResp => {
                                     self.metrics.add_pingresp();
                                     let inflight = self.eventloop.state.inflight();
@@ -230,6 +284,9 @@ impl Mqtt {
                         }
                     }
                 },
+                _ = event_wait.as_mut() => {
+                    event_wait.set(event_push_state.do_the_thang());
+                }
                 Ok(MqttShutdown) = self.ctrl_rx.recv_async() => {
                     break;
                 }
@@ -342,3 +399,6 @@ impl CtrlTx {
         let _ = self.inner.send_async(MqttShutdown).await;
     }
 }
+
+const RESERVED_EVENT_PKID: u16 = u16::MAX;
+const EVENT_PUSH_TIMEOUT: u64 = 10;

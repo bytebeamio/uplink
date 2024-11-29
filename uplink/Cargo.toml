@@ -19,6 +19,7 @@ tokio-util = { workspace = true }
 # binary utils
 anyhow = "1"
 axum = "0.6"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 config = { version = "0.13.2", default-features = false, features = [
     "toml",
     "json",
