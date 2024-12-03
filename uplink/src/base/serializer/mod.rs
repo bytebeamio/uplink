@@ -648,6 +648,7 @@ pub mod tests {
     use crate::base::bridge::stream::Buffer;
     use crate::config::Persistence;
     use super::*;
+    use crate::config::StreamConfig;
 
     pub fn default_config() -> Config {
         Config {
@@ -715,6 +716,92 @@ pub mod tests {
         stream_queue_behavior(10000, 0, 150).await;
     }
 
+    #[derive(Deserialize)]
+    struct SerializedPayload {
+        pub sequence: u32,
+        pub timestamp: u64,
+        #[serde(flatten)]
+        pub payload: Value,
+    }
+
+    /// create an in memory persistence stream
+    /// Write some data to it
+    /// Read a packet so that read and write buffers are swapped
+    /// Write data to it and force it to convert to in memory storage
+    /// Read all packets and verify the behavior
+    #[tokio::test]
+    async fn directory_to_in_memory_queue_behavior() {
+        let temp_dir = tempdir::TempDir::new("uplink").unwrap();
+        let sk = Arc::new(StreamConfig {
+            name: "test_stream".to_string(),
+            topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
+            batch_size: 2,
+            flush_period: Duration::from_secs(1),
+            compression: Compression::Disabled,
+            persistence: Persistence {
+                max_file_size: 10800,
+                max_file_count: 10,
+            },
+            priority: 0,
+        });
+        let config = Config {
+            persistence_path: temp_dir.path().to_owned(),
+            streams: hashmap!(
+                "test_stream".to_owned() => sk.as_ref().clone()
+            ),
+            mqtt: MqttConfig {
+                max_packet_size: 2560000,
+                max_inflight: 10,
+                keep_alive: 30,
+                network_timeout: 30,
+            },
+            ..Default::default()
+        };
+        let config = Arc::new(config);
+        let (serializer, data_tx, net_rx, _) = defaults(config);
+
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .thread_name("mock serializer")
+                .build()
+                .unwrap()
+                .block_on(serializer.start());
+        });
+
+        for i in 0..50 {
+            data_tx.send(Box::new(create_test_buffer(i, sk.clone()))).unwrap();
+        }
+        std::fs::remove_dir_all(temp_dir.path()).unwrap();
+
+        if let Request::Publish(publish) = net_rx.recv_async().await.unwrap() {
+            let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
+            assert_eq!(payloads.len(), 1);
+            let payload = payloads.get(0).unwrap();
+            assert_eq!(payload.sequence, 0);
+            assert_eq!(payload.payload, serde_json::json!({ "msg": "Hello, World!" }));
+        } else {
+            assert!(false);
+        }
+
+        for i in 50..148 {
+            data_tx.send(Box::new(create_test_buffer(i, sk.clone()))).unwrap();
+        }
+
+        for i in 1..147 {
+            if let Request::Publish(publish) = net_rx.recv_async().await.unwrap() {
+                let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
+                assert_eq!(payloads.len(), 1);
+                let payload = payloads.get(0).unwrap();
+                assert_eq!(payload.sequence, i);
+                assert_eq!(payload.payload, serde_json::json!({ "msg": "Hello, World!" }));
+            } else {
+                assert!(false);
+            }
+        }
+    }
+
     fn create_test_buffer(i: u32, sk: Arc<StreamConfig>) -> Buffer<Payload> {
         let mut buffer = Buffer::<Payload>::new(Arc::new("test_stream".to_owned()), sk);
         buffer.buffer.push(Payload {
@@ -724,6 +811,26 @@ pub mod tests {
             payload: serde_json::json!({ "msg": "Hello, World!" }),
         });
         buffer
+    }
+
+    #[test]
+    fn get_test_buffer_size() {
+        let sk = Arc::new(StreamConfig {
+            name: "test_stream".to_string(),
+            topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
+            batch_size: 2,
+            flush_period: Duration::from_secs(1),
+            compression: Compression::Disabled,
+            persistence: Persistence {
+                max_file_size: 100000,
+                max_file_count: 100000,
+            },
+            priority: 0,
+        });
+        let data = Box::new(create_test_buffer(0, sk));
+        let stream_config = data.stream_config();
+        let publish = construct_publish(data, &mut HashMap::new());
+        dbg!(publish.size());
     }
 
     /// Each publish is 100 bytes
@@ -776,13 +883,6 @@ pub mod tests {
             let result = net_rx.recv().unwrap();
             match result {
                 Request::Publish(publish) => {
-                    #[derive(Deserialize)]
-                    struct SerializedPayload {
-                        pub sequence: u32,
-                        pub timestamp: u64,
-                        #[serde(flatten)]
-                        pub payload: Value,
-                    }
                     let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
                     assert_eq!(payloads.len(), 1);
                     let payload = payloads.get(0).unwrap();
