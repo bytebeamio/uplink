@@ -148,7 +148,7 @@ impl LogFileReader {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) -> Result<(), Error> {
         let mut cmd =
-            Command::new("tail").args(["-F", &self.config.path]).stdout(Stdio::piped()).spawn()?;
+            Command::new(self.config.cmd.get(0).unwrap()).args(&self.config.cmd[1..]).stdout(Stdio::piped()).spawn()?;
         let file = cmd.stdout.take().expect("Expected stdout");
         let lines = BufReader::new(file).lines();
         let mut parser =
@@ -344,7 +344,7 @@ mod test {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct LogReaderConfig {
-    pub path: String,
+    pub cmd: Vec<String>,
     pub stream_name: String,
     pub log_template: String,
     pub timestamp_template: String,
