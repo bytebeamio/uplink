@@ -52,6 +52,7 @@ impl EventsPusher {
                 Init => {
                     match conn.query_row(FETCH_ONE_EVENT, (), EventOrm::create) {
                         Ok(event) => {
+                            tracing::info!("found an event, writing to network");
                             state = SendingEvent(
                                 Box::new(self.publisher.request_tx.send_async(
                                     self.generate_publish(event, self.reserved_pkids[current_pkid_idx]),
@@ -70,6 +71,7 @@ impl EventsPusher {
                 SendingEvent(fut) => {
                     match fut.await {
                         Ok(_) => {
+                            tracing::info!("event written to network, waiting for acknowledgement");
                             state = WaitingForAck;
                         }
                         Err(e) => {
@@ -84,6 +86,7 @@ impl EventsPusher {
                         match tokio::time::timeout_at(end, self.pubacks.recv_async()).await {
                             Ok(Ok(pkid)) => {
                                 if pkid == self.reserved_pkids[current_pkid_idx] {
+                                    tracing::info!("received acknowledgement");
                                     if let Err(e) = conn.execute(POP_EVENT, ()) {
                                         tracing::error!("unexpected error: couldn't pop event from queue: {e}");
                                         return;
@@ -98,7 +101,8 @@ impl EventsPusher {
                                 return;
                             }
                             Err(_) => {
-                                tracing::error!("Timed out waiting for PubAck, retrying.")
+                                tracing::error!("Timed out waiting for PubAck, retrying.");
+                                state = Init;
                             }
                         }
                     }
