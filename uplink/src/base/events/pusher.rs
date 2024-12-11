@@ -45,6 +45,16 @@ impl EventsPusher {
                 return;
             }
         };
+        match conn.query_row(FETCH_EVENTS_COUNT, (), |row| row.get::<_, u64>(0)) {
+            Ok(count) => {
+                log::info!("found {count} events saved in storage");
+            }
+            Err(e) => {
+                log::error!("sqlite error : {e}");
+                return;
+            }
+        }
+
         let mut current_pkid_idx = 0;
         let mut state = Init;
         loop {
@@ -139,6 +149,9 @@ struct EventOrm {
 
 // language=sqlite
 const FETCH_ONE_EVENT: &str = "SELECT id, payload FROM events ORDER BY id LIMIT 1";
+
+// language=sqlite
+const FETCH_EVENTS_COUNT: &str = "SELECT COUNT(*) FROM events";
 
 impl EventOrm {
     pub fn create(row: &Row) -> rusqlite::Result<Self> {
