@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use crate::config::{Config, DeviceConfig};
 use crate::Action;
-
+use crate::base::events::pusher::EventsPusher;
 pub use self::metrics::MqttMetrics;
 
 mod metrics;
@@ -78,7 +78,6 @@ impl Mqtt {
         let (client, mut eventloop) = AsyncClient::new(options, 0);
         eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
         let (ctrl_tx, ctrl_rx) = bounded(1);
-
         Mqtt {
             config,
             client,
@@ -171,6 +170,15 @@ impl Mqtt {
             error!("Error recovering data from inflight file: {e}");
         }
 
+        let (events_puback_tx, events_puback_rx) = bounded::<u16>(32);
+        let max_inflight = self.eventloop.mqtt_options.inflight();
+        let pusher_task = EventsPusher::new(
+            events_puback_rx, self.client.clone(),
+            [max_inflight+1, max_inflight-1],
+            self.config.persistence_path.join(".events.db"),
+        );
+        // tokio::task::spawn(pusher_task.start());
+
         loop {
             select! {
                 event = self.eventloop.poll() => {
@@ -201,7 +209,10 @@ impl Mqtt {
                         Ok(Event::Incoming(packet)) => {
                             debug!("Incoming = {:?}", packet);
                             match packet {
-                                rumqttc::Packet::PubAck(_) => self.metrics.add_puback(),
+                                rumqttc::Packet::PubAck(puback) => {
+                                    self.metrics.add_puback();
+                                    events_puback_tx.try_send(puback.pkid).unwrap()
+                                },
                                 rumqttc::Packet::PingResp => {
                                     self.metrics.add_pingresp();
                                     let inflight = self.eventloop.state.inflight();

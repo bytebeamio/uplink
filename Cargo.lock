@@ -700,25 +700,13 @@ dependencies = [
 
 [[package]]
 name = "flume"
-version = "0.10.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1657b4441c3403d9f7b3409e47575237dac27b1b5726df654a6ecbf92f0f7577"
-dependencies = [
- "futures-core",
- "futures-sink",
- "nanorand",
- "pin-project 1.1.5",
- "spin 0.9.8",
-]
-
-[[package]]
-name = "flume"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55ac459de2512911e4b674ce33cf20befaba382d05b62b008afc1c8b57cbf181"
 dependencies = [
  "futures-core",
  "futures-sink",
+ "nanorand",
  "spin 0.9.8",
 ]
 
@@ -2302,7 +2290,7 @@ version = "0.24.0"
 source = "git+https://github.com/bytebeamio/rumqtt?rev=b7ae6b5693d8c9c972d5eb857b2293fb901d57d9#b7ae6b5693d8c9c972d5eb857b2293fb901d57d9"
 dependencies = [
  "bytes 1.7.1",
- "flume 0.11.0",
+ "flume",
  "futures-util",
  "log",
  "rustls-native-certs",
@@ -3585,7 +3573,7 @@ dependencies = [
  "bytes 1.7.1",
  "config",
  "fake",
- "flume 0.10.14",
+ "flume",
  "fs2",
  "futures-util",
  "hex",
@@ -3644,7 +3632,7 @@ checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 name = "utils"
 version = "0.1.0"
 dependencies = [
- "flume 0.10.14",
+ "flume",
  "futures-util",
  "serde",
  "serde_json",

@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
+use flume::{SendError, Sender};
 
 /// Map with a maximum size
 ///
@@ -55,4 +56,12 @@ fn t2() {
     dbg!(m.set("a".to_owned(), "A".to_owned()));
     dbg!(m.set("b".to_owned(), "B".to_owned()));
     dbg!(m.get(&"a".to_owned()));
+}
+
+pub struct SendOnce<T>(Sender<T>);
+
+impl<T> SendOnce<T> {
+    pub async fn send_async(self, value: T) -> Result<(), SendError<T>> {
+        self.0.send_async(value).await
+    }
 }

@@ -1,16 +1,19 @@
 use std::future::Future;
-use std::net::TcpStream;
+use std::pin::Pin;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use flume::{Receiver, SendError};
+use flume::{Receiver, SendError, Sender};
 use rumqttc::{AsyncClient, Publish, QoS, Request};
-use rusqlite::Row;
-use crate::base::bridge::{Payload, Point};
+use rusqlite::{Connection, Row};
+use crate::base::bridge::Payload;
+use crate::utils::SendOnce;
 
-struct EventsPusher {
+pub struct EventsPusher {
     pubacks: Receiver<u16>,
     publisher: AsyncClient,
-    db_path: String,
     reserved_pkids: [u16; 2],
+    db_path: PathBuf,
 }
 
 enum EventsPusherState {
@@ -21,7 +24,7 @@ enum EventsPusherState {
     /// Wait on rumqtt push
     ///   If it succeeds, go to next step
     ///   If it fails with rumqtt error, log error and stop
-    SendingEvent(Box<dyn Future<Output=Result<(), SendError<Request>>>>),
+    SendingEvent(Pin<Box<dyn Future<Output=Result<(), SendError<Request>>> + Send>>),
     /// Wait for the puback for some time
     ///   If the correct puback arrives, pop message and go to first step
     ///   If the step times out, go to S1
@@ -29,23 +32,23 @@ enum EventsPusherState {
 }
 
 impl EventsPusher {
-    pub fn new(pubacks: Receiver<u16>, publisher: AsyncClient, reserved_pkids: [u16; 2], db_path: String) -> Self {
+    pub fn new(pubacks: Receiver<u16>, publisher: AsyncClient, reserved_pkids: [u16; 2], db_path: PathBuf) -> Self {
         Self { pubacks, publisher, db_path, reserved_pkids }
     }
 
-    pub async fn start(mut self) {
+    pub async fn start(self) {
         use EventsPusherState::*;
 
-        let _span = tracing::trace_span!("event_pusher_thread").entered();
+        // let _span = tracing::trace_span!("event_pusher_thread").entered();
 
-        let mut conn = match rusqlite::Connection::open(self.db_path.as_str()) {
-            Ok(c) => c,
+        let mut conn = match Connection::open(&self.db_path) {
+            Ok(c) => Mutex::new(c),
             Err(e) => {
                 log::error!("couldn't connect to events database: {e}");
                 return;
             }
         };
-        match conn.query_row(FETCH_EVENTS_COUNT, (), |row| row.get::<_, u64>(0)) {
+        match conn.lock().unwrap().query_row(FETCH_EVENTS_COUNT, (), |row| row.get::<_, u64>(0)) {
             Ok(count) => {
                 log::info!("found {count} events saved in storage");
             }
@@ -60,11 +63,11 @@ impl EventsPusher {
         loop {
             match &mut state {
                 Init => {
-                    match conn.query_row(FETCH_ONE_EVENT, (), EventOrm::create) {
+                    match conn.lock().unwrap().query_row(FETCH_ONE_EVENT, (), EventOrm::create) {
                         Ok(event) => {
                             log::info!("found an event, writing to network");
                             state = SendingEvent(
-                                Box::new(self.publisher.request_tx.send_async(
+                                Box::pin(SendOnce(self.publisher.request_tx.clone()).send_async(
                                     self.generate_publish(event, self.reserved_pkids[current_pkid_idx]),
                                 )),
                             );
@@ -82,6 +85,7 @@ impl EventsPusher {
                     match fut.await {
                         Ok(_) => {
                             log::info!("event written to network, waiting for acknowledgement");
+                            self.pubacks.drain();
                             state = WaitingForAck;
                         }
                         Err(e) => {
@@ -97,7 +101,7 @@ impl EventsPusher {
                             Ok(Ok(pkid)) => {
                                 if pkid == self.reserved_pkids[current_pkid_idx] {
                                     log::info!("received acknowledgement");
-                                    if let Err(e) = conn.execute(POP_EVENT, ()) {
+                                    if let Err(e) = conn.lock().unwrap().execute(POP_EVENT, ()) {
                                         log::error!("unexpected error: couldn't pop event from queue: {e}");
                                         return;
                                     }
@@ -124,7 +128,7 @@ impl EventsPusher {
     fn generate_publish(&self, event: EventOrm, pkid: u16) -> Request {
         let payload = serde_json::from_str::<Payload>(event.payload.as_str()).unwrap();
         let mut result = Publish::new(
-            format!("/tenants/{}/devices/{}/events/{}/jsonarray", self.tenant_id, self.device_id, payload.stream),
+            format!("/tenants/{}/devices/{}/events/{}/jsonarray", "", "", payload.stream),
             QoS::AtLeastOnce,
             serde_json::to_string(&[payload]).unwrap(),
         );
