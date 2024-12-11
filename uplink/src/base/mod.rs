@@ -13,6 +13,7 @@ pub mod bridge;
 pub mod monitor;
 pub mod mqtt;
 pub mod serializer;
+pub mod events;
 
 pub fn clock() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()

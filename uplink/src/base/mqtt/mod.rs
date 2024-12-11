@@ -1,21 +1,22 @@
 use bytes::BytesMut;
-use flume::{bounded, Receiver, RecvError, SendError, Sender, TrySendError};
+use flume::{bounded, Receiver, Sender, TrySendError};
 use log::{debug, error, info};
 use storage::PersistenceFile;
 use thiserror::Error;
-use tokio::time::{Duration, Timeout};
+use tokio::time::Duration;
 use tokio::{select, task};
 
 use std::fs::File;
-use std::future::Future;
 use std::io::Read;
 use std::path::Path;
 use std::sync::Mutex;
 
-use rumqttc::{AsyncClient, Client, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS, Request, TlsConfiguration, Transport};
+use rumqttc::{
+    AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS,
+    Request, TlsConfiguration, Transport,
+};
 use std::sync::Arc;
-use std::time::Instant;
-use tokio::time::error::Elapsed;
+
 use crate::config::{Config, DeviceConfig};
 use crate::Action;
 
@@ -340,109 +341,4 @@ impl CtrlTx {
     pub async fn trigger_shutdown(&self) {
         let _ = self.inner.send_async(MqttShutdown).await;
     }
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-struct EventsPusher {
-    pubacks: Receiver<u16>,
-    publisher: AsyncClient,
-    db_path: String,
-    reserved_pkids: [u16; 2],
-}
-
-enum EventsPusherState {
-    /// If queue has messages
-    ///   initiate push to rumqtt and go to next step
-    ///   otherwise wait for some time
-    Init,
-    /// Wait on rumqtt push
-    ///   If it succeeds, go to next step
-    ///   If it fails with rumqtt error, log error and stop
-    SendingEvent(Box<dyn Future<Output=Result<(), SendError<Request>>>>),
-    /// Wait for the puback for some time
-    ///   If the correct puback arrives, pop message and go to first step
-    ///   If the step times out, go to S1
-    WaitingForAck,
-}
-
-impl EventsPusher {
-    pub fn new(pubacks: Receiver<u16>, publisher: AsyncClient, reserved_pkids: [u16; 2], db_path: String) -> Self {
-        Self { pubacks, publisher, db_path, reserved_pkids }
-    }
-
-    pub async fn start(mut self) {
-        use EventsPusherState::*;
-
-        let mut conn = match rusqlite::Connection::open(self.db_path.as_str()) {
-            Ok(c) => c,
-            Err(e) => {
-                log::error!("couldn't connect to events database: {e}");
-                return;
-            }
-        };
-        let mut current_pkid_idx = 0;
-        let mut state = Init;
-        loop {
-            match &mut state {
-                Init => {
-                    match conn.query_row(FETCH_ONE_EVENT, ()) {
-                        Some(event) => {
-                            state = SendingEvent(
-                                Box::new(self.publisher.request_tx.send_async(
-                                    generate_publish(event, self.reserved_pkids[current_pkid_idx]),
-                                )),
-                            );
-                        }
-                        None => {
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                        }
-                    }
-                }
-                SendingEvent(fut) => {
-                    match fut.await {
-                        Ok(t) => {
-
-                        }
-                        Err(e) => {
-                            log::error!("Rumqtt send error, aborting : {e}");
-                            return;
-                        }
-                    }
-                }
-                WaitingForAck => {
-                    let end = tokio::time::Instant::now() + Duration::from_secs(60);
-                    loop {
-                        match tokio::time::timeout_at(end, self.pubacks.recv_async()).await {
-                            Ok(Ok(pkid)) => {
-                                if pkid == self.reserved_pkids[current_pkid_idx] {
-                                    conn.execute(POP_EVENT);
-                                    current_pkid_idx += 1;
-                                    current_pkid_idx %= 2;
-                                    state = Init;
-                                }
-                            }
-                            Ok(Err(e)) => {
-                                log::error!("PubAcks stream ended, aborting : {e}");
-                                return;
-                            }
-                            Err(_) => {
-                                log::error!("Timed out waiting for PubAck, retrying.")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// language=sqlite
-const POP_EVENT: &str = "";
-
-// language=sqlite
-const FETCH_ONE_EVENT: &str = "";
-
-fn generate_publish(event: (), pkid: u16) -> Request {
-
 }
