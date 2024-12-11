@@ -17,6 +17,7 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 
 # binary utils
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 anyhow = "1"
 axum = "0.6"
 config = { version = "0.13.2", default-features = false, features = [

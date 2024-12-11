@@ -7,14 +7,12 @@ use tokio::time::Duration;
 use tokio::{select, task};
 
 use std::fs::File;
+use std::future::Future;
 use std::io::Read;
 use std::path::Path;
 use std::sync::Mutex;
 
-use rumqttc::{
-    AsyncClient, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS,
-    Request, TlsConfiguration, Transport,
-};
+use rumqttc::{AsyncClient, Client, ConnectionError, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS, Request, TlsConfiguration, Transport};
 use std::sync::Arc;
 
 use crate::config::{Config, DeviceConfig};
@@ -340,5 +338,69 @@ impl CtrlTx {
     /// Triggers shutdown of `Mqtt`
     pub async fn trigger_shutdown(&self) {
         let _ = self.inner.send_async(MqttShutdown).await;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+struct EventsPusher {
+    pubacks: Receiver<u16>,
+    publisher: AsyncClient,
+    db_path: String,
+}
+
+enum EventsPusherState {
+    /// If queue has messages
+    ///   initiate push to rumqtt and go to S2
+    ///   otherwise wait for some time
+    S1,
+    /// initiate push for first message to rumqtt with DUP set and go to S2
+    S1_5,
+    /// Wait on rumqtt push with a timeout
+    ///   If it succeeds, go to S3
+    ///   If it fails with timeout, go to S1
+    ///   If it fails with rumqtt error, log error and stop
+    S2(Box<dyn Future<Output=()>>),
+    /// Wait for puback for some time
+    ///   If the correct puback arrives, pop message and go to S1
+    ///   If the step times out, go to S1_5
+    S3,
+    /// Pushed a message and waiting for puback
+    /// Revert to QUEUE_HAS_MESSAGES if a puback doesn't come within some timeout
+    /// Revert to QUEUE_HAS_MESSAGES on receiving puback, also pop the ACKed message
+    S4,
+
+}
+
+impl EventsPusher {
+    pub fn new(pubacks: Receiver<u16>, publisher: AsyncClient, db_path: String) -> Self {
+        Self { pubacks, publisher, db_path, state: EventsPusherState::IDLE }
+    }
+
+    pub fn start(mut self) {
+        let state = EventsPusherState::IDLE;
+        let mut conn = match rusqlite::Connection::open(self.db_path.as_str()) {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("couldn't connect to events database: {e}");
+                return;
+            }
+        };
+        loop {
+            match state {
+                EventsPusherState::IDLE => {
+                    std::thread::sleep(Duration::from_secs(1));
+                    // conn.query_row(FETCH_ONE_)
+                    match self.publisher.request_tx.try_send() {
+                        Ok(_) => {
+                            state = EventsPusherState::WAITING_FOR_PUBACK;
+                        }
+                        Err(e) => {
+
+                        }
+                    }
+                }
+            }
+        }
     }
 }
