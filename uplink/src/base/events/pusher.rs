@@ -41,7 +41,7 @@ impl EventsPusher {
         let mut conn = match rusqlite::Connection::open(self.db_path.as_str()) {
             Ok(c) => c,
             Err(e) => {
-                tracing::error!("couldn't connect to events database: {e}");
+                log::error!("couldn't connect to events database: {e}");
                 return;
             }
         };
@@ -52,7 +52,7 @@ impl EventsPusher {
                 Init => {
                     match conn.query_row(FETCH_ONE_EVENT, (), EventOrm::create) {
                         Ok(event) => {
-                            tracing::info!("found an event, writing to network");
+                            log::info!("found an event, writing to network");
                             state = SendingEvent(
                                 Box::new(self.publisher.request_tx.send_async(
                                     self.generate_publish(event, self.reserved_pkids[current_pkid_idx]),
@@ -63,7 +63,7 @@ impl EventsPusher {
                             tokio::time::sleep(Duration::from_secs(1)).await;
                         }
                         Err(e) => {
-                            tracing::error!("unexpected error when fetching event: {e}");
+                            log::error!("unexpected error when fetching event: {e}");
                             tokio::time::sleep(Duration::from_secs(60)).await;
                         }
                     }
@@ -71,11 +71,11 @@ impl EventsPusher {
                 SendingEvent(fut) => {
                     match fut.await {
                         Ok(_) => {
-                            tracing::info!("event written to network, waiting for acknowledgement");
+                            log::info!("event written to network, waiting for acknowledgement");
                             state = WaitingForAck;
                         }
                         Err(e) => {
-                            tracing::error!("Rumqtt send error, aborting : {e}");
+                            log::error!("Rumqtt send error, aborting : {e}");
                             return;
                         }
                     }
@@ -86,9 +86,9 @@ impl EventsPusher {
                         match tokio::time::timeout_at(end, self.pubacks.recv_async()).await {
                             Ok(Ok(pkid)) => {
                                 if pkid == self.reserved_pkids[current_pkid_idx] {
-                                    tracing::info!("received acknowledgement");
+                                    log::info!("received acknowledgement");
                                     if let Err(e) = conn.execute(POP_EVENT, ()) {
-                                        tracing::error!("unexpected error: couldn't pop event from queue: {e}");
+                                        log::error!("unexpected error: couldn't pop event from queue: {e}");
                                         return;
                                     }
                                     current_pkid_idx += 1;
@@ -97,11 +97,11 @@ impl EventsPusher {
                                 }
                             }
                             Ok(Err(e)) => {
-                                tracing::warn!("PubAcks stream ended, aborting : {e}");
+                                log::warn!("PubAcks stream ended, aborting : {e}");
                                 return;
                             }
                             Err(_) => {
-                                tracing::error!("Timed out waiting for PubAck, retrying.");
+                                log::error!("Timed out waiting for PubAck, retrying.");
                                 state = Init;
                             }
                         }
