@@ -1,9 +1,9 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Duration;
-use flume::{Receiver, SendError, Sender};
+use flume::{Receiver, SendError};
 use rumqttc::{AsyncClient, Publish, QoS, Request};
 use rusqlite::{Connection, Row};
 use crate::base::bridge::Payload;
@@ -41,7 +41,7 @@ impl EventsPusher {
 
         // let _span = tracing::trace_span!("event_pusher_thread").entered();
 
-        let mut conn = match Connection::open(&self.db_path) {
+        let conn = match Connection::open(&self.db_path) {
             Ok(c) => Mutex::new(c),
             Err(e) => {
                 log::error!("couldn't connect to events database: {e}");
@@ -65,12 +65,17 @@ impl EventsPusher {
                 Init => {
                     match conn.lock().unwrap().query_row(FETCH_ONE_EVENT, (), EventOrm::create) {
                         Ok(event) => {
-                            log::info!("found an event, writing to network");
-                            state = SendingEvent(
-                                Box::pin(SendOnce(self.publisher.request_tx.clone()).send_async(
-                                    self.generate_publish(event, self.reserved_pkids[current_pkid_idx]),
-                                )),
-                            );
+                            match self.generate_publish(event, self.reserved_pkids[current_pkid_idx]) {
+                                Ok(event) => {
+                                    log::info!("found an event, writing to network");
+                                    state = SendingEvent(
+                                        Box::pin(SendOnce(self.publisher.request_tx.clone()).send_async(event)),
+                                    );
+                                }
+                                Err(e) => {
+                                    log::error!("invalid event in database : {e}");
+                                }
+                            }
                         }
                         Err(rusqlite::Error::QueryReturnedNoRows) => {
                             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -96,45 +101,44 @@ impl EventsPusher {
                 }
                 WaitingForAck => {
                     let end = tokio::time::Instant::now() + Duration::from_secs(60);
-                    loop {
-                        match tokio::time::timeout_at(end, self.pubacks.recv_async()).await {
-                            Ok(Ok(pkid)) => {
-                                if pkid == self.reserved_pkids[current_pkid_idx] {
-                                    log::info!("received acknowledgement");
-                                    if let Err(e) = conn.lock().unwrap().execute(POP_EVENT, ()) {
-                                        log::error!("unexpected error: couldn't pop event from queue: {e}");
-                                        return;
-                                    }
-                                    current_pkid_idx += 1;
-                                    current_pkid_idx %= 2;
-                                    state = Init;
+                    match tokio::time::timeout_at(end, self.pubacks.recv_async()).await {
+                        Ok(Ok(pkid)) => {
+                            if pkid == self.reserved_pkids[current_pkid_idx] {
+                                log::info!("received acknowledgement");
+                                if let Err(e) = conn.lock().unwrap().execute(POP_EVENT, ()) {
+                                    log::error!("unexpected error: couldn't pop event from queue: {e}");
+                                    return;
                                 }
-                            }
-                            Ok(Err(e)) => {
-                                log::warn!("PubAcks stream ended, aborting : {e}");
-                                return;
-                            }
-                            Err(_) => {
-                                log::error!("Timed out waiting for PubAck, retrying.");
+                                current_pkid_idx += 1;
+                                current_pkid_idx %= 2;
                                 state = Init;
                             }
                         }
+                        Ok(Err(e)) => {
+                            log::warn!("PubAcks stream ended, aborting : {e}");
+                            return;
+                        }
+                        Err(_) => {
+                            log::error!("Timed out waiting for PubAck, retrying.");
+                            state = Init;
+                        }
                     }
+
                 }
             }
         }
     }
 
-    fn generate_publish(&self, event: EventOrm, pkid: u16) -> Request {
-        let payload = serde_json::from_str::<Payload>(event.payload.as_str()).unwrap();
+    fn generate_publish(&self, event: EventOrm, pkid: u16) -> anyhow::Result<Request> {
+        let payload = serde_json::from_str::<Payload>(event.payload.as_str())?;
         let mut result = Publish::new(
-            format!("/tenants/{}/devices/{}/events/{}/jsonarray", "", "", payload.stream),
+            format!("/tenants/{}/devices/{}/events/{}/jsonarray", "test", "test", payload.stream),
             QoS::AtLeastOnce,
             serde_json::to_string(&[payload]).unwrap(),
         );
         result.pkid = pkid;
         result.retain = false;
-        Request::Publish(result)
+        Ok(Request::Publish(result))
     }
 }
 

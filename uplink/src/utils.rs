@@ -58,7 +58,7 @@ fn t2() {
     dbg!(m.get(&"a".to_owned()));
 }
 
-pub struct SendOnce<T>(Sender<T>);
+pub struct SendOnce<T>(pub Sender<T>);
 
 impl<T> SendOnce<T> {
     pub async fn send_async(self, value: T) -> Result<(), SendError<T>> {
