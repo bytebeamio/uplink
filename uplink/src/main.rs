@@ -144,10 +144,12 @@ impl CommandLine {
             *topic = topic.replace("{tenant_id}", tenant_id).replace("{device_id}", device_id);
         };
 
-        for config in config.streams.values_mut() {
-            replace_topic_placeholders(&mut config.topic);
+        for (stream_name, stream_config) in config.streams.iter_mut() {
+            stream_name.clone_into(&mut stream_config.name);
+            replace_topic_placeholders(&mut stream_config.topic);
         }
 
+        "action_status".clone_into(&mut config.action_status.name);
         replace_topic_placeholders(&mut config.action_status.topic);
         replace_topic_placeholders(&mut config.stream_metrics.bridge_topic);
         replace_topic_placeholders(&mut config.stream_metrics.serializer_topic);

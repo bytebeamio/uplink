@@ -216,8 +216,9 @@ where
         self.stream_name.clone()
     }
 
-    fn serialize(&self) -> serde_json::Result<Vec<u8>> {
-        serde_json::to_vec(&self.buffer)
+    fn serialize(&self) -> Vec<u8> {
+        // This unwrap is safe because our data meets the requirements of `to_vec`
+        serde_json::to_vec(&self.buffer).unwrap()
     }
 
     fn anomalies(&self) -> Option<(String, usize)> {

@@ -73,7 +73,6 @@ use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
 pub use collector::{simulator, tcpjson::TcpJson};
-pub use storage::Storage;
 
 /// Spawn a named thread to run the function f on
 pub fn spawn_named_thread<F>(name: &str, f: F)
@@ -148,14 +147,7 @@ impl Uplink {
         let ctrl_mqtt = mqtt.ctrl_tx();
 
         let tenant_filter = format!("/tenants/{}/", device_config.project_id);
-        let serializer = Serializer::new(
-            self.config.clone(),
-            tenant_filter,
-            self.data_rx.clone(),
-            mqtt_client.clone(),
-            self.serializer_metrics_tx(),
-        )?;
-        let ctrl_serializer = serializer.ctrl_tx();
+        let (serializer_shutdown_tx, serializer_shutdown_rx) = flume::bounded(1);
 
         let (ctrl_tx, ctrl_rx) = bounded(1);
         let ctrl_downloader = DownloaderCtrlTx { inner: ctrl_tx };
@@ -176,15 +168,28 @@ impl Uplink {
 
         // Serializer thread to handle network conditions state machine
         // and send data to mqtt thread
-        spawn_named_thread("Serializer", || {
-            let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        {
+            let mqtt_client = mqtt_client.clone();
+            let config = self.config.clone();
+            let data_rx = self.data_rx.clone();
+            let serializer_metrics_tx = self.serializer_metrics_tx.clone();
+            let serializer_shutdown_rx = serializer_shutdown_rx;
+            spawn_named_thread("Serializer", move || {
+                let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
-            rt.block_on(async {
-                if let Err(e) = serializer.start().await {
-                    error!("Serializer stopped!! Error = {e}");
-                }
-            })
-        });
+                rt.block_on(async move {
+                    let serializer = Serializer::new(
+                        config,
+                        tenant_filter,
+                        data_rx,
+                        mqtt_client,
+                        serializer_metrics_tx,
+                        serializer_shutdown_rx,
+                    );
+                    serializer.start().await;
+                })
+            });
+        }
 
         // Mqtt thread to receive actions and send data
         spawn_named_thread("Mqttio", || {
@@ -245,7 +250,7 @@ impl Uplink {
         Ok(CtrlTx {
             data_lane: ctrl_data_lane,
             mqtt: ctrl_mqtt,
-            serializer: ctrl_serializer,
+            serializer: serializer_shutdown_tx,
             downloader: ctrl_downloader,
         })
     }

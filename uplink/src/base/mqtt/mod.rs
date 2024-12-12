@@ -1,7 +1,6 @@
 use bytes::BytesMut;
 use flume::{bounded, Receiver, Sender, TrySendError};
 use log::{debug, error, info};
-use storage::PersistenceFile;
 use thiserror::Error;
 use tokio::time::Duration;
 use tokio::{select, task};
@@ -19,6 +18,7 @@ use std::sync::Arc;
 
 use crate::config::{Config, DeviceConfig};
 use crate::Action;
+use crate::base::serializer::storage::{PersistenceFile, PersistenceError};
 use crate::base::events::pusher::EventsPusher;
 pub use self::metrics::MqttMetrics;
 
@@ -35,7 +35,7 @@ pub enum Error {
     #[error("Mqtt error {0}")]
     Mqtt(#[from] rumqttc::mqttbytes::Error),
     #[error("Storage error {0}")]
-    Storage(#[from] storage::Error),
+    Storage(#[from] PersistenceError),
 }
 
 impl From<flume::TrySendError<Action>> for Error {
@@ -119,7 +119,7 @@ impl Mqtt {
             return Ok(());
         }
 
-        let mut file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string())?;
+        let file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string());
         let mut buf = BytesMut::new();
 
         for publish in publishes {
@@ -136,7 +136,7 @@ impl Mqtt {
     /// once done, deletes the file, while writing incoming data into storage.
     fn reload_from_inflight_file(&mut self) -> Result<(), Error> {
         // Read contents of inflight file into an in-memory buffer
-        let mut file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string())?;
+        let file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string());
         let path = file.path();
         if !path.is_file() {
             return Ok(());
