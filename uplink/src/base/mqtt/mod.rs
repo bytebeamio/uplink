@@ -211,7 +211,7 @@ impl Mqtt {
                             match packet {
                                 rumqttc::Packet::PubAck(puback) => {
                                     self.metrics.add_puback();
-                                    events_puback_tx.try_send(puback.pkid).unwrap()
+                                    let _ = events_puback_tx.try_send(puback.pkid);
                                 },
                                 rumqttc::Packet::PingResp => {
                                     self.metrics.add_pingresp();

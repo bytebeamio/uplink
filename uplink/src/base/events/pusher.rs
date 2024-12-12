@@ -48,14 +48,10 @@ impl EventsPusher {
                 return;
             }
         };
-        match conn.lock().unwrap().query_row(FETCH_EVENTS_COUNT, (), |row| row.get::<_, u64>(0)) {
-            Ok(count) => {
-                log::info!("found {count} events saved in storage");
-            }
-            Err(e) => {
-                log::error!("sqlite error : {e}");
-                return;
-            }
+
+        if let Err(e) = do_initialization(&conn) {
+            log::error!("sqlite error : {e}");
+            return;
         }
 
         let mut current_pkid_idx = 0;
@@ -148,11 +144,22 @@ impl EventsPusher {
     }
 }
 
+fn do_initialization(conn: &Mutex<Connection>) -> anyhow::Result<()> {
+    conn.lock().unwrap()
+        .execute(CREATE_EVENTS_TABLE, ())?;
+
+    let count = conn.lock().unwrap().query_row(FETCH_EVENTS_COUNT, (), |row| row.get::<_, u64>(0))?;
+    if count != 0 {
+        log::info!("found {count} events saved in storage");
+    }
+    Ok(())
+}
+
 // language=sqlite
 const POP_EVENT: &str = "DELETE FROM events WHERE id = ?";
 
 // language=sqlite
-const _CREATE_EVENTS_TABLE: &str = "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT)";
+const CREATE_EVENTS_TABLE: &str = "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT)";
 
 #[derive(Debug)]
 struct EventOrm {
