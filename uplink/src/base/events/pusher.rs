@@ -65,7 +65,7 @@ impl EventsPusher {
                 Init => {
                     match conn.lock().unwrap().query_row(FETCH_ONE_EVENT, (), EventOrm::create) {
                         Ok(event) => {
-                            match self.generate_publish(event, self.reserved_pkids[current_pkid_idx]) {
+                            match self.generate_publish(&event, self.reserved_pkids[current_pkid_idx]) {
                                 Ok(event) => {
                                     log::info!("found an event, writing to network");
                                     state = SendingEvent(
@@ -73,7 +73,11 @@ impl EventsPusher {
                                     );
                                 }
                                 Err(e) => {
-                                    log::error!("invalid event in database : {e}");
+                                    log::error!("invalid event in database : {event:?} : {e}");
+                                    if let Err(e) = conn.lock().unwrap().execute(POP_EVENT, ()) {
+                                        log::error!("unexpected error: couldn't pop event from queue: {e}");
+                                        return;
+                                    }
                                 }
                             }
                         }
@@ -129,7 +133,7 @@ impl EventsPusher {
         }
     }
 
-    fn generate_publish(&self, event: EventOrm, pkid: u16) -> anyhow::Result<Request> {
+    fn generate_publish(&self, event: &EventOrm, pkid: u16) -> anyhow::Result<Request> {
         let payload = serde_json::from_str::<Payload>(event.payload.as_str())?;
         let mut result = Publish::new(
             format!("/tenants/{}/devices/{}/events/{}/jsonarray", "test", "test", payload.stream),
@@ -150,6 +154,7 @@ WHERE id = (SELECT id FROM events ORDER BY id LIMIT 1)";
 // language=sqlite
 const CREATE_EVENTS_TABLE: &str = "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT)";
 
+#[derive(Debug)]
 struct EventOrm {
     id: i64,
     payload: String,
