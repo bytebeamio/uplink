@@ -24,11 +24,11 @@ enum EventsPusherState {
     /// Wait on rumqtt push
     ///   If it succeeds, go to next step
     ///   If it fails with rumqtt error, log error and stop
-    SendingEvent(Pin<Box<dyn Future<Output=Result<(), SendError<Request>>> + Send>>),
+    SendingEvent(i64, Pin<Box<dyn Future<Output=Result<(), SendError<Request>>> + Send>>),
     /// Wait for the puback for some time
     ///   If the correct puback arrives, pop message and go to first step
     ///   If the step times out, go to S1
-    WaitingForAck,
+    WaitingForAck(i64),
 }
 
 impl EventsPusher {
@@ -63,18 +63,20 @@ impl EventsPusher {
         loop {
             match &mut state {
                 Init => {
-                    match conn.lock().unwrap().query_row(FETCH_ONE_EVENT, (), EventOrm::create) {
-                        Ok(event) => {
-                            match self.generate_publish(&event, self.reserved_pkids[current_pkid_idx]) {
+                    let result = conn.lock().unwrap().query_row(FETCH_ONE_EVENT, (), EventOrm::create);
+                    match result {
+                        Ok(event_o) => {
+                            match self.generate_publish(&event_o, self.reserved_pkids[current_pkid_idx]) {
                                 Ok(event) => {
                                     log::info!("found an event, writing to network");
                                     state = SendingEvent(
+                                        event_o.id,
                                         Box::pin(SendOnce(self.publisher.request_tx.clone()).send_async(event)),
                                     );
                                 }
                                 Err(e) => {
-                                    log::error!("invalid event in database : {event:?} : {e}");
-                                    if let Err(e) = conn.lock().unwrap().execute(POP_EVENT, ()) {
+                                    log::error!("invalid event in database : {event_o:?} : {e}");
+                                    if let Err(e) = conn.lock().unwrap().execute(POP_EVENT, (event_o.id,)) {
                                         log::error!("unexpected error: couldn't pop event from queue: {e}");
                                         return;
                                     }
@@ -90,12 +92,12 @@ impl EventsPusher {
                         }
                     }
                 }
-                SendingEvent(fut) => {
+                SendingEvent(event_id, fut) => {
                     match fut.await {
                         Ok(_) => {
                             log::info!("event written to network, waiting for acknowledgement");
                             self.pubacks.drain();
-                            state = WaitingForAck;
+                            state = WaitingForAck(*event_id);
                         }
                         Err(e) => {
                             log::error!("Rumqtt send error, aborting : {e}");
@@ -103,13 +105,13 @@ impl EventsPusher {
                         }
                     }
                 }
-                WaitingForAck => {
+                WaitingForAck(event_id) => {
                     let end = tokio::time::Instant::now() + Duration::from_secs(60);
                     match tokio::time::timeout_at(end, self.pubacks.recv_async()).await {
                         Ok(Ok(pkid)) => {
                             if pkid == self.reserved_pkids[current_pkid_idx] {
                                 log::info!("received acknowledgement");
-                                if let Err(e) = conn.lock().unwrap().execute(POP_EVENT, ()) {
+                                if let Err(e) = conn.lock().unwrap().execute(POP_EVENT, (*event_id,)) {
                                     log::error!("unexpected error: couldn't pop event from queue: {e}");
                                     return;
                                 }
@@ -147,12 +149,10 @@ impl EventsPusher {
 }
 
 // language=sqlite
-const POP_EVENT: &str = "
-DELETE FROM events
-WHERE id = (SELECT id FROM events ORDER BY id LIMIT 1)";
+const POP_EVENT: &str = "DELETE FROM events WHERE id = ?";
 
 // language=sqlite
-const CREATE_EVENTS_TABLE: &str = "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT)";
+const _CREATE_EVENTS_TABLE: &str = "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT)";
 
 #[derive(Debug)]
 struct EventOrm {
@@ -168,9 +168,14 @@ const FETCH_EVENTS_COUNT: &str = "SELECT COUNT(*) FROM events";
 
 impl EventOrm {
     pub fn create(row: &Row) -> rusqlite::Result<Self> {
+        is_send::<Mutex<Connection>>();
+        is_send::<EventsPusherState>();
+        is_send::<tokio::time::Instant>();
         Ok(Self {
             id: row.get(0)?,
             payload: row.get(1)?,
         })
     }
 }
+
+fn is_send<T: Send>() {}

@@ -177,7 +177,7 @@ impl Mqtt {
             [max_inflight+1, max_inflight-1],
             self.config.persistence_path.join(".events.db"),
         );
-        // tokio::task::spawn(pusher_task.start());
+        tokio::task::spawn(pusher_task.start());
 
         loop {
             select! {
