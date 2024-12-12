@@ -347,7 +347,10 @@ fn main() -> Result<(), Error> {
         let port = config.console.port;
         let ctrl_tx = ctrl_tx.clone();
         spawn_named_thread("Uplink Console", move || {
-            console::start(port, reload_handle, ctrl_tx, downloader_disable, network_up)
+            console::start(
+                port, reload_handle, ctrl_tx, downloader_disable, network_up,
+                config.console.accept_events.then(|| config.persistence_path.join(".events.db"))
+            )
         });
     }
 

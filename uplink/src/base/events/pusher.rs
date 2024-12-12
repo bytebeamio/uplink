@@ -164,7 +164,7 @@ fn do_initialization(conn: &Mutex<Connection>) -> anyhow::Result<()> {
 const POP_EVENT: &str = "DELETE FROM events WHERE id = ?";
 
 // language=sqlite
-const CREATE_EVENTS_TABLE: &str = "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT)";
+pub const CREATE_EVENTS_TABLE: &str = "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT)";
 
 #[derive(Debug)]
 struct EventOrm {

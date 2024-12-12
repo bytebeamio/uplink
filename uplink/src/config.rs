@@ -202,6 +202,8 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ConsoleConfig {
     pub enabled: bool,
+    #[serde(default)]
+    pub accept_events: bool,
     pub port: u16,
 }
 

@@ -173,21 +173,23 @@ impl Mqtt {
         }
 
         let (events_puback_tx, events_puback_rx) = bounded::<u16>(32);
-        /// we use two pkids after the rumqttc reserved pkids for events
-        /// the second pkid won't be sent until uplink has received an acknowledgement for the first pkid
-        /// and the first pkid won't be sent again until uplink receives an acknowledgement for the second pkid
-        /// which will only happen after all the messages with the first pkid are processed by the broker
-        /// this ensures that only two events pkids will be in transit at any time because mqtt standard guarantees
-        /// that PubAck pkids have to be in the same order as Publish pkids
-        let max_inflight = self.eventloop.mqtt_options.inflight();
-        let pusher_task = EventsPusher::new(
-            events_puback_rx, self.client.clone(),
-            self.device_config.project_id.clone(),
-            self.device_config.device_id.clone(),
-            [max_inflight+1, max_inflight+2],
-            self.config.persistence_path.join(".events.db"),
-        );
-        tokio::task::spawn(pusher_task.start());
+        if self.config.console.accept_events {
+            // we use two pkids after the rumqttc reserved pkids for events
+            // the second pkid won't be sent until uplink has received an acknowledgement for the first pkid
+            // and the first pkid won't be sent again until uplink receives an acknowledgement for the second pkid
+            // which will only happen after all the messages with the first pkid are processed by the broker
+            // this ensures that only two events pkids will be in transit at any time because mqtt standard guarantees
+            // that PubAck pkids have to be in the same order as Publish pkids
+            let max_inflight = self.eventloop.mqtt_options.inflight();
+            let pusher_task = EventsPusher::new(
+                events_puback_rx, self.client.clone(),
+                self.device_config.project_id.clone(),
+                self.device_config.device_id.clone(),
+                [max_inflight+1, max_inflight+2],
+                self.config.persistence_path.join(".events.db"),
+            );
+            tokio::task::spawn(pusher_task.start());
+        }
 
         loop {
             select! {
