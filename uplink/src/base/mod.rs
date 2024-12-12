@@ -1,11 +1,10 @@
 use std::fmt::Debug;
 use std::time::{SystemTime, UNIX_EPOCH};
-
+use flume::Sender;
 use tokio::join;
 
 use self::bridge::DataLaneCtrlTx;
 use self::mqtt::CtrlTx as MqttCtrlTx;
-use self::serializer::CtrlTx as SerializerCtrlTx;
 use crate::collector::downloader::CtrlTx as DownloaderCtrlTx;
 
 pub mod actions;
@@ -25,16 +24,16 @@ pub fn clock() -> u128 {
 pub struct CtrlTx {
     pub data_lane: DataLaneCtrlTx,
     pub mqtt: MqttCtrlTx,
-    pub serializer: SerializerCtrlTx,
+    pub serializer: Sender<()>,
     pub downloader: DownloaderCtrlTx,
 }
 
 impl CtrlTx {
     pub async fn trigger_shutdown(&self) {
-        join!(
+        let _ = join!(
             self.data_lane.trigger_shutdown(),
             self.mqtt.trigger_shutdown(),
-            self.serializer.trigger_shutdown(),
+            self.serializer.send_async(()),
             self.downloader.trigger_shutdown()
         );
     }

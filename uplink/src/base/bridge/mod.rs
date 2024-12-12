@@ -31,7 +31,7 @@ pub trait Package: Send + Debug {
     fn stream_name(&self) -> Arc<String>;
     // TODO: Implement a generic Return type that can wrap
     // around custom serialization error types.
-    fn serialize(&self) -> serde_json::Result<Vec<u8>>;
+    fn serialize(&self) -> Vec<u8>;
     fn anomalies(&self) -> Option<(String, usize)>;
     fn len(&self) -> usize;
     fn latency(&self) -> u64;
