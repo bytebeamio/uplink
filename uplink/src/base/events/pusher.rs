@@ -12,6 +12,8 @@ use crate::utils::SendOnce;
 pub struct EventsPusher {
     pubacks: Receiver<u16>,
     publisher: AsyncClient,
+    tenant_id: String,
+    device_id: String,
     reserved_pkids: [u16; 2],
     db_path: PathBuf,
 }
@@ -32,8 +34,8 @@ enum EventsPusherState {
 }
 
 impl EventsPusher {
-    pub fn new(pubacks: Receiver<u16>, publisher: AsyncClient, reserved_pkids: [u16; 2], db_path: PathBuf) -> Self {
-        Self { pubacks, publisher, db_path, reserved_pkids }
+    pub fn new(pubacks: Receiver<u16>, publisher: AsyncClient, tenant_id: String, device_id: String, reserved_pkids: [u16; 2], db_path: PathBuf) -> Self {
+        Self { pubacks, publisher, tenant_id, device_id, db_path, reserved_pkids }
     }
 
     pub async fn start(self) {
@@ -103,29 +105,32 @@ impl EventsPusher {
                 }
                 WaitingForAck(event_id) => {
                     let end = tokio::time::Instant::now() + Duration::from_secs(60);
-                    match tokio::time::timeout_at(end, self.pubacks.recv_async()).await {
-                        Ok(Ok(pkid)) => {
-                            if pkid == self.reserved_pkids[current_pkid_idx] {
-                                log::info!("received acknowledgement");
-                                if let Err(e) = conn.lock().unwrap().execute(POP_EVENT, (*event_id,)) {
-                                    log::error!("unexpected error: couldn't pop event from queue: {e}");
-                                    return;
+                    loop {
+                        match tokio::time::timeout_at(end, self.pubacks.recv_async()).await {
+                            Ok(Ok(pkid)) => {
+                                if pkid == self.reserved_pkids[current_pkid_idx] {
+                                    log::info!("received acknowledgement");
+                                    if let Err(e) = conn.lock().unwrap().execute(POP_EVENT, (*event_id,)) {
+                                        log::error!("unexpected error: couldn't pop event from queue: {e}");
+                                        return;
+                                    }
+                                    current_pkid_idx += 1;
+                                    current_pkid_idx %= 2;
+                                    state = Init;
+                                    break;
                                 }
-                                current_pkid_idx += 1;
-                                current_pkid_idx %= 2;
+                            }
+                            Ok(Err(e)) => {
+                                log::warn!("PubAcks stream ended, aborting : {e}");
+                                return;
+                            }
+                            Err(_) => {
+                                log::error!("Timed out waiting for PubAck, retrying.");
                                 state = Init;
+                                break;
                             }
                         }
-                        Ok(Err(e)) => {
-                            log::warn!("PubAcks stream ended, aborting : {e}");
-                            return;
-                        }
-                        Err(_) => {
-                            log::error!("Timed out waiting for PubAck, retrying.");
-                            state = Init;
-                        }
                     }
-
                 }
             }
         }
@@ -134,7 +139,7 @@ impl EventsPusher {
     fn generate_publish(&self, event: &EventOrm, pkid: u16) -> anyhow::Result<Request> {
         let payload = serde_json::from_str::<Payload>(event.payload.as_str())?;
         let mut result = Publish::new(
-            format!("/tenants/{}/devices/{}/events/{}/jsonarray", "test", "test", payload.stream),
+            format!("/tenants/{}/devices/{}/events/{}/jsonarray", self.tenant_id, self.device_id, payload.stream),
             QoS::AtLeastOnce,
             serde_json::to_string(&[payload]).unwrap(),
         );
