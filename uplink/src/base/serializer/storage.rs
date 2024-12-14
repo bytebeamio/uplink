@@ -564,27 +564,25 @@ mod test {
             .collect::<Vec<_>>();
         assert_eq!(files.len(), 2);
         files.sort_by_key(|e| e.file_name());
-        let file = files.get(0).unwrap().path();
-        // these two will be deleted because they're extra
+        let file = files.get(1).unwrap().path();
         std::fs::copy(file.as_path(), dir.path().join("backup@3")).unwrap();
         std::fs::copy(file.as_path(), dir.path().join("backup@4")).unwrap();
-        // this will just be skipped
         std::fs::copy(file.as_path(), dir.path().join("extra_file")).unwrap();
 
-        let mut storage = DirectoryStorage::new(dir.path().to_owned(), 100, 2, 1024 * 1000).unwrap();
-        assert_eq!(storage.files_queue.len(), 2);
+        let mut storage = DirectoryStorage::new(dir.path().to_owned(), 100, 3, 1024 * 1000).unwrap();
+        assert_eq!(storage.files_queue.len(), 3);
         let files = std::fs::read_dir(dir.path()).unwrap()
             .filter_map(|e| e.ok())
             .collect::<Vec<_>>();
-        // 2 + 3 - 2
-        assert_eq!(files.len(), 3);
+        assert_eq!(files.len(), 4);
 
-        for idx in 0..10 {
+        for idx in (7..10).chain(7..10).chain(7..10) {
             let p = storage.read_packet().unwrap();
-            dbg!(std::str::from_utf8(p.payload.as_ref()).unwrap());
-            // assert_eq!(p.topic, "test_topic");
-            // assert_eq!(std::str::from_utf8(p.payload.as_ref()).unwrap(), idx.to_string());
+            assert_eq!(p.topic, "test_topic");
+            assert_eq!(std::str::from_utf8(p.payload.as_ref()).unwrap(), idx.to_string());
         }
+
+        assert!(matches!(storage.read_packet(), Err(StorageReadError::Empty)));
     }
 
     fn create_publish(topic: &str, i: u32) -> Publish {

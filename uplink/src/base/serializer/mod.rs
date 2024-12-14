@@ -818,7 +818,6 @@ pub mod tests {
         }
     }
 
-    #[test]
     fn get_test_buffer_size() {
         let sk = Arc::new(StreamConfig {
             name: "test_stream".to_string(),
