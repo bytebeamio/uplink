@@ -515,7 +515,7 @@ impl<'a> PersistenceFile<'a> {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use bytes::Bytes;
     use rumqttc::{Publish, QoS};
     use crate::base::serializer::storage::{DirectoryStorage, Storage, StorageReadError};

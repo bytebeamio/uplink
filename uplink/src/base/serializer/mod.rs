@@ -1265,7 +1265,7 @@ pub mod tests {
         assert_eq!(payload, "1");
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn crash_test() {
         let mut config = default_config();
         config.stream_metrics.timeout = Duration::from_secs(1000);
@@ -1303,7 +1303,7 @@ pub mod tests {
             Request::Publish(p) => {
                 assert_eq!(p.topic, sk.topic);
                 let payload = serde_json::from_slice::<[SerializedPayload; 1]>(p.payload.as_ref()).unwrap();
-                assert_eq!(payload[0].sequence, 0);
+                assert_eq!(payload[0].sequence, 1);
             }
             _ => {
                 panic!("boo");
@@ -1313,7 +1313,7 @@ pub mod tests {
             Request::Publish(p) => {
                 assert_eq!(p.topic, sk.topic);
                 let payload = serde_json::from_slice::<[SerializedPayload; 1]>(p.payload.as_ref()).unwrap();
-                assert_eq!(payload[0].sequence, 1);
+                assert_eq!(payload[0].sequence, 0);
             }
             _ => {
                 panic!("boo");
