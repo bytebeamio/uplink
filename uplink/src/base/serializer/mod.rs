@@ -637,13 +637,14 @@ pub fn construct_publish(
 #[cfg(test)]
 pub mod tests {
     use std::path::PathBuf;
+    use std::thread::JoinHandle;
     use bytes::Bytes;
     use flume::bounded;
     use serde::{Deserialize, Serialize};
     use serde_json::Value;
     use tokio::{spawn, time::sleep};
 
-    use crate::{config::MqttConfig, hashmap, mock::{MockClient, MockCollector}, spawn_named_thread};
+    use crate::{config::MqttConfig, hashmap, mock::{MockClient, MockCollector}};
     use crate::base::bridge::Payload;
     use crate::base::bridge::stream::Buffer;
     use crate::config::Persistence;
@@ -716,7 +717,7 @@ pub mod tests {
         stream_queue_behavior(10000, 0, 150).await;
     }
 
-    #[derive(Deserialize)]
+    #[derive(Debug, Deserialize)]
     struct SerializedPayload {
         pub sequence: u32,
         pub timestamp: u64,
@@ -732,18 +733,7 @@ pub mod tests {
     #[tokio::test]
     async fn directory_to_in_memory_queue_behavior() {
         let temp_dir = tempdir::TempDir::new("uplink").unwrap();
-        let sk = Arc::new(StreamConfig {
-            name: "test_stream".to_string(),
-            topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
-            batch_size: 2,
-            flush_period: Duration::from_secs(1),
-            compression: Compression::Disabled,
-            persistence: Persistence {
-                max_file_size: 10800,
-                max_file_count: 10,
-            },
-            priority: 0,
-        });
+        let sk = Arc::new(create_test_stream_config());
         let config = Config {
             persistence_path: temp_dir.path().to_owned(),
             streams: hashmap!(
@@ -811,6 +801,21 @@ pub mod tests {
             payload: serde_json::json!({ "msg": "Hello, World!" }),
         });
         buffer
+    }
+
+    fn create_test_stream_config() -> StreamConfig {
+        StreamConfig {
+            name: "test_stream".to_string(),
+            topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
+            batch_size: 2,
+            flush_period: Duration::from_secs(1),
+            compression: Compression::Disabled,
+            persistence: Persistence {
+                max_file_size: 10800,
+                max_file_count: 10,
+            },
+            priority: 0,
+        }
     }
 
     #[test]
@@ -1261,6 +1266,65 @@ pub mod tests {
         assert_eq!(payload, "1");
     }
 
+    // #[tokio::test]
+    async fn crash_test() {
+        let mut config = default_config();
+        config.stream_metrics.timeout = Duration::from_secs(1000);
+        config.streams.insert("test_stream".to_owned(), create_test_stream_config());
+        let config = Arc::new(config);
+        let sk = Arc::new(create_test_stream_config());
+        let (mut serializer, data_tx, mqtt_rx, ctrl_tx) = defaults(config.clone());
+        let st = spawn_named_thread("Serializer", move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+
+            rt.block_on(async move {
+                serializer.start().await;
+            });
+        });
+
+        std::thread::sleep(Duration::from_secs(1));
+
+        data_tx.send(Box::new(create_test_buffer(0, sk.clone()))).unwrap();
+        data_tx.send(Box::new(create_test_buffer(1, sk.clone()))).unwrap();
+
+        drop(mqtt_rx);
+        drop(data_tx);
+        st.join().unwrap();
+
+        let (mut serializer, data_tx, mqtt_rx, ctrl_tx) = defaults(config.clone());
+        let st = spawn_named_thread("Serializer", move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+
+            rt.block_on(async move {
+                serializer.start().await;
+            });
+        });
+
+        match mqtt_rx.recv().unwrap() {
+            Request::Publish(p) => {
+                assert_eq!(p.topic, sk.topic);
+                let payload = serde_json::from_slice::<[SerializedPayload; 1]>(p.payload.as_ref()).unwrap();
+                assert_eq!(payload[0].sequence, 0);
+            }
+            _ => {
+                panic!("boo");
+            }
+        }
+        match mqtt_rx.recv().unwrap() {
+            Request::Publish(p) => {
+                assert_eq!(p.topic, sk.topic);
+                let payload = serde_json::from_slice::<[SerializedPayload; 1]>(p.payload.as_ref()).unwrap();
+                assert_eq!(payload[0].sequence, 1);
+            }
+            _ => {
+                panic!("boo");
+            }
+        }
+
+        ctrl_tx.send(()).unwrap();
+        st.join().unwrap();
+    }
+
     fn create_publish(topic: &str, i: u32) -> Publish {
         Publish {
             dup: false,
@@ -1270,5 +1334,12 @@ pub mod tests {
             pkid: 1,
             payload: Bytes::from(i.to_string()),
         }
+    }
+
+    pub fn spawn_named_thread<F>(name: &str, f: F) -> JoinHandle<()>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        std::thread::Builder::new().name(name.to_string()).spawn(f).unwrap()
     }
 }
