@@ -98,7 +98,7 @@ impl ActionsBridge {
     fn load_actions_routing_cache(persistence: &Path) -> LimitedArrayMap<String, String> {
         let save_file = persistence.join("actions_routing_cache.json");
         if std::fs::metadata(&save_file).is_err() {
-            return LimitedArrayMap::new(64);
+            return LimitedArrayMap::new(32);
         }
         let mut result = std::fs::read(&save_file)
             .context("")
@@ -108,9 +108,9 @@ impl ActionsBridge {
             if let Err(e) = std::fs::remove_file(&save_file) {
                 log::warn!("Couldn't remove a file in persistence directory: {e}. Does the uplink process have right permissions?");
             }
-            LimitedArrayMap::new(64)
+            LimitedArrayMap::new(32)
         });
-        result.map.reserve(64);
+        result.map.reserve(32);
         result
     }
 
