@@ -291,14 +291,16 @@ impl FileDownloader {
 
     // A download must be retried with Range header when HTTP/reqwest errors are faced
     async fn continuous_retry(&self, state: &mut DownloadState) -> Result<(), Error> {
-        'outer: loop {
+        'outer: for idx in 1..=20 {
+            log::info!("download attempt {idx}");
             let mut req = self.client.get(&state.current.meta.url);
             if let Some(range) = state.retry_range() {
                 warn!("Retrying download; Continuing to download file from: {range}");
                 req = req.header("Range", range);
             }
-            let mut stream = match req.send().await {
-                Ok(s) => s.error_for_status()?.bytes_stream(),
+            let mut stream = match req.send().await.context("network issue")
+                .and_then(|s| s.error_for_status().context("request failed") ) {
+                Ok(s) => s.bytes_stream(),
                 Err(e) => {
                     error!("Download failed: {e}");
                     // Retry after wait
