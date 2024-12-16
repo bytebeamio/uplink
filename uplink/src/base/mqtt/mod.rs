@@ -173,7 +173,7 @@ impl Mqtt {
         }
 
         let (events_puback_tx, events_puback_rx) = bounded::<u16>(32);
-        if self.config.enable_events {
+        if self.config.console.enable_events {
             // we use two pkids after the rumqttc reserved pkids for events
             // the second pkid won't be sent until uplink has received an acknowledgement for the first pkid
             // and the first pkid won't be sent again until uplink receives an acknowledgement for the second pkid

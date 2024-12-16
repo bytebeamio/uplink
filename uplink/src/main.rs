@@ -351,7 +351,7 @@ fn main() -> Result<(), Error> {
         spawn_named_thread("Uplink Console", move || {
             console::start(
                 port, reload_handle, ctrl_tx, downloader_disable, network_up,
-                config.enable_events.then(|| config.persistence_path.join("events.db"))
+                config.console.enable_events.then(|| config.persistence_path.join("events.db"))
             )
         });
     }
