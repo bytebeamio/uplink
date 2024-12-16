@@ -151,7 +151,7 @@ impl EventsPusher {
 
 fn do_initialization(conn: &Mutex<Connection>) -> anyhow::Result<()> {
     conn.lock().unwrap()
-        .execute(CREATE_EVENTS_TABLE, ())?;
+        .execute_batch(CREATE_EVENTS_TABLE)?;
 
     let count = conn.lock().unwrap().query_row(FETCH_EVENTS_COUNT, (), |row| row.get::<_, u64>(0))?;
     if count != 0 {
@@ -164,7 +164,7 @@ fn do_initialization(conn: &Mutex<Connection>) -> anyhow::Result<()> {
 const POP_EVENT: &str = "DELETE FROM events WHERE id = ?";
 
 // language=sqlite
-pub const CREATE_EVENTS_TABLE: &str = "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT)";
+pub const CREATE_EVENTS_TABLE: &str = "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT); VACUUM;";
 
 #[derive(Debug)]
 struct EventOrm {

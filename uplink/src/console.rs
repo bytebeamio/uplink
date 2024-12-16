@@ -45,7 +45,7 @@ pub async fn start(
                     e
                 })
                 .and_then(|conn| {
-                    match conn.execute(CREATE_EVENTS_TABLE, ()) {
+                    match conn.execute_batch(CREATE_EVENTS_TABLE) {
                         Ok(_) => Ok(conn),
                         Err(e) => {
                             log::error!("couldn't create events table : {e}");
