@@ -201,7 +201,7 @@ impl FileDownloader {
             Ok(s) => s,
             Err(Error::NoSave) => return,
             Err(e) => {
-                warn!("Couldn't reload current_download: {e}");
+                warn!("Couldn't reload current_download: {e:?}");
                 return;
             }
         };
@@ -267,7 +267,7 @@ impl FileDownloader {
 
             Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
                 if let Err(e) = state.save(&self.config) {
-                    error!("Error saving current_download: {e}");
+                    error!("Error saving current_download: {e:?}");
                 }
 
                 return DownloadResult::Suspended;
@@ -302,7 +302,7 @@ impl FileDownloader {
                 .and_then(|s| s.error_for_status().context("request failed") ) {
                 Ok(s) => s.bytes_stream(),
                 Err(e) => {
-                    error!("Download failed: {e}");
+                    error!("Download failed: {e:?}");
                     // Retry after wait
                     sleep(Duration::from_secs(1)).await;
                     continue 'outer;
@@ -326,7 +326,7 @@ impl FileDownloader {
                             ActionResponse::progress(&self.action_id, "Download Failed", 0)
                                 .add_error(e.to_string());
                         self.bridge_tx.send_action_response(status).await;
-                        error!("Download failed: {e}");
+                        error!("Download failed: {e:?}");
                         // Retry after wait
                         sleep(Duration::from_secs(1)).await;
                         continue 'outer;
