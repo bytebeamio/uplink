@@ -55,6 +55,10 @@ impl LogLevel {
     }
 }
 
+fn default_tag() -> String {
+    "system".to_owned()
+}
+
 #[derive(Deserialize)]
 struct JournaldEntry {
     #[serde(rename = "PRIORITY")]
@@ -63,7 +67,7 @@ struct JournaldEntry {
     #[serde(rename = "__REALTIME_TIMESTAMP")]
     log_timestamp: String,
 
-    #[serde(rename = "SYSLOG_IDENTIFIER")]
+    #[serde(rename = "SYSLOG_IDENTIFIER", default = "default_tag")]
     tag: String,
 
     #[serde(rename = "MESSAGE")]
