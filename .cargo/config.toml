@@ -1,7 +1,0 @@
-# we don't do releases for this architecture
-[build]
-target = "x86_64-unknown-linux-gnu"
-
-[target.x86_64-unknown-linux-gnu]
-linker = "/usr/bin/clang-14"
-rustflags = [ "-C", "relocation-model=static", "-C", "link-arg=--ld-path=mold", "-A", "warnings"]
