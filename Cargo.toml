@@ -8,11 +8,11 @@ exclude = ["tools/deserialize-backup", "tools/simulator", "tools/tunshell"]
 
 [workspace.dependencies]
 bytes = "1"
-flume = "0.10"
+flume = "0.11"
 futures-util = "0.3"
 log = "0.4"
 rand = "0.8"
-rumqttc = { git = "https://github.com/bytebeamio/rumqtt", rev = "c5bfdd74a535cadd518c12f7667e64f1ec68858c" }
+rumqttc = { git = "https://github.com/bytebeamio/rumqtt", rev = "b7ae6b5693d8c9c972d5eb857b2293fb901d57d9" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 tempdir = "0.3"
@@ -23,10 +23,14 @@ tokio-util = { version = "0.7", features = ["codec", "time"] }
 
 [profile.dev]
 opt-level = 0
-# for faster compile, run cycle
-# remove if you want to use the debugger
+############# for faster compile, run cycle
 #debug = 0
 #strip = "debuginfo"
+############################################
+############# for debugging
+debug = true
+strip = false
+############################################
 panic = "unwind"
 
 [profile.release]

@@ -2,7 +2,7 @@ use std::collections::btree_map::IterMut;
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Debug;
 use std::thread::JoinHandle;
-use flume::Sender;
+use flume::{SendError, Sender};
 
 /// Map with a maximum size
 ///
@@ -44,6 +44,22 @@ impl<K: Eq + Clone + Debug, V> LimitedArrayMap<K, V> {
     }
 }
 
+#[test]
+fn t1() {
+    let mut m = LimitedArrayMap::new(64);
+    dbg!(m.set("a".to_owned(), "A".to_owned()));
+    dbg!(m.set("b".to_owned(), "B".to_owned()));
+    dbg!(m);
+}
+
+#[test]
+fn t2() {
+    let mut m = LimitedArrayMap::new(64);
+    dbg!(m.set("a".to_owned(), "A".to_owned()));
+    dbg!(m.set("b".to_owned(), "B".to_owned()));
+    dbg!(m.get(&"a".to_owned()));
+}
+
 /// An iterator that allows user to access the current element
 /// under the cursor of a BTreeMap
 pub struct BTreeCursorMut<'a, K, V> {
@@ -60,6 +76,14 @@ impl<'a, K: Ord, V> BTreeCursorMut<'a, K, V> {
 
     pub fn bump(&mut self) {
         self.current = self.iter.next();
+    }
+}
+
+pub struct SendOnce<T>(pub Sender<T>);
+
+impl<T> SendOnce<T> {
+    pub async fn send_async(self, value: T) -> Result<(), SendError<T>> {
+        self.0.send_async(value).await
     }
 }
 
