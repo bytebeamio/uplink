@@ -180,14 +180,9 @@ const FETCH_EVENTS_COUNT: &str = "SELECT COUNT(*) FROM events";
 
 impl EventOrm {
     pub fn create(row: &Row) -> rusqlite::Result<Self> {
-        is_send::<Mutex<Connection>>();
-        is_send::<EventsPusherState>();
-        is_send::<tokio::time::Instant>();
         Ok(Self {
             id: row.get(0)?,
             payload: row.get(1)?,
         })
     }
 }
-
-fn is_send<T: Send>() {}

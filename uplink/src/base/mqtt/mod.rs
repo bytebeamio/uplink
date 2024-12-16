@@ -173,7 +173,7 @@ impl Mqtt {
         }
 
         let (events_puback_tx, events_puback_rx) = bounded::<u16>(32);
-        if self.config.console.accept_events {
+        if self.config.enable_events {
             // we use two pkids after the rumqttc reserved pkids for events
             // the second pkid won't be sent until uplink has received an acknowledgement for the first pkid
             // and the first pkid won't be sent again until uplink receives an acknowledgement for the second pkid
@@ -186,7 +186,7 @@ impl Mqtt {
                 self.device_config.project_id.clone(),
                 self.device_config.device_id.clone(),
                 [max_inflight+1, max_inflight+2],
-                self.config.persistence_path.join(".events.db"),
+                self.config.persistence_path.join("events.db"),
             );
             tokio::task::spawn(pusher_task.start());
         }

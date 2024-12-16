@@ -206,8 +206,6 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ConsoleConfig {
     pub enabled: bool,
-    #[serde(default)]
-    pub accept_events: bool,
     pub port: u16,
 }
 
@@ -266,6 +264,8 @@ pub struct DeviceConfig {
 pub struct Config {
     #[serde(default)]
     pub console: ConsoleConfig,
+    #[serde(default)]
+    pub enable_events: bool,
     #[serde(default = "default_tcpapps")]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
