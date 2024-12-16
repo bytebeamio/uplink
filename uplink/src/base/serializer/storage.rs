@@ -25,7 +25,7 @@ pub trait Storage: Send {
 
     /// Consume and convert into an in memory storage
     /// Used in case of file system errors
-    fn to_in_memory(&self) -> Box<dyn Storage>;
+    fn to_in_memory(self) -> StorageEnum;
 
     fn metrics(&self) -> StorageMetrics;
 }
@@ -36,6 +36,11 @@ pub struct StorageMetrics {
     pub bytes_on_disk: u64,
     pub files_count: u32,
     pub lost_files: u32,
+}
+
+pub enum StorageEnum {
+    InMemory(InMemoryStorage),
+    Directory(DirectoryStorage),
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -120,9 +125,7 @@ impl Storage for InMemoryStorage {
         Ok(())
     }
 
-    fn to_in_memory(&self) -> Box<dyn Storage> {
-        Box::new(self.clone())
-    }
+    fn to_in_memory(self) -> StorageEnum { StorageEnum::InMemory(self) }
 
     fn metrics(&self) -> StorageMetrics {
         let result = StorageMetrics {
@@ -341,11 +344,11 @@ impl Storage for DirectoryStorage {
         return result;
     }
 
-    fn to_in_memory(&self) -> Box<dyn Storage> {
-        Box::new(InMemoryStorage {
+    fn to_in_memory(self) -> StorageEnum {
+        StorageEnum::InMemory(InMemoryStorage {
             name: self.name().to_owned(),
-            read_buffer: self.read_buffer.clone(),
-            write_buffer: self.write_buffer.clone(),
+            read_buffer: self.read_buffer,
+            write_buffer: self.write_buffer,
             buf_size: self.max_file_size,
             max_packet_size: self.max_packet_size,
             lost_files: self.lost_files,
@@ -593,6 +596,52 @@ pub mod test {
             topic: topic.to_owned(),
             pkid: 1,
             payload: Bytes::from(i.to_string()),
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+impl Storage for StorageEnum {
+    fn name(&self) -> &str {
+        match self {
+            StorageEnum::InMemory(a) => a.name(),
+            StorageEnum::Directory(a) => a.name(),
+        }
+    }
+
+    fn read_packet(&mut self) -> Result<Publish, StorageReadError> {
+        match self {
+            StorageEnum::InMemory(a) => a.read_packet(),
+            StorageEnum::Directory(a) => a.read_packet(),
+        }
+    }
+
+    fn write_packet(&mut self, packet: Publish) -> Result<(), StorageWriteError> {
+        match self {
+            StorageEnum::InMemory(a) => a.write_packet(packet),
+            StorageEnum::Directory(a) => a.write_packet(packet),
+        }
+    }
+
+    fn flush(&mut self) -> Result<(), StorageFlushError> {
+        match self {
+            StorageEnum::InMemory(a) => a.flush(),
+            StorageEnum::Directory(a) => a.flush(),
+        }
+    }
+
+    fn to_in_memory(self) -> StorageEnum {
+        match self {
+            StorageEnum::InMemory(a) => a.to_in_memory(),
+            StorageEnum::Directory(a) => a.to_in_memory(),
+        }
+    }
+
+    fn metrics(&self) -> StorageMetrics {
+        match self {
+            StorageEnum::InMemory(a) => a.metrics(),
+            StorageEnum::Directory(a) => a.metrics(),
         }
     }
 }

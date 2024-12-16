@@ -53,11 +53,9 @@ impl TunshellClient {
             let session = self.clone();
             //TODO(RT): Findout why this is spawned. We want to send other action's with shell?
             tokio::spawn(async move {
-                if let Err(e) = session.session(&action).await {
-                    error!("{e}");
-                    let status = ActionResponse::failure(&action.action_id, e.to_string());
-                    session.bridge.send_action_response(status).await;
-                }
+                let _ = session.session(&action).await;
+                let status = ActionResponse::success(&action.action_id);
+                session.bridge.send_action_response(status).await;
             });
         }
     }

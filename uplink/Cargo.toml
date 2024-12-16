@@ -41,12 +41,14 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 # built-in collectors
 # tunshell
 tokio-compat-02 = "0.2.0"
-tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch" }
+tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "bytebeam-changes" }
 # simulator
 fake = { version = "2.5.0", features = ["derive"] }
 rand = { workspace = true }
 # downloader
 fs2 = "0.4"
+trait_enum = "0.5.0"
+replace_with = "0.1.7"
 futures-util = { workspace = true }
 hex = "0.4"
 human_bytes = "0.4"

@@ -201,7 +201,7 @@ impl FileDownloader {
             Ok(s) => s,
             Err(Error::NoSave) => return,
             Err(e) => {
-                warn!("Couldn't reload current_download: {e}");
+                warn!("Couldn't reload current_download: {e:?}");
                 return;
             }
         };
@@ -267,7 +267,7 @@ impl FileDownloader {
 
             Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
                 if let Err(e) = state.save(&self.config) {
-                    error!("Error saving current_download: {e}");
+                    error!("Error saving current_download: {e:?}");
                 }
 
                 return DownloadResult::Suspended;
@@ -291,16 +291,18 @@ impl FileDownloader {
 
     // A download must be retried with Range header when HTTP/reqwest errors are faced
     async fn continuous_retry(&self, state: &mut DownloadState) -> Result<(), Error> {
-        'outer: loop {
+        'outer: for idx in 1..=20 {
+            log::info!("download attempt {idx}");
             let mut req = self.client.get(&state.current.meta.url);
             if let Some(range) = state.retry_range() {
                 warn!("Retrying download; Continuing to download file from: {range}");
                 req = req.header("Range", range);
             }
-            let mut stream = match req.send().await {
-                Ok(s) => s.error_for_status()?.bytes_stream(),
+            let mut stream = match req.send().await.context("network issue")
+                .and_then(|s| s.error_for_status().context("request failed") ) {
+                Ok(s) => s.bytes_stream(),
                 Err(e) => {
-                    error!("Download failed: {e}");
+                    error!("Download failed: {e:?}");
                     // Retry after wait
                     sleep(Duration::from_secs(1)).await;
                     continue 'outer;
@@ -324,7 +326,7 @@ impl FileDownloader {
                             ActionResponse::progress(&self.action_id, "Download Failed", 0)
                                 .add_error(e.to_string());
                         self.bridge_tx.send_action_response(status).await;
-                        error!("Download failed: {e}");
+                        error!("Download failed: {e:?}");
                         // Retry after wait
                         sleep(Duration::from_secs(1)).await;
                         continue 'outer;

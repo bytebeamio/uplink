@@ -2191,6 +2191,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "replace_with"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a8614ee435691de62bcffcf4a66d91b3594bf1428a5722e79103249a095690"
+
+[[package]]
 name = "reqwest"
 version = "0.11.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3410,6 +3416,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "trait_enum"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "130dd741d3c71f76d031e58caffff3624eaaa2db9bd8c4b05406a71885300fc7"
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3437,7 +3449,7 @@ dependencies = [
 [[package]]
 name = "tunshell-client"
 version = "0.1.0"
-source = "git+https://github.com/bytebeamio/tunshell.git?branch=android_patch#a05b990230eeedcf47e68980f6ab9266977ba248"
+source = "git+https://github.com/bytebeamio/tunshell.git?branch=bytebeam-changes#2c3b7b7a68da8452289fc089c352221a3e7abd55"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3480,7 +3492,7 @@ dependencies = [
 [[package]]
 name = "tunshell-shared"
 version = "0.1.0"
-source = "git+https://github.com/bytebeamio/tunshell.git?branch=android_patch#a05b990230eeedcf47e68980f6ab9266977ba248"
+source = "git+https://github.com/bytebeamio/tunshell.git?branch=bytebeam-changes#2c3b7b7a68da8452289fc089c352221a3e7abd55"
 dependencies = [
  "afl",
  "anyhow",
@@ -3584,6 +3596,7 @@ dependencies = [
  "pretty-bytes",
  "rand 0.8.5",
  "regex",
+ "replace_with",
  "reqwest",
  "rsa",
  "rumqttc",
@@ -3607,6 +3620,7 @@ dependencies = [
  "tokio-util 0.7.11",
  "tracing",
  "tracing-subscriber",
+ "trait_enum",
  "tunshell-client",
  "vergen",
 ]

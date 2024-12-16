@@ -8,6 +8,7 @@ use std::{sync::Arc, time::Duration};
 use flume::{Receiver, Sender};
 use lz4_flex::frame::FrameEncoder;
 use pretty_bytes::converter::convert;
+use replace_with::replace_with_or_abort;
 use rumqttc::*;
 use tokio::{select, time::interval};
 
@@ -15,6 +16,7 @@ use crate::config::{Compression, StreamConfig};
 use crate::{Config, Package};
 pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
 use crate::base::clock;
+use crate::base::serializer::storage::{Storage, StorageEnum};
 use crate::utils::BTreeCursorMut;
 
 const METRICS_INTERVAL: Duration = Duration::from_secs(10);
@@ -172,7 +174,7 @@ pub struct Serializer<C: MqttClient> {
     /// when fetching packets, we sort by this and return the live data that has the most stale data
     /// if this isn't done, live data for a high frequency stream can block live data for other streams
     live_data_clock: usize,
-    sorted_storages: BTreeMap<Arc<StreamConfig>, (Box<dyn storage::Storage>, Option<Publish>, usize)>,
+    sorted_storages: BTreeMap<Arc<StreamConfig>, (StorageEnum, Option<Publish>, usize)>,
     ctrl_rx: Receiver<()>,
 }
 
@@ -210,19 +212,19 @@ impl<C: MqttClient> Serializer<C> {
         }
     }
 
-    fn create_storage_for_stream(&self, config: &StreamConfig) -> Box<dyn storage::Storage> {
+    fn create_storage_for_stream(&self, config: &StreamConfig) -> StorageEnum {
         if config.persistence.max_file_count == 0 {
-            Box::new(storage::InMemoryStorage::new(config.name.as_str(), config.persistence.max_file_size, self.config.mqtt.max_packet_size))
+            StorageEnum::InMemory(storage::InMemoryStorage::new(config.name.as_str(), config.persistence.max_file_size, self.config.mqtt.max_packet_size))
         } else {
             match storage::DirectoryStorage::new(
                 self.config.persistence_path.join(config.name.as_str()),
                 config.persistence.max_file_size, config.persistence.max_file_count,
                 self.config.mqtt.max_packet_size,
             ) {
-                Ok(s) => Box::new(s),
+                Ok(s) => StorageEnum::Directory(s),
                 Err(e) => {
                     log::error!("Failed to initialize disk backed storage for {} : {e}, falling back to in memory persistence", config.name);
-                    Box::new(storage::InMemoryStorage::new(config.name.as_str(), config.persistence.max_file_size, self.config.mqtt.max_packet_size))
+                    StorageEnum::InMemory(storage::InMemoryStorage::new(config.name.as_str(), config.persistence.max_file_size, self.config.mqtt.max_packet_size))
                 }
             }
         }
@@ -250,7 +252,9 @@ impl<C: MqttClient> Serializer<C> {
                 }
                 Err(storage::StorageReadError::FileSystemError(e)) => {
                     log::error!("Encountered file system error when reading packet for stream({}): {e}, falling back to in memory persistence", storage.name());
-                    *storage = storage.to_in_memory()
+                    replace_with_or_abort(storage, |s| {
+                        s.to_in_memory()
+                    });
                 }
                 Err(storage::StorageReadError::InvalidPacket(e)) => {
                     log::error!("Found invalid packet when reading from storage for stream({}): {e}", storage.name());

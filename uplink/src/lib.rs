@@ -146,7 +146,7 @@ impl Uplink {
         let mqtt_client = mqtt.client();
         let ctrl_mqtt = mqtt.ctrl_tx();
 
-        let tenant_filter = format!("/tenants/{}/", device_config.project_id);
+        let tenant_filter = format!("/tenants/{}/devices/{}", device_config.project_id, device_config.device_id);
         let (serializer_shutdown_tx, serializer_shutdown_rx) = flume::bounded(1);
 
         let (ctrl_tx, ctrl_rx) = bounded(1);

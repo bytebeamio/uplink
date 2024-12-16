@@ -221,7 +221,7 @@ impl CommandLine {
         let levels =
             match self.modules.clone().into_iter().reduce(|e, acc| format!("{e}={level},{acc}")) {
                 Some(f) => format!("{f}={level}"),
-                _ => format!("uplink={level},storage={level}"),
+                _ => format!("{level}"),
             };
 
         let builder = tracing_subscriber::fmt()
