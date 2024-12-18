@@ -75,6 +75,8 @@ use crate::{base::bridge::BridgeTx, Action, ActionResponse};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Cannot download file: invalid credentials")]
+    InvalidCredentials,
     #[error("Serde error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Error from reqwest: {0}")]
@@ -291,8 +293,7 @@ impl FileDownloader {
 
     // A download must be retried with Range header when HTTP/reqwest errors are faced
     async fn continuous_retry(&self, state: &mut DownloadState) -> Result<(), Error> {
-        'outer: for idx in 1..=20 {
-            log::info!("download attempt {idx}");
+        'outer: loop {
             let mut req = self.client.get(&state.current.meta.url);
             if let Some(range) = state.retry_range() {
                 warn!("Retrying download; Continuing to download file from: {range}");
@@ -302,6 +303,9 @@ impl FileDownloader {
                 .and_then(|s| s.error_for_status().context("request failed") ) {
                 Ok(s) => s.bytes_stream(),
                 Err(e) => {
+                    if format!("{e:?}").contains("BadSignature") {
+                        return Err(Error::InvalidCredentials);
+                    }
                     error!("Download failed: {e:?}");
                     // Retry after wait
                     sleep(Duration::from_secs(1)).await;
