@@ -5,6 +5,8 @@ targets = [
     "i686-linux-android",
     "aarch64-linux-android",
     "armv7-linux-androideabi",
+    "aarch64-unknown-linux-gnu",
+    "armv7-unknown-linux-gnueabihf"
 ]
 profile = "minimal"
 components = ["clippy"]

@@ -23,7 +23,7 @@ jobs:
           target: x86_64-unknown-linux-musl
 
       - name: Build binary
-        run: cargo build -p ${{ matrix.build }} --verbose --release --target x86_64-unknown-linux-musl
+        run: cargo build -p ${{ matrix.build }} --release --target x86_64-unknown-linux-musl
 
       - name: Upload release archive
         uses: softprops/action-gh-release@v1
@@ -86,7 +86,7 @@ jobs:
           echo "TARGET_DIR=./target/${{ matrix.target }}" >> $GITHUB_ENV
 
       - name: Build release binary
-        run: cross build --verbose --release ${{ env.TARGET_FLAGS }}
+        run: cross build --release ${{ env.TARGET_FLAGS }}
 
       - name: Strip release binary (linux and macos)
         if: matrix.build == 'linux' || matrix.build == 'macos' || matrix.build == 'macos-m1'
