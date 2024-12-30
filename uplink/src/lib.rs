@@ -73,6 +73,7 @@ use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
 pub use collector::{simulator, tcpjson::TcpJson};
+use crate::collector::log_reader::LogFileReader;
 
 /// Spawn a named thread to run the function f on
 pub fn spawn_named_thread<F>(name: &str, f: F)
@@ -329,6 +330,11 @@ impl Uplink {
                     error!("Script runner stopped!! Error = {e}");
                 }
             });
+        }
+
+        for (_logger, config) in self.config.log_reader.iter() {
+            let stdout_collector = LogFileReader::new(config.clone(), bridge_tx.clone());
+            thread::spawn(move || stdout_collector.start());
         }
 
         if let Some(checker_config) = &self.config.precondition_checks {

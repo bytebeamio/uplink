@@ -66,7 +66,6 @@ tar = "0.4"
 # device_shadow
 surge-ping = "0.8"
 
-[target.'cfg(target_os = "android")'.dependencies]
 time = "0.3"
 
 [target.'cfg(unix)'.dependencies]

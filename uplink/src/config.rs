@@ -305,4 +305,7 @@ pub struct Config {
     pub precondition_checks: Option<PreconditionCheckerConfig>,
     #[serde(default)]
     pub prioritize_live_data: bool,
+
+    #[serde(default)]
+    pub log_reader: HashMap<String, crate::collector::log_reader::LogReaderConfig>,
 }
