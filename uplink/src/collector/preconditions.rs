@@ -1,5 +1,5 @@
 use std::{fs::metadata, os::unix::fs::MetadataExt, sync::Arc};
-
+use anyhow::Context;
 use flume::Receiver;
 use human_bytes::human_bytes;
 use log::debug;
@@ -13,6 +13,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Disk space is insufficient: {0}")]
     InsufficientDisk(String),
+    #[error("Error while checking disk space: {0}")]
+    PreconditionError(#[from] anyhow::Error),
 }
 
 #[derive(Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -52,7 +54,7 @@ impl PreconditionChecker {
                 continue;
             }
 
-            let response = ActionResponse::progress(&action.action_id, "Checked OK", 100);
+            let response = ActionResponse::done(&action.action_id, "Checked OK", Some(action.clone()));
             self.bridge_tx.send_action_response(response).await;
         }
     }
@@ -65,6 +67,12 @@ impl PreconditionChecker {
         let Some(mut required_free_space) = preconditions.uncompressed_length else {
             return Ok(());
         };
+
+        std::fs::create_dir_all(self.config.downloader.path.as_path())
+            .context("Couldn't create download directory")?;
+        std::fs::create_dir_all(self.config.precondition_checks.as_ref().unwrap().path.as_path())
+            .context("Couldn't create precondition directory")?;
+
         let disk_free_space =
             fs2::free_space(&self.config.precondition_checks.as_ref().unwrap().path)? as usize;
 

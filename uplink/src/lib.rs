@@ -42,23 +42,22 @@
 //! [`name`]: Action#structfield.name
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 
 use anyhow::Error;
-use flume::{bounded, Receiver, RecvError, Sender};
+use flume::{bounded, Receiver, Sender};
 use log::error;
 
 pub mod base;
 pub mod collector;
 pub mod config;
 pub mod mock;
+pub mod utils;
 
 use self::config::{ActionRoute, Config, DeviceConfig};
 pub use base::actions::{Action, ActionResponse};
 use base::bridge::{stream::Stream, Bridge, Package, Payload, Point, StreamMetrics};
 use base::monitor::Monitor;
 use base::mqtt::Mqtt;
-pub use base::serializer::Storage;
 use base::serializer::{Serializer, SerializerMetrics};
 use base::CtrlTx;
 use collector::device_shadow::DeviceShadow;
@@ -94,8 +93,6 @@ pub struct Uplink {
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
     serializer_metrics_rx: Receiver<SerializerMetrics>,
-    shutdown_tx: Sender<()>,
-    shutdown_rx: Receiver<()>,
 }
 
 impl Uplink {
@@ -104,7 +101,6 @@ impl Uplink {
         let (data_tx, data_rx) = bounded(10);
         let (stream_metrics_tx, stream_metrics_rx) = bounded(10);
         let (serializer_metrics_tx, serializer_metrics_rx) = bounded(10);
-        let (shutdown_tx, shutdown_rx) = bounded(1);
 
         Ok(Uplink {
             config,
@@ -117,8 +113,6 @@ impl Uplink {
             stream_metrics_rx,
             serializer_metrics_tx,
             serializer_metrics_rx,
-            shutdown_tx,
-            shutdown_rx,
         })
     }
 
@@ -129,22 +123,22 @@ impl Uplink {
             self.data_tx.clone(),
             self.stream_metrics_tx(),
             self.action_rx.clone(),
-            self.shutdown_tx.clone(),
         )
     }
 
     pub fn spawn(
         &mut self,
+        device_config: &DeviceConfig,
         mut bridge: Bridge,
         downloader_disable: Arc<Mutex<bool>>,
         network_up: Arc<Mutex<bool>>,
     ) -> Result<CtrlTx, Error> {
         let (mqtt_metrics_tx, mqtt_metrics_rx) = bounded(10);
-        let (ctrl_actions_lane, ctrl_data_lane) = bridge.ctrl_tx();
+        let ctrl_data_lane = bridge.ctrl_tx();
 
         let mut mqtt = Mqtt::new(
             self.config.clone(),
-            &self.device_config,
+            device_config,
             self.action_tx.clone(),
             mqtt_metrics_tx,
             network_up,
@@ -152,13 +146,8 @@ impl Uplink {
         let mqtt_client = mqtt.client();
         let ctrl_mqtt = mqtt.ctrl_tx();
 
-        let serializer = Serializer::new(
-            self.config.clone(),
-            self.data_rx.clone(),
-            mqtt_client.clone(),
-            self.serializer_metrics_tx(),
-        )?;
-        let ctrl_serializer = serializer.ctrl_tx();
+        let tenant_filter = format!("/tenants/{}/devices/{}", device_config.project_id, device_config.device_id);
+        let (serializer_shutdown_tx, serializer_shutdown_rx) = flume::bounded(1);
 
         let (ctrl_tx, ctrl_rx) = bounded(1);
         let ctrl_downloader = DownloaderCtrlTx { inner: ctrl_tx };
@@ -168,7 +157,7 @@ impl Uplink {
             let actions_rx = bridge.register_action_routes(&self.config.downloader.actions)?;
             let file_downloader = FileDownloader::new(
                 self.config.clone(),
-                &self.device_config.authentication,
+                &device_config.authentication,
                 actions_rx,
                 bridge.bridge_tx(),
                 ctrl_rx,
@@ -179,15 +168,28 @@ impl Uplink {
 
         // Serializer thread to handle network conditions state machine
         // and send data to mqtt thread
-        spawn_named_thread("Serializer", || {
-            let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        {
+            let mqtt_client = mqtt_client.clone();
+            let config = self.config.clone();
+            let data_rx = self.data_rx.clone();
+            let serializer_metrics_tx = self.serializer_metrics_tx.clone();
+            let serializer_shutdown_rx = serializer_shutdown_rx;
+            spawn_named_thread("Serializer", move || {
+                let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
-            rt.block_on(async {
-                if let Err(e) = serializer.start().await {
-                    error!("Serializer stopped!! Error = {e}");
-                }
-            })
-        });
+                rt.block_on(async move {
+                    let serializer = Serializer::new(
+                        config,
+                        tenant_filter,
+                        data_rx,
+                        mqtt_client,
+                        serializer_metrics_tx,
+                        serializer_shutdown_rx,
+                    );
+                    serializer.start().await;
+                })
+            });
+        }
 
         // Mqtt thread to receive actions and send data
         spawn_named_thread("Mqttio", || {
@@ -246,10 +248,9 @@ impl Uplink {
         });
 
         Ok(CtrlTx {
-            actions_lane: ctrl_actions_lane,
             data_lane: ctrl_data_lane,
             mqtt: ctrl_mqtt,
-            serializer: ctrl_serializer,
+            serializer: serializer_shutdown_tx,
             downloader: ctrl_downloader,
         })
     }
@@ -259,7 +260,6 @@ impl Uplink {
 
         let route = ActionRoute {
             name: "launch_shell".to_owned(),
-            timeout: Duration::from_secs(10),
             cancellable: false,
         };
         let actions_rx = bridge.register_action_route(route)?;
@@ -280,7 +280,6 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
-                timeout: Duration::from_secs(10),
                 cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
@@ -296,7 +295,6 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
-                timeout: Duration::from_secs(10),
                 cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
@@ -356,9 +354,5 @@ impl Uplink {
 
     pub fn serializer_metrics_tx(&self) -> Sender<SerializerMetrics> {
         self.serializer_metrics_tx.clone()
-    }
-
-    pub async fn resolve_on_shutdown(&self) -> Result<(), RecvError> {
-        self.shutdown_rx.recv_async().await
     }
 }

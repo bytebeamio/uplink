@@ -1,6 +1,6 @@
 use flume::{Receiver, RecvError};
 use futures_util::SinkExt;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
@@ -10,9 +10,9 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use std::io;
-
+use anyhow::Context;
 use crate::base::bridge::BridgeTx;
-use crate::config::AppConfig;
+use crate::config::{AppConfig};
 use crate::{Action, ActionResponse, Payload};
 
 #[derive(Error, Debug)]
@@ -64,11 +64,11 @@ impl TcpJson {
                 }
             }
         };
-        let mut handle: Option<JoinHandle<()>> = None;
+        let mut existing_connection: Option<JoinHandle<()>> = None;
 
         info!("Waiting for app = {} to connect on {addr}", self.name);
         loop {
-            let framed = match listener.accept().await {
+            let tcp_connection = match listener.accept().await {
                 Ok((stream, addr)) => {
                     info!("Accepted connection from app = {} on {addr}", self.name);
                     Framed::new(stream, LinesCodec::new())
@@ -79,64 +79,76 @@ impl TcpJson {
                 }
             };
 
-            if let Some(handle) = handle {
-                handle.abort();
+            if let Some(existing_connection) = existing_connection.take() {
+                existing_connection.abort();
+                let _ = existing_connection.await;
+                warn!("Dropping previous connection to tcpapp({}) because another connection was initiated", self.name);
             }
 
-            let tcpjson = self.clone();
-            handle = Some(spawn(async move {
-                if let Err(e) = tcpjson.collect(framed).await {
-                    error!("TcpJson failed. app = {}, Error = {e}", tcpjson.name);
-                }
-            }));
-        }
-    }
-
-    async fn collect(&self, mut client: Framed<TcpStream, LinesCodec>) -> Result<(), Error> {
-        if let Some(actions_rx) = self.actions_rx.as_ref() {
-            loop {
-                select! {
-                    line = client.next() => {
-                        let line = line.ok_or(Error::StreamDone)??;
-                        if let Err(e) = self.handle_incoming_line(line).await {
-                            error!("Error handling incoming line = {e}, app = {}", self.name);
-                        }
+            {
+                let supports_cancellation = self.config.actions.iter().find(|c| c.cancellable).is_some();
+                let mut client_connection = ClientConnection {
+                    app_name: self.name.clone(),
+                    supports_cancellation,
+                    actions_rx: self.actions_rx.clone(),
+                    bridge_tx: self.bridge.clone(),
+                };
+                existing_connection = Some(spawn(async move {
+                    if let Err(e) = client_connection.start(tcp_connection).await {
+                        error!("TcpJson failed. app = {}, Error = {e}", client_connection.app_name);
                     }
-                    action = actions_rx.recv_async() => {
-                        let action = action?;
-                        match serde_json::to_string(&action) {
-                            Ok(data) => client.send(data).await?,
-                            Err(e) => {
-                                error!("Serialization error = {e}, app = {}", self.name);
-                                continue
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            loop {
-                let line = client.next().await;
-                let line = line.ok_or(Error::StreamDone)??;
-                if let Err(e) = self.handle_incoming_line(line).await {
-                    error!("Error handling incoming line = {e}, app = {}", self.name);
-                }
+                }));
             }
         }
     }
+}
 
+struct ClientConnection {
+    app_name: String,
+    supports_cancellation: bool,
+    actions_rx: Option<Receiver<Action>>,
+    bridge_tx: BridgeTx,
+}
+
+impl ClientConnection {
+    pub async fn start(&mut self, mut client: Framed<TcpStream, LinesCodec>) -> anyhow::Result<()> {
+        let (_dummy_action_tx, dummy_action_rx) = flume::bounded(0);
+        let actions_rx = self.actions_rx.as_ref().unwrap_or_else(|| &dummy_action_rx);
+        loop {
+            select! {
+                line = client.next() => {
+                    let line = line.ok_or(Error::StreamDone)??;
+                    if let Err(e) = self.handle_incoming_line(line).await {
+                        error!("Error handling incoming line = {e}, app = {}", self.app_name);
+                    }
+                }
+                action = actions_rx.recv_async() => {
+                    let action = action?;
+                    if action.name == "cancel_action" {
+                        if !self.supports_cancellation {
+                            self.bridge_tx.send_action_response(ActionResponse::failure(&action.action_id, "This tcp port isn't configured to support cancellation")).await;
+                        } else {
+                            client.send(serde_json::to_string(&action).unwrap()).await
+                                .context("failed to route action to client")?;
+                        }
+                    } else {
+                        client.send(serde_json::to_string(&action).unwrap()).await
+                            .context("failed to route action to client")?;
+                    }
+                }
+            }
+        }
+    }
     async fn handle_incoming_line(&self, line: String) -> Result<(), Error> {
-        debug!("{}: Received line = {line:?}", self.name);
+        debug!("{}: Received line = {line:?}", self.app_name);
         let data = serde_json::from_str::<Payload>(&line)?;
 
         if data.stream == "action_status" {
             let response = ActionResponse::from_payload(&data)?;
-            self.bridge.send_action_response(response).await;
-
-            return Ok(());
+            self.bridge_tx.send_action_response(response).await;
+        } else {
+            self.bridge_tx.send_payload(data).await;
         }
-
-        self.bridge.send_payload(data).await;
 
         Ok(())
     }

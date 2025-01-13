@@ -1,6 +1,0 @@
-#!/bin/sh
-
-cd /usr/share/bytebeam/uplink
-
-exec ./simulator.sh kill_devices
-echo "Killed all simulated devices"

@@ -18,8 +18,6 @@ pub enum Error {
     CorruptedFile,
     #[error("Empty write buffer")]
     NoWrites,
-    #[error("All backups have been consumed")]
-    Done,
 }
 
 pub struct Storage {
@@ -131,50 +129,42 @@ impl Storage {
     /// the file after loading. If all the disk data is caught up,
     /// swaps current write buffer to current read buffer if there
     /// is pending data in memory write buffer.
-    /// Returns Error::Done if all the messages are caught up
-    pub fn reload_on_eof(&mut self) -> Result<(), Error> {
+    /// Returns true if all the messages are caught up
+    pub fn reload_on_eof(&mut self) -> Result<bool, Error> {
         // Don't reload if there is data in current read file
         if self.current_read_file.has_remaining() {
-            return Ok(());
+            return Ok(false);
         }
 
-        let Some(persistence) = &mut self.persistence else {
-            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
-            // If read buffer is 0 after swapping, all the data is caught up
-            if self.current_read_file.is_empty() {
-                return Err(Error::Done);
+        if let Some(persistence) = &mut self.persistence {
+            // Remove read file on completion in destructive-read mode
+            let read_is_destructive = !persistence.non_destructive_read;
+            let read_file_id = persistence.current_read_file_id.take();
+            if let Some(id) = read_is_destructive.then_some(read_file_id).flatten() {
+                let deleted_file = persistence.remove(id)?;
+                debug!("Completed reading a persistence file, deleting it; storage = {}, path = {deleted_file:?}", self.name);
             }
 
-            return Ok(());
-        };
-
-        // Remove read file on completion in destructive-read mode
-        let read_is_destructive = !persistence.non_destructive_read;
-        let read_file_id = persistence.current_read_file_id.take();
-        if let Some(id) = read_is_destructive.then_some(read_file_id).flatten() {
-            let deleted_file = persistence.remove(id)?;
-            debug!("Completed reading a persistence file, deleting it; storage = {}, path = {deleted_file:?}", self.name);
-        }
-
-        // Swap read buffer with write buffer to read data in inmemory write
-        // buffer when all the backlog disk files are done
-        if persistence.backlog_files.is_empty() {
-            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
-            // If read buffer is 0 after swapping, all the data is caught up
-            if self.current_read_file.is_empty() {
-                return Err(Error::Done);
+            // Swap read buffer with write buffer to read data in inmemory write
+            // buffer when all the backlog disk files are done
+            if persistence.backlog_files.is_empty() {
+                mem::swap(&mut self.current_read_file, &mut self.current_write_file);
+                // If read buffer is 0 after swapping, all the data is caught up
+                return Ok(self.current_read_file.is_empty());
             }
 
-            return Ok(());
-        }
+            if let Err(e) = persistence.load_next_read_file(&mut self.current_read_file) {
+                self.current_read_file.clear();
+                persistence.current_read_file_id.take();
+                return Err(e);
+            }
 
-        if let Err(e) = persistence.load_next_read_file(&mut self.current_read_file) {
-            self.current_read_file.clear();
-            persistence.current_read_file_id.take();
-            return Err(e);
+            Ok(false)
+        } else {
+            mem::swap(&mut self.current_read_file, &mut self.current_write_file);
+            // If read buffer is 0 after swapping, all the data is caught up
+            Ok(self.current_read_file.is_empty())
         }
-
-        Ok(())
     }
 }
 
@@ -194,8 +184,8 @@ fn id(path: &Path) -> Result<u64, Error> {
 
 /// Gets list of file ids in the disk. Id of file backup@10 is 10.
 /// Storing ids instead of full paths enables efficient indexing
-fn get_file_ids(path: &Path, max_file_count: usize) -> Result<VecDeque<u64>, Error> {
-    let mut file_ids = Vec::with_capacity(max_file_count);
+fn get_file_ids(path: &Path) -> Result<VecDeque<u64>, Error> {
+    let mut file_ids = Vec::new();
     let files = fs::read_dir(path)?;
     for file in files {
         let path = file?.path();
@@ -322,7 +312,7 @@ struct Persistence {
 impl Persistence {
     fn new<P: Into<PathBuf>>(path: P, max_file_count: usize) -> Result<Self, Error> {
         let path = path.into();
-        let backlog_files = get_file_ids(&path, max_file_count)?;
+        let backlog_files = get_file_ids(&path)?;
         info!("List of file ids loaded from disk: {backlog_files:?}");
 
         let bytes_occupied = backlog_files.iter().fold(0, |acc, id| {
@@ -389,18 +379,16 @@ impl Persistence {
         Ok(NextFile { file: PersistenceFile::new(&self.path, file_name)?, deleted })
     }
 
-    /// Load the next persistence file to be read into memory, returns Error::Done if there is none left.
+    /// Load the next persistence file to be read into memory
     fn load_next_read_file(&mut self, current_read_file: &mut BytesMut) -> Result<(), Error> {
-        let Some(id) = self.backlog_files.pop_front() else {
-            self.current_read_file_id.take();
-            return Err(Error::Done);
-        };
+        // Len always > 0 because of above if. Doesn't panic
+        let id = self.backlog_files.pop_front().unwrap();
         let file_name = format!("backup@{id}");
         let mut file = PersistenceFile::new(&self.path, file_name)?;
 
         // Load file into memory and store its id for deleting in the future
         file.read(current_read_file)?;
-        self.current_read_file_id.replace(id);
+        self.current_read_file_id = Some(id);
 
         Ok(())
     }
@@ -435,7 +423,7 @@ mod test {
         let mut publishes = vec![];
         for _ in 0..n {
             // Done reading all the pending files
-            if let Err(super::Error::Done) = storage.reload_on_eof() {
+            if storage.reload_on_eof().unwrap() {
                 break;
             }
 
@@ -462,7 +450,7 @@ mod test {
         assert_eq!(storage.writer().len(), 1036);
 
         // other messages on disk
-        let files = get_file_ids(&backup.path(), 10).unwrap();
+        let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
@@ -475,14 +463,14 @@ mod test {
         // 11 files created. 10 on disk
         write_n_publishes(&mut storage, 110);
 
-        let files = get_file_ids(&backup.path(), 10).unwrap();
+        let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
         // 11 files created. 10 on disk
         write_n_publishes(&mut storage, 10);
 
         assert_eq!(storage.writer().len(), 0);
-        let files = get_file_ids(&backup.path(), 10).unwrap();
+        let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
 
@@ -535,7 +523,7 @@ mod test {
         assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
         // Ensure unread files are all present before read
-        let files = get_file_ids(&backup.path(), 10).unwrap();
+        let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
         // Successfully read 10 files with files still in storage after 10 reads
@@ -544,7 +532,7 @@ mod test {
             let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
             assert_eq!(file_id, i);
             // Ensure partially read file is still present in backup dir
-            let files = get_file_ids(&backup.path(), 10).unwrap();
+            let files = get_file_ids(&backup.path()).unwrap();
             assert!(files.contains(&i));
         }
 
@@ -553,7 +541,7 @@ mod test {
         assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
         // Ensure read files are all present before read
-        let files = get_file_ids(&backup.path(), 10).unwrap();
+        let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![]);
     }
 
@@ -574,14 +562,14 @@ mod test {
         assert_eq!(file_id, 0);
 
         // Ensure all persistance files still exist
-        let files = get_file_ids(&backup.path(), 10).unwrap();
+        let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
         // Write 10 more files onto disk, 10 publishes per file
         write_n_publishes(&mut storage, 100);
 
         // Ensure none of the earlier files exist on disk
-        let files = get_file_ids(&backup.path(), 10).unwrap();
+        let files = get_file_ids(&backup.path()).unwrap();
         assert_eq!(files, vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
     }
 }
