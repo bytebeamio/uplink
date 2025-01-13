@@ -6,7 +6,7 @@ As described in the [example `config.toml`](https://github.com/bytebeamio/uplink
 Here is one more example config to illustrate how uplink can be configured:
 ```
 [downloader]
-actions = [{ name = "update_firmware",  timeout = 3600 }] // sets the timeout to 1hr, allowing for uplink to wait for a whole hour before timing out the download, useful for large downloads over slower networks
+actions = [{ name = "update_firmware }]
 path = "/data/local/downloads" // downloads the file into a location commonly seen in Android systems, i.e. /data/local/downloads/update_firmware
 ```
 

@@ -1,7 +1,7 @@
 # Collection of binaries which uplink can spawn as a process
 # This ensures that user is protected against random actions
 # triggered from cloud.
-processes = [{ name = "echo", timeout = 10 }]
+processes = [{ name = "echo" }]
 
 # Map of action names for re-routing on partial completion. An action is considered
 # partially completed when progress is 100, but status is neither "Failed" nor "Completed".
@@ -9,7 +9,7 @@ action_redirections = { "firmware_update" = "install_update", "send_file" = "loa
 
 # Script runner allows users to trigger an action that will run an already downloaded
 # file as described by the download_path field of the JSON payload of a download action.
-script_runner = [{ name = "run_script", timeout = 10 }]
+script_runner = [{ name = "run_script" }]
 
 # Location on disk for persisted streams to write backlogs into, also used to write
 persistence_path = "/tmp/uplink/"
@@ -19,11 +19,6 @@ default_buf_size = 1024 # 1KB
 
 # Maximum number of data streams that can be accepted by uplink
 max_stream_count = 10
-
-# All streams will first push the latest packet before pushing historical data in
-# FIFO order, defaults to false. This solves the problem of bad networks leading to
-# data being pushed so slow that it is practically impossible to track the device.
-default_live_data_first = true
 
 # MQTT client configuration
 #
@@ -89,19 +84,13 @@ blacklist = ["cancollector_metrics", "candump_metrics", "pinger"]
 #   used when there is a network/system failure.
 # - priority(optional, u8): Higher prioirity streams get to push their data
 #   onto the network first.
-# - live_data_first(optional, bool): All streams will first push the latest packet
-#   before pushing historical data in FIFO order, defaults to false. This solves the
-#   problem of bad networks leading to data being pushed so slow that it is practically
-#   impossible to track the device.
 #
 # In the following config for the device_shadow stream we set batch_size to 1 and mark
-# it as non-persistent, also setting up live_data_first to enable quick delivery of stats.
-# Streams are internally constructed as a map of Name -> Config
+# it as non-persistent. streams are internally constructed as a map of Name -> Config
 [streams.device_shadow]
 topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
 flush_period = 5
 priority = 75
-live_data_first = true
 
 # Example using compression
 [streams.imu]
@@ -160,7 +149,7 @@ priority = 255
 [downloader]
 actions = [
     { name = "update_firmware" },
-    { name = "send_file", timeout = 10 },
+    { name = "send_file" },
     { name = "send_script" },
 ]
 path = "/var/tmp/ota-file"

@@ -1,7 +1,6 @@
 use bytes::BytesMut;
 use flume::{bounded, Receiver, Sender, TrySendError};
 use log::{debug, error, info};
-use storage::PersistenceFile;
 use thiserror::Error;
 use tokio::time::Duration;
 use tokio::{select, task};
@@ -19,7 +18,8 @@ use std::sync::Arc;
 
 use crate::config::{Config, DeviceConfig};
 use crate::Action;
-
+use crate::base::serializer::storage::{PersistenceFile, PersistenceError};
+use crate::base::events::pusher::EventsPusher;
 pub use self::metrics::MqttMetrics;
 
 mod metrics;
@@ -35,7 +35,7 @@ pub enum Error {
     #[error("Mqtt error {0}")]
     Mqtt(#[from] rumqttc::mqttbytes::Error),
     #[error("Storage error {0}")]
-    Storage(#[from] storage::Error),
+    Storage(#[from] PersistenceError),
 }
 
 impl From<flume::TrySendError<Action>> for Error {
@@ -48,6 +48,7 @@ impl From<flume::TrySendError<Action>> for Error {
 pub struct Mqtt {
     /// Uplink config
     config: Arc<Config>,
+    device_config: DeviceConfig,
     /// Client handle
     client: AsyncClient,
     /// Event loop handle
@@ -78,9 +79,9 @@ impl Mqtt {
         let (client, mut eventloop) = AsyncClient::new(options, 0);
         eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
         let (ctrl_tx, ctrl_rx) = bounded(1);
-
         Mqtt {
             config,
+            device_config: device_config.clone(),
             client,
             eventloop,
             native_actions_tx: actions_tx,
@@ -118,7 +119,7 @@ impl Mqtt {
             return Ok(());
         }
 
-        let mut file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string())?;
+        let file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string());
         let mut buf = BytesMut::new();
 
         for publish in publishes {
@@ -135,7 +136,7 @@ impl Mqtt {
     /// once done, deletes the file, while writing incoming data into storage.
     fn reload_from_inflight_file(&mut self) -> Result<(), Error> {
         // Read contents of inflight file into an in-memory buffer
-        let mut file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string())?;
+        let file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string());
         let path = file.path();
         if !path.is_file() {
             return Ok(());
@@ -171,6 +172,25 @@ impl Mqtt {
             error!("Error recovering data from inflight file: {e}");
         }
 
+        let (events_puback_tx, events_puback_rx) = bounded::<u16>(32);
+        if self.config.console.enable_events {
+            // we use two pkids after the rumqttc reserved pkids for events
+            // the second pkid won't be sent until uplink has received an acknowledgement for the first pkid
+            // and the first pkid won't be sent again until uplink receives an acknowledgement for the second pkid
+            // which will only happen after all the messages with the first pkid are processed by the broker
+            // this ensures that only two events pkids will be in transit at any time because mqtt standard guarantees
+            // that PubAck pkids have to be in the same order as Publish pkids
+            let max_inflight = self.eventloop.mqtt_options.inflight();
+            let pusher_task = EventsPusher::new(
+                events_puback_rx, self.client.clone(),
+                self.device_config.project_id.clone(),
+                self.device_config.device_id.clone(),
+                [max_inflight+1, max_inflight+2],
+                self.config.persistence_path.join("events.db"),
+            );
+            tokio::task::spawn(pusher_task.start());
+        }
+
         loop {
             select! {
                 event = self.eventloop.poll() => {
@@ -201,7 +221,10 @@ impl Mqtt {
                         Ok(Event::Incoming(packet)) => {
                             debug!("Incoming = {:?}", packet);
                             match packet {
-                                rumqttc::Packet::PubAck(_) => self.metrics.add_puback(),
+                                rumqttc::Packet::PubAck(puback) => {
+                                    self.metrics.add_puback();
+                                    let _ = events_puback_tx.try_send(puback.pkid);
+                                },
                                 rumqttc::Packet::PingResp => {
                                     self.metrics.add_pingresp();
                                     let inflight = self.eventloop.state.inflight();
@@ -339,6 +362,6 @@ pub struct CtrlTx {
 impl CtrlTx {
     /// Triggers shutdown of `Mqtt`
     pub async fn trigger_shutdown(&self) {
-        self.inner.send_async(MqttShutdown).await.unwrap()
+        let _ = self.inner.send_async(MqttShutdown).await;
     }
 }

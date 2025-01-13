@@ -9,8 +9,6 @@ use anyhow::Error;
 use config::{Environment, File, FileFormat};
 use log::info;
 use structopt::StructOpt;
-use tokio::select;
-use tokio::time::sleep;
 use tracing::error;
 use tracing_subscriber::fmt::format::{Format, Pretty};
 use tracing_subscriber::{fmt::Layer, layer::Layered, reload::Handle};
@@ -19,10 +17,6 @@ use tracing_subscriber::{EnvFilter, Registry};
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
-#[cfg(feature = "bus")]
-use uplink::collector::bus::Bus;
-#[cfg(feature = "bus")]
-use uplink::config::{ActionRoute, DEFAULT_TIMEOUT};
 use uplink::config::{AppConfig, Config, DeviceConfig, StreamConfig, MAX_BATCH_SIZE};
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
@@ -86,8 +80,8 @@ pub struct CommandLine {
     #[structopt(skip = env ! ("VERGEN_GIT_COMMIT_TIMESTAMP"))]
     pub commit_date: String,
     /// config file
-    #[structopt(short = "c", help = "Config file", default_value = "uplink.config.toml")]
-    pub config: PathBuf,
+    #[structopt(short = "c", help = "Config file")]
+    pub config: Option<PathBuf>,
     /// config file
     #[structopt(short = "a", help = "Authentication file")]
     pub auth: PathBuf,
@@ -106,24 +100,14 @@ impl CommandLine {
         let mut config =
             config::Config::builder().add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml));
 
-        if self.config.is_file() {
-            let read = read_to_string(&self.config).map_err(|e| {
+        if let Some(path) = &self.config {
+            let read = read_to_string(path).map_err(|e| {
                 Error::msg(format!(
                     "Config file couldn't be loaded from {:?}; error = {e}",
-                    self.config.display()
+                    path.display()
                 ))
             })?;
-            let file_format = match self.config.extension() {
-                Some(e) if e == "json" => FileFormat::Json,
-                Some(e) if e == "toml" => FileFormat::Toml,
-                _ => {
-                    return Err(Error::msg(format!(
-                        "Config file couldn't be loaded from {:?}; supported file extensions: [`.json`,`.toml`]",
-                        self.config.display(),
-                    )))
-                }
-            };
-            config = config.add_source(File::from_str(&read, file_format));
+            config = config.add_source(File::from_str(&read, FileFormat::Toml));
         }
 
         let mut config: Config =
@@ -160,10 +144,12 @@ impl CommandLine {
             *topic = topic.replace("{tenant_id}", tenant_id).replace("{device_id}", device_id);
         };
 
-        for config in config.streams.values_mut() {
-            replace_topic_placeholders(&mut config.topic);
+        for (stream_name, stream_config) in config.streams.iter_mut() {
+            stream_name.clone_into(&mut stream_config.name);
+            replace_topic_placeholders(&mut stream_config.topic);
         }
 
+        "action_status".clone_into(&mut config.action_status.name);
         replace_topic_placeholders(&mut config.action_status.topic);
         replace_topic_placeholders(&mut config.stream_metrics.bridge_topic);
         replace_topic_placeholders(&mut config.stream_metrics.serializer_topic);
@@ -235,7 +221,7 @@ impl CommandLine {
         let levels =
             match self.modules.clone().into_iter().reduce(|e, acc| format!("{e}={level},{acc}")) {
                 Some(f) => format!("{f}={level}"),
-                _ => format!("uplink={level},storage={level}"),
+                _ => format!("{level}"),
             };
 
         let builder = tracing_subscriber::fmt()
@@ -348,33 +334,10 @@ fn main() -> Result<(), Error> {
         _ => None,
     };
 
-    #[cfg(feature = "bus")]
-    let bus = config.bus.as_ref().map(|cfg| {
-        let actions_rx = bridge
-            .register_action_routes([ActionRoute {
-                name: "*".to_string(),
-                timeout: DEFAULT_TIMEOUT,
-                cancellable: false,
-            }])
-            .unwrap();
-
-        Bus::new(cfg.clone(), bridge_tx.clone(), actions_rx)
-    });
-
-    let update_config_actions = bridge.register_action_route(ActionRoute {
-        name: "update_uplink_config".to_owned(),
-        timeout: DEFAULT_TIMEOUT,
-        cancellable: false,
-    })?;
-
     let downloader_disable = Arc::new(Mutex::new(false));
     let network_up = Arc::new(Mutex::new(false));
-    let ctrl_tx = uplink.spawn(bridge, downloader_disable.clone(), network_up.clone())?;
-
-    #[cfg(feature = "bus")]
-    if let Some(bus) = bus {
-        spawn_named_thread("Bus Interface", move || bus.start())
-    };
+    let ctrl_tx =
+        uplink.spawn(&device_config, bridge, downloader_disable.clone(), network_up.clone())?;
 
     if let Some(config) = config.simulator.clone() {
         spawn_named_thread("Simulator", || {
@@ -386,7 +349,10 @@ fn main() -> Result<(), Error> {
         let port = config.console.port;
         let ctrl_tx = ctrl_tx.clone();
         spawn_named_thread("Uplink Console", move || {
-            console::start(port, reload_handle, ctrl_tx, downloader_disable, network_up)
+            console::start(
+                port, reload_handle, ctrl_tx, downloader_disable, network_up,
+                config.console.enable_events.then(|| config.persistence_path.join("events.db"))
+            )
         });
     }
 
@@ -404,45 +370,28 @@ fn main() -> Result<(), Error> {
             });
         }
 
-        let config_path = commandline.config.clone();
         #[cfg(unix)]
-        tokio::spawn(async move {
+        {
             use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
             use signal_hook_tokio::Signals;
             use tokio_stream::StreamExt;
 
             let mut signals = Signals::new([SIGTERM, SIGINT, SIGQUIT]).unwrap();
-            loop {
-                select! {
-                    Ok(action) = update_config_actions.recv_async() => {
-                        // NOTE: this will log an error until #356 isn't merged
-                        let config: Config = match serde_json::from_str(&action.payload) {
-                            Ok(c) => c,
-                            Err(e) => {
-                                error!("unexpected config: {}; error = {e}", action.payload);
-                                continue;
-                            },
-                        };
-                        if let Err(e) = config.write_file(&config_path) {
-                            error!("couldn't write file to: {}; error = {e}", config_path.display());
-                        }
-                    }
-                    // Handle a shutdown signal from POSIX
-                    Some(signal) = signals.next() => {
-                        match signal {
-                            SIGTERM | SIGINT | SIGQUIT => ctrl_tx.trigger_shutdown().await,
-                            s => error!("Couldn't handle signal: {s}"),
-                        }
-                    }
+            while let Some(signal) = signals.next().await {
+                match signal {
+                    SIGTERM | SIGINT | SIGQUIT => {
+                        ctrl_tx.trigger_shutdown().await;
+                        break;
+                    },
+                    s => error!("Couldn't handle signal: {s}"),
                 }
             }
-        });
-
-        uplink.resolve_on_shutdown().await.unwrap();
-        info!("Uplink shutting down...");
-        // NOTE: wait 5s to allow serializer to write to network/disk
-        sleep(Duration::from_secs(10)).await;
+        };
     });
+
+    info!("Uplink shutting down...");
+    // NOTE: wait 5s to allow serializer to write to network/disk
+    std::thread::sleep(Duration::from_secs(5));
 
     Ok(())
 }

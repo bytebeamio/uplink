@@ -52,7 +52,7 @@ Self Instrumentation
 * Total incoming and outgoing data throughput
 * Number of files in disk
 * Total backlog size
-* Rougue data. Receiving data of invalid channels. Report first incident
+* Rogue data. Receiving data of invalid channels. Report first incident
   and frequency for a given time period
 * This can be a hashmap 
 

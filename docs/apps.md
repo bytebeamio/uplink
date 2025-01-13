@@ -73,13 +73,6 @@ An example success response to an action with the id `"123"`, would look like:
 }
 ```
 
-> **NOTE:** There is a timeout mechanism which on being triggered will send a ***Failed*** response to platform and stop forwarding any *Progress* responses from the connected applications. In order to not trigger this timeout, an application must send a ***Failed*** or ***Completed*** response before the action timeout. Once an action has timedout, a failure response is sent and all it's future responses are dropped. Action timeouts can be configured per action when setting up uplink, as follows:
-> ```
-> [tcpapps.main_app]
-> port = 5050
-> actions = [{ name = "abc", timeout = 300 }] # Allow the connected app to send responses for action abc upto 5 minutes from receive, send a failure response and drop all responses afterwards if not yet completed.
-> ```
-
 ## Demonstration
 We have provided examples written in python and golang to demonstrate how you can receive Actions and reply back with either data or responses. You can checkout the examples provided in the `demo/` directory and execute them as such:
 1. Ensure uplink is running on the device, connected to relevant broker and using the following config:

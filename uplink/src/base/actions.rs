@@ -7,7 +7,7 @@ use super::clock;
 /// On the Bytebeam platform, an Action is how beamd and through it,
 /// the end-user, can communicate the tasks they want to perform on
 /// said device, in this case, uplink.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
     // action id
     #[serde(alias = "id")]
@@ -18,7 +18,7 @@ pub struct Action {
     pub payload: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionResponse {
     #[serde(alias = "id")]
     pub action_id: String,

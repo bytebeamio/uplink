@@ -68,13 +68,15 @@ use std::{
     path::Path,
 };
 use std::{io::Write, path::PathBuf};
-
+use anyhow::Context;
 use crate::base::actions::Cancellation;
 use crate::config::{Authentication, Config, DownloaderConfig};
 use crate::{base::bridge::BridgeTx, Action, ActionResponse};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Cannot download file: invalid credentials")]
+    InvalidCredentials,
     #[error("Serde error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("Error from reqwest: {0}")]
@@ -97,6 +99,12 @@ pub enum Error {
     NoSave,
     #[error("Download has been cancelled by '{0}'")]
     Cancelled(String),
+}
+
+enum DownloadResult {
+    Ok,
+    Err(String),
+    Suspended,
 }
 
 /// This struct contains the necessary components to download and store file as notified by a download file
@@ -170,15 +178,20 @@ impl FileDownloader {
             let status = ActionResponse::progress(&self.action_id, "Downloading", 0);
             self.bridge_tx.send_action_response(status).await;
 
-            if let Err(e) = self.download(&mut state).await {
-                self.forward_error(e).await;
-                continue;
+            match self.download(&mut state).await {
+                DownloadResult::Ok => {
+                    // Forward updated action as part of response
+                    let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
+                    let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
+                    self.bridge_tx.send_action_response(status).await;
+                }
+                DownloadResult::Err(e) => {
+                    self.bridge_tx.send_action_response(ActionResponse::failure(&self.action_id, e)).await;
+                }
+                DownloadResult::Suspended => {
+                    break
+                }
             }
-
-            // Forward updated action as part of response
-            let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
-            let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
-            self.bridge_tx.send_action_response(status).await;
         }
 
         error!("Downloader thread stopped");
@@ -190,53 +203,92 @@ impl FileDownloader {
             Ok(s) => s,
             Err(Error::NoSave) => return,
             Err(e) => {
-                warn!("Couldn't reload current_download: {e}");
+                warn!("Couldn't reload current_download: {e:?}");
                 return;
             }
         };
         state.current.action.action_id.clone_into(&mut self.action_id);
 
-        if let Err(e) = self.download(&mut state).await {
-            self.forward_error(e).await;
-            return;
+        match self.download(&mut state).await {
+            DownloadResult::Ok => {
+                // Forward updated action as part of response
+                let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
+                let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
+                self.bridge_tx.send_action_response(status).await;
+            }
+            DownloadResult::Err(e) => {
+                self.bridge_tx.send_action_response(ActionResponse::failure(&self.action_id, e)).await;
+            }
+            DownloadResult::Suspended => {}
         }
-
-        // Forward updated action as part of response
-        let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
-        let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
-        self.bridge_tx.send_action_response(status).await;
     }
 
     // Accepts `DownloadState`, sets a timeout for the action
-    async fn download(&mut self, state: &mut DownloadState) -> Result<(), Error> {
+    async fn download(&mut self, state: &mut DownloadState) -> DownloadResult {
         let shutdown_rx = self.shutdown_rx.clone();
         select! {
-            // Wait till download completes
-            o = self.continuous_retry(state) => o?,
-            // Cancel download on receiving cancel action, e.g. on action timeout
+            o = self.continuous_retry(state) => if let Err(e) = o {
+                return DownloadResult::Err(e.to_string());
+            },
             Ok(action) = self.actions_rx.recv_async() => {
-                let cancellation: Cancellation = serde_json::from_str(&action.payload)?;
-
-                trace!("Deleting partially downloaded file: {cancellation:?}");
-                state.clean()?;
-
-                return Err(Error::Cancelled(action.action_id));
+                if action.action_id == self.action_id {
+                    // This handles the edge case when the device is able to receive actions
+                    // from the broker but for something goes wrong when pushing action statuses back to the backend
+                    // In this case the backend will try sending the same action again
+                    //
+                    // TODO: Right now we use the action status pushed by device as confirmation that it
+                    // has received the action. It is not very reliable because as of now the action status pipeline can drop messages.
+                    // Would it be better if the backend used MQTT Ack of the action message instead?
+                    log::error!("Backend tried sending the same action again!");
+                } else if action.name != "cancel_action" {
+                    self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), "Downloader is already occupied")).await;
+                } else {
+                    match serde_json::from_str::<Cancellation>(&action.payload)
+                        .context("Invalid cancel action payload")
+                        .and_then(|cancellation| {
+                            if cancellation.action_id == self.action_id {
+                                Ok(())
+                            } else {
+                                Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, self.action_id)))
+                            }
+                        })
+                        .and_then(|_| {
+                            state.clean()
+                                .context("Couldn't couldn't perform cleanup")
+                        }) {
+                        Ok(_) => {
+                            self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
+                            return DownloadResult::Err(format!("action has been cancelled!"));
+                        },
+                        Err(e) => {
+                            self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
+                        },
+                    }
+                }
             },
 
             Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
                 if let Err(e) = state.save(&self.config) {
-                    error!("Error saving current_download: {e}");
+                    error!("Error saving current_download: {e:?}");
                 }
 
-                return Ok(());
+                return DownloadResult::Suspended;
             },
         }
 
-        state.current.meta.verify_checksum()?;
+        self.bridge_tx.send_action_response(ActionResponse::progress(self.action_id.as_str(), "VerifyingChecksum", 99)).await;
+        if let Err(e) = state.current.meta.verify_checksum() {
+            return DownloadResult::Err(e.to_string());
+        }
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
-        state.current.action.payload = serde_json::to_string(&state.current.meta)?;
+        state.current.action.payload = match serde_json::to_string(&state.current.meta) {
+            Ok(p) => p,
+            Err(e) => {
+                return DownloadResult::Err(e.to_string());
+            }
+        };
 
-        Ok(())
+        DownloadResult::Ok
     }
 
     // A download must be retried with Range header when HTTP/reqwest errors are faced
@@ -247,10 +299,14 @@ impl FileDownloader {
                 warn!("Retrying download; Continuing to download file from: {range}");
                 req = req.header("Range", range);
             }
-            let mut stream = match req.send().await {
-                Ok(s) => s.error_for_status()?.bytes_stream(),
+            let mut stream = match req.send().await.context("network issue")
+                .and_then(|s| s.error_for_status().context("request failed") ) {
+                Ok(s) => s.bytes_stream(),
                 Err(e) => {
-                    error!("Download failed: {e}");
+                    if format!("{e:?}").contains("BadSignature") {
+                        return Err(Error::InvalidCredentials);
+                    }
+                    error!("Download failed: {e:?}");
                     // Retry after wait
                     sleep(Duration::from_secs(1)).await;
                     continue 'outer;
@@ -274,7 +330,7 @@ impl FileDownloader {
                             ActionResponse::progress(&self.action_id, "Download Failed", 0)
                                 .add_error(e.to_string());
                         self.bridge_tx.send_action_response(status).await;
-                        error!("Download failed: {e}");
+                        error!("Download failed: {e:?}");
                         // Retry after wait
                         sleep(Duration::from_secs(1)).await;
                         continue 'outer;

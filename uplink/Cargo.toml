@@ -1,6 +1,6 @@
 [package]
 name = "uplink"
-version = "2.16.0"
+version = "2.17.1"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2021"
 
@@ -8,7 +8,6 @@ edition = "2021"
 bytes = { workspace = true }
 flume = { workspace = true }
 rumqttc = { workspace = true }
-rumqttd = { git = "https://github.com/bytebeamio/rumqtt", default-features = false, optional = true, branch = "console-response" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = "3.3.0"
@@ -18,6 +17,7 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 
 # binary utils
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 anyhow = "1"
 axum = "0.6"
 config = { version = "0.13.2", default-features = false, features = [
@@ -30,7 +30,7 @@ structopt = "0.3"
 async-trait = "0.1"
 lz4_flex = "0.10"
 pretty-bytes = "0.2.2"
-storage = { path = "../storage" }
+seahash = "4.1.0"
 
 # logging
 log = { workspace = true }
@@ -41,12 +41,14 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 # built-in collectors
 # tunshell
 tokio-compat-02 = "0.2.0"
-tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "android_patch" }
+tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "bytebeam-changes" }
 # simulator
 fake = { version = "2.5.0", features = ["derive"] }
 rand = { workspace = true }
 # downloader
 fs2 = "0.4"
+trait_enum = "0.5.0"
+replace_with = "0.1.7"
 futures-util = { workspace = true }
 hex = "0.4"
 human_bytes = "0.4"
@@ -63,7 +65,6 @@ lazy_static = "1.4.0"
 tar = "0.4"
 # device_shadow
 surge-ping = "0.8"
-toml = "0.8.19"
 
 [target.'cfg(target_os = "android")'.dependencies]
 time = "0.3"
@@ -77,12 +78,3 @@ vergen = { version = "7", features = ["git", "build", "time"] }
 
 [dev-dependencies]
 tempdir = { workspace = true }
-
-[features]
-default = ["bus"]
-bus = ["rumqttd"]
-
-[[test]]
-name = "joins"
-path = "tests/joins.rs"
-required-features = ["bus"]

@@ -1,12 +1,13 @@
-FROM rust:alpine AS builder
+FROM rust:alpine as builder
 
 RUN apk add build-base openssl-dev
 WORKDIR "/usr/share/bytebeam/uplink"
 
 COPY uplink/ uplink
 COPY storage/ storage
-COPY tools/ tools
-COPY Cargo.* .
+COPY tools/utils/ tools/utils
+COPY tools/system-stats/ tools/system-stats
+COPY Cargo.* ./
 COPY .git/ .git
 
 RUN mkdir -p /usr/share/bytebeam/uplink/bin
@@ -28,3 +29,4 @@ CMD ["/usr/bin/runsvdir", "/etc/runit"]
 
 COPY paths/ paths
 COPY simulator.sh .
+
