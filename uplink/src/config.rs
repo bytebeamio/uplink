@@ -67,7 +67,8 @@ pub enum Compression {
 pub struct StreamConfig {
     #[serde(default)]
     #[serde(skip_deserializing)]
-    pub name: String,
+    pub name: String, // TODO: serializer uses this, remove it
+    #[serde(default)]
     pub topic: String,
     #[serde(default = "max_batch_size")]
     pub batch_size: usize,

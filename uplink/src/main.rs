@@ -147,6 +147,9 @@ impl CommandLine {
         };
 
         for (stream_name, stream_config) in config.streams.iter_mut() {
+            if stream_config.topic == "" {
+                stream_config.topic = format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray");
+            }
             stream_name.clone_into(&mut stream_config.name);
             replace_topic_placeholders(&mut stream_config.topic);
         }
