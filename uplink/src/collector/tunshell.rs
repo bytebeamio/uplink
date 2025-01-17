@@ -53,12 +53,12 @@ impl TunshellClient {
             let session = self.clone();
             tokio::spawn(async move {
                 if let Err(e) = session.session(&action).await {
-                    log::error!("remote shell session ended with an error: {e:?}")
+                    log::error!("remote shell session ended with an error: {e:?}");
+                    session.bridge.send_action_response(ActionResponse::failure(&action.action_id, e.to_string())).await
                 } else {
                     log::info!("remote shell session finished");
+                    session.bridge.send_action_response(ActionResponse::success(&action.action_id)).await
                 }
-                let status = ActionResponse::success(&action.action_id);
-                session.bridge.send_action_response(status).await;
             });
         }
     }
@@ -76,7 +76,6 @@ impl TunshellClient {
         if status != 0 {
             Err(Error::UnexpectedStatus(status))
         } else {
-            log::info!("Tunshell session ended successfully");
             Ok(())
         }
     }
