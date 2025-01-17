@@ -45,7 +45,7 @@ use std::thread;
 
 use anyhow::Error;
 use flume::{bounded, Receiver, Sender};
-use log::error;
+use log::{error, info};
 
 pub mod base;
 pub mod collector;
@@ -73,6 +73,7 @@ use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
 pub use collector::{simulator, tcpjson::TcpJson};
+use crate::collector::stdio::stdin_collector;
 
 /// Spawn a named thread to run the function f on
 pub fn spawn_named_thread<F>(name: &str, f: F)
@@ -258,13 +259,25 @@ impl Uplink {
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
         let bridge_tx = bridge.bridge_tx();
 
-        let route = ActionRoute {
-            name: "launch_shell".to_owned(),
-            cancellable: false,
-        };
-        let actions_rx = bridge.register_action_route(route)?;
-        let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
-        spawn_named_thread("Tunshell Client", move || tunshell_client.start());
+        if self.config.enable_remote_shell {
+            let route = ActionRoute {
+                name: "launch_shell".to_owned(),
+                cancellable: false,
+            };
+            let actions_rx = bridge.register_action_route(route)?;
+            let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
+            spawn_named_thread("Tunshell Client", move || tunshell_client.start());
+        }
+
+        if self.config.enable_stdin_collector {
+            info!("starting stdin collector");
+            let bridge = bridge_tx.clone();
+            spawn_named_thread("Stdin Collector", move || {
+                stdin_collector(bridge);
+            });
+        } else {
+            info!("stdin collector disabled");
+        }
 
         let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
         spawn_named_thread("Device Shadow Generator", move || device_shadow.start());

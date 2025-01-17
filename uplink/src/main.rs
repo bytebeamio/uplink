@@ -21,6 +21,8 @@ use uplink::config::{AppConfig, Config, DeviceConfig, StreamConfig, MAX_BATCH_SI
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
 const DEFAULT_CONFIG: &str = r#"
+    enable_remote_shell = true
+
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100

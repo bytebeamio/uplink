@@ -305,4 +305,8 @@ pub struct Config {
     pub precondition_checks: Option<PreconditionCheckerConfig>,
     #[serde(default)]
     pub prioritize_live_data: bool,
+    #[serde(default)]
+    pub enable_remote_shell: bool,
+    #[serde(default)]
+    pub enable_stdin_collector: bool,
 }

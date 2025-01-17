@@ -51,9 +51,12 @@ impl TunshellClient {
     pub async fn start(self) {
         while let Ok(action) = self.actions_rx.recv_async().await {
             let session = self.clone();
-            //TODO(RT): Findout why this is spawned. We want to send other action's with shell?
             tokio::spawn(async move {
-                let _ = session.session(&action).await;
+                if let Err(e) = session.session(&action).await {
+                    log::error!("remote shell session ended with an error: {e:?}")
+                } else {
+                    log::info!("remote shell session finished");
+                }
                 let status = ActionResponse::success(&action.action_id);
                 session.bridge.send_action_response(status).await;
             });
@@ -63,7 +66,6 @@ impl TunshellClient {
     async fn session(&self, action: &Action) -> Result<(), Error> {
         let action_id = action.action_id.clone();
 
-        // println!("{:?}", keys);
         let keys = serde_json::from_str(&action.payload)?;
         let mut client = Client::new(self.config(keys), HostShell::new().unwrap());
 
