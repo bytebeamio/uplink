@@ -62,7 +62,7 @@ const DEFAULT_CONFIG: &str = r#"
 
     [system_stats]
     enabled = true
-    process_names = ["uplink"]
+    process_names = []
     update_period = 30
 "#;
 
