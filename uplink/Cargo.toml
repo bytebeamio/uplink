@@ -58,7 +58,7 @@ reqwest = { version = "0.11", default-features = false, features = [
 ] }
 rsa = { version = "0.9.6", features = ["sha2"] }
 # systemstats
-sysinfo = "0.26"
+sysinfo = { path = "../../../sysinfo" }
 # logcat
 lazy_static = "1.4.0"
 # installer

@@ -141,6 +141,8 @@ pub struct Stats {
     pub process_names: Vec<String>,
     pub update_period: u64,
     pub stream_size: Option<usize>,
+    #[serde(default)]
+    pub read_processes: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

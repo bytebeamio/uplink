@@ -1,9 +1,7 @@
-use log::error;
+use log::{error, info};
 use serde::Serialize;
 use serde_json::json;
-use sysinfo::{
-    ComponentExt, CpuExt, DiskExt, NetworkData, NetworkExt, PidExt, ProcessExt, SystemExt,
-};
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, NetworkData, ProcessRefreshKind, ProcessesToUpdate, RefreshKind};
 use tokio::time::Instant;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -45,7 +43,7 @@ pub struct System {
 impl System {
     fn init(sys: &sysinfo::System) -> System {
         System {
-            kernel_version: sys.kernel_version().unwrap_or_default(),
+            kernel_version: sysinfo::System::kernel_version().unwrap_or_default(),
             total_memory: sys.total_memory(),
             ..Default::default()
         }
@@ -54,9 +52,9 @@ impl System {
     fn update(&mut self, sys: &sysinfo::System, timestamp: u64) {
         self.sequence += 1;
         self.timestamp = timestamp;
-        self.uptime = sys.uptime();
+        self.uptime = sysinfo::System::uptime();
         self.no_processes = sys.processes().len();
-        let sysinfo::LoadAvg { one, five, fifteen } = sys.load_average();
+        let sysinfo::LoadAvg { one, five, fifteen } = sysinfo::System::load_average();
         self.load_avg_one = one;
         self.load_avg_five = five;
         self.load_avg_fifteen = fifteen;
@@ -312,7 +310,7 @@ impl Component {
     }
 
     fn update(&mut self, comp: &sysinfo::Component, timestamp: u64, sequence: u32) {
-        self.temperature = comp.temperature();
+        self.temperature = comp.temperature().unwrap_or(f32::NAN);
         self.timestamp = timestamp;
         self.sequence = sequence;
     }
@@ -444,8 +442,11 @@ impl ProcessStats {
 /// Collects and forward system information such as kernel version, memory and disk space usage,
 /// information regarding running processes, network and processor usage, etc to an IoT platform.
 pub struct StatCollector {
-    /// Handle to sysinfo struct containing system information.
+    /// Handles to sysinfo struct containing system information.
     sys: sysinfo::System,
+    sys_disks: sysinfo::Disks,
+    sys_networks: sysinfo::Networks,
+    sys_components: sysinfo::Components,
     /// System information values to be serialized.
     system: SystemStats,
     /// Information about running processes.
@@ -467,23 +468,28 @@ pub struct StatCollector {
 impl StatCollector {
     /// Create and initialize a stat collector
     pub fn new(config: Arc<Config>, bridge_tx: BridgeTx) -> Self {
-        let mut sys = sysinfo::System::new();
-        sys.refresh_disks_list();
-        sys.refresh_networks_list();
-        sys.refresh_networks();
-        sys.refresh_memory();
-        sys.refresh_cpu();
-        sys.refresh_components();
+        let mut sys_specifics = RefreshKind::nothing()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything());
+        if config.system_stats.read_processes {
+            sys_specifics = sys_specifics.with_processes(ProcessRefreshKind::everything());
+        }
+        let mut sys = sysinfo::System::new_with_specifics(sys_specifics);
+        sys.refresh_all();
+        let sys_disks = sysinfo::Disks::new_with_refreshed_list();
+        let sys_networks = sysinfo::Networks::new_with_refreshed_list();
+        let mut sys_components = sysinfo::Components::new_with_refreshed_list();
+        sys_components.refresh(false);
 
         let mut map = HashMap::new();
-        for disk_data in sys.disks() {
+        for disk_data in sys_disks.iter() {
             let disk_name = disk_data.name().to_string_lossy().to_string();
             map.insert(disk_name.clone(), Disk::init(disk_name, disk_data));
         }
         let disks = DiskStats { sequence: 0, map };
 
         let mut map = HashMap::new();
-        for (net_name, _) in sys.networks() {
+        for (net_name, _) in sys_networks.iter() {
             map.insert(net_name.to_owned(), Network::init(net_name.to_owned()));
         }
         let networks = NetworkStats { sequence: 0, map };
@@ -502,6 +508,9 @@ impl StatCollector {
 
         StatCollector {
             sys,
+            sys_disks,
+            sys_networks,
+            sys_components,
             system,
             config,
             processes,
@@ -519,29 +528,31 @@ impl StatCollector {
         loop {
             std::thread::sleep(Duration::from_secs(self.config.system_stats.update_period));
 
-            if let Err(e) = self.update_memory_stats() {
-                error!("Error refreshing system memory statistics: {e}");
-            }
-
-            if let Err(e) = self.update_disk_stats() {
-                error!("Error refreshing disk statistics: {e}");
-            }
-
-            if let Err(e) = self.update_network_stats() {
-                error!("Error refreshing network statistics: {e}");
-            }
-
+            // if let Err(e) = self.update_memory_stats() {
+            //     error!("Error refreshing system memory statistics: {e}");
+            // }
+            //
+            // if let Err(e) = self.update_disk_stats() {
+            //     error!("Error refreshing disk statistics: {e}");
+            // }
+            //
+            // if let Err(e) = self.update_network_stats() {
+            //     error!("Error refreshing network statistics: {e}");
+            // }
+            //
             if let Err(e) = self.update_cpu_stats() {
                 error!("Error refreshing CPU statistics: {e}");
             }
 
-            if let Err(e) = self.update_component_stats() {
-                error!("Error refreshing component statistics: {e}");
-            }
-
-            if let Err(e) = self.update_process_stats() {
-                error!("Error refreshing process statistics: {e}");
-            }
+            // if let Err(e) = self.update_component_stats() {
+            //     error!("Error refreshing component statistics: {e}");
+            // }
+            //
+            // if self.config.system_stats.read_processes {
+            //     if let Err(e) = self.update_process_stats() {
+            //         error!("Error refreshing process statistics: {e}");
+            //     }
+            // }
         }
     }
 
@@ -557,9 +568,9 @@ impl StatCollector {
 
     // Refresh disk stats
     fn update_disk_stats(&mut self) -> Result<(), Error> {
-        self.sys.refresh_disks();
+        self.sys_disks.refresh(true);
         let timestamp = clock() as u64;
-        for disk_data in self.sys.disks() {
+        for disk_data in self.sys_disks.iter() {
             let payload = self.disks.push(disk_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
         }
@@ -570,19 +581,21 @@ impl StatCollector {
     // Refresh network byte rate stats
     fn update_network_stats(&mut self) -> Result<(), Error> {
         let timestamp = clock() as u64;
-        for (net_name, net_data) in self.sys.networks() {
+        for (net_name, net_data) in self.sys_networks.iter() {
             let payload = self.networks.push(net_name.to_owned(), net_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
         }
-        self.sys.refresh_networks();
+        self.sys_networks.refresh(false);
 
         Ok(())
     }
 
     // Refresh processor stats
     fn update_cpu_stats(&mut self) -> Result<(), Error> {
-        self.sys.refresh_cpu();
+        info!("updating cpu stats");
+        self.sys.refresh_cpu_specifics(CpuRefreshKind::everything());
         let timestamp = clock() as u64;
+        self.processors.map.clear();
         for proc_data in self.sys.cpus().iter() {
             let payload = self.processors.push(proc_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
@@ -593,9 +606,9 @@ impl StatCollector {
 
     // Refresh component stats
     fn update_component_stats(&mut self) -> Result<(), Error> {
-        self.sys.refresh_components();
+        self.sys_components.refresh(false);
         let timestamp = clock() as u64;
-        for comp_data in self.sys.components().iter() {
+        for comp_data in self.sys_components.iter() {
             let payload = self.components.push(comp_data, timestamp);
             self.bridge_tx.send_payload_sync(payload);
         }
@@ -608,10 +621,15 @@ impl StatCollector {
     // at init and only collecting process information for them instead of iterating
     // over all running processes as is being done now.
     fn update_process_stats(&mut self) -> Result<(), Error> {
-        self.sys.refresh_processes();
+        self.sys.refresh_processes(ProcessesToUpdate::All, false);
         let timestamp = clock() as u64;
         for (&id, p) in self.sys.processes() {
-            let name = p.cmd().first().map(|s| s.to_string()).unwrap_or(p.name().to_string());
+            let name = p.cmd().first()
+                .map(|s| s.as_os_str())
+                .unwrap_or(p.name());
+            let name = name.to_str()
+                .unwrap_or("<invalid process name>")
+                .to_owned();
 
             if self.config.system_stats.process_names.contains(&name) {
                 let payload = self.processes.push(id.as_u32(), p, name, timestamp);
