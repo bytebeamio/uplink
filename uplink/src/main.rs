@@ -17,7 +17,7 @@ use tracing_subscriber::{EnvFilter, Registry};
 pub type ReloadHandle =
     Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
-use uplink::config::{AppConfig, Config, DeviceConfig, StreamConfig, MAX_BATCH_SIZE};
+use uplink::config::{AppConfig, Compression, Config, DeviceConfig, StreamConfig, MAX_BATCH_SIZE};
 use uplink::{simulator, spawn_named_thread, TcpJson, Uplink};
 
 const DEFAULT_CONFIG: &str = r#"
@@ -55,10 +55,6 @@ const DEFAULT_CONFIG: &str = r#"
     [streams.device_shadow]
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     flush_period = 5
-
-    [streams.logs]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
-    batch_size = 32
 
     [system_stats]
     enabled = true
@@ -148,7 +144,10 @@ impl CommandLine {
 
         for (stream_name, stream_config) in config.streams.iter_mut() {
             if stream_config.topic == "" {
-                stream_config.topic = format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray");
+                stream_config.topic = match stream_config.compression {
+                    Compression::Disabled => format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray"),
+                    Compression::Lz4 => format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray/lz4"),
+                };
             }
             stream_name.clone_into(&mut stream_config.name);
             replace_topic_placeholders(&mut stream_config.topic);
