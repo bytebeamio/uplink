@@ -17,7 +17,7 @@ pub use actions_lane::StatusTx;
 use data_lane::DataBridge;
 pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
-use crate::config::{ActionRoute, Config, DeviceConfig, StreamConfig};
+use crate::uplink_config::{ActionRoute, Config, DeviceConfig, StreamConfig};
 use crate::{Action, ActionResponse};
 
 pub trait Point: Send + Debug + Serialize + 'static {

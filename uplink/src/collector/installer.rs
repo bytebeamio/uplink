@@ -6,7 +6,7 @@ use tar::Archive;
 use tokio::process::Command;
 
 use super::downloader::DownloadFile;
-use crate::{base::bridge::BridgeTx, config::InstallerConfig, Action, ActionResponse};
+use crate::{base::bridge::BridgeTx, uplink_config::InstallerConfig, Action, ActionResponse};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

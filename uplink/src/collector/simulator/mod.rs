@@ -1,5 +1,5 @@
 use crate::base::bridge::{BridgeTx, Payload};
-use crate::config::SimulatorConfig;
+use crate::uplink_config::SimulatorConfig;
 use crate::{Action, ActionResponse};
 use data::{Bms, DeviceData, DeviceShadow, Gps, Imu, Motor, PeripheralState};
 use flume::{bounded, Receiver, Sender};

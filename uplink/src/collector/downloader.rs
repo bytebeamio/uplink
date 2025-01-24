@@ -70,7 +70,7 @@ use std::{
 use std::{io::Write, path::PathBuf};
 use anyhow::Context;
 use crate::base::actions::Cancellation;
-use crate::config::{Authentication, Config, DownloaderConfig};
+use crate::uplink_config::{Authentication, Config, DownloaderConfig};
 use crate::{base::bridge::BridgeTx, Action, ActionResponse};
 
 #[derive(thiserror::Error, Debug)]

@@ -12,8 +12,8 @@ use log::info;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use uplink::base::CtrlTx;
-use uplink::base::events::pusher::CREATE_EVENTS_TABLE;
+use crate::base::CtrlTx;
+use crate::base::events::pusher::CREATE_EVENTS_TABLE;
 use crate::ReloadHandle;
 
 #[derive(Debug, Clone)]

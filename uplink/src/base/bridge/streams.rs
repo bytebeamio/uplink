@@ -4,7 +4,7 @@ use std::sync::Arc;
 use flume::Sender;
 use log::{error, info, trace};
 
-use crate::config::{DeviceConfig, StreamConfig};
+use crate::uplink_config::{DeviceConfig, StreamConfig};
 
 use super::{
     delaymap::DelayMap,

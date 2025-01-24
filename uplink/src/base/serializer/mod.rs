@@ -12,7 +12,7 @@ use replace_with::replace_with_or_abort;
 use rumqttc::*;
 use tokio::{select, time::interval};
 
-use crate::config::{Compression, StreamConfig};
+use crate::uplink_config::{Compression, StreamConfig};
 use crate::{Config, Package};
 pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
 use crate::base::clock;
@@ -648,12 +648,12 @@ pub mod tests {
     use serde_json::Value;
     use tokio::{spawn, time::sleep};
 
-    use crate::{config::MqttConfig, hashmap, mock::{MockClient, MockCollector}};
+    use crate::{uplink_config::MqttConfig, hashmap, mock::{MockClient, MockCollector}};
     use crate::base::bridge::Payload;
     use crate::base::bridge::stream::Buffer;
-    use crate::config::Persistence;
+    use crate::uplink_config::Persistence;
     use super::*;
-    use crate::config::StreamConfig;
+    use crate::uplink_config::StreamConfig;
 
     pub fn default_config() -> Config {
         Config {

@@ -6,7 +6,7 @@ use tokio::time::interval;
 use super::streams::Streams;
 use super::{Package, StreamMetrics};
 use crate::base::actions::Cancellation;
-use crate::config::{ActionRoute, Config, DeviceConfig};
+use crate::uplink_config::{ActionRoute, Config, DeviceConfig};
 use crate::utils::LimitedArrayMap;
 use crate::{Action, ActionResponse};
 use std::fmt::{Display, Formatter};

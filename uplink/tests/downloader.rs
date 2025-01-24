@@ -11,7 +11,7 @@ use tempdir::TempDir;
 use uplink::{
     base::bridge::{BridgeTx, DataTx, StatusTx},
     collector::downloader::{DownloadFile, FileDownloader},
-    config::{ActionRoute, Config, DownloaderConfig},
+    uplink_config::{ActionRoute, Config, DownloaderConfig},
     Action,
 };
 

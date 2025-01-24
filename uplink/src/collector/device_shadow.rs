@@ -2,7 +2,7 @@ use log::{error, trace};
 use serde::Serialize;
 
 use crate::base::{bridge::BridgeTx, clock};
-use crate::config::DeviceShadowConfig;
+use crate::uplink_config::DeviceShadowConfig;
 use crate::Payload;
 
 pub const UPLINK_VERSION: &str = env!("VERGEN_BUILD_SEMVER");

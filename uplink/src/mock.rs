@@ -3,7 +3,7 @@ use rumqttc::{Publish, QoS, Request};
 
 use crate::{
     base::serializer::{MqttClient, MqttError},
-    config::StreamConfig,
+    uplink_config::StreamConfig,
     Package, Payload, Stream,
 };
 

@@ -16,7 +16,7 @@ use rumqttc::{
 };
 use std::sync::Arc;
 
-use crate::config::{Config, DeviceConfig};
+use crate::uplink_config::{Config, DeviceConfig};
 use crate::Action;
 use crate::base::serializer::storage::{PersistenceFile, PersistenceError};
 use crate::base::events::pusher::EventsPusher;

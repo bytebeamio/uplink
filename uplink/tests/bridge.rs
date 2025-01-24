@@ -5,7 +5,7 @@ use tokio::{runtime::Runtime};
 
 use uplink::{
     base::bridge::{ActionsBridge, Package},
-    config::{ActionRoute, Config, DeviceConfig},
+    uplink_config::{ActionRoute, Config, DeviceConfig},
     Action, ActionResponse,
 };
 

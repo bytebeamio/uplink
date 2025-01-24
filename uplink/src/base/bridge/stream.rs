@@ -5,7 +5,7 @@ use log::{debug, trace};
 use serde::Serialize;
 
 use super::{Package, Point, StreamMetrics};
-use crate::config::StreamConfig;
+use crate::uplink_config::StreamConfig;
 
 /// Signals status of stream buffer
 #[derive(Debug)]

@@ -4,7 +4,7 @@ use flume::{bounded, Receiver, RecvError, Sender};
 use log::{debug, error};
 use tokio::{select, time::interval};
 
-use crate::config::{Config, DeviceConfig};
+use crate::uplink_config::{Config, DeviceConfig};
 
 use super::{streams::Streams, DataBridgeShutdown, Package, Payload, StreamMetrics};
 

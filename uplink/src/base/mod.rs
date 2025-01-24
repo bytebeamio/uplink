@@ -30,7 +30,7 @@ pub struct CtrlTx {
 }
 
 impl CtrlTx {
-    pub async fn trigger_shutdown(&self) {
+    pub fn trigger_shutdown(&self) {
         let _ = join!(
             self.data_lane.trigger_shutdown(),
             self.mqtt.trigger_shutdown(),
