@@ -84,7 +84,7 @@ async fn reload_loglevel(State(state): State<StateHandle>, filter: String) -> im
 
 async fn shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Shutting down uplink");
-    state.ctrl_tx.trigger_shutdown().await;
+    state.ctrl_tx.trigger_shutdown();
 
     StatusCode::OK
 }

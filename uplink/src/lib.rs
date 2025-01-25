@@ -702,7 +702,7 @@ pub fn entrypoint(device_json: String, config_toml: String, log_level: u8, log_m
                     while let Some(signal) = signals.next().await {
                         match signal {
                             SIGTERM | SIGINT | SIGQUIT => {
-                                ctrl_tx.trigger_shutdown().await;
+                                ctrl_tx.trigger_shutdown();
                                 break;
                             },
                             s => tracing::error!("Couldn't handle signal: {s}"),

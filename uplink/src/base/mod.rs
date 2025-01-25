@@ -34,7 +34,7 @@ impl CtrlTx {
         let _ = join!(
             self.data_lane.trigger_shutdown(),
             self.mqtt.trigger_shutdown(),
-            self.serializer.send_async(()),
+            self.serializer.send(()),
             self.downloader.trigger_shutdown()
         );
     }
