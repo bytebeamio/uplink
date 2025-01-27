@@ -88,6 +88,8 @@ use crate::uplink_config::{AppConfig, StreamConfig, MAX_BATCH_SIZE};
 pub type ReloadHandle =
 Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
 
+pub type ActionCallback = Box<dyn Fn(Action) + Send + Sync>;
+
 /// Spawn a named thread to run the function f on
 pub fn spawn_named_thread<F>(name: &str, f: F)
 where
@@ -130,13 +132,14 @@ impl Uplink {
         })
     }
 
-    pub fn configure_bridge(&mut self) -> Bridge {
+    pub fn configure_bridge(&mut self, actions_callback: Option<ActionCallback>) -> Bridge {
         Bridge::new(
             self.config.clone(),
             self.device_config.clone(),
             self.data_tx.clone(),
             self.stream_metrics_tx(),
             self.action_rx.clone(),
+            actions_callback,
         )
     }
 
@@ -619,16 +622,23 @@ fn banner(config: &Config, device_config: &DeviceConfig) {
     println!("\n");
 }
 
-pub fn entrypoint(device_json: String, config_toml: String, log_level: u8, log_modules: Vec<String>, print_banner: bool) -> Result<(CtrlTx, Receiver<()>), Error> {
+pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Option<impl Fn(Action) + Send + Sync + 'static>, log_level: u8, log_modules: Vec<String>, print_banner: bool) -> Result<(CtrlTx, Receiver<()>), Error> {
     let (config, device_config) = parse_config(device_json.as_str(), config_toml.as_str())?;
     if print_banner {
         banner(&config, &device_config);
     }
-    let reload_handle = initialize_logging(log_level, log_modules);
+    #[cfg(target_os = "android")]
+    android_logger::init_once(android_logger::Config::default().with_max_level(LevelFilter::Trace));
+
+    #[cfg(target_os = "ios_simulator")]
+    oslog::OsLogger::new("io.bytebeam").level_filter(log::LevelFilter::Trace).init().unwrap();
+
+    // let reload_handle = ReloadHandle {};
+    // let reload_handle = initialize_logging(log_level, log_modules);
     let config = Arc::new(config);
     let device_config = Arc::new(device_config);
     let mut uplink = Uplink::new(config.clone(), device_config.clone())?;
-    let mut bridge = uplink.configure_bridge();
+    let mut bridge = uplink.configure_bridge(actions_callback.map(|cb| Box::new(cb) as ActionCallback));
     uplink.spawn_builtins(&mut bridge)?;
 
     let bridge_tx = bridge.bridge_tx();
@@ -668,7 +678,9 @@ pub fn entrypoint(device_json: String, config_toml: String, log_level: u8, log_m
         let ctrl_tx = ctrl_tx.clone();
         spawn_named_thread("Uplink Console", move || {
             console::start(
-                port, reload_handle, ctrl_tx, downloader_disable, network_up,
+                port,
+                // reload_handle,
+                ctrl_tx, downloader_disable, network_up,
                 config.console.enable_events.then(|| config.persistence_path.join("events.db"))
             )
         });
@@ -702,7 +714,7 @@ pub fn entrypoint(device_json: String, config_toml: String, log_level: u8, log_m
                     while let Some(signal) = signals.next().await {
                         match signal {
                             SIGTERM | SIGINT | SIGQUIT => {
-                                ctrl_tx.trigger_shutdown();
+                                ctrl_tx.trigger_shutdown().await;
                                 break;
                             },
                             s => tracing::error!("Couldn't handle signal: {s}"),

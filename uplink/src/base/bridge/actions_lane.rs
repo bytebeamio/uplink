@@ -8,7 +8,7 @@ use super::{Package, StreamMetrics};
 use crate::base::actions::Cancellation;
 use crate::uplink_config::{ActionRoute, Config, DeviceConfig};
 use crate::utils::LimitedArrayMap;
-use crate::{Action, ActionResponse};
+use crate::{Action, ActionCallback, ActionResponse};
 use std::fmt::{Display, Formatter};
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use std::path::Path;
@@ -57,6 +57,8 @@ pub struct ActionsBridge {
     /// * The user tries cancelling the first action
     /// * The cancel action will fail
     actions_routing_cache: LimitedArrayMap<String, String>,
+    /// used if uplink is used as a library
+    actions_callback: Option<ActionCallback>,
 }
 
 impl ActionsBridge {
@@ -66,6 +68,7 @@ impl ActionsBridge {
         package_tx: Sender<Box<dyn Package>>,
         actions_rx: Receiver<Action>,
         metrics_tx: Sender<StreamMetrics>,
+        actions_callback: Option<ActionCallback>,
     ) -> Self {
         let (status_tx, status_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
@@ -92,6 +95,7 @@ impl ActionsBridge {
             streams,
             action_routes: HashMap::with_capacity(16),
             action_redirections,
+            actions_callback,
         }
     }
 
@@ -239,16 +243,13 @@ impl ActionsBridge {
                 }
             }
             None => {
-                match self
-                    .action_routes
-                    .get("*") {
-                    Some(bus_route) => {
-                        if let Err(e) = bus_route.try_send(action.clone()) {
-                            log::error!("Could not forward action to collector: {e}");
-                            self.forward_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not forward action to collector: {e}"))).await;
-                        } else {
-                            debug!("Action routed to broker");
-                        }
+                match &self.actions_callback {
+                    Some(cb) => {
+                        // forgive me for the harm I've caused this world
+                        // none may atone for my actions but me
+                        // and only in me shall the stain live on
+                        // all I can be is sorry and that is all I am
+                        cb(action);
                     }
                     None => {
                         self.forward_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Uplink isn't configured to handle actions of type {route_id}"))).await;

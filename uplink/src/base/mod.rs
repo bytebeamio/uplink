@@ -30,11 +30,11 @@ pub struct CtrlTx {
 }
 
 impl CtrlTx {
-    pub fn trigger_shutdown(&self) {
+    pub async fn trigger_shutdown(&self) {
         let _ = join!(
             self.data_lane.trigger_shutdown(),
             self.mqtt.trigger_shutdown(),
-            self.serializer.send(()),
+            self.serializer.send_async(()),
             self.downloader.trigger_shutdown()
         );
     }

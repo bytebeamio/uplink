@@ -18,7 +18,7 @@ use data_lane::DataBridge;
 pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
 use crate::uplink_config::{ActionRoute, Config, DeviceConfig, StreamConfig};
-use crate::{Action, ActionResponse};
+use crate::{Action, ActionCallback, ActionResponse};
 
 pub trait Point: Send + Debug + Serialize + 'static {
     fn stream_name(&self) -> &str;
@@ -81,6 +81,7 @@ impl Bridge {
         package_tx: Sender<Box<dyn Package>>,
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
+        actions_callback: Option<ActionCallback>,
     ) -> Self {
         let data = DataBridge::new(
             config.clone(),
@@ -94,6 +95,7 @@ impl Bridge {
             package_tx,
             actions_rx,
             metrics_tx,
+            actions_callback,
         );
         Self { data, actions }
     }
