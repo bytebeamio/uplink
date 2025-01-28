@@ -9,12 +9,9 @@ use super::clock;
 /// said device, in this case, uplink.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
-    // action id
     #[serde(alias = "id")]
     pub action_id: String,
-    // action name
     pub name: String,
-    // action payload. json. can be args/payload. depends on the invoked command
     pub payload: String,
 }
 
