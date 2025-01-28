@@ -206,7 +206,6 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     fn initialize_storages(&mut self) {
-        self.sorted_storages.insert(Arc::new(self.config.action_status.clone()), (self.create_storage_for_stream(&self.config.action_status), None, 0));
         for stream_config in self.config.streams.values() {
             self.sorted_storages.insert(Arc::new(stream_config.clone()), (self.create_storage_for_stream(&stream_config), None, 0));
         }

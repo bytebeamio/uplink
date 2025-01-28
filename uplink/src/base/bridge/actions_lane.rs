@@ -1,12 +1,10 @@
-use flume::{bounded, Receiver, Sender, TrySendError};
-use log::{debug, error, info, warn};
+use flume::{bounded, Receiver, Sender};
+use log::{info, warn};
 use tokio::select;
-use tokio::time::interval;
 
-use super::streams::Streams;
-use super::{Package, StreamMetrics};
+use super::Payload;
 use crate::base::actions::Cancellation;
-use crate::uplink_config::{ActionRoute, Config, DeviceConfig};
+use crate::uplink_config::{ActionRoute, Config};
 use crate::utils::LimitedArrayMap;
 use crate::{Action, ActionCallback, ActionResponse};
 use std::fmt::{Display, Formatter};
@@ -36,12 +34,12 @@ pub struct ActionsBridge {
     status_rx: Receiver<ActionResponse>,
     /// Actions incoming from backend
     actions_rx: Receiver<Action>,
-    /// Contains stream to send ActionResponses on
-    streams: Streams<ActionResponse>,
+    /// action responses going to backend
+    data_tx: Sender<Payload>,
     /// Apps registered with the bridge
     /// NOTE: Sometimes action_routes could overlap, the latest route
     /// to be registered will be used in such a circumstance.
-    action_routes: HashMap<String, ActionRouter>,
+    action_routes: HashMap<String, Sender<Action>>,
     /// Action redirections
     action_redirections: HashMap<String, String>,
     /// A mapping from action ids to their routes
@@ -64,27 +62,12 @@ pub struct ActionsBridge {
 impl ActionsBridge {
     pub fn new(
         config: Arc<Config>,
-        device_config: Arc<DeviceConfig>,
-        package_tx: Sender<Box<dyn Package>>,
         actions_rx: Receiver<Action>,
-        metrics_tx: Sender<StreamMetrics>,
+        data_tx: Sender<Payload>,
         actions_callback: Option<ActionCallback>,
     ) -> Self {
         let (status_tx, status_rx) = bounded(10);
         let action_redirections = config.action_redirections.clone();
-
-        let mut streams_config = HashMap::new();
-        let mut action_status = config.action_status.clone();
-
-        // TODO: Should be removed once action response batching is supported on platform
-        if action_status.batch_size > 1 {
-            warn!("Buffer size of `action_status` stream restricted to 1")
-        }
-        action_status.batch_size = 1;
-
-        streams_config.insert("action_status".to_owned(), action_status);
-        let mut streams = Streams::new(1, device_config, package_tx, metrics_tx);
-        streams.config_streams(streams_config);
 
         Self {
             status_tx,
@@ -92,7 +75,7 @@ impl ActionsBridge {
             actions_routing_cache: Self::load_actions_routing_cache(config.persistence_path.as_path()),
             config,
             actions_rx,
-            streams,
+            data_tx,
             action_routes: HashMap::with_capacity(16),
             action_redirections,
             actions_callback,
@@ -110,7 +93,7 @@ impl ActionsBridge {
                 .context("actions_routing_cache.json has invalid data")).unwrap_or_else(|e| {
             warn!("Couldn't read actions_routing_cache.json: {e}, resetting to default");
             if let Err(e) = std::fs::remove_file(&save_file) {
-                log::warn!("Couldn't remove a file in persistence directory: {e}. Does the uplink process have right permissions?");
+                warn!("Couldn't remove a file in persistence directory: {e}. Does the uplink process have right permissions?");
             }
             LimitedArrayMap::new(32)
         });
@@ -132,11 +115,10 @@ impl ActionsBridge {
 
     pub fn register_action_route(
         &mut self,
-        ActionRoute { name, cancellable }: ActionRoute,
+        ActionRoute { name, .. }: ActionRoute,
         actions_tx: Sender<Action>,
     ) -> Result<(), Error> {
-        let action_router = ActionRouter { actions_tx, cancellable };
-        if self.action_routes.insert(name.clone(), action_router).is_some() {
+        if self.action_routes.insert(name.clone(), actions_tx).is_some() {
             return Err(Error::DuplicateActionRoutes { action_name: name });
         }
 
@@ -156,14 +138,11 @@ impl ActionsBridge {
     }
 
     /// Handle to send action status messages from connected application
-    pub fn status_tx(&self) -> StatusTx {
-        StatusTx { inner: self.status_tx.clone() }
+    pub fn status_tx(&self) -> Sender<ActionResponse> {
+        self.status_tx.clone()
     }
 
     pub async fn start(&mut self) -> Result<(), String> {
-
-        let mut metrics_timeout = interval(self.config.stream_metrics.timeout);
-
         loop {
             select! {
                 action = self.actions_rx.recv_async() => {
@@ -182,22 +161,6 @@ impl ActionsBridge {
                     let response = response.map_err(|e| format!("Encountered error when receiving status from a collector: {e:?}"))?;
                     self.forward_action_response(response).await;
                 }
-
-                // Flush streams that timeout
-                Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
-                    debug!("Flushing stream = {timedout_stream}");
-                    if let Err(e) = self.streams.flush_stream(&timedout_stream).await {
-                        error!("Failed to flush stream = {timedout_stream}. Error = {e}");
-                    }
-                }
-
-                // Flush all metrics when timed out
-                _ = metrics_timeout.tick() => {
-                    if let Err(e) = self.streams.check_and_flush_metrics() {
-                        debug!("Failed to flush stream metrics. Error = {e}");
-                    }
-                }
-
             }
         }
     }
@@ -262,7 +225,7 @@ impl ActionsBridge {
     async fn forward_action_response(&mut self, response: ActionResponse) {
         info!("Action response = {:?}", response);
 
-        self.streams.forward(response.clone()).await;
+        let _ = self.data_tx.send_async(response.to_payload()).await;
 
         if let Some(mut redirected_action) = response.done_response {
             if let Some(target_action) = self.action_redirections.get(redirected_action.name.as_str()) {
@@ -270,40 +233,5 @@ impl ActionsBridge {
                 self.handle_incoming_action(redirected_action).await;
             }
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct ActionRouter {
-    pub(crate) actions_tx: Sender<Action>,
-    cancellable: bool,
-}
-
-impl ActionRouter {
-    #[allow(clippy::result_large_err)]
-    /// Forwards action to the appropriate application and returns the instance in time at which it should be timedout if incomplete
-    pub fn try_send(&self, action: Action) -> Result<(), TrySendError<Action>> {
-        self.actions_tx.try_send(action)?;
-        Ok(())
-    }
-
-    pub fn is_cancellable(&self) -> bool {
-        self.cancellable
-    }
-}
-
-/// Handle for apps to send action status to bridge
-#[derive(Debug, Clone)]
-pub struct StatusTx {
-    pub inner: Sender<ActionResponse>,
-}
-
-impl StatusTx {
-    pub async fn send_action_response(&self, response: ActionResponse) {
-        self.inner.send_async(response).await.unwrap()
-    }
-
-    pub fn send_action_response_sync(&self, response: ActionResponse) {
-        self.inner.send(response).unwrap()
     }
 }

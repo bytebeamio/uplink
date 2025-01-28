@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-
 use flume::Sender;
 use log::{error, info, trace};
 
@@ -49,7 +48,6 @@ impl<T: Point> Streams<T> {
     pub async fn forward(&mut self, data: T) {
         let stream_name = data.stream_name().to_string();
 
-        // Create stream if it doesn't already exist
         if !self.map.contains_key(&stream_name) {
             if self.map.keys().len() > self.max_stream_count {
                 error!(

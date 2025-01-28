@@ -50,11 +50,6 @@ use anyhow::Error;
 use flume::{bounded, Receiver, Sender};
 use log::{error, info};
 use structopt::StructOpt;
-use tracing_subscriber::{EnvFilter, Registry};
-use tracing_subscriber::fmt::format::{Format, Pretty};
-use tracing_subscriber::fmt::Layer;
-use tracing_subscriber::layer::Layered;
-use tracing_subscriber::reload::Handle;
 
 pub mod console;
 pub mod base;
@@ -85,10 +80,7 @@ use collector::tunshell::TunshellClient;
 pub use collector::{simulator, tcpjson::TcpJson};
 use crate::uplink_config::{AppConfig, StreamConfig, MAX_BATCH_SIZE};
 
-pub type ReloadHandle =
-Handle<EnvFilter, Layered<Layer<Registry, Pretty, Format<Pretty>>, Registry>>;
-
-pub type ActionCallback = Box<dyn Fn(Action) + Send + Sync>;
+pub type ActionCallback = Box<dyn Fn(Action) + Send>;
 
 /// Spawn a named thread to run the function f on
 pub fn spawn_named_thread<F>(name: &str, f: F)
@@ -399,7 +391,7 @@ const DEFAULT_CONFIG: &str = r#"
     enabled = true
     topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_mqtt_metrics/jsonarray"
 
-    [action_status]
+    [streams.action_status]
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     batch_size = 1
     flush_period = 2
@@ -502,8 +494,6 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
         replace_topic_placeholders(&mut stream_config.topic);
     }
 
-    "action_status".clone_into(&mut config.action_status.name);
-    replace_topic_placeholders(&mut config.action_status.topic);
     replace_topic_placeholders(&mut config.stream_metrics.bridge_topic);
     replace_topic_placeholders(&mut config.stream_metrics.serializer_topic);
     replace_topic_placeholders(&mut config.serializer_metrics.topic);
@@ -618,16 +608,14 @@ fn banner(config: &Config, device_config: &DeviceConfig) {
     println!("\n");
 }
 
-pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Option<impl Fn(Action) + Send + Sync + 'static>, print_banner: bool) -> Result<UplinkController, Error> {
+pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Option<ActionCallback>) -> Result<UplinkController, Error> {
     let (config, device_config) = parse_config(device_json.as_str(), config_toml.as_str())?;
-    if print_banner {
-        banner(&config, &device_config);
-    }
+    banner(&config, &device_config);
 
     let config = Arc::new(config);
     let device_config = Arc::new(device_config);
     let mut uplink = Uplink::new(config.clone(), device_config.clone())?;
-    let mut bridge = uplink.configure_bridge(actions_callback.map(|cb| Box::new(cb) as ActionCallback));
+    let mut bridge = uplink.configure_bridge(actions_callback);
     uplink.spawn_builtins(&mut bridge)?;
 
     let bridge_tx = bridge.bridge_tx();
@@ -658,6 +646,7 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
         uplink.spawn(&device_config, bridge, downloader_disable.clone(), network_up.clone())?;
 
     if let Some(config) = config.simulator.clone() {
+        let bridge_tx = bridge_tx.clone();
         spawn_named_thread("Simulator", || {
             simulator::start(config, bridge_tx, simulator_actions).unwrap();
         });

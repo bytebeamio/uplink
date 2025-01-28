@@ -274,7 +274,6 @@ pub struct Config {
     pub persistence_path: PathBuf,
     #[serde(default = "default_file_size")]
     pub default_buf_size: usize,
-    pub action_status: StreamConfig,
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,

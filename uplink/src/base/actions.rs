@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-
+use serde_json::json;
 use crate::{Payload, Point};
 
 use super::clock;
@@ -94,6 +94,22 @@ impl ActionResponse {
     pub fn from_payload(payload: &Payload) -> Result<Self, serde_json::Error> {
         let intermediate = serde_json::to_value(payload)?;
         serde_json::from_value(intermediate)
+    }
+
+    pub fn to_payload(&self) -> Payload {
+        let payload = json! {{
+            "action_id": self.action_id,
+            "state": self.state,
+            "progress": self.progress,
+            "errors": self.errors
+        }};
+
+        Payload {
+            stream: String::from("action_status"),
+            sequence: self.sequence,
+            timestamp: self.timestamp,
+            payload,
+        }
     }
 }
 

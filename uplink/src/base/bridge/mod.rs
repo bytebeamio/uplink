@@ -13,7 +13,6 @@ pub mod stream;
 mod streams;
 
 pub use actions_lane::{ActionsBridge, Error};
-pub use actions_lane::StatusTx;
 use data_lane::DataBridge;
 pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
@@ -91,10 +90,8 @@ impl Bridge {
         );
         let actions = ActionsBridge::new(
             config,
-            device_config,
-            package_tx,
             actions_rx,
-            metrics_tx,
+            data.data_tx().inner.clone(),
             actions_callback,
         );
         Self { data, actions }
@@ -130,7 +127,7 @@ impl Bridge {
 #[derive(Debug, Clone)]
 pub struct BridgeTx {
     pub data_tx: DataTx,
-    pub status_tx: StatusTx,
+    pub status_tx: Sender<ActionResponse>,
 }
 
 impl BridgeTx {
@@ -143,6 +140,6 @@ impl BridgeTx {
     }
 
     pub async fn send_action_response(&self, response: ActionResponse) {
-        self.status_tx.send_action_response(response).await
+        let _ = self.status_tx.send_async(response).await;
     }
 }
