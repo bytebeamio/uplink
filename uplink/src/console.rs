@@ -18,7 +18,6 @@ use crate::ReloadHandle;
 
 #[derive(Debug, Clone)]
 struct StateHandle {
-    // reload_handle: ReloadHandle,
     ctrl_tx: CtrlTx,
     downloader_disable: Arc<Mutex<bool>>,
     network_up: Arc<Mutex<bool>>,
@@ -28,7 +27,6 @@ struct StateHandle {
 #[tokio::main]
 pub async fn start(
     port: u16,
-    // reload_handle: ReloadHandle,
     ctrl_tx: CtrlTx,
     downloader_disable: Arc<Mutex<bool>>,
     network_up: Arc<Mutex<bool>>,
@@ -60,7 +58,6 @@ pub async fn start(
         });
 
     let app = Router::new()
-        // .route("/logs", post(reload_loglevel))
         .route("/shutdown", post(shutdown))
         .route("/disable_downloader", put(disable_downloader))
         .route("/enable_downloader", put(enable_downloader))
@@ -74,15 +71,6 @@ pub async fn start(
 
     axum::Server::bind(&address.parse().unwrap()).serve(app.into_make_service()).await.unwrap();
 }
-
-// async fn reload_loglevel(State(state): State<StateHandle>, filter: String) -> impl IntoResponse {
-//     info!("Reloading tracing filter: {filter}");
-//     if state.reload_handle.reload(&filter).is_err() {
-//         return StatusCode::INTERNAL_SERVER_ERROR;
-//     }
-//
-//     StatusCode::OK
-// }
 
 async fn shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
     info!("Shutting down uplink");

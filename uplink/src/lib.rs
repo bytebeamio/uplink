@@ -437,7 +437,7 @@ pub struct CommandLine {
     pub modules: Vec<String>,
 }
 
-fn initialize_logging(log_level: u8, log_modules: Vec<String>) -> ReloadHandle {
+pub fn initialize_logging(log_level: u8, log_modules: Vec<String>) {
     let level = match log_level {
         0 => "warn",
         1 => "info",
@@ -460,11 +460,7 @@ fn initialize_logging(log_level: u8, log_modules: Vec<String>) -> ReloadHandle {
         .with_env_filter(levels)
         .with_filter_reloading();
 
-    let reload_handle = builder.reload_handle();
-
     builder.try_init().expect("initialized subscriber succesfully");
-
-    reload_handle
 }
 
 fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceConfig), Error> {
@@ -622,19 +618,12 @@ fn banner(config: &Config, device_config: &DeviceConfig) {
     println!("\n");
 }
 
-pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Option<impl Fn(Action) + Send + Sync + 'static>, log_level: u8, log_modules: Vec<String>, print_banner: bool) -> Result<(CtrlTx, Receiver<()>), Error> {
+pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Option<impl Fn(Action) + Send + Sync + 'static>, print_banner: bool) -> Result<(CtrlTx, Receiver<()>), Error> {
     let (config, device_config) = parse_config(device_json.as_str(), config_toml.as_str())?;
     if print_banner {
         banner(&config, &device_config);
     }
-    #[cfg(target_os = "android")]
-    android_logger::init_once(android_logger::Config::default().with_max_level(LevelFilter::Trace));
 
-    #[cfg(target_os = "ios_simulator")]
-    oslog::OsLogger::new("io.bytebeam").level_filter(log::LevelFilter::Trace).init().unwrap();
-
-    // let reload_handle = ReloadHandle {};
-    // let reload_handle = initialize_logging(log_level, log_modules);
     let config = Arc::new(config);
     let device_config = Arc::new(device_config);
     let mut uplink = Uplink::new(config.clone(), device_config.clone())?;
@@ -678,9 +667,7 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
         let ctrl_tx = ctrl_tx.clone();
         spawn_named_thread("Uplink Console", move || {
             console::start(
-                port,
-                // reload_handle,
-                ctrl_tx, downloader_disable, network_up,
+                port, ctrl_tx, downloader_disable, network_up,
                 config.console.enable_events.then(|| config.persistence_path.join("events.db"))
             )
         });
