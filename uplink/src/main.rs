@@ -1,4 +1,5 @@
 use std::fs::read_to_string;
+use std::path::PathBuf;
 use anyhow::Error;
 use structopt::StructOpt;
 use uplink::*;
@@ -27,3 +28,46 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
+#[derive(StructOpt, Debug)]
+#[structopt(name = "uplink", about = "collect, batch, compress, publish")]
+pub struct CommandLine {
+    /// config file
+    #[structopt(short = "c", help = "Config file")]
+    pub config: Option<PathBuf>,
+    /// config file
+    #[structopt(short = "a", help = "Authentication file")]
+    pub auth: PathBuf,
+    /// log level (v: info, vv: debug, vvv: trace)
+    #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
+    pub verbose: u8,
+    /// list of modules to log
+    #[structopt(short = "m", long = "modules")]
+    pub modules: Vec<String>,
+}
+
+pub fn initialize_logging(log_level: u8, log_modules: Vec<String>) {
+    let level = match log_level {
+        0 => "warn",
+        1 => "info",
+        2 => "debug",
+        _ => "trace",
+    };
+
+    let levels =
+        match log_modules.into_iter().reduce(|e, acc| format!("{e}={level},{acc}")) {
+            Some(f) => format!("{f}={level}"),
+            _ => format!("{level}"),
+        };
+
+    let builder = tracing_subscriber::fmt()
+        .pretty()
+        .compact()
+        .with_line_number(false)
+        .with_file(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_env_filter(levels)
+        .with_filter_reloading();
+
+    builder.try_init().expect("initialized subscriber succesfully");
+}

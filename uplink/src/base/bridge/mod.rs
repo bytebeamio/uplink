@@ -144,6 +144,6 @@ impl BridgeTx {
     }
 
     pub fn send_action_response_sync(&self, response: ActionResponse) {
-        self.status_tx.send_action_response_sync(response);
+        let _ = self.status_tx.send(response);
     }
 }
