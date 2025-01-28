@@ -539,8 +539,10 @@ impl StatCollector {
                 error!("Error refreshing component statistics: {e}");
             }
 
-            if let Err(e) = self.update_process_stats() {
-                error!("Error refreshing process statistics: {e}");
+            if !self.config.system_stats.process_names.is_empty() {
+                if let Err(e) = self.update_process_stats() {
+                    error!("Error refreshing process statistics: {e}");
+                }
             }
         }
     }

@@ -142,4 +142,8 @@ impl BridgeTx {
     pub async fn send_action_response(&self, response: ActionResponse) {
         let _ = self.status_tx.send_async(response).await;
     }
+
+    pub fn send_action_response_sync(&self, response: ActionResponse) {
+        self.status_tx.send_action_response_sync(response);
+    }
 }

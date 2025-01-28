@@ -78,6 +78,7 @@ use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
 pub use collector::{simulator, tcpjson::TcpJson};
+use crate::collector::stdio::stdin_collector;
 use crate::uplink_config::{AppConfig, StreamConfig, MAX_BATCH_SIZE};
 
 pub type ActionCallback = Box<dyn Fn(Action) + Send>;
@@ -267,13 +268,23 @@ impl Uplink {
     pub fn spawn_builtins(&mut self, bridge: &mut Bridge) -> Result<(), Error> {
         let bridge_tx = bridge.bridge_tx();
 
-        let route = ActionRoute {
-            name: "launch_shell".to_owned(),
-            cancellable: false,
-        };
-        let actions_rx = bridge.register_action_route(route)?;
-        let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
-        spawn_named_thread("Tunshell Client", move || tunshell_client.start());
+        if self.config.enable_remote_shell {
+            let route = ActionRoute {
+                name: "launch_shell".to_owned(),
+                cancellable: false,
+            };
+            let actions_rx = bridge.register_action_route(route)?;
+            let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
+            spawn_named_thread("Tunshell Client", move || tunshell_client.start());
+        }
+
+        if self.config.enable_stdin_collector {
+            info!("starting stdin collector");
+            let bridge = bridge_tx.clone();
+            spawn_named_thread("Stdin Collector", move || {
+                stdin_collector(bridge);
+            });
+        }
 
         let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
         spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
@@ -369,6 +380,9 @@ impl Uplink {
 
 
 const DEFAULT_CONFIG: &str = r#"
+    enable_remote_shell = true
+    enable_stdin_collector = false
+
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
