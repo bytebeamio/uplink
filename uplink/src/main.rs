@@ -19,8 +19,8 @@ fn main() -> Result<(), Error> {
     };
 
     initialize_logging(commandline.verbose, commandline.modules.clone());
-    let (_, end_rx) = entrypoint(device_json, config_toml, None as Option<Box<dyn Fn(Action) + Send + Sync>>, true)?;
-    if let Err(_) = end_rx.recv() {
+    let controller = entrypoint(device_json, config_toml, None as Option<Box<dyn Fn(Action) + Send + Sync>>, true)?;
+    if let Err(_) = controller.end_rx.recv() {
         log::error!("uplink stopped without sending to end_tx");
     }
 

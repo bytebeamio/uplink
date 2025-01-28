@@ -618,7 +618,7 @@ fn banner(config: &Config, device_config: &DeviceConfig) {
     println!("\n");
 }
 
-pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Option<impl Fn(Action) + Send + Sync + 'static>, print_banner: bool) -> Result<(CtrlTx, Receiver<()>), Error> {
+pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Option<impl Fn(Action) + Send + Sync + 'static>, print_banner: bool) -> Result<UplinkController, Error> {
     let (config, device_config) = parse_config(device_json.as_str(), config_toml.as_str())?;
     if print_banner {
         banner(&config, &device_config);
@@ -631,6 +631,7 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
     uplink.spawn_builtins(&mut bridge)?;
 
     let bridge_tx = bridge.bridge_tx();
+    let data_tx = bridge_tx.data_tx.inner.clone();
 
     let mut tcpapps = vec![];
     for (app, cfg) in config.tcpapps.clone() {
@@ -715,11 +716,15 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
             let _ = end_tx.send(());
         });
     }
-    Ok((ctrl_tx, end_rx))
+    Ok(UplinkController {
+        shutdown: ctrl_tx,
+        end_rx,
+        data_tx,
+    })
 }
 
 pub struct UplinkController {
     pub shutdown: CtrlTx,
     pub end_rx: Receiver<()>,
-    pub data_lane: Sender<Payload>,
+    pub data_tx: Sender<Payload>,
 }

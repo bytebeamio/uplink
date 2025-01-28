@@ -47,14 +47,6 @@ fn default_download_path() -> PathBuf {
     path
 }
 
-// Automatically assigns port 5050 for default main app, if left unconfigured
-fn default_tcpapps() -> HashMap<String, AppConfig> {
-    let mut apps = HashMap::new();
-    apps.insert("main".to_string(), AppConfig { port: 5050, actions: vec![] });
-
-    apps
-}
-
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq, PartialOrd)]
 pub enum Compression {
     #[default]
@@ -266,7 +258,7 @@ pub struct DeviceConfig {
 pub struct Config {
     #[serde(default)]
     pub console: ConsoleConfig,
-    #[serde(default = "default_tcpapps")]
+    #[serde(default)]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
     #[serde(default = "default_stream_count")]
