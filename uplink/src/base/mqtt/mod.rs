@@ -64,6 +64,7 @@ pub struct Mqtt {
     ctrl_tx: Sender<MqttShutdown>,
     /// True when network is connected
     network_up: Arc<Mutex<bool>>,
+    tenant_filter: String,
 }
 
 impl Mqtt {
@@ -73,6 +74,7 @@ impl Mqtt {
         actions_tx: Sender<Action>,
         metrics_tx: Sender<MqttMetrics>,
         network_up: Arc<Mutex<bool>>,
+        tenant_filter: String,
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
         let options = mqttoptions(&config, device_config);
@@ -90,6 +92,7 @@ impl Mqtt {
             ctrl_tx,
             ctrl_rx,
             network_up,
+            tenant_filter,
         }
     }
 
@@ -149,7 +152,9 @@ impl Mqtt {
             // NOTE: This can fail when packet sizes > max_payload_size in config are written to disk.
             match Packet::read(&mut buf, max_packet_size) {
                 Ok(Packet::Publish(publish)) => {
-                    self.eventloop.pending.push_back(Request::Publish(publish))
+                    if publish.topic.starts_with(&self.tenant_filter) {
+                        self.eventloop.pending.push_back(Request::Publish(publish))
+                    }
                 }
                 Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
                 Err(rumqttc::Error::InsufficientBytes(_)) => break,
@@ -230,7 +235,7 @@ impl Mqtt {
                                     let inflight = self.eventloop.state.inflight();
                                     self.metrics.update_inflight(inflight);
                                     if let Err(e) = self.check_and_flush_metrics() {
-                                        error!("Failed to flush MQTT metrics. Erro = {:?}", e);
+                                        debug!("Failed to flush MQTT metrics. Erro = {:?}", e);
                                     }
                                 }
                                 _ => {}
