@@ -53,7 +53,7 @@ impl Monitor {
 
         loop {
             select! {
-                o = self.stream_metrics_rx.recv_async() => {
+                o = self.stream_metrics_rx.recv_async(), if stream_metrics_config.enabled => {
                     let o = o?;
 
                     if stream_metrics_config.blacklist.contains(o.stream()) {
@@ -66,7 +66,7 @@ impl Monitor {
                     bridge_stream_metrics.clear();
                     self.client.publish(&bridge_stream_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
                 }
-                o = self.serializer_metrics_rx.recv_async() => {
+                o = self.serializer_metrics_rx.recv_async(), if serializer_metrics_config.enabled => {
                     let o = o?;
                     match o {
                         SerializerMetrics::Main(o) => {
@@ -86,7 +86,7 @@ impl Monitor {
                         }
                     }
                 }
-                o = self.mqtt_metrics_rx.recv_async() => {
+                o = self.mqtt_metrics_rx.recv_async(), if mqtt_metrics_config.enabled => {
                     let o = o?;
                     mqtt_metrics.push(o);
                     let v = serde_json::to_string(&mqtt_metrics).unwrap();
