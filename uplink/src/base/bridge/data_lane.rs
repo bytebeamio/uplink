@@ -61,6 +61,7 @@ impl DataBridge {
             select! {
                 data = self.data_rx.recv_async() => {
                     let data = data?;
+                    log::info!("{data:?}");
                     self.streams.forward(data).await;
                 }
                 // Flush streams that timeout

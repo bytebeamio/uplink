@@ -77,7 +77,7 @@ use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
 pub use collector::{simulator, tcpjson::TcpJson};
 use crate::collector::stdio::stdin_collector;
-use crate::uplink_config::{AppConfig, StreamConfig, MAX_BATCH_SIZE};
+use crate::uplink_config::{AppConfig, Compression, StreamConfig, MAX_BATCH_SIZE};
 
 pub type ActionCallback = Box<dyn Fn(Action) + Send>;
 
@@ -411,11 +411,9 @@ const DEFAULT_CONFIG: &str = r#"
     priority = 255 # highest priority for quick delivery of action status info to platform
 
     [streams.device_shadow]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/device_shadow/jsonarray"
     flush_period = 5
 
     [streams.logs]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
     batch_size = 32
 
     [system_stats]
@@ -460,6 +458,12 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
 
     for (stream_name, stream_config) in config.streams.iter_mut() {
         stream_name.clone_into(&mut stream_config.name);
+        if stream_config.topic == "" {
+            stream_config.topic = match stream_config.compression {
+                Compression::Disabled => format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray"),
+                Compression::Lz4 =>      format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray/lz4"),
+            };
+        }
         replace_topic_placeholders(&mut stream_config.topic);
     }
 
