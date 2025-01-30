@@ -18,12 +18,7 @@ pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
 use crate::uplink_config::{ActionRoute, Config, DeviceConfig, StreamConfig};
 use crate::{Action, ActionCallback, ActionResponse};
-
-pub trait Point: Send + Debug + Serialize + 'static {
-    fn stream_name(&self) -> &str;
-    fn sequence(&self) -> u32;
-    fn timestamp(&self) -> u64;
-}
+use crate::base::bridge::stream::MessageBuffer;
 
 pub trait Package: Send + Debug {
     fn stream_config(&self) -> Arc<StreamConfig>;
@@ -51,7 +46,7 @@ pub struct Payload {
     pub payload: Value,
 }
 
-impl Point for Payload {
+impl Payload {
     fn stream_name(&self) -> &str {
         &self.stream
     }
@@ -77,7 +72,7 @@ impl Bridge {
     pub fn new(
         config: Arc<Config>,
         device_config: Arc<DeviceConfig>,
-        package_tx: Sender<Box<dyn Package>>,
+        package_tx: Sender<Box<MessageBuffer>>,
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
         actions_callback: Option<ActionCallback>,

@@ -4,8 +4,9 @@ use rumqttc::{Publish, QoS, Request};
 use crate::{
     base::serializer::{MqttClient, MqttError},
     uplink_config::StreamConfig,
-    Package, Payload, Stream,
+    Payload, Stream,
 };
+use crate::base::bridge::stream::MessageBuffer;
 
 #[derive(Clone)]
 pub struct MockClient {
@@ -61,14 +62,14 @@ pub enum Error {
 }
 
 pub struct MockCollector {
-    stream: Stream<Payload>,
+    stream: Stream,
 }
 
 impl MockCollector {
     pub fn new(
         stream_name: &str,
         stream_config: StreamConfig,
-        data_tx: Sender<Box<dyn Package>>,
+        data_tx: Sender<Box<MessageBuffer>>,
     ) -> MockCollector {
         MockCollector { stream: Stream::new(stream_name, stream_config, data_tx) }
     }

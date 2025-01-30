@@ -2,29 +2,25 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use flume::Sender;
 use log::{error, info, trace};
-
+use crate::base::bridge::stream::MessageBuffer;
 use crate::uplink_config::{DeviceConfig, StreamConfig};
 
-use super::{
-    delaymap::DelayMap,
-    stream::{self, Stream, StreamStatus},
-    Package, Point, StreamMetrics,
-};
+use super::{delaymap::DelayMap, stream::{self, Stream, StreamStatus}, Payload, StreamMetrics};
 
-pub struct Streams<T> {
+pub struct Streams {
     max_stream_count: usize,
     device_config: Arc<DeviceConfig>,
-    data_tx: Sender<Box<dyn Package>>,
+    data_tx: Sender<Box<MessageBuffer>>,
     metrics_tx: Sender<StreamMetrics>,
-    map: HashMap<String, Stream<T>>,
+    map: HashMap<String, Stream>,
     pub stream_timeouts: DelayMap<String>,
 }
 
-impl<T: Point> Streams<T> {
+impl Streams {
     pub fn new(
         max_stream_count: usize,
         device_config: Arc<DeviceConfig>,
-        data_tx: Sender<Box<dyn Package>>,
+        data_tx: Sender<Box<MessageBuffer>>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
         let map = HashMap::with_capacity(max_stream_count);
@@ -45,7 +41,7 @@ impl<T: Point> Streams<T> {
         }
     }
 
-    pub async fn forward(&mut self, data: T) {
+    pub async fn forward(&mut self, data: Payload) {
         let stream_name = data.stream_name().to_string();
 
         if !self.map.contains_key(&stream_name) {

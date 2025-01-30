@@ -58,7 +58,7 @@ pub mod utils;
 
 use self::uplink_config::{ActionRoute, Config, DeviceConfig};
 pub use base::actions::{Action, ActionResponse};
-use base::bridge::{stream::Stream, Bridge, Package, Payload, Point, StreamMetrics};
+use base::bridge::{stream::Stream, Bridge, Payload, StreamMetrics};
 use base::monitor::Monitor;
 use base::mqtt::Mqtt;
 use base::serializer::{Serializer, SerializerMetrics};
@@ -76,6 +76,7 @@ use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
 pub use collector::{simulator, tcpjson::TcpJson};
+use crate::base::bridge::stream::MessageBuffer;
 use crate::collector::stdio::stdin_collector;
 use crate::uplink_config::{AppConfig, Compression, StreamConfig, MAX_BATCH_SIZE};
 
@@ -94,8 +95,8 @@ pub struct Uplink {
     device_config: Arc<DeviceConfig>,
     action_rx: Receiver<Action>,
     action_tx: Sender<Action>,
-    data_rx: Receiver<Box<dyn Package>>,
-    data_tx: Sender<Box<dyn Package>>,
+    data_rx: Receiver<Box<MessageBuffer>>,
+    data_tx: Sender<Box<MessageBuffer>>,
     stream_metrics_tx: Sender<StreamMetrics>,
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
@@ -363,7 +364,7 @@ impl Uplink {
         self.action_rx.clone()
     }
 
-    pub fn bridge_data_tx(&self) -> Sender<Box<dyn Package>> {
+    pub fn bridge_data_tx(&self) -> Sender<Box<MessageBuffer>> {
         self.data_tx.clone()
     }
 

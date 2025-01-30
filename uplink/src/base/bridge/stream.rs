@@ -2,9 +2,8 @@ use std::{fmt::Debug, mem, sync::Arc, time::Duration};
 
 use flume::{SendError, Sender};
 use log::{debug, trace};
-use serde::Serialize;
 
-use super::{Package, Point, StreamMetrics};
+use super::{Payload, StreamMetrics};
 use crate::uplink_config::StreamConfig;
 
 /// Signals status of stream buffer
@@ -18,35 +17,31 @@ pub enum StreamStatus {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Send error {0}")]
-    Send(#[from] SendError<Box<dyn Package>>),
+    Send(#[from] SendError<Box<MessageBuffer>>),
 }
 
 pub const MAX_BATCH_SIZE: usize = 100;
 
 #[derive(Debug)]
-pub struct Stream<T> {
+pub struct Stream {
     pub name: Arc<String>,
     pub config: Arc<StreamConfig>,
     last_sequence: u32,
     last_timestamp: u64,
-    buffer: Buffer<T>,
-    tx: Sender<Box<dyn Package>>,
+    buffer: MessageBuffer,
+    tx: Sender<Box<MessageBuffer>>,
     pub metrics: StreamMetrics,
 }
 
-impl<T> Stream<T>
-where
-    T: Point,
-    Buffer<T>: Package,
-{
+impl Stream {
     pub fn new(
         stream_name: impl Into<String>,
         stream_config: StreamConfig,
-        tx: Sender<Box<dyn Package>>,
-    ) -> Stream<T> {
+        tx: Sender<Box<MessageBuffer>>,
+    ) -> Stream {
         let name = Arc::new(stream_name.into());
         let config = Arc::new(stream_config);
-        let buffer = Buffer::new(name.clone(), config.clone());
+        let buffer = MessageBuffer::new(name.clone(), config.clone());
         let metrics = StreamMetrics::new(&name, config.batch_size);
 
         Stream { name, config, last_sequence: 0, last_timestamp: 0, buffer, tx, metrics }
@@ -56,8 +51,8 @@ where
         stream_name: impl Into<String>,
         project_id: impl Into<String>,
         device_id: impl Into<String>,
-        tx: Sender<Box<dyn Package>>,
-    ) -> Stream<T> {
+        tx: Sender<Box<MessageBuffer>>,
+    ) -> Stream {
         let stream_name = stream_name.into();
         let project_id = project_id.into();
         let device_id = device_id.into();
@@ -68,7 +63,7 @@ where
         Stream::new(stream_name, config, tx)
     }
 
-    fn add(&mut self, data: T) -> Result<Option<Buffer<T>>, Error> {
+    fn add(&mut self, data: Payload) -> Result<Option<MessageBuffer>, Error> {
         let current_sequence = data.sequence();
         let current_timestamp = data.timestamp();
         let last_sequence = self.last_sequence;
@@ -104,12 +99,12 @@ where
     }
 
     // Returns buffer content, replacing with empty buffer in-place
-    fn take_buffer(&mut self) -> Buffer<T> {
+    fn take_buffer(&mut self) -> MessageBuffer {
         let name = self.name.clone();
         let config = self.config.clone();
         trace!("Flushing stream name: {name}, topic: {}", config.topic);
 
-        mem::replace(&mut self.buffer, Buffer::new(name, config))
+        mem::replace(&mut self.buffer, MessageBuffer::new(name, config))
     }
 
     /// Triggers flush and async channel send if not empty
@@ -134,7 +129,7 @@ where
 
     /// Fill buffer with data and trigger async channel send on breaching max_batch_size.
     /// Returns [`StreamStatus`].
-    pub async fn fill(&mut self, data: T) -> Result<StreamStatus, Error> {
+    pub async fn fill(&mut self, data: Payload) -> Result<StreamStatus, Error> {
         if let Some(buf) = self.add(data)? {
             self.tx.send_async(Box::new(buf)).await?;
             return Ok(StreamStatus::Flushed);
@@ -149,22 +144,21 @@ where
     }
 }
 
-/// Buffer is an abstraction of a collection that serializer receives.
-/// It also contains meta data to understand the type of data
-/// e.g stream to mqtt topic mapping
-/// Buffer doesn't put any restriction on type of `T`
+/// Streams module buffers messages into this type
+/// and sends them over to Serializer
+/// which does persistence, compression, etc
 #[derive(Debug)]
-pub struct Buffer<T> {
+pub struct MessageBuffer {
     pub stream_name: Arc<String>,
     pub stream_config: Arc<StreamConfig>,
-    pub buffer: Vec<T>,
+    pub buffer: Vec<Payload>,
     pub anomalies: String,
     pub anomaly_count: usize,
 }
 
-impl<T> Buffer<T> {
-    pub fn new(stream_name: Arc<String>, stream_config: Arc<StreamConfig>) -> Buffer<T> {
-        Buffer {
+impl MessageBuffer {
+    pub fn new(stream_name: Arc<String>, stream_config: Arc<StreamConfig>) -> MessageBuffer {
+        MessageBuffer {
             buffer: Vec::with_capacity(stream_config.batch_size),
             stream_name,
             stream_config,
@@ -200,47 +194,26 @@ impl<T> Buffer<T> {
 
         Some((self.anomalies.clone(), self.anomaly_count))
     }
-}
 
-impl<T> Package for Buffer<T>
-where
-    T: Point,
-    Vec<T>: Serialize,
-{
-    fn stream_config(&self) -> Arc<StreamConfig> {
-        self.stream_config.clone()
-    }
-
-    fn stream_name(&self) -> Arc<String> {
-        self.stream_name.clone()
-    }
-
-    fn serialize(&self) -> Vec<u8> {
+    pub fn serialize(&self) -> Vec<u8> {
         // This unwrap is safe because our data meets the requirements of `to_vec`
         serde_json::to_vec(&self.buffer).unwrap()
     }
 
-    fn anomalies(&self) -> Option<(String, usize)> {
-        self.anomalies()
-    }
-
-    fn len(&self) -> usize {
-        self.buffer.len()
-    }
-
-    fn latency(&self) -> u64 {
+    // TODO: remove this
+    pub fn latency(&self) -> u64 {
         0
     }
 }
 
-impl<T> Clone for Stream<T> {
+impl Clone for Stream {
     fn clone(&self) -> Self {
         Stream {
             name: self.name.clone(),
             config: self.config.clone(),
             last_sequence: 0,
             last_timestamp: 0,
-            buffer: Buffer::new(self.buffer.stream_name.clone(), self.buffer.stream_config.clone()),
+            buffer: MessageBuffer::new(self.buffer.stream_name.clone(), self.buffer.stream_config.clone()),
             metrics: StreamMetrics::new(&self.name, self.config.batch_size),
             tx: self.tx.clone(),
         }

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use crate::{Payload, Point};
+use crate::Payload;
 
 use super::clock;
 
@@ -107,20 +107,6 @@ impl ActionResponse {
             timestamp: self.timestamp,
             payload,
         }
-    }
-}
-
-impl Point for ActionResponse {
-    fn stream_name(&self) -> &str {
-        "action_status"
-    }
-
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
     }
 }
 

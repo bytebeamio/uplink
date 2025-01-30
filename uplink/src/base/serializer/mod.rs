@@ -13,8 +13,9 @@ use rumqttc::*;
 use tokio::{select, time::interval};
 
 use crate::uplink_config::{Compression, StreamConfig};
-use crate::{Config, Package};
+use crate::{Config};
 pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
+use crate::base::bridge::stream::MessageBuffer;
 use crate::base::clock;
 use crate::base::serializer::storage::{Storage, StorageEnum};
 use crate::utils::BTreeCursorMut;
@@ -161,7 +162,7 @@ impl MqttClient for AsyncClient {
 pub struct Serializer<C: MqttClient> {
     config: Arc<Config>,
     tenant_filter: String,
-    collector_rx: Receiver<Box<dyn Package>>,
+    collector_rx: Receiver<Box<MessageBuffer>>,
     client: C,
     metrics_tx: Sender<SerializerMetrics>,
     /// Serializer metrics
@@ -184,7 +185,7 @@ impl<C: MqttClient> Serializer<C> {
     pub fn new(
         config: Arc<Config>,
         tenant_filter: String,
-        collector_rx: Receiver<Box<dyn Package>>,
+        collector_rx: Receiver<Box<MessageBuffer>>,
         client: C,
         metrics_tx: Sender<SerializerMetrics>,
         ctrl_rx: Receiver<()>,
@@ -266,8 +267,8 @@ impl<C: MqttClient> Serializer<C> {
         None
     }
 
-    fn write_package_to_storage(&mut self, data: Box<dyn Package>) {
-        let stream_config = data.stream_config();
+    fn write_package_to_storage(&mut self, data: Box<MessageBuffer>) {
+        let stream_config = data.stream_config.clone();
         let publish = construct_publish(data, &mut self.stream_metrics);
         self.write_publish_to_storage(stream_config, publish);
     }
@@ -532,7 +533,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     };
                     self.metrics.batches += 1;
-                    let stream = data.stream_config();
+                    let stream = data.stream_config.clone();
                     let publish = construct_publish(data, &mut self.stream_metrics);
                     let payload_size = publish.payload.len();
                     match self.client.try_publish(&stream.topic, QoS::AtLeastOnce, false, publish.payload) {
@@ -600,12 +601,12 @@ fn lz4_compress(payload: &mut Vec<u8>) {
 
 // Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
 pub fn construct_publish(
-    data: Box<dyn Package>,
+    data: Box<MessageBuffer>,
     stream_metrics: &mut HashMap<String, StreamMetrics>,
 ) -> Publish {
-    let stream_name = data.stream_name().as_ref().to_owned();
-    let stream_config = data.stream_config();
-    let point_count = data.len();
+    let stream_name = data.stream_name.as_ref().clone();
+    let stream_config = data.stream_config.clone();
+    let point_count = data.buffer.len();
     let batch_latency = data.latency();
     log::trace!("Data received on stream: {stream_name}; message count = {point_count}; batching latency = {batch_latency}");
 
@@ -649,7 +650,7 @@ pub mod tests {
 
     use crate::{uplink_config::MqttConfig, hashmap, mock::{MockClient, MockCollector}};
     use crate::base::bridge::Payload;
-    use crate::base::bridge::stream::Buffer;
+    use crate::base::bridge::stream::MessageBuffer;
     use crate::uplink_config::Persistence;
     use super::*;
     use crate::uplink_config::StreamConfig;
@@ -664,7 +665,7 @@ pub mod tests {
 
     pub fn defaults(
         config: Arc<Config>,
-    ) -> (Serializer<MockClient>, Sender<Box<dyn Package>>, Receiver<Request>, Sender<()>) {
+    ) -> (Serializer<MockClient>, Sender<Box<MessageBuffer>>, Receiver<Request>, Sender<()>) {
         let (data_tx, data_rx) = bounded(0);
         let (net_tx, net_rx) = bounded(0);
         let (metrics_tx, _metrics_rx) = bounded(1);
@@ -795,8 +796,8 @@ pub mod tests {
         }
     }
 
-    fn create_test_buffer(i: u32, sk: Arc<StreamConfig>) -> Buffer<Payload> {
-        let mut buffer = Buffer::<Payload>::new(Arc::new("test_stream".to_owned()), sk);
+    fn create_test_buffer(i: u32, sk: Arc<StreamConfig>) -> MessageBuffer<Payload> {
+        let mut buffer = MessageBuffer::<Payload>::new(Arc::new("test_stream".to_owned()), sk);
         buffer.buffer.push(Payload {
             stream: Default::default(),
             sequence: i,

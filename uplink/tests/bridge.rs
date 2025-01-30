@@ -4,7 +4,7 @@ use flume::{bounded, Receiver, Sender};
 use tokio::{runtime::Runtime};
 
 use uplink::{
-    base::bridge::{ActionsBridge, Package},
+    base::bridge::{ActionsBridge},
     uplink_config::{ActionRoute, Config, DeviceConfig},
     Action, ActionResponse,
 };
@@ -21,7 +21,7 @@ fn default_configs() -> (Config, DeviceConfig) {
 fn create_bridge(
     config: Arc<Config>,
     device_config: Arc<DeviceConfig>,
-) -> (ActionsBridge, Sender<Action>, Receiver<Box<dyn Package>>) {
+) -> (ActionsBridge, Sender<Action>, Receiver<Box<MessageBuffer>>) {
     let (data_tx, data_rx) = bounded(10);
     let (actions_tx, actions_rx) = bounded(10);
     let (metrics_tx, _) = bounded(1);
@@ -39,7 +39,7 @@ fn spawn_bridge(mut bridge: ActionsBridge) {
 }
 
 struct Responses {
-    rx: Receiver<Box<dyn Package>>,
+    rx: Receiver<Box<MessageBuffer>>,
     responses: Vec<ActionResponse>,
 }
 
