@@ -41,7 +41,7 @@
 //! [`port`]: base::AppConfig#structfield.port
 //! [`name`]: Action#structfield.name
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use ::config::{Environment, File, FileFormat};
@@ -101,6 +101,37 @@ pub struct Uplink {
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
     serializer_metrics_rx: Receiver<SerializerMetrics>,
+}
+
+pub struct Nuplink {
+    config: Arc<Config>,
+    device_config: Arc<DeviceConfig>,
+    action_rx: Receiver<Action>,
+    action_tx: Sender<Action>,
+    data_rx: Receiver<Box<MessageBuffer>>,
+    data_tx: Sender<Box<MessageBuffer>>,
+    stream_metrics_tx: Sender<StreamMetrics>,
+    stream_metrics_rx: Receiver<StreamMetrics>,
+    serializer_metrics_tx: Sender<SerializerMetrics>,
+    serializer_metrics_rx: Receiver<SerializerMetrics>,
+}
+
+pub struct ConnectionContext {
+    config: Config,
+    device_config: DeviceConfig,
+    actions_callback: ActionCallback,
+}
+
+pub struct UplinkController {
+    pub data_tx: Sender<Payload>,
+    /// can be used to trigger shutdown
+    /// uplink will stop everything it's doing and send a message on end_rx when everything has stopped
+    pub shutdown: CtrlTx,
+    pub end_rx: Receiver<()>,
+}
+
+fn start_nuplink(context: ConnectionContext) -> UplinkController {
+
 }
 
 impl Uplink {
@@ -377,212 +408,6 @@ impl Uplink {
     }
 }
 
-
-
-const DEFAULT_CONFIG: &str = r#"
-    enable_remote_shell = true
-    enable_stdin_collector = false
-
-    [mqtt]
-    max_packet_size = 256000
-    max_inflight = 100
-    keep_alive = 30
-    network_timeout = 30
-
-    [stream_metrics]
-    enabled = false
-    bridge_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
-    serializer_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_stream_metrics/jsonarray"
-    blacklist = []
-    timeout = 10
-
-    [serializer_metrics]
-    enabled = false
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_metrics/jsonarray"
-    timeout = 10
-
-    [mqtt_metrics]
-    enabled = true
-    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_mqtt_metrics/jsonarray"
-
-    [streams.action_status]
-    topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
-    batch_size = 1
-    flush_period = 2
-    persistence = { max_file_count = 1 } # Ensures action responses are not lost on restarts
-    priority = 255 # highest priority for quick delivery of action status info to platform
-
-    [streams.device_shadow]
-    flush_period = 5
-
-    [streams.logs]
-    batch_size = 32
-
-    [system_stats]
-    enabled = true
-    process_names = ["uplink"]
-    update_period = 30
-"#;
-
-fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceConfig), Error> {
-    let mut config =
-        config::Config::builder().add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml));
-
-    config = config.add_source(File::from_str(config_toml, FileFormat::Toml));
-
-    let mut config: Config =
-        config.add_source(Environment::default()).build()?.try_deserialize()?;
-
-    // Create directory at persistence_path if it doesn't already exist
-    std::fs::create_dir_all(&config.persistence_path).map_err(|_| {
-        Error::msg(format!(
-            "Permission denied for creating persistence directory at {:?}",
-            config.persistence_path.display()
-        ))
-    })?;
-
-    let device_config: DeviceConfig = config::Config::builder()
-        .add_source(File::from_str(device_json, FileFormat::Json))
-        .add_source(Environment::default())
-        .build()?
-        .try_deserialize()?;
-
-    // replace placeholders with device/tenant ID
-    let tenant_id = device_config.project_id.trim();
-    let device_id = device_config.device_id.trim();
-
-    // Replace placeholders in topic strings with configured values for tenant_id and device_id
-    // e.g. for tenant_id: "demo"; device_id: "123"
-    // "/tenants/{tenant_id}/devices/{device_id}/events/stream/jsonarry" ~> "/tenants/demo/devices/123/events/stream/jsonarry"
-    let replace_topic_placeholders = |topic: &mut String| {
-        *topic = topic.replace("{tenant_id}", tenant_id).replace("{device_id}", device_id);
-    };
-
-    for (stream_name, stream_config) in config.streams.iter_mut() {
-        stream_name.clone_into(&mut stream_config.name);
-        if stream_config.topic == "" {
-            stream_config.topic = match stream_config.compression {
-                Compression::Disabled => format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray"),
-                Compression::Lz4 =>      format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray/lz4"),
-            };
-        }
-        replace_topic_placeholders(&mut stream_config.topic);
-    }
-
-    replace_topic_placeholders(&mut config.stream_metrics.bridge_topic);
-    replace_topic_placeholders(&mut config.stream_metrics.serializer_topic);
-    replace_topic_placeholders(&mut config.serializer_metrics.topic);
-    replace_topic_placeholders(&mut config.mqtt_metrics.topic);
-
-    if config.system_stats.enabled {
-        for stream_name in [
-            "uplink_disk_stats",
-            "uplink_network_stats",
-            "uplink_processor_stats",
-            "uplink_process_stats",
-            "uplink_component_stats",
-            "uplink_system_stats",
-        ] {
-            config.stream_metrics.blacklist.push(stream_name.to_owned());
-            let stream_config = StreamConfig {
-                topic: format!(
-                    "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
-                ),
-                batch_size: config.system_stats.stream_size.unwrap_or(MAX_BATCH_SIZE),
-                ..Default::default()
-            };
-            config.streams.insert(stream_name.to_owned(), stream_config);
-        }
-    }
-
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    if let Some(batch_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
-        let stream_config =
-            config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
-                topic: format!(
-                    "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
-                ),
-                batch_size: 32,
-                ..Default::default()
-            });
-        stream_config.batch_size = batch_size;
-    }
-
-    config.actions_subscription = format!("/tenants/{tenant_id}/devices/{device_id}/actions");
-
-    // downloader actions are cancellable by default
-    for route in config.downloader.actions.iter_mut() {
-        route.cancellable = true;
-    }
-
-    // process actions are cancellable by default
-    for route in config.processes.iter_mut() {
-        route.cancellable = true;
-    }
-
-    // script runner actions are cancellable by default
-    for route in config.script_runner.iter_mut() {
-        route.cancellable = true;
-    }
-
-    Ok((config, device_config))
-}
-
-fn banner(config: &Config, device_config: &DeviceConfig) {
-    const B: &str = r#"
-        ░█░▒█░▄▀▀▄░█░░░▀░░█▀▀▄░█░▄
-        ░█░▒█░█▄▄█░█░░░█▀░█░▒█░█▀▄
-        ░░▀▀▀░█░░░░▀▀░▀▀▀░▀░░▀░▀░▀
-        "#;
-
-    println!("{B}");
-    println!("    version: {}", env!("VERGEN_BUILD_SEMVER"));
-    println!("    profile: {}", env!("VERGEN_CARGO_PROFILE"));
-    println!("    commit_sha: {}", env!("VERGEN_GIT_SHA"));
-    println!("    commit_date: {}", env!("VERGEN_GIT_COMMIT_TIMESTAMP"));
-    println!("    project_id: {}", device_config.project_id);
-    println!("    device_id: {}", device_config.device_id);
-    println!("    remote: {}:{}", device_config.broker, device_config.port);
-    println!("    persistence_path: {}", config.persistence_path.display());
-    if !config.action_redirections.is_empty() {
-        println!("    action redirections:");
-        for (action, redirection) in config.action_redirections.iter() {
-            println!("\t{action} -> {redirection}");
-        }
-    }
-    if !config.tcpapps.is_empty() {
-        println!("    tcp applications:");
-        for (app, AppConfig { port, actions }) in config.tcpapps.iter() {
-            println!("\tname: {app:?}\n\tport: {port}\n\tactions: {actions:?}\n\t@");
-        }
-    }
-    println!("    secure_transport: {}", device_config.authentication.is_some());
-    println!("    max_packet_size: {}", config.mqtt.max_packet_size);
-    println!("    max_inflight_messages: {}", config.mqtt.max_inflight);
-    println!("    keep_alive_timeout: {}", config.mqtt.keep_alive);
-
-    if !config.downloader.actions.is_empty() {
-        println!(
-            "    downloader:\n\tpath: {:?}\n\tactions: {:?}",
-            config.downloader.path.display(),
-            config.downloader.actions
-        );
-    }
-    if !config.ota_installer.actions.is_empty() {
-        println!(
-            "    installer:\n\tpath: {}\n\tactions: {:?}",
-            config.ota_installer.path, config.ota_installer.actions
-        );
-    }
-    if config.system_stats.enabled {
-        println!("    processes: {:?}", config.system_stats.process_names);
-    }
-    if config.console.enabled {
-        println!("    console: http://localhost:{}", config.console.port);
-    }
-    println!("\n");
-}
-
 pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Option<ActionCallback>) -> Result<UplinkController, Error> {
     let (config, device_config) = parse_config(device_json.as_str(), config_toml.as_str())?;
     banner(&config, &device_config);
@@ -687,8 +512,200 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
     })
 }
 
-pub struct UplinkController {
-    pub shutdown: CtrlTx,
-    pub end_rx: Receiver<()>,
-    pub data_tx: Sender<Payload>,
+fn banner(config: &Config, device_config: &DeviceConfig) {
+    const B: &str = r#"
+        ░█░▒█░▄▀▀▄░█░░░▀░░█▀▀▄░█░▄
+        ░█░▒█░█▄▄█░█░░░█▀░█░▒█░█▀▄
+        ░░▀▀▀░█░░░░▀▀░▀▀▀░▀░░▀░▀░▀
+        "#;
+
+    println!("{B}");
+    println!("    version: {}", env!("VERGEN_BUILD_SEMVER"));
+    println!("    profile: {}", env!("VERGEN_CARGO_PROFILE"));
+    println!("    commit_sha: {}", env!("VERGEN_GIT_SHA"));
+    println!("    commit_date: {}", env!("VERGEN_GIT_COMMIT_TIMESTAMP"));
+    println!("    project_id: {}", device_config.project_id);
+    println!("    device_id: {}", device_config.device_id);
+    println!("    remote: {}:{}", device_config.broker, device_config.port);
+    println!("    persistence_path: {}", config.persistence_path.display());
+    if !config.action_redirections.is_empty() {
+        println!("    action redirections:");
+        for (action, redirection) in config.action_redirections.iter() {
+            println!("\t{action} -> {redirection}");
+        }
+    }
+    if !config.tcpapps.is_empty() {
+        println!("    tcp applications:");
+        for (app, AppConfig { port, actions }) in config.tcpapps.iter() {
+            println!("\tname: {app:?}\n\tport: {port}\n\tactions: {actions:?}\n\t@");
+        }
+    }
+    println!("    secure_transport: {}", device_config.authentication.is_some());
+    println!("    max_packet_size: {}", config.mqtt.max_packet_size);
+    println!("    max_inflight_messages: {}", config.mqtt.max_inflight);
+    println!("    keep_alive_timeout: {}", config.mqtt.keep_alive);
+
+    if !config.downloader.actions.is_empty() {
+        println!(
+            "    downloader:\n\tpath: {:?}\n\tactions: {:?}",
+            config.downloader.path.display(),
+            config.downloader.actions
+        );
+    }
+    if !config.ota_installer.actions.is_empty() {
+        println!(
+            "    installer:\n\tpath: {}\n\tactions: {:?}",
+            config.ota_installer.path, config.ota_installer.actions
+        );
+    }
+    if config.system_stats.enabled {
+        println!("    processes: {:?}", config.system_stats.process_names);
+    }
+    if config.console.enabled {
+        println!("    console: http://localhost:{}", config.console.port);
+    }
+    println!("\n");
+}
+
+const DEFAULT_CONFIG: &str = r#"
+    enable_remote_shell = true
+    enable_stdin_collector = false
+
+    [mqtt]
+    max_packet_size = 256000
+    max_inflight = 100
+    keep_alive = 30
+    network_timeout = 30
+
+    [stream_metrics]
+    enabled = false
+    bridge_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_stream_metrics/jsonarray"
+    serializer_topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_stream_metrics/jsonarray"
+    blacklist = []
+    timeout = 10
+
+    [serializer_metrics]
+    enabled = false
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_serializer_metrics/jsonarray"
+    timeout = 10
+
+    [mqtt_metrics]
+    enabled = true
+    topic = "/tenants/{tenant_id}/devices/{device_id}/events/uplink_mqtt_metrics/jsonarray"
+
+    [streams.action_status]
+    topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
+    batch_size = 1
+    flush_period = 2
+    persistence = { max_file_count = 1 } # Ensures action responses are not lost on restarts
+    priority = 255 # highest priority for quick delivery of action status info to platform
+
+    [streams.device_shadow]
+    flush_period = 5
+
+    [streams.logs]
+    batch_size = 32
+
+    [system_stats]
+    enabled = true
+    process_names = ["uplink"]
+    update_period = 30
+"#;
+
+fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceConfig), Error> {
+    let mut config =
+        config::Config::builder()
+            .add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml))
+            .add_source(File::from_str(config_toml, FileFormat::Toml))
+            .add_source(Environment::default()).build()?
+            .try_deserialize::<Config>()?;
+
+    // Create directory at persistence_path if it doesn't already exist
+    std::fs::create_dir_all(&config.persistence_path).map_err(|_| {
+        Error::msg(format!(
+            "Permission denied for creating persistence directory at {:?}",
+            config.persistence_path.display()
+        ))
+    })?;
+
+    let device_config = config::Config::builder()
+        .add_source(File::from_str(device_json, FileFormat::Json))
+        .add_source(Environment::default())
+        .build()?
+        .try_deserialize::<DeviceConfig>()?;
+
+    let tenant_id = device_config.project_id.as_str();
+    let device_id = device_config.device_id.as_str();
+    let replace_topic_placeholders = |topic: &mut String| {
+        *topic = topic.replace("{tenant_id}", tenant_id).replace("{device_id}", device_id);
+    };
+
+    for (stream_name, stream_config) in config.streams.iter_mut() {
+        stream_name.clone_into(&mut stream_config.name);
+        if stream_config.topic == "" {
+            stream_config.topic = match stream_config.compression {
+                Compression::Disabled => format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray"),
+                Compression::Lz4 =>      format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray/lz4"),
+            };
+        }
+        replace_topic_placeholders(&mut stream_config.topic);
+    }
+
+    replace_topic_placeholders(&mut config.stream_metrics.bridge_topic);
+    replace_topic_placeholders(&mut config.stream_metrics.serializer_topic);
+    replace_topic_placeholders(&mut config.serializer_metrics.topic);
+    replace_topic_placeholders(&mut config.mqtt_metrics.topic);
+
+    if config.system_stats.enabled {
+        for stream_name in [
+            "uplink_disk_stats",
+            "uplink_network_stats",
+            "uplink_processor_stats",
+            "uplink_process_stats",
+            "uplink_component_stats",
+            "uplink_system_stats",
+        ] {
+            config.stream_metrics.blacklist.push(stream_name.to_owned());
+            let stream_config = StreamConfig {
+                topic: format!(
+                    "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
+                ),
+                batch_size: config.system_stats.stream_size.unwrap_or(MAX_BATCH_SIZE),
+                ..Default::default()
+            };
+            config.streams.insert(stream_name.to_owned(), stream_config);
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if let Some(batch_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
+        let stream_config =
+            config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
+                topic: format!(
+                    "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
+                ),
+                batch_size: 32,
+                ..Default::default()
+            });
+        stream_config.batch_size = batch_size;
+    }
+
+    config.actions_subscription = format!("/tenants/{tenant_id}/devices/{device_id}/actions");
+
+    // downloader actions are cancellable by default
+    for route in config.downloader.actions.iter_mut() {
+        route.cancellable = true;
+    }
+
+    // process actions are cancellable by default
+    for route in config.processes.iter_mut() {
+        route.cancellable = true;
+    }
+
+    // script runner actions are cancellable by default
+    for route in config.script_runner.iter_mut() {
+        route.cancellable = true;
+    }
+
+    Ok((config, device_config))
 }
