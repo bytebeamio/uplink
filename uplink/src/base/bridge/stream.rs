@@ -64,8 +64,8 @@ impl Stream {
     }
 
     fn add(&mut self, data: Payload) -> Result<Option<MessageBuffer>, Error> {
-        let current_sequence = data.sequence();
-        let current_timestamp = data.timestamp();
+        let current_sequence = data.sequence;
+        let current_timestamp = data.timestamp;
         let last_sequence = self.last_sequence;
         let last_timestamp = self.last_timestamp;
 

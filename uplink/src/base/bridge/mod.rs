@@ -16,23 +16,9 @@ pub use actions_lane::{ActionsBridge, Error};
 use data_lane::DataBridge;
 pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
-use crate::uplink_config::{ActionRoute, Config, DeviceConfig, StreamConfig};
+use crate::uplink_config::{ActionRoute, Config, DeviceConfig};
 use crate::{Action, ActionCallback, ActionResponse};
 use crate::base::bridge::stream::MessageBuffer;
-
-pub trait Package: Send + Debug {
-    fn stream_config(&self) -> Arc<StreamConfig>;
-    fn stream_name(&self) -> Arc<String>;
-    // TODO: Implement a generic Return type that can wrap
-    // around custom serialization error types.
-    fn serialize(&self) -> Vec<u8>;
-    fn anomalies(&self) -> Option<(String, usize)>;
-    fn len(&self) -> usize;
-    fn latency(&self) -> u64;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
 
 // TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
 // TODO which cloud will double deserialize (Batch 1st and messages next)
@@ -46,26 +32,12 @@ pub struct Payload {
     pub payload: Value,
 }
 
-impl Payload {
-    fn stream_name(&self) -> &str {
-        &self.stream
-    }
-
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-}
-
 /// Commands that can be used to remotely trigger data_lane shutdown
-pub(crate) struct DataBridgeShutdown;
+pub struct DataBridgeShutdown;
 
 pub struct Bridge {
-    pub(crate) data: DataBridge,
-    pub(crate) actions: ActionsBridge,
+    pub data: DataBridge,
+    pub actions: ActionsBridge,
 }
 
 impl Bridge {

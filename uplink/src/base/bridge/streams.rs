@@ -42,7 +42,7 @@ impl Streams {
     }
 
     pub async fn forward(&mut self, data: Payload) {
-        let stream_name = data.stream_name().to_string();
+        let stream_name = data.stream.clone();
 
         if !self.map.contains_key(&stream_name) {
             if self.map.keys().len() > self.max_stream_count {
