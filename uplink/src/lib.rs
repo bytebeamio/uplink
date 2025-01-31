@@ -130,9 +130,9 @@ pub struct UplinkController {
     pub end_rx: Receiver<()>,
 }
 
-fn start_nuplink(context: ConnectionContext) -> UplinkController {
-
-}
+// fn start_nuplink(context: ConnectionContext) -> UplinkController {
+//
+// }
 
 impl Uplink {
     pub fn new(config: Arc<Config>, device_config: Arc<DeviceConfig>) -> Result<Uplink, Error> {
