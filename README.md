@@ -28,17 +28,13 @@ uplink -a auth.json
 
 The `auth.json` file must contain information such as the device's ID, the broker's URL, the port to connect to and the TLS certificates to be used while connecting. An example of what such a file's contents would look like is given in [dummy.json][dummy]. When connecting over non-TLS connections, authentication information is unncessary, as given in the example file contents of [noauth.json][noauth].
 
-
-> **NOTE**: If you are using the [Bytebeam][bytebeam] platform, you could use the file downloaded [from the Bytebeam UI][platform]. If you are using your own broker instead, you could use uplink [without TLS][unsecure], but we recommend that you use TLS and [provision your own certificates][provision] to do it. You can read more about securing uplink in the [uplink Security document][security].
-
 For more details on how to configure uplink to run on your edge device, read the [configuration guide][config].
 
-#### Writing Applications
-uplink acts as an intermediary between the user's application running on edge devices and the Bytebeam platform or an MQTT 3.1.1 broker of choice. One can accept commands in the form of [Action][action]s and update progress of said commands with [Action Response][action_response]s or even push the latest data from applications(such as sensing), with the help of uplink.
+#### Monitoring
 
-Uplink acts as a sidecar, simplifying the programmer's experience of interacting with Bytebeam. By just opening a TCP connection with the uplink daemon and reading/writing JSON as text through the same, the user application is able to take advantage of a secure and reliabale data-pipeline.
+By default uplink can collect generic linux system related stats and upload them to cloud. You will see this data in streams prefixed with `uplink_` (`uplink_system_stats`, `uplink_processor_stats`, `uplink_disk_stats`, etc).
 
-<img src="docs/uplink.png" height="150px" alt="uplink architecture">
+Uplink will also send messages regularly to `device_shadow` stream. The latest message on this stream is used to show the device overview and last heartbead on the main page.
 
 **Receiving Actions**:
 Actions are messages that uplink expects to receive from the broker and is executable on the user's device. The JSON format for Actions are as such:

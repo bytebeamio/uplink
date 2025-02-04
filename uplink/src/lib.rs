@@ -500,7 +500,7 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
                 };
             });
             info!("Uplink shutting down...");
-            thread::sleep(Duration::from_secs(5));
+            thread::sleep(Duration::from_secs(1));
 
             let _ = end_tx.send(());
         });
@@ -609,7 +609,7 @@ const DEFAULT_CONFIG: &str = r#"
     [system_stats]
     enabled = true
     process_names = ["uplink"]
-    update_period = 30
+    update_period = 2
 "#;
 
 fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceConfig), Error> {

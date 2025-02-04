@@ -108,7 +108,7 @@ impl SystemStats {
     fn push(&mut self, sys: &sysinfo::System, timestamp: u64) -> Payload {
         self.stat.update(sys, timestamp);
 
-        (&self.stat).into()
+        dbg!((&self.stat).into())
     }
 }
 
