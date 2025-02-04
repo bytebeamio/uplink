@@ -332,8 +332,8 @@ impl Uplink {
             });
         }
 
-        for (_logger, config) in self.config.log_reader.iter() {
-            let stdout_collector = LogFileReader::new(config.clone(), bridge_tx.clone());
+        for (name, config) in self.config.log_reader.iter() {
+            let stdout_collector = LogFileReader::new(name.clone(), config.clone(), bridge_tx.clone());
             thread::spawn(move || stdout_collector.start());
         }
 

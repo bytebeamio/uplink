@@ -132,6 +132,7 @@ impl<T: AsyncBufReadExt + Unpin> LogParser<T> {
 
 #[derive(Debug, Clone)]
 pub struct LogFileReader {
+    name: String,
     config: LogReaderConfig,
     tx: BridgeTx,
     log_template: Regex,
@@ -139,10 +140,10 @@ pub struct LogFileReader {
 }
 
 impl LogFileReader {
-    pub fn new(config: LogReaderConfig, tx: BridgeTx) -> Self {
+    pub fn new(name: String, config: LogReaderConfig, tx: BridgeTx) -> Self {
         let log_template = Regex::new(&config.log_template).unwrap();
         let timestamp_template = Regex::new(&config.timestamp_template).unwrap();
-        Self { config, tx, log_template, timestamp_template }
+        Self { name, config, tx, log_template, timestamp_template }
     }
 
     #[tokio::main(flavor = "current_thread")]
@@ -159,8 +160,9 @@ impl LogFileReader {
         let stream_name = self.config.stream_name.to_owned();
         let tx = self.tx.clone();
 
-        while let Some(entry) = parser.next().await {
+        while let Some(mut entry) = parser.next().await {
             sequence += 1;
+            entry.tag = entry.tag.take().map(|t| format!("{}::{}", self.name, t));
             let payload = entry.payload(stream_name.clone(), sequence);
             tx.send_payload(payload).await
         }
