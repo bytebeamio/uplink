@@ -1,6 +1,6 @@
 use std::fs::read_to_string;
 use std::path::PathBuf;
-use anyhow::Error;
+use anyhow::{Context, Error};
 use structopt::StructOpt;
 use uplink::*;
 
@@ -11,11 +11,13 @@ fn main() -> Result<(), Error> {
     }
 
     let commandline: CommandLine = StructOpt::from_args();
-    let device_json = read_to_string(commandline.auth.as_path())?;
+    let device_json = read_to_string(commandline.auth.as_path())
+        .context("couldn't read auth json file")?;
     let config_toml = match commandline.config.as_ref() {
         None => { String::new() }
         Some(p) => {
-            read_to_string(p)?
+            read_to_string(p)
+                .context("couldn't read config toml file")?
         }
     };
 
