@@ -268,7 +268,6 @@ pub struct Config {
     pub processes: Vec<ActionRoute>,
     #[serde(default)]
     pub script_runner: Vec<ActionRoute>,
-    #[serde(skip)]
     pub actions_subscription: String,
     pub streams: HashMap<String, StreamConfig>,
     #[serde(default = "default_persistence_path")]

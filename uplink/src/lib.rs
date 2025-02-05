@@ -610,6 +610,8 @@ const DEFAULT_CONFIG: &str = r#"
     enabled = true
     process_names = ["uplink"]
     update_period = 2
+
+    actions_subscription = "/tenants/{tenant_id}/devices/{device_id}/actions"
 "#;
 
 fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceConfig), Error> {
@@ -623,7 +625,7 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
     // Create directory at persistence_path if it doesn't already exist
     std::fs::create_dir_all(&config.persistence_path).map_err(|_| {
         Error::msg(format!(
-            "Permission denied for creating persistence directory at {:?}",
+            "Couldn't create persistence directory at {:?}",
             config.persistence_path.display()
         ))
     })?;
@@ -690,22 +692,7 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
         stream_config.batch_size = batch_size;
     }
 
-    config.actions_subscription = format!("/tenants/{tenant_id}/devices/{device_id}/actions");
-
-    // downloader actions are cancellable by default
-    for route in config.downloader.actions.iter_mut() {
-        route.cancellable = true;
-    }
-
-    // process actions are cancellable by default
-    for route in config.processes.iter_mut() {
-        route.cancellable = true;
-    }
-
-    // script runner actions are cancellable by default
-    for route in config.script_runner.iter_mut() {
-        route.cancellable = true;
-    }
+    replace_topic_placeholders(&mut config.actions_subscription);
 
     Ok((config, device_config))
 }
