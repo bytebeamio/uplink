@@ -14,21 +14,21 @@ of features needed to follow along.
 ---
 
 The device management page has a create device button. Click on it, your browser will download a `device_1.json` file. Your devices
-are supposed to use this file to connect to our broker. Each device you create on the dashboard is supposed to map to a unique physical device.
-This file contains device private keys and the ca certificates as well, everything needed to securely connect to our backend.
+are supposed to use this file to connect to our platform. Each device you create on the dashboard is supposed to map to a unique physical device.
+This file contains device private keys and the ca certificates, everything needed to securely connect to our backend.
 
 --- 
 
-Download the uplink executable for your platform and start it by providing the `device.json` file as an argument:
+Download the uplink executable for your platform from the github releases page and start it by providing the `device.json` file as an argument:
 
 ```sh
 ./uplink -a device_1.json -v
 ```
 
-Uplink will start and connect to our backend. You will notice a few changes in your project dashboard:
+Uplink will start and connect to our backend. You will notice a few changes in your device management page:
 
-* The last heartbeat will change to `a few seconds ago`. This means that the device is live.
-* You will see a value in the uplink version field in the overview of this device. Uplink is pushing it's version along with the device shadow.
+* The last heartbeat of the created device will change to `a few seconds ago`. This means that the device is live.
+* You will see a value in the uplink version field in the overview of this device. Uplink is pushing its version along with the device shadow.
 * You will be able to login to your device remotely using the `Remote shell` button. 
 
 The uplink program is supposed to run as a background daemon on your device.
@@ -49,7 +49,7 @@ devices using our platform:
 Uplink can automatically collect system info like disk, network, cpu usage, memory usage, etc and upload it to our cloud.
 You can visualize this info remotely using our dashboard, like a remote system monitor:
 
-``img1``
+![System stats](assets/system_stats.png)
 
 Line chart is one of several panel types. [See our documentation](https://bytebeamio.mintlify.app/platform-guide/dashboards/panels/introduction-to-panels) for detailed description of all available panels.
 
@@ -59,14 +59,12 @@ Uplink can also automatically collect journalctl (gnu linux) and logcat (android
 To enable log collection, add this to your config.toml file:
 
 ```toml
-# For linux:
-[journalctl]
-args = ["-p", "4", "-t", "tag1", "-t", "tag2"] # journalctl log level 4 is "WARN", collect warning logs for tag1 and tag2
-
-# For android:
-[logcat]
-args = ["*:S", "VIC:W"] # silence all logs except those with tag "VIC"
+[logging]
+tags = ["tag1", "tag2"]
+min_level = 4 # must be between 0 (FATAL) and 6 (VERBOSE), 4 is info
 ```
+
+![Logs](assets/logs.png)
 
 #### Monitoring domain specific data
 
@@ -82,8 +80,8 @@ which is generating some data specific to your use case, that you want to be abl
 You can monitor and visualize this information remotely using our dashboards and panels. To do this you will need to create
 a [stream](https://bytebeamio.mintlify.app/platform-guide/streams-tables/introduction-to-streams#introduction-to-streams-data-tables).
 A stream is like a table in our backend, ordered by timestamp, to which you can push data remotely from your devices, and then
-visualize using our platform. You've already seen examples of some streams that are created by default for you 
-(device_shadow, uplink_system_stats, uplink_processor_stats). You can also create streams and push data to them manually using uplink. 
+visualize using our portal. You've already seen examples of some streams that are created by default for you 
+(device_shadow, uplink_system_stats for RAM, uplink_processor_stats for CPU usage). You can also create streams and push data to them manually using uplink. 
 
 ---
 
@@ -106,12 +104,16 @@ Say you created a stream called `motor_info` with these fields:
 
 You can connect to uplink over the declared tcp port and push data to it, one message per line, as json objects. This is how a message is supposed to look like:
 ```json
-{"stream": "motor_info", "sequence": 5, "timestamp": 1738581618576, "temperature": 65, "rpm": 650, "vibrations": 0.31}
+{"stream": "motor_info", "sequence": 5, "timestamp": 1738581618576, "temperature": 74, "rpm": 650, "vibrations": 0.31}
 ```
-These messages should be written to the port separated by ascii newlines (`\n`).
+Individual messages should be written to the port separated by ascii newlines (`\n`).
 
-Uplink will buffer and upload data to our cloud and then you can visualize it using our dashboards:
+Uplink will buffer and upload data to our cloud and then you can visualize it using our dashboards.
 
-```img2```
+Uplink can also compress your data before uploading it if you want to save on network bandwidth. This compression has to be enabled
+an a per stream basis. Eg. to enable compression for `motor_info` stream, add this to your config.toml:
 
-Uplink can also compress your data before uploading it if you want to save on network bandwidth.
+```toml
+[streams.motor_info]
+compression = "Lz4"
+```
