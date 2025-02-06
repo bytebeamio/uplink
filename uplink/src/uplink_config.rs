@@ -230,6 +230,7 @@ impl From<&ActionRoute> for ActionRoute {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct DeviceShadowConfig {
+    pub enabled: bool,
     #[serde_as(as = "DurationSeconds<u64>")]
     pub interval: Duration,
 }
@@ -283,7 +284,6 @@ pub struct Config {
     pub simulator: Option<SimulatorConfig>,
     #[serde(default)]
     pub ota_installer: InstallerConfig,
-    #[serde(default)]
     pub device_shadow: DeviceShadowConfig,
     #[serde(default)]
     pub action_redirections: HashMap<String, String>,

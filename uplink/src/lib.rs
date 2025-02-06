@@ -318,8 +318,10 @@ impl Uplink {
             });
         }
 
-        let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
-        spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
+        if let Some(dsc) = self.config.device_shadow.cloned() {
+            let device_shadow = DeviceShadow::new(dsc, bridge_tx.clone());
+            spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
+        }
 
         if !self.config.ota_installer.actions.is_empty() {
             let actions_rx = bridge.register_action_routes(&self.config.ota_installer.actions)?;
@@ -613,6 +615,10 @@ const DEFAULT_CONFIG: &str = r#"
     process_names = ["uplink"]
     update_period = 2
     stream_size = 4
+
+    [device_shadow]
+    enabled = true
+    interval = 10
 "#;
 
 fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceConfig), Error> {
