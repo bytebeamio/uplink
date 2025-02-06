@@ -356,7 +356,7 @@ impl<C: MqttClient> Serializer<C> {
     fn send_stream_metrics(&mut self) {
         for metrics in self.stream_metrics.values_mut() {
             metrics.prepare_snapshot();
-            log::info!(
+            let log_message = format!(
                 "{:>17}: serialized_data_size = {} compressed_data_size = {} avg_serialization_time = {}us avg_compression_time = {}us",
                 metrics.stream,
                 convert(metrics.serialized_data_size as f64),
@@ -364,6 +364,11 @@ impl<C: MqttClient> Serializer<C> {
                 metrics.avg_serialization_time.as_micros(),
                 metrics.avg_compression_time.as_micros()
             );
+            if metrics.serialized_data_size == 0 {
+                log::debug!("{}", log_message);
+            } else {
+                log::info!("{}", log_message);
+            }
             let _ = self.metrics_tx.try_send(SerializerMetrics::Stream(Box::new(metrics.clone())));
             metrics.prepare_next();
         }

@@ -570,6 +570,7 @@ fn banner(config: &Config, device_config: &DeviceConfig) {
 const DEFAULT_CONFIG: &str = r#"
     enable_remote_shell = true
     enable_stdin_collector = false
+    actions_subscription = "/tenants/{tenant_id}/devices/{device_id}/actions"
 
     [mqtt]
     max_packet_size = 256000
@@ -610,8 +611,7 @@ const DEFAULT_CONFIG: &str = r#"
     enabled = true
     process_names = ["uplink"]
     update_period = 2
-
-    actions_subscription = "/tenants/{tenant_id}/devices/{device_id}/actions"
+    stream_size = 4
 "#;
 
 fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceConfig), Error> {
