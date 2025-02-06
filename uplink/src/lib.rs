@@ -41,7 +41,7 @@
 //! [`port`]: base::AppConfig#structfield.port
 //! [`name`]: Action#structfield.name
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use ::config::{Environment, File, FileFormat};
@@ -51,6 +51,7 @@ use log::{error, info};
 
 pub mod console;
 pub mod base;
+
 pub mod collector;
 pub mod uplink_config;
 pub mod mock;
