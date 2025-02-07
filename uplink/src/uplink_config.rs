@@ -13,17 +13,9 @@ use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(target_os = "android")]
 use crate::collector::logcat::LogcatConfig;
 
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
-pub const MAX_STREAM_COUNT: usize = 20;
-
 #[inline]
 fn default_timeout() -> Duration {
-    DEFAULT_TIMEOUT
-}
-
-#[inline]
-fn default_stream_count() -> usize {
-    MAX_STREAM_COUNT
+    Duration::from_secs(60)
 }
 
 #[inline]
@@ -196,15 +188,14 @@ pub struct AppConfig {
     pub actions: Vec<ActionRoute>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ConsoleConfig {
     pub enabled: bool,
     pub port: u16,
-    #[serde(default)]
     pub enable_events: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MqttConfig {
     pub max_packet_size: usize,
     pub max_inflight: u16,
@@ -235,12 +226,6 @@ pub struct DeviceShadowConfig {
     pub interval: Duration,
 }
 
-impl Default for DeviceShadowConfig {
-    fn default() -> Self {
-        Self { interval: DEFAULT_TIMEOUT }
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct PreconditionCheckerConfig {
     pub path: PathBuf,
@@ -256,25 +241,18 @@ pub struct DeviceConfig {
     pub authentication: Option<Authentication>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    #[serde(default)]
     pub console: ConsoleConfig,
-    #[serde(default)]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
-    #[serde(default = "default_stream_count")]
     pub max_stream_count: usize,
-    #[serde(default)]
     pub processes: Vec<ActionRoute>,
-    #[serde(default)]
     pub script_runner: Vec<ActionRoute>,
     pub actions_subscription: String,
     pub streams: HashMap<String, StreamConfig>,
     #[serde(default = "default_persistence_path")]
     pub persistence_path: PathBuf,
-    #[serde(default = "default_file_size")]
-    pub default_buf_size: usize,
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
@@ -285,19 +263,13 @@ pub struct Config {
     #[serde(default)]
     pub ota_installer: InstallerConfig,
     pub device_shadow: DeviceShadowConfig,
-    #[serde(default)]
     pub action_redirections: HashMap<String, String>,
-    #[serde(default)]
-    pub ignore_actions_if_no_clients: bool,
     #[cfg(target_os = "linux")]
     pub logging: Option<JournalCtlConfig>,
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
     pub precondition_checks: Option<PreconditionCheckerConfig>,
-    #[serde(default)]
     pub prioritize_live_data: bool,
-    #[serde(default)]
     pub enable_remote_shell: bool,
-    #[serde(default)]
     pub enable_stdin_collector: bool,
 }

@@ -104,25 +104,6 @@ pub struct Uplink {
     serializer_metrics_rx: Receiver<SerializerMetrics>,
 }
 
-pub struct Nuplink {
-    config: Arc<Config>,
-    device_config: Arc<DeviceConfig>,
-    action_rx: Receiver<Action>,
-    action_tx: Sender<Action>,
-    data_rx: Receiver<Box<MessageBuffer>>,
-    data_tx: Sender<Box<MessageBuffer>>,
-    stream_metrics_tx: Sender<StreamMetrics>,
-    stream_metrics_rx: Receiver<StreamMetrics>,
-    serializer_metrics_tx: Sender<SerializerMetrics>,
-    serializer_metrics_rx: Receiver<SerializerMetrics>,
-}
-
-pub struct ConnectionContext {
-    config: Config,
-    device_config: DeviceConfig,
-    actions_callback: ActionCallback,
-}
-
 pub struct UplinkController {
     pub data_tx: Sender<Payload>,
     /// can be used to trigger shutdown
@@ -130,10 +111,6 @@ pub struct UplinkController {
     pub shutdown: CtrlTx,
     pub end_rx: Receiver<()>,
 }
-
-// fn start_nuplink(context: ConnectionContext) -> UplinkController {
-//
-// }
 
 impl Uplink {
     pub fn new(config: Arc<Config>, device_config: Arc<DeviceConfig>) -> Result<Uplink, Error> {
@@ -318,8 +295,8 @@ impl Uplink {
             });
         }
 
-        if let Some(dsc) = self.config.device_shadow.cloned() {
-            let device_shadow = DeviceShadow::new(dsc, bridge_tx.clone());
+        if self.config.device_shadow.enabled {
+            let device_shadow = DeviceShadow::new(self.config.device_shadow.clone(), bridge_tx.clone());
             spawn_named_thread("Device Shadow Generator", move || device_shadow.start());
         }
 
@@ -573,7 +550,14 @@ fn banner(config: &Config, device_config: &DeviceConfig) {
 const DEFAULT_CONFIG: &str = r#"
     enable_remote_shell = true
     enable_stdin_collector = false
+    prioritize_live_data = false
     actions_subscription = "/tenants/{tenant_id}/devices/{device_id}/actions"
+    max_stream_count = 20
+
+    tcpapps = {}
+    processes = []
+    script_runner = []
+    action_redirections = {}
 
     [mqtt]
     max_packet_size = 256000
@@ -619,6 +603,11 @@ const DEFAULT_CONFIG: &str = r#"
     [device_shadow]
     enabled = true
     interval = 10
+
+    [console]
+    enabled = false
+    port = 0
+    enable_events = false
 "#;
 
 fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceConfig), Error> {
