@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
-use futures_util::{SinkExt, TryFutureExt};
+use futures_util::SinkExt;
 use tokio::net::TcpStream;
 use tokio_util::codec::{Framed, LinesCodec};
 
@@ -35,11 +35,6 @@ async fn respond<'a>(
     let resp = serde_json::to_string(&response).unwrap();
     println!("Sending: {resp}");
     framed.send(resp).await.unwrap();
-}
-
-struct ActionState {
-    id: String,
-    response_counter: u32,
 }
 
 #[tokio::main]

@@ -3,7 +3,7 @@ use std::env::current_dir;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{collections::HashMap, fmt::Debug};
-
+use config::{File, FileFormat};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
 
@@ -12,6 +12,7 @@ pub use crate::base::bridge::stream::MAX_BATCH_SIZE;
 use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(target_os = "android")]
 use crate::collector::logcat::LogcatConfig;
+use crate::DEFAULT_CONFIG;
 
 #[inline]
 fn default_timeout() -> Duration {
@@ -272,4 +273,13 @@ pub struct Config {
     pub prioritize_live_data: bool,
     pub enable_remote_shell: bool,
     pub enable_stdin_collector: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        config::Config::builder()
+            .add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml))
+            .build().unwrap()
+            .try_deserialize::<Config>().unwrap()
+    }
 }

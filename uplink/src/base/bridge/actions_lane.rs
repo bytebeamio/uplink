@@ -51,7 +51,7 @@ pub struct ActionsBridge {
     ///
     /// Right now this will malfunction if:
     /// * An action is triggered
-    /// * Device receives 64 actions after it
+    /// * Device receives 32 actions after it
     /// * The user tries cancelling the first action
     /// * The cancel action will fail
     actions_routing_cache: LimitedArrayMap<String, String>,

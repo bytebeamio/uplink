@@ -649,7 +649,7 @@ pub mod tests {
     use std::thread::JoinHandle;
     use bytes::Bytes;
     use flume::bounded;
-    use serde::{Deserialize, Serialize};
+    use serde::Deserialize;
     use serde_json::Value;
     use tokio::{spawn, time::sleep};
 
@@ -663,7 +663,7 @@ pub mod tests {
     pub fn default_config() -> Config {
         Config {
             streams: HashMap::new(),
-            mqtt: MqttConfig { max_packet_size: 1024 * 1024, ..Default::default() },
+            mqtt: MqttConfig { max_packet_size: 1024 * 1024, max_inflight: 100, keep_alive: 30, network_timeout: 30 },
             ..Default::default()
         }
     }
@@ -729,7 +729,6 @@ pub mod tests {
     #[derive(Debug, Deserialize)]
     struct SerializedPayload {
         pub sequence: u32,
-        pub timestamp: u64,
         #[serde(flatten)]
         pub payload: Value,
     }
@@ -801,8 +800,8 @@ pub mod tests {
         }
     }
 
-    fn create_test_buffer(i: u32, sk: Arc<StreamConfig>) -> MessageBuffer<Payload> {
-        let mut buffer = MessageBuffer::<Payload>::new(Arc::new("test_stream".to_owned()), sk);
+    fn create_test_buffer(i: u32, sk: Arc<StreamConfig>) -> MessageBuffer {
+        let mut buffer = MessageBuffer::new(Arc::new("test_stream".to_owned()), sk);
         buffer.buffer.push(Payload {
             stream: Default::default(),
             sequence: i,
@@ -827,7 +826,7 @@ pub mod tests {
         }
     }
 
-    fn get_test_buffer_size() {
+    fn _get_test_buffer_size() {
         let sk = Arc::new(StreamConfig {
             name: "test_stream".to_string(),
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
@@ -841,7 +840,6 @@ pub mod tests {
             priority: 0,
         });
         let data = Box::new(create_test_buffer(0, sk));
-        let stream_config = data.stream_config();
         let publish = construct_publish(data, &mut HashMap::new());
         dbg!(publish.size());
     }
@@ -947,12 +945,11 @@ pub mod tests {
         #[derive(Deserialize)]
         struct SerializedPayload {
             pub sequence: u32,
-            pub timestamp: u64,
             #[serde(flatten)]
             pub payload: Value,
         }
 
-        let (serializer, data_tx, net_rx, ctrl_tx) = defaults(config.clone());
+        let (serializer, data_tx, _net_rx, ctrl_tx) = defaults(config.clone());
 
         let first_serializer = std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
@@ -970,9 +967,9 @@ pub mod tests {
 
         ctrl_tx.send(()).unwrap();
 
-        first_serializer.join();
+        first_serializer.join().unwrap();
 
-        let (serializer, data_tx, net_rx, ctrl_tx) = defaults(config);
+        let (serializer, _data_tx, net_rx, _ctrl_tx) = defaults(config);
 
         std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
@@ -1281,7 +1278,7 @@ pub mod tests {
         config.streams.insert("test_stream".to_owned(), create_test_stream_config());
         let config = Arc::new(config);
         let sk = Arc::new(create_test_stream_config());
-        let (mut serializer, data_tx, mqtt_rx, ctrl_tx) = defaults(config.clone());
+        let (serializer, data_tx, mqtt_rx, _ctrl_tx) = defaults(config.clone());
         let st = spawn_named_thread("Serializer", move || {
             let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
@@ -1299,7 +1296,7 @@ pub mod tests {
         drop(data_tx);
         st.join().unwrap();
 
-        let (mut serializer, data_tx, mqtt_rx, ctrl_tx) = defaults(config.clone());
+        let (serializer, _data_tx, mqtt_rx, ctrl_tx) = defaults(config.clone());
         let st = spawn_named_thread("Serializer", move || {
             let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
