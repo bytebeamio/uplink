@@ -43,6 +43,6 @@ Please follow the [code of conduct][coc] while opening issues to report bugs or 
 [docs.rs]: https://docs.rs/uplink
 [coc]: docs/CoC.md
 [contribute]: CONTRIBUTING.md
-[dummy]: configs/dummy.json
-[noauth]: configs/noauth.json
+[dummy]: docs/configs/dummy.json
+[noauth]: docs/configs/noauth.json
 [bytebeam]: https://bytebeam.io
