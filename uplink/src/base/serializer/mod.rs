@@ -726,9 +726,11 @@ pub mod tests {
         stream_queue_behavior(10000, 0, 150).await;
     }
 
+    #[allow(unused)]
     #[derive(Debug, Deserialize)]
     struct SerializedPayload {
         pub sequence: u32,
+        pub timestamp: u64,
         #[serde(flatten)]
         pub payload: Value,
     }
@@ -915,6 +917,7 @@ pub mod tests {
         let max_file_count = 10;
         let number_of_samples = 350;
         let temp_dir = PathBuf::from("/tmp/uplink/persistence");
+        let _ = std::fs::remove_dir_all(temp_dir.as_path());
         let sk = Arc::new(StreamConfig {
             name: "test_stream".to_string(),
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
@@ -941,13 +944,6 @@ pub mod tests {
             ..Default::default()
         };
         let config = Arc::new(config);
-
-        #[derive(Deserialize)]
-        struct SerializedPayload {
-            pub sequence: u32,
-            #[serde(flatten)]
-            pub payload: Value,
-        }
 
         let (serializer, data_tx, _net_rx, ctrl_tx) = defaults(config.clone());
 
