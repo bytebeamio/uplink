@@ -115,50 +115,6 @@ impl MqttClient for AsyncClient {
     }
 }
 
-/// The uplink Serializer is the component that deals with serializing, compressing and writing data onto disk or Network.
-/// In case of network issues, the Serializer enters various states depending on the severeness, managed by [`start()`].
-///
-/// The Serializer writes data directly to network in **normal mode** with the [`try_publish()`] method on the MQTT client.
-/// In case of the network being slow, this fails and we are forced into **slow mode**, where-in new data gets written into
-/// [`Storage`] while consequently we await on a [`publish()`]. If the [`publish()`] succeeds, we move into **catchup mode**
-/// or if it fails we move to the **crash mode**. In **catchup mode**, we continuously write to [`Storage`] while also
-/// pushing data onto the network with a [`publish()`]. If a [`publish()`] succeds, we load the next [`Publish`] packet from
-/// [`Storage`], until it is empty. We can transition back into normal mode when [`Storage`] is empty during operation in
-/// the catchup mode.
-///
-/// P.S: We have a transition into **crash mode** when we are in catchup or slow mode and the thread running the MQTT client
-/// stalls and dies out. Here we merely write all data received, directly into disk. This is a failure mode that ideally the
-/// serializer should never be operated in.
-///
-/// ```text
-///
-///                         Send publishes in Storage to                                  No more publishes
-///                         Network, write new data to disk                               left in Storage
-///                        ┌---------------------┐                                       ┌──────┐
-///                        │Serializer::catchup()├───────────────────────────────────────►Normal│
-///                        └---------▲---------┬-┘                                       └───┬──┘
-///                                  │         │     Network has crashed                     │
-///                       Network is │         │    ┌───────────────────────┐                │
-///                        available │         ├────►EventloopCrash(publish)│                │
-/// ┌-------------------┐    ┌───────┴──────┐  │    └───────────┬───────────┘     ┌----------▼---------┐
-/// │Serializer::start()├────►EventloopReady│  │   ┌------------▼-------------┐   │Serializer::normal()│ Forward all data to Network
-/// └-------------------┘    └───────▲──────┘  │   │Serializer::crash(publish)├─┐ └----------┬---------┘
-///                                  │         │   └-------------------------▲┘ │            │
-///                                  │         │    Write all data to Storage└──┘            │
-///                                  │         │                                             │
-///                        ┌---------┴---------┴-----┐                           ┌───────────▼──────────┐
-///                        │Serializer::slow(publish)◄───────────────────────────┤SlowEventloop(publish)│
-///                        └-------------------------┘                           └──────────────────────┘
-///                         Write to storage,                                     Slow network encountered
-///                         but continue trying to publish
-///
-///```
-///
-/// NOTE: Shutdown mode and crash mode are only different in how they get triggered,
-/// but should be considered as interchangeable in the above diagram.
-/// [`start()`]: Serializer::start
-/// [`try_publish()`]: AsyncClient::try_publish
-/// [`publish()`]: AsyncClient::publish
 pub struct Serializer<C: MqttClient> {
     config: Arc<Config>,
     tenant_filter: String,

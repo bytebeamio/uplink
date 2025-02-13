@@ -4,7 +4,7 @@ use crate::Payload;
 
 use super::clock;
 
-/// On the Bytebeam platform, an Action is how beamd and through it,
+/// On the Bytebeam platform, an Action is how broker and through it,
 /// the end-user, can communicate the tasks they want to perform on
 /// said device, in this case, uplink.
 #[derive(Debug, Clone, Serialize, Deserialize)]
