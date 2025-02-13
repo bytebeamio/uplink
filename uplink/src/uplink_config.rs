@@ -272,6 +272,7 @@ pub struct Config {
     pub precondition_checks: Option<PreconditionCheckerConfig>,
     pub prioritize_live_data: bool,
     pub enable_remote_shell: bool,
+    pub wait_for_disk: bool,
     pub enable_stdin_collector: bool,
 }
 

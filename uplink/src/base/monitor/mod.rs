@@ -4,7 +4,6 @@ use std::sync::Arc;
 use flume::{Receiver, RecvError};
 use rumqttc::{AsyncClient, ClientError, QoS, Request};
 use tokio::select;
-
 use crate::Config;
 
 use super::bridge::StreamMetrics;
@@ -51,6 +50,9 @@ impl Monitor {
         let mqtt_metrics_topic = mqtt_metrics_config.topic;
         let mut mqtt_metrics = Vec::with_capacity(10);
 
+        if !stream_metrics_config.enabled && !serializer_metrics_config.enabled && !mqtt_metrics_config.enabled {
+            return Ok(());
+        }
         loop {
             select! {
                 o = self.stream_metrics_rx.recv_async(), if stream_metrics_config.enabled => {

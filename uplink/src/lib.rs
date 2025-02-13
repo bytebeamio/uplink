@@ -433,12 +433,14 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
     }
 
     if config.console.enabled {
+        let events_enabled = config.console.enable_events;
         let port = config.console.port;
         let ctrl_tx = ctrl_tx.clone();
+        let events_db_path = config.persistence_path.join("events.db");
         spawn_named_thread("Uplink Console", move || {
             console::start(
                 port, ctrl_tx, downloader_disable, network_up,
-                config.console.enable_events.then(|| config.persistence_path.join("events.db"))
+                events_enabled.then(|| events_db_path)
             )
         });
     }
@@ -480,7 +482,9 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
                 };
             });
             info!("Uplink shutting down...");
-            thread::sleep(Duration::from_secs(1));
+            if config.wait_for_disk {
+                thread::sleep(Duration::from_secs(1));
+            }
 
             let _ = end_tx.send(());
         });
@@ -551,6 +555,7 @@ const DEFAULT_CONFIG: &str = r#"
     enable_remote_shell = true
     enable_stdin_collector = false
     prioritize_live_data = false
+    wait_for_disk = true
     actions_subscription = "/tenants/{tenant_id}/devices/{device_id}/actions"
     max_stream_count = 20
 
@@ -597,8 +602,8 @@ const DEFAULT_CONFIG: &str = r#"
     [system_stats]
     enabled = true
     process_names = ["uplink"]
-    update_period = 2
-    stream_size = 4
+    update_period = 10
+    stream_size = 16
 
     [device_shadow]
     enabled = true

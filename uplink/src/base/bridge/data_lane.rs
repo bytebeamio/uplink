@@ -87,6 +87,7 @@ impl DataBridge {
     }
 }
 
+/// TODO: remove this
 /// Handle for apps to send action status to bridge
 #[derive(Debug, Clone)]
 pub struct DataTx {
