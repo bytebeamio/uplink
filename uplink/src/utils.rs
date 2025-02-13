@@ -44,22 +44,6 @@ impl<K: Eq + Clone + Debug, V> LimitedArrayMap<K, V> {
     }
 }
 
-#[test]
-fn t1() {
-    let mut m = LimitedArrayMap::new(64);
-    dbg!(m.set("a".to_owned(), "A".to_owned()));
-    dbg!(m.set("b".to_owned(), "B".to_owned()));
-    dbg!(m);
-}
-
-#[test]
-fn t2() {
-    let mut m = LimitedArrayMap::new(64);
-    dbg!(m.set("a".to_owned(), "A".to_owned()));
-    dbg!(m.set("b".to_owned(), "B".to_owned()));
-    dbg!(m.get(&"a".to_owned()));
-}
-
 /// An iterator that allows user to access the current element
 /// under the cursor of a BTreeMap
 pub struct BTreeCursorMut<'a, K, V> {
