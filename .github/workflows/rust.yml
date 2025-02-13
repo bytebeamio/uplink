@@ -13,11 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Clippy
-        run: cargo clippy --verbose
+        run: cargo clippy
         env:
           RUSTFLAGS: "-D warnings"
       - name: Run tests
-        run: cargo test --verbose --all-features
+        run: cargo test --all-features
 
   clippy-android:
     name: Clippy on android aarch64
