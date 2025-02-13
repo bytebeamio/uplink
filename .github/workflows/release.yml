@@ -91,7 +91,7 @@ jobs:
             "$PWD/target:/target:Z" \
             rustembedded/cross:armv7-unknown-linux-gnueabihf \
             arm-linux-gnueabihf-strip \
-            /target/armv7-unknown-linux-gnueabihf/release/uplink
+            /target/armv7-unknown-linux-musleabi/release/uplink
 
       - name: Strip release binary (aarch-musl)
         if: matrix.build == 'linux-aarch-musl'
