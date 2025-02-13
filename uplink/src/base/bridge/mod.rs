@@ -13,32 +13,12 @@ pub mod stream;
 mod streams;
 
 pub use actions_lane::{ActionsBridge, Error};
-pub use actions_lane::StatusTx;
 use data_lane::DataBridge;
 pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
 
-use crate::config::{ActionRoute, Config, DeviceConfig, StreamConfig};
-use crate::{Action, ActionResponse};
-
-pub trait Point: Send + Debug + Serialize + 'static {
-    fn stream_name(&self) -> &str;
-    fn sequence(&self) -> u32;
-    fn timestamp(&self) -> u64;
-}
-
-pub trait Package: Send + Debug {
-    fn stream_config(&self) -> Arc<StreamConfig>;
-    fn stream_name(&self) -> Arc<String>;
-    // TODO: Implement a generic Return type that can wrap
-    // around custom serialization error types.
-    fn serialize(&self) -> Vec<u8>;
-    fn anomalies(&self) -> Option<(String, usize)>;
-    fn len(&self) -> usize;
-    fn latency(&self) -> u64;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
+use crate::uplink_config::{ActionRoute, Config, DeviceConfig};
+use crate::{Action, ActionCallback, ActionResponse};
+use crate::base::bridge::stream::MessageBuffer;
 
 // TODO Don't do any deserialization on payload. Read it a Vec<u8> which is in turn a json
 // TODO which cloud will double deserialize (Batch 1st and messages next)
@@ -52,35 +32,22 @@ pub struct Payload {
     pub payload: Value,
 }
 
-impl Point for Payload {
-    fn stream_name(&self) -> &str {
-        &self.stream
-    }
-
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
-    }
-}
-
 /// Commands that can be used to remotely trigger data_lane shutdown
-pub(crate) struct DataBridgeShutdown;
+pub struct DataBridgeShutdown;
 
 pub struct Bridge {
-    pub(crate) data: DataBridge,
-    pub(crate) actions: ActionsBridge,
+    pub data: DataBridge,
+    pub actions: ActionsBridge,
 }
 
 impl Bridge {
     pub fn new(
         config: Arc<Config>,
         device_config: Arc<DeviceConfig>,
-        package_tx: Sender<Box<dyn Package>>,
+        package_tx: Sender<Box<MessageBuffer>>,
         metrics_tx: Sender<StreamMetrics>,
         actions_rx: Receiver<Action>,
+        actions_callback: Option<ActionCallback>,
     ) -> Self {
         let data = DataBridge::new(
             config.clone(),
@@ -90,10 +57,9 @@ impl Bridge {
         );
         let actions = ActionsBridge::new(
             config,
-            device_config,
-            package_tx,
             actions_rx,
-            metrics_tx,
+            data.data_tx().inner.clone(),
+            actions_callback,
         );
         Self { data, actions }
     }
@@ -128,7 +94,7 @@ impl Bridge {
 #[derive(Debug, Clone)]
 pub struct BridgeTx {
     pub data_tx: DataTx,
-    pub status_tx: StatusTx,
+    pub status_tx: Sender<ActionResponse>,
 }
 
 impl BridgeTx {
@@ -141,6 +107,10 @@ impl BridgeTx {
     }
 
     pub async fn send_action_response(&self, response: ActionResponse) {
-        self.status_tx.send_action_response(response).await
+        let _ = self.status_tx.send_async(response).await;
+    }
+
+    pub fn send_action_response_sync(&self, response: ActionResponse) {
+        let _ = self.status_tx.send(response);
     }
 }

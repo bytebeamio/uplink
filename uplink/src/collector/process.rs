@@ -7,11 +7,12 @@ use tokio::select;
 
 use crate::base::actions::Cancellation;
 use crate::base::bridge::BridgeTx;
-use crate::{Action, ActionResponse, Package};
+use crate::{Action, ActionResponse};
 
 use std::io;
 use std::process::Stdio;
 use anyhow::Context;
+use crate::base::bridge::stream::MessageBuffer;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -22,7 +23,7 @@ pub enum Error {
     #[error("Recv error {0}")]
     Recv(#[from] RecvError),
     #[error("Send error {0}")]
-    Send(#[from] SendError<Box<dyn Package>>),
+    Send(#[from] SendError<Box<MessageBuffer>>),
     #[error("Busy with previous action")]
     Busy,
     #[error("No stdout in spawned action")]

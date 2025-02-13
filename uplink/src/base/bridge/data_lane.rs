@@ -3,10 +3,10 @@ use std::sync::Arc;
 use flume::{bounded, Receiver, RecvError, Sender};
 use log::{debug, error};
 use tokio::{select, time::interval};
+use crate::base::bridge::stream::MessageBuffer;
+use crate::uplink_config::{Config, DeviceConfig};
 
-use crate::config::{Config, DeviceConfig};
-
-use super::{streams::Streams, DataBridgeShutdown, Package, Payload, StreamMetrics};
+use super::{streams::Streams, DataBridgeShutdown, Payload, StreamMetrics};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -22,7 +22,7 @@ pub struct DataBridge {
     /// Rx to receive data from apps
     data_rx: Receiver<Payload>,
     /// Handle to send data over streams
-    streams: Streams<Payload>,
+    streams: Streams,
     ctrl_rx: Receiver<DataBridgeShutdown>,
     ctrl_tx: Sender<DataBridgeShutdown>,
 }
@@ -31,7 +31,7 @@ impl DataBridge {
     pub fn new(
         config: Arc<Config>,
         device_config: Arc<DeviceConfig>,
-        package_tx: Sender<Box<dyn Package>>,
+        package_tx: Sender<Box<MessageBuffer>>,
         metrics_tx: Sender<StreamMetrics>,
     ) -> Self {
         let (data_tx, data_rx) = bounded(10);
@@ -87,6 +87,7 @@ impl DataBridge {
     }
 }
 
+/// TODO: remove this
 /// Handle for apps to send action status to bridge
 #[derive(Debug, Clone)]
 pub struct DataTx {

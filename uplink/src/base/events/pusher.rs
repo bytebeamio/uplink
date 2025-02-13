@@ -29,7 +29,7 @@ enum EventsPusherState {
     SendingEvent(i64, Pin<Box<dyn Future<Output=Result<(), SendError<Request>>> + Send>>),
     /// Wait for the puback for some time
     ///   If the correct puback arrives, pop message and go to first step
-    ///   If the step times out, go to S1
+    ///   If the step times out, go to first step
     WaitingForAck(i64),
 }
 

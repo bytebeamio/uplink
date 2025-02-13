@@ -59,10 +59,7 @@ pub struct System {
 impl System {
     fn init(sys: &sysinfo::System) -> System {
         System {
-            kernel_version: match sys.kernel_version() {
-                Some(kv) => kv,
-                None => String::default(),
-            },
+            kernel_version: sys.kernel_version().unwrap_or_default(),
             total_memory: sys.total_memory(),
             ..Default::default()
         }
@@ -622,7 +619,7 @@ impl StatCollector {
         self.sys.refresh_processes();
         let timestamp = clock();
         for (&id, p) in self.sys.processes() {
-            let name = p.cmd().get(0).map(|s| s.to_string()).unwrap_or(p.name().to_string());
+            let name = p.cmd().first().map(|s| s.to_string()).unwrap_or(p.name().to_string());
 
             if self.config.process_names.contains(&name) {
                 let payload = self.processes.push(id.as_u32(), p, name, timestamp);

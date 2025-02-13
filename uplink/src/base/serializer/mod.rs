@@ -12,9 +12,10 @@ use replace_with::replace_with_or_abort;
 use rumqttc::*;
 use tokio::{select, time::interval};
 
-use crate::config::{Compression, StreamConfig};
-use crate::{Config, Package};
+use crate::uplink_config::{Compression, StreamConfig};
+use crate::{Config};
 pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
+use crate::base::bridge::stream::MessageBuffer;
 use crate::base::clock;
 use crate::base::serializer::storage::{Storage, StorageEnum};
 use crate::utils::BTreeCursorMut;
@@ -114,54 +115,10 @@ impl MqttClient for AsyncClient {
     }
 }
 
-/// The uplink Serializer is the component that deals with serializing, compressing and writing data onto disk or Network.
-/// In case of network issues, the Serializer enters various states depending on the severeness, managed by [`start()`].
-///
-/// The Serializer writes data directly to network in **normal mode** with the [`try_publish()`] method on the MQTT client.
-/// In case of the network being slow, this fails and we are forced into **slow mode**, where-in new data gets written into
-/// [`Storage`] while consequently we await on a [`publish()`]. If the [`publish()`] succeeds, we move into **catchup mode**
-/// or if it fails we move to the **crash mode**. In **catchup mode**, we continuously write to [`Storage`] while also
-/// pushing data onto the network with a [`publish()`]. If a [`publish()`] succeds, we load the next [`Publish`] packet from
-/// [`Storage`], until it is empty. We can transition back into normal mode when [`Storage`] is empty during operation in
-/// the catchup mode.
-///
-/// P.S: We have a transition into **crash mode** when we are in catchup or slow mode and the thread running the MQTT client
-/// stalls and dies out. Here we merely write all data received, directly into disk. This is a failure mode that ideally the
-/// serializer should never be operated in.
-///
-/// ```text
-///
-///                         Send publishes in Storage to                                  No more publishes
-///                         Network, write new data to disk                               left in Storage
-///                        ┌---------------------┐                                       ┌──────┐
-///                        │Serializer::catchup()├───────────────────────────────────────►Normal│
-///                        └---------▲---------┬-┘                                       └───┬──┘
-///                                  │         │     Network has crashed                     │
-///                       Network is │         │    ┌───────────────────────┐                │
-///                        available │         ├────►EventloopCrash(publish)│                │
-/// ┌-------------------┐    ┌───────┴──────┐  │    └───────────┬───────────┘     ┌----------▼---------┐
-/// │Serializer::start()├────►EventloopReady│  │   ┌------------▼-------------┐   │Serializer::normal()│ Forward all data to Network
-/// └-------------------┘    └───────▲──────┘  │   │Serializer::crash(publish)├─┐ └----------┬---------┘
-///                                  │         │   └-------------------------▲┘ │            │
-///                                  │         │    Write all data to Storage└──┘            │
-///                                  │         │                                             │
-///                        ┌---------┴---------┴-----┐                           ┌───────────▼──────────┐
-///                        │Serializer::slow(publish)◄───────────────────────────┤SlowEventloop(publish)│
-///                        └-------------------------┘                           └──────────────────────┘
-///                         Write to storage,                                     Slow network encountered
-///                         but continue trying to publish
-///
-///```
-///
-/// NOTE: Shutdown mode and crash mode are only different in how they get triggered,
-/// but should be considered as interchangeable in the above diagram.
-/// [`start()`]: Serializer::start
-/// [`try_publish()`]: AsyncClient::try_publish
-/// [`publish()`]: AsyncClient::publish
 pub struct Serializer<C: MqttClient> {
     config: Arc<Config>,
     tenant_filter: String,
-    collector_rx: Receiver<Box<dyn Package>>,
+    collector_rx: Receiver<Box<MessageBuffer>>,
     client: C,
     metrics_tx: Sender<SerializerMetrics>,
     /// Serializer metrics
@@ -184,7 +141,7 @@ impl<C: MqttClient> Serializer<C> {
     pub fn new(
         config: Arc<Config>,
         tenant_filter: String,
-        collector_rx: Receiver<Box<dyn Package>>,
+        collector_rx: Receiver<Box<MessageBuffer>>,
         client: C,
         metrics_tx: Sender<SerializerMetrics>,
         ctrl_rx: Receiver<()>,
@@ -206,9 +163,8 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     fn initialize_storages(&mut self) {
-        self.sorted_storages.insert(Arc::new(self.config.action_status.clone()), (self.create_storage_for_stream(&self.config.action_status), None, 0));
         for stream_config in self.config.streams.values() {
-            self.sorted_storages.insert(Arc::new(stream_config.clone()), (self.create_storage_for_stream(&stream_config), None, 0));
+            self.sorted_storages.insert(Arc::new(stream_config.clone()), (self.create_storage_for_stream(stream_config), None, 0));
         }
     }
 
@@ -267,8 +223,8 @@ impl<C: MqttClient> Serializer<C> {
         None
     }
 
-    fn write_package_to_storage(&mut self, data: Box<dyn Package>) {
-        let stream_config = data.stream_config();
+    fn write_package_to_storage(&mut self, data: Box<MessageBuffer>) {
+        let stream_config = data.stream_config.clone();
         let publish = construct_publish(data, &mut self.stream_metrics);
         self.write_publish_to_storage(stream_config, publish);
     }
@@ -356,7 +312,7 @@ impl<C: MqttClient> Serializer<C> {
     fn send_stream_metrics(&mut self) {
         for metrics in self.stream_metrics.values_mut() {
             metrics.prepare_snapshot();
-            log::info!(
+            let log_message = format!(
                 "{:>17}: serialized_data_size = {} compressed_data_size = {} avg_serialization_time = {}us avg_compression_time = {}us",
                 metrics.stream,
                 convert(metrics.serialized_data_size as f64),
@@ -364,6 +320,11 @@ impl<C: MqttClient> Serializer<C> {
                 metrics.avg_serialization_time.as_micros(),
                 metrics.avg_compression_time.as_micros()
             );
+            if metrics.serialized_data_size == 0 {
+                log::debug!("{}", log_message);
+            } else {
+                log::info!("{}", log_message);
+            }
             let _ = self.metrics_tx.try_send(SerializerMetrics::Stream(Box::new(metrics.clone())));
             metrics.prepare_next();
         }
@@ -533,7 +494,7 @@ impl<C: MqttClient> Serializer<C> {
                         }
                     };
                     self.metrics.batches += 1;
-                    let stream = data.stream_config();
+                    let stream = data.stream_config.clone();
                     let publish = construct_publish(data, &mut self.stream_metrics);
                     let payload_size = publish.payload.len();
                     match self.client.try_publish(&stream.topic, QoS::AtLeastOnce, false, publish.payload) {
@@ -599,14 +560,14 @@ fn lz4_compress(payload: &mut Vec<u8>) {
     *payload = compressor.finish().unwrap();
 }
 
-// Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
+#[allow(clippy::boxed_local)]
 pub fn construct_publish(
-    data: Box<dyn Package>,
+    data: Box<MessageBuffer>,
     stream_metrics: &mut HashMap<String, StreamMetrics>,
 ) -> Publish {
-    let stream_name = data.stream_name().as_ref().to_owned();
-    let stream_config = data.stream_config();
-    let point_count = data.len();
+    let stream_name = data.stream_name.as_ref().clone();
+    let stream_config = data.stream_config.clone();
+    let point_count = data.buffer.len();
     let batch_latency = data.latency();
     log::trace!("Data received on stream: {stream_name}; message count = {point_count}; batching latency = {batch_latency}");
 
@@ -644,28 +605,28 @@ pub mod tests {
     use std::thread::JoinHandle;
     use bytes::Bytes;
     use flume::bounded;
-    use serde::{Deserialize, Serialize};
+    use serde::Deserialize;
     use serde_json::Value;
     use tokio::{spawn, time::sleep};
 
-    use crate::{config::MqttConfig, hashmap, mock::{MockClient, MockCollector}};
+    use crate::{uplink_config::MqttConfig, hashmap, mock::{MockClient, MockCollector}};
     use crate::base::bridge::Payload;
-    use crate::base::bridge::stream::Buffer;
-    use crate::config::Persistence;
+    use crate::base::bridge::stream::MessageBuffer;
+    use crate::uplink_config::Persistence;
     use super::*;
-    use crate::config::StreamConfig;
+    use crate::uplink_config::StreamConfig;
 
     pub fn default_config() -> Config {
         Config {
             streams: HashMap::new(),
-            mqtt: MqttConfig { max_packet_size: 1024 * 1024, ..Default::default() },
+            mqtt: MqttConfig { max_packet_size: 1024 * 1024, max_inflight: 100, keep_alive: 30, network_timeout: 30 },
             ..Default::default()
         }
     }
 
     pub fn defaults(
         config: Arc<Config>,
-    ) -> (Serializer<MockClient>, Sender<Box<dyn Package>>, Receiver<Request>, Sender<()>) {
+    ) -> (Serializer<MockClient>, Sender<Box<MessageBuffer>>, Receiver<Request>, Sender<()>) {
         let (data_tx, data_rx) = bounded(0);
         let (net_tx, net_rx) = bounded(0);
         let (metrics_tx, _metrics_rx) = bounded(1);
@@ -721,6 +682,7 @@ pub mod tests {
         stream_queue_behavior(10000, 0, 150).await;
     }
 
+    #[allow(unused)]
     #[derive(Debug, Deserialize)]
     struct SerializedPayload {
         pub sequence: u32,
@@ -772,7 +734,7 @@ pub mod tests {
         if let Request::Publish(publish) = net_rx.recv_async().await.unwrap() {
             let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
             assert_eq!(payloads.len(), 1);
-            let payload = payloads.get(0).unwrap();
+            let payload = payloads.first().unwrap();
             assert_eq!(payload.sequence, 0);
             assert_eq!(payload.payload, serde_json::json!({ "msg": "Hello, World!" }));
         } else {
@@ -787,7 +749,7 @@ pub mod tests {
             if let Request::Publish(publish) = net_rx.recv_async().await.unwrap() {
                 let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
                 assert_eq!(payloads.len(), 1);
-                let payload = payloads.get(0).unwrap();
+                let payload = payloads.first().unwrap();
                 assert_eq!(payload.sequence, i);
                 assert_eq!(payload.payload, serde_json::json!({ "msg": "Hello, World!" }));
             } else {
@@ -796,8 +758,8 @@ pub mod tests {
         }
     }
 
-    fn create_test_buffer(i: u32, sk: Arc<StreamConfig>) -> Buffer<Payload> {
-        let mut buffer = Buffer::<Payload>::new(Arc::new("test_stream".to_owned()), sk);
+    fn create_test_buffer(i: u32, sk: Arc<StreamConfig>) -> MessageBuffer {
+        let mut buffer = MessageBuffer::new(Arc::new("test_stream".to_owned()), sk);
         buffer.buffer.push(Payload {
             stream: Default::default(),
             sequence: i,
@@ -822,7 +784,7 @@ pub mod tests {
         }
     }
 
-    fn get_test_buffer_size() {
+    fn _get_test_buffer_size() {
         let sk = Arc::new(StreamConfig {
             name: "test_stream".to_string(),
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
@@ -836,7 +798,6 @@ pub mod tests {
             priority: 0,
         });
         let data = Box::new(create_test_buffer(0, sk));
-        let stream_config = data.stream_config();
         let publish = construct_publish(data, &mut HashMap::new());
         dbg!(publish.size());
     }
@@ -893,7 +854,7 @@ pub mod tests {
                 Request::Publish(publish) => {
                     let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
                     assert_eq!(payloads.len(), 1);
-                    let payload = payloads.get(0).unwrap();
+                    let payload = payloads.first().unwrap();
                     assert_eq!(payload.sequence, i);
                     assert_eq!(payload.payload, serde_json::json!({ "msg": "Hello, World!" }));
                 }
@@ -912,6 +873,7 @@ pub mod tests {
         let max_file_count = 10;
         let number_of_samples = 350;
         let temp_dir = PathBuf::from("/tmp/uplink/persistence");
+        let _ = std::fs::remove_dir_all(temp_dir.as_path());
         let sk = Arc::new(StreamConfig {
             name: "test_stream".to_string(),
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
@@ -939,15 +901,7 @@ pub mod tests {
         };
         let config = Arc::new(config);
 
-        #[derive(Deserialize)]
-        struct SerializedPayload {
-            pub sequence: u32,
-            pub timestamp: u64,
-            #[serde(flatten)]
-            pub payload: Value,
-        }
-
-        let (serializer, data_tx, net_rx, ctrl_tx) = defaults(config.clone());
+        let (serializer, data_tx, _net_rx, ctrl_tx) = defaults(config.clone());
 
         let first_serializer = std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
@@ -965,9 +919,9 @@ pub mod tests {
 
         ctrl_tx.send(()).unwrap();
 
-        first_serializer.join();
+        first_serializer.join().unwrap();
 
-        let (serializer, data_tx, net_rx, ctrl_tx) = defaults(config);
+        let (serializer, _data_tx, net_rx, _ctrl_tx) = defaults(config);
 
         std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
@@ -987,7 +941,7 @@ pub mod tests {
                 Ok(Request::Publish(publish)) => {
                     let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
                     assert_eq!(payloads.len(), 1);
-                    let payload = payloads.get(0).unwrap();
+                    let payload = payloads.first().unwrap();
                     sum += payload.sequence;
                     assert_eq!(payload.payload, serde_json::json!({ "msg": "Hello, World!" }));
                 }
@@ -1276,7 +1230,7 @@ pub mod tests {
         config.streams.insert("test_stream".to_owned(), create_test_stream_config());
         let config = Arc::new(config);
         let sk = Arc::new(create_test_stream_config());
-        let (mut serializer, data_tx, mqtt_rx, ctrl_tx) = defaults(config.clone());
+        let (serializer, data_tx, mqtt_rx, _ctrl_tx) = defaults(config.clone());
         let st = spawn_named_thread("Serializer", move || {
             let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
@@ -1294,7 +1248,7 @@ pub mod tests {
         drop(data_tx);
         st.join().unwrap();
 
-        let (mut serializer, data_tx, mqtt_rx, ctrl_tx) = defaults(config.clone());
+        let (serializer, _data_tx, mqtt_rx, ctrl_tx) = defaults(config.clone());
         let st = spawn_named_thread("Serializer", move || {
             let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 

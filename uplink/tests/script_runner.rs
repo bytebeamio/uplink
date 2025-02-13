@@ -2,7 +2,7 @@ use std::thread::spawn;
 
 use flume::bounded;
 use uplink::{
-    base::bridge::{BridgeTx, DataTx, StatusTx},
+    base::bridge::{BridgeTx, DataTx},
     collector::script_runner::ScriptRunner,
     Action, ActionResponse,
 };
@@ -11,7 +11,7 @@ use uplink::{
 fn empty_payload() {
     let (tx, _) = bounded(2);
     let (inner, status_rx) = bounded(2);
-    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: StatusTx { inner } };
+    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: inner };
 
     let (actions_tx, actions_rx) = bounded(1);
     let script_runner = ScriptRunner::new(actions_rx, bridge_tx);
@@ -34,7 +34,7 @@ fn empty_payload() {
 fn missing_path() {
     let (tx, _) = bounded(2);
     let (inner, status_rx) = bounded(2);
-    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: StatusTx { inner } };
+    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: inner };
 
     let (actions_tx, actions_rx) = bounded(1);
     let script_runner = ScriptRunner::new(actions_rx, bridge_tx);

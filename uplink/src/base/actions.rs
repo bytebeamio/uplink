@@ -1,20 +1,17 @@
 use serde::{Deserialize, Serialize};
-
-use crate::{Payload, Point};
+use serde_json::json;
+use crate::Payload;
 
 use super::clock;
 
-/// On the Bytebeam platform, an Action is how beamd and through it,
+/// On the Bytebeam platform, an Action is how broker and through it,
 /// the end-user, can communicate the tasks they want to perform on
 /// said device, in this case, uplink.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
-    // action id
     #[serde(alias = "id")]
     pub action_id: String,
-    // action name
     pub name: String,
-    // action payload. json. can be args/payload. depends on the invoked command
     pub payload: String,
 }
 
@@ -95,19 +92,21 @@ impl ActionResponse {
         let intermediate = serde_json::to_value(payload)?;
         serde_json::from_value(intermediate)
     }
-}
 
-impl Point for ActionResponse {
-    fn stream_name(&self) -> &str {
-        "action_status"
-    }
+    pub fn to_payload(&self) -> Payload {
+        let payload = json! {{
+            "action_id": self.action_id,
+            "state": self.state,
+            "progress": self.progress,
+            "errors": self.errors
+        }};
 
-    fn sequence(&self) -> u32 {
-        self.sequence
-    }
-
-    fn timestamp(&self) -> u64 {
-        self.timestamp
+        Payload {
+            stream: String::from("action_status"),
+            sequence: self.sequence,
+            timestamp: self.timestamp,
+            payload,
+        }
     }
 }
 

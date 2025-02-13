@@ -58,13 +58,11 @@ reqwest = { version = "0.11", default-features = false, features = [
 ] }
 rsa = { version = "0.9.6", features = ["sha2"] }
 # systemstats
-sysinfo = "0.26"
+sysinfo = { git = "https://github.com/bytebeamio/sysinfo", ref = "v0.26.9-bugfixes" }
 # logcat
 lazy_static = "1.4.0"
 # installer
 tar = "0.4"
-# device_shadow
-surge-ping = "0.8"
 
 [target.'cfg(target_os = "android")'.dependencies]
 time = "0.3"

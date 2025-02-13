@@ -9,9 +9,9 @@ use serde_json::json;
 use tempdir::TempDir;
 
 use uplink::{
-    base::bridge::{BridgeTx, DataTx, StatusTx},
+    base::bridge::{BridgeTx, DataTx},
     collector::downloader::{DownloadFile, FileDownloader},
-    config::{ActionRoute, Config, DownloaderConfig},
+    uplink_config::{ActionRoute, Config, DownloaderConfig},
     Action,
 };
 
@@ -40,7 +40,7 @@ fn download_file() {
 
     let (tx, _) = bounded(2);
     let (inner, status_rx) = bounded(2);
-    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: StatusTx { inner } };
+    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: inner };
 
     // Create channels to forward and push actions on
     let (download_tx, download_rx) = bounded(1);
@@ -110,7 +110,7 @@ fn checksum_of_file() {
 
     let (tx, _) = bounded(2);
     let (inner, status_rx) = bounded(2);
-    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: StatusTx { inner } };
+    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: inner };
 
     // Create channels to forward and push action_status on
     let (download_tx, download_rx) = bounded(1);

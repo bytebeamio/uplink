@@ -1,52 +1,3 @@
-//! Contains the handler and definitions necessary to download files such as OTA updates, as notified by a download file [`Action`]
-//!
-//! The thread running [`Bridge`] forwards the appropriate `Action`s to the [`FileDownloader`].
-//!
-//! Download file `Action`s contain JSON formatted [`payload`] which can be deserialized into an object of type [`DownloadFile`].
-//! This object contains information such as the `url` where the download file is accessible from, the `file_name` or `version` number
-//! associated with the downloaded file and a field which must be updated with the location in file-system where the file is stored into.
-//!
-//! The `FileDownloader` also updates the state of a downloading `Action` using periodic [`ActionResponse`]s containing
-//! progress information. On completion of a download, the received `Action`'s `payload` is updated to contain information
-//! about where the file was downloaded into, within the file-system. This action is then sent back to bridge as part of
-//! the final "Completed" response through use of the [`done_response`].
-//!
-//! As illustrated in the following diagram, the [`Bridge`] forwards download actions to the [`FileDownloader`] where it is downloaded and
-//! intermediate [`ActionResponse`]s are sent back to bridge as progress notifications. On completion of a download, the action response
-//! also includes a modified action with the [`done_response`], where the action received by the downloader is suitably modified to include
-//! information such as the path into which the file was downloaded. As seen in the diagram, two actions with [`action_id`] `"1"` and `"3"` are
-//! forwarded from bridge. In the case of `action_id = 1` we can see that 3 action responses containing progress information are sent back
-//! to bridge and on completion of download, action response containing the done_response is also sent to the bridge from where it might be
-//! forwarded with help of [`action_redirections`]. The same is repeated in the case of `action_id = 3`.
-//!
-//! ```text
-//!                                 ┌──────────────┐
-//!                                 │FileDownloader│
-//!                                 └──────┬───────┘
-//!                                        │
-//!                          .recv_async() │
-//!     ┌──────┐    ┌────────────────┐  1  │
-//!     │Bridge├────►Receiver<Action>├────►├───────┐
-//!     └───▲──┘    └───────┬────────┘     │       │
-//!         │               │              ├───────┤
-//!         │               │              │       | progress = x%
-//!         │               │              ├───────┤
-//!         │               │              ├-------┼-----┐
-//!         │               │              │   1   │     '
-//!         │               │     3        │       │     '
-//!         │               └─────────────►├───────┤     ' done_response = Some(action)
-//!         │                              │       │     '
-//!         │                              ├───────┘     '
-//!         └───────ActionResponse─────────┴-------------┘
-//!                                                3
-//! ```
-//!
-//! [`Bridge`]: crate::Bridge
-//! [`action_id`]: Action#structfield.action_id
-//! [`payload`]: Action#structfield.payload
-//! [`done_response`]: ActionResponse#structfield.done_response
-//! [`action_redirections`]: Config#structfield.action_redirections
-
 use bytes::BytesMut;
 use flume::{Receiver, Sender};
 use futures_util::StreamExt;
@@ -70,7 +21,7 @@ use std::{
 use std::{io::Write, path::PathBuf};
 use anyhow::Context;
 use crate::base::actions::Cancellation;
-use crate::config::{Authentication, Config, DownloaderConfig};
+use crate::uplink_config::{Authentication, Config, DownloaderConfig};
 use crate::{base::bridge::BridgeTx, Action, ActionResponse};
 
 #[derive(thiserror::Error, Debug)]
@@ -226,54 +177,60 @@ impl FileDownloader {
     // Accepts `DownloadState`, sets a timeout for the action
     async fn download(&mut self, state: &mut DownloadState) -> DownloadResult {
         let shutdown_rx = self.shutdown_rx.clone();
-        select! {
-            o = self.continuous_retry(state) => if let Err(e) = o {
-                return DownloadResult::Err(e.to_string());
-            },
-            Ok(action) = self.actions_rx.recv_async() => {
-                if action.action_id == self.action_id {
-                    // This handles the edge case when the device is able to receive actions
-                    // from the broker but for something goes wrong when pushing action statuses back to the backend
-                    // In this case the backend will try sending the same action again
-                    //
-                    // TODO: Right now we use the action status pushed by device as confirmation that it
-                    // has received the action. It is not very reliable because as of now the action status pipeline can drop messages.
-                    // Would it be better if the backend used MQTT Ack of the action message instead?
-                    log::error!("Backend tried sending the same action again!");
-                } else if action.name != "cancel_action" {
-                    self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), "Downloader is already occupied")).await;
-                } else {
-                    match serde_json::from_str::<Cancellation>(&action.payload)
-                        .context("Invalid cancel action payload")
-                        .and_then(|cancellation| {
-                            if cancellation.action_id == self.action_id {
-                                Ok(())
-                            } else {
-                                Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, self.action_id)))
-                            }
-                        })
-                        .and_then(|_| {
-                            state.clean()
-                                .context("Couldn't couldn't perform cleanup")
-                        }) {
-                        Ok(_) => {
-                            self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
-                            return DownloadResult::Err(format!("action has been cancelled!"));
-                        },
-                        Err(e) => {
-                            self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
-                        },
+        loop {
+            select! {
+                o = self.continuous_retry(state) => {
+                    if let Err(e) = o {
+                        return DownloadResult::Err(e.to_string());
+                    } else {
+                        break;
                     }
-                }
-            },
+                },
+                Ok(action) = self.actions_rx.recv_async() => {
+                    if action.action_id == self.action_id {
+                        // This handles the edge case when the device is able to receive actions
+                        // from the broker but for something goes wrong when pushing action statuses back to the backend
+                        // In this case the backend will try sending the same action again
+                        //
+                        // TODO: Right now we use the action status pushed by device as confirmation that it
+                        // has received the action. It is not very reliable because as of now the action status pipeline can drop messages.
+                        // Would it be better if the backend used MQTT Ack of the action message instead?
+                        log::error!("Backend tried sending the same action again!");
+                    } else if action.name != "cancel_action" {
+                        self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), "Downloader is already occupied")).await;
+                    } else {
+                        match serde_json::from_str::<Cancellation>(&action.payload)
+                            .context("Invalid cancel action payload")
+                            .and_then(|cancellation| {
+                                if cancellation.action_id == self.action_id {
+                                    Ok(())
+                                } else {
+                                    Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, self.action_id)))
+                                }
+                            })
+                            .and_then(|_| {
+                                state.clean()
+                                    .context("Couldn't couldn't perform cleanup")
+                            }) {
+                            Ok(_) => {
+                                self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
+                                return DownloadResult::Err("action has been cancelled!".to_string());
+                            },
+                            Err(e) => {
+                                self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
+                            },
+                        }
+                    }
+                },
 
-            Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
-                if let Err(e) = state.save(&self.config) {
-                    error!("Error saving current_download: {e:?}");
-                }
+                Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
+                    if let Err(e) = state.save(&self.config) {
+                        error!("Error saving current_download: {e:?}");
+                    }
 
-                return DownloadResult::Suspended;
-            },
+                    return DownloadResult::Suspended;
+                },
+            }
         }
 
         self.bridge_tx.send_action_response(ActionResponse::progress(self.action_id.as_str(), "VerifyingChecksum", 99)).await;

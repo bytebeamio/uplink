@@ -12,7 +12,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 use std::io;
 use anyhow::Context;
 use crate::base::bridge::BridgeTx;
-use crate::config::{AppConfig};
+use crate::uplink_config::{AppConfig};
 use crate::{Action, ActionResponse, Payload};
 
 #[derive(Error, Debug)]
@@ -86,7 +86,7 @@ impl TcpJson {
             }
 
             {
-                let supports_cancellation = self.config.actions.iter().find(|c| c.cancellable).is_some();
+                let supports_cancellation = self.config.actions.iter().any(|c| c.cancellable);
                 let mut client_connection = ClientConnection {
                     app_name: self.name.clone(),
                     supports_cancellation,
@@ -113,7 +113,7 @@ struct ClientConnection {
 impl ClientConnection {
     pub async fn start(&mut self, mut client: Framed<TcpStream, LinesCodec>) -> anyhow::Result<()> {
         let (_dummy_action_tx, dummy_action_rx) = flume::bounded(0);
-        let actions_rx = self.actions_rx.as_ref().unwrap_or_else(|| &dummy_action_rx);
+        let actions_rx = self.actions_rx.as_ref().unwrap_or(&dummy_action_rx);
         loop {
             select! {
                 line = client.next() => {

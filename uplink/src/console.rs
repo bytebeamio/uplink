@@ -12,13 +12,11 @@ use log::info;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use uplink::base::CtrlTx;
-use uplink::base::events::pusher::CREATE_EVENTS_TABLE;
-use crate::ReloadHandle;
+use crate::base::CtrlTx;
+use crate::base::events::pusher::CREATE_EVENTS_TABLE;
 
 #[derive(Debug, Clone)]
 struct StateHandle {
-    reload_handle: ReloadHandle,
     ctrl_tx: CtrlTx,
     downloader_disable: Arc<Mutex<bool>>,
     network_up: Arc<Mutex<bool>>,
@@ -28,7 +26,6 @@ struct StateHandle {
 #[tokio::main]
 pub async fn start(
     port: u16,
-    reload_handle: ReloadHandle,
     ctrl_tx: CtrlTx,
     downloader_disable: Arc<Mutex<bool>>,
     network_up: Arc<Mutex<bool>>,
@@ -60,26 +57,18 @@ pub async fn start(
         });
 
     let app = Router::new()
-        .route("/logs", post(reload_loglevel))
         .route("/shutdown", post(shutdown))
         .route("/disable_downloader", put(disable_downloader))
         .route("/enable_downloader", put(enable_downloader))
         .route("/status", get(status))
         .route("/events", post(save_events));
 
-    let state = StateHandle { reload_handle, ctrl_tx, downloader_disable, network_up, events_db_conn };
+    let state = StateHandle {
+        // reload_handle,
+        ctrl_tx, downloader_disable, network_up, events_db_conn };
     let app = app.with_state(state);
 
     axum::Server::bind(&address.parse().unwrap()).serve(app.into_make_service()).await.unwrap();
-}
-
-async fn reload_loglevel(State(state): State<StateHandle>, filter: String) -> impl IntoResponse {
-    info!("Reloading tracing filter: {filter}");
-    if state.reload_handle.reload(&filter).is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR;
-    }
-
-    StatusCode::OK
 }
 
 async fn shutdown(State(state): State<StateHandle>) -> impl IntoResponse {

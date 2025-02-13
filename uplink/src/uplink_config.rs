@@ -3,7 +3,7 @@ use std::env::current_dir;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{collections::HashMap, fmt::Debug};
-
+use config::{File, FileFormat};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
 
@@ -12,18 +12,11 @@ pub use crate::base::bridge::stream::MAX_BATCH_SIZE;
 use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(target_os = "android")]
 use crate::collector::logcat::LogcatConfig;
-
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
-pub const MAX_STREAM_COUNT: usize = 20;
+use crate::DEFAULT_CONFIG;
 
 #[inline]
 fn default_timeout() -> Duration {
-    DEFAULT_TIMEOUT
-}
-
-#[inline]
-fn default_stream_count() -> usize {
-    MAX_STREAM_COUNT
+    Duration::from_secs(60)
 }
 
 #[inline]
@@ -47,14 +40,6 @@ fn default_download_path() -> PathBuf {
     path
 }
 
-// Automatically assigns port 5050 for default main app, if left unconfigured
-fn default_tcpapps() -> HashMap<String, AppConfig> {
-    let mut apps = HashMap::new();
-    apps.insert("main".to_string(), AppConfig { port: 5050, actions: vec![] });
-
-    apps
-}
-
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq, PartialOrd)]
 pub enum Compression {
     #[default]
@@ -67,7 +52,8 @@ pub enum Compression {
 pub struct StreamConfig {
     #[serde(default)]
     #[serde(skip_deserializing)]
-    pub name: String,
+    pub name: String, // TODO: serializer uses this, remove it
+    #[serde(default)]
     pub topic: String,
     #[serde(default = "max_batch_size")]
     pub batch_size: usize,
@@ -203,15 +189,14 @@ pub struct AppConfig {
     pub actions: Vec<ActionRoute>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ConsoleConfig {
     pub enabled: bool,
     pub port: u16,
-    #[serde(default)]
     pub enable_events: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MqttConfig {
     pub max_packet_size: usize,
     pub max_inflight: u16,
@@ -237,14 +222,9 @@ impl From<&ActionRoute> for ActionRoute {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct DeviceShadowConfig {
+    pub enabled: bool,
     #[serde_as(as = "DurationSeconds<u64>")]
     pub interval: Duration,
-}
-
-impl Default for DeviceShadowConfig {
-    fn default() -> Self {
-        Self { interval: DEFAULT_TIMEOUT }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -262,27 +242,18 @@ pub struct DeviceConfig {
     pub authentication: Option<Authentication>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    #[serde(default)]
     pub console: ConsoleConfig,
-    #[serde(default = "default_tcpapps")]
     pub tcpapps: HashMap<String, AppConfig>,
     pub mqtt: MqttConfig,
-    #[serde(default = "default_stream_count")]
     pub max_stream_count: usize,
-    #[serde(default)]
     pub processes: Vec<ActionRoute>,
-    #[serde(default)]
     pub script_runner: Vec<ActionRoute>,
-    #[serde(skip)]
     pub actions_subscription: String,
     pub streams: HashMap<String, StreamConfig>,
     #[serde(default = "default_persistence_path")]
     pub persistence_path: PathBuf,
-    #[serde(default = "default_file_size")]
-    pub default_buf_size: usize,
-    pub action_status: StreamConfig,
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
@@ -292,17 +263,24 @@ pub struct Config {
     pub simulator: Option<SimulatorConfig>,
     #[serde(default)]
     pub ota_installer: InstallerConfig,
-    #[serde(default)]
     pub device_shadow: DeviceShadowConfig,
-    #[serde(default)]
     pub action_redirections: HashMap<String, String>,
-    #[serde(default)]
-    pub ignore_actions_if_no_clients: bool,
     #[cfg(target_os = "linux")]
     pub logging: Option<JournalCtlConfig>,
     #[cfg(target_os = "android")]
     pub logging: Option<LogcatConfig>,
     pub precondition_checks: Option<PreconditionCheckerConfig>,
-    #[serde(default)]
     pub prioritize_live_data: bool,
+    pub enable_remote_shell: bool,
+    pub wait_for_disk: bool,
+    pub enable_stdin_collector: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        config::Config::builder()
+            .add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml))
+            .build().unwrap()
+            .try_deserialize::<Config>().unwrap()
+    }
 }
