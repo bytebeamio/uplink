@@ -263,7 +263,7 @@ impl FileDownloader {
                             }) {
                             Ok(_) => {
                                 self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
-                                return DownloadResult::Err(format!("action has been cancelled!"));
+                                return DownloadResult::Err("action has been cancelled!".to_string());
                             },
                             Err(e) => {
                                 self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;

@@ -23,7 +23,7 @@ fn main() -> Result<(), Error> {
 
     initialize_logging(commandline.verbose, commandline.modules.clone());
     let controller = entrypoint(device_json, config_toml, None as Option<ActionCallback>)?;
-    if let Err(_) = controller.end_rx.recv() {
+    if controller.end_rx.recv().is_err() {
         log::error!("uplink stopped without sending to end_tx");
     }
 
@@ -58,7 +58,7 @@ pub fn initialize_logging(log_level: u8, log_modules: Vec<String>) {
     let levels =
         match log_modules.into_iter().reduce(|e, acc| format!("{e}={level},{acc}")) {
             Some(f) => format!("{f}={level}"),
-            _ => format!("{level}"),
+            _ => level.to_string(),
         };
 
     let builder = tracing_subscriber::fmt()

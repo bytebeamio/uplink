@@ -208,7 +208,7 @@ impl<C: MqttClient> Serializer<C> {
 
     fn initialize_storages(&mut self) {
         for stream_config in self.config.streams.values() {
-            self.sorted_storages.insert(Arc::new(stream_config.clone()), (self.create_storage_for_stream(&stream_config), None, 0));
+            self.sorted_storages.insert(Arc::new(stream_config.clone()), (self.create_storage_for_stream(stream_config), None, 0));
         }
     }
 
@@ -604,7 +604,7 @@ fn lz4_compress(payload: &mut Vec<u8>) {
     *payload = compressor.finish().unwrap();
 }
 
-// Constructs a [Publish] packet given a [Package] element. Updates stream metrics as necessary.
+#[allow(clippy::boxed_local)]
 pub fn construct_publish(
     data: Box<MessageBuffer>,
     stream_metrics: &mut HashMap<String, StreamMetrics>,
@@ -778,7 +778,7 @@ pub mod tests {
         if let Request::Publish(publish) = net_rx.recv_async().await.unwrap() {
             let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
             assert_eq!(payloads.len(), 1);
-            let payload = payloads.get(0).unwrap();
+            let payload = payloads.first().unwrap();
             assert_eq!(payload.sequence, 0);
             assert_eq!(payload.payload, serde_json::json!({ "msg": "Hello, World!" }));
         } else {
@@ -793,7 +793,7 @@ pub mod tests {
             if let Request::Publish(publish) = net_rx.recv_async().await.unwrap() {
                 let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
                 assert_eq!(payloads.len(), 1);
-                let payload = payloads.get(0).unwrap();
+                let payload = payloads.first().unwrap();
                 assert_eq!(payload.sequence, i);
                 assert_eq!(payload.payload, serde_json::json!({ "msg": "Hello, World!" }));
             } else {
@@ -898,7 +898,7 @@ pub mod tests {
                 Request::Publish(publish) => {
                     let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
                     assert_eq!(payloads.len(), 1);
-                    let payload = payloads.get(0).unwrap();
+                    let payload = payloads.first().unwrap();
                     assert_eq!(payload.sequence, i);
                     assert_eq!(payload.payload, serde_json::json!({ "msg": "Hello, World!" }));
                 }
@@ -985,7 +985,7 @@ pub mod tests {
                 Ok(Request::Publish(publish)) => {
                     let payloads = serde_json::from_slice::<Vec<SerializedPayload>>(publish.payload.as_ref()).unwrap();
                     assert_eq!(payloads.len(), 1);
-                    let payload = payloads.get(0).unwrap();
+                    let payload = payloads.first().unwrap();
                     sum += payload.sequence;
                     assert_eq!(payload.payload, serde_json::json!({ "msg": "Hello, World!" }));
                 }

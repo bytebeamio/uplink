@@ -450,7 +450,7 @@ mod test {
         assert_eq!(storage.writer().len(), 1036);
 
         // other messages on disk
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(backup.path()).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
@@ -463,14 +463,14 @@ mod test {
         // 11 files created. 10 on disk
         write_n_publishes(&mut storage, 110);
 
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(backup.path()).unwrap();
         assert_eq!(files, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
         // 11 files created. 10 on disk
         write_n_publishes(&mut storage, 10);
 
         assert_eq!(storage.writer().len(), 0);
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(backup.path()).unwrap();
         assert_eq!(files, vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
 
@@ -523,7 +523,7 @@ mod test {
         assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
         // Ensure unread files are all present before read
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(backup.path()).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
         // Successfully read 10 files with files still in storage after 10 reads
@@ -532,7 +532,7 @@ mod test {
             let file_id = storage.persistence.as_ref().unwrap().current_read_file_id.unwrap();
             assert_eq!(file_id, i);
             // Ensure partially read file is still present in backup dir
-            let files = get_file_ids(&backup.path()).unwrap();
+            let files = get_file_ids(backup.path()).unwrap();
             assert!(files.contains(&i));
         }
 
@@ -541,7 +541,7 @@ mod test {
         assert_eq!(storage.persistence.as_ref().unwrap().current_read_file_id, None);
 
         // Ensure read files are all present before read
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(backup.path()).unwrap();
         assert_eq!(files, vec![]);
     }
 
@@ -562,14 +562,14 @@ mod test {
         assert_eq!(file_id, 0);
 
         // Ensure all persistance files still exist
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(backup.path()).unwrap();
         assert_eq!(files, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
         // Write 10 more files onto disk, 10 publishes per file
         write_n_publishes(&mut storage, 100);
 
         // Ensure none of the earlier files exist on disk
-        let files = get_file_ids(&backup.path()).unwrap();
+        let files = get_file_ids(backup.path()).unwrap();
         assert_eq!(files, vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
     }
 }

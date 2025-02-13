@@ -39,7 +39,7 @@ async fn main() {
             sequence: idx,
             timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64,
             can_id: idx % 1024,
-            byte1: ((idx + 0) % 256) as u8,
+            byte1: (idx % 256) as u8,
             byte2: ((idx + 1) % 256) as u8,
             byte3: ((idx + 2) % 256) as u8,
             byte4: ((idx + 3) % 256) as u8,

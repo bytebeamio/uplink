@@ -170,7 +170,7 @@ impl ActionsBridge {
             if action.name == "cancel_action" {
                 match serde_json::from_str::<Cancellation>(action.payload.as_str()) {
                     Ok(payload) => {
-                        if let Some(route_id) = self.actions_routing_cache.get(&payload.action_id).map(|e| e.clone()) {
+                        if let Some(route_id) = self.actions_routing_cache.get(&payload.action_id).cloned() {
                             self.try_route_action(route_id.as_str(), action).await;
                         } else {
                             self.forward_action_response(

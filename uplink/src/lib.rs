@@ -440,7 +440,7 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
         spawn_named_thread("Uplink Console", move || {
             console::start(
                 port, ctrl_tx, downloader_disable, network_up,
-                events_enabled.then(|| events_db_path)
+                events_enabled.then_some(events_db_path)
             )
         });
     }
@@ -645,7 +645,7 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
 
     for (stream_name, stream_config) in config.streams.iter_mut() {
         stream_name.clone_into(&mut stream_config.name);
-        if stream_config.topic == "" {
+        if stream_config.topic.is_empty() {
             stream_config.topic = match stream_config.compression {
                 Compression::Disabled => format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray"),
                 Compression::Lz4 =>      format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray/lz4"),
