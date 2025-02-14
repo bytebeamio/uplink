@@ -356,7 +356,7 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
     uplink.spawn_builtins(&mut bridge)?;
 
     let bridge_tx = bridge.bridge_tx();
-    let data_tx = bridge_tx.data_tx.inner.clone();
+    let data_tx = bridge_tx.data_tx.clone();
 
     let mut tcpapps = vec![];
     for (app, cfg) in config.tcpapps.clone() {

@@ -14,7 +14,7 @@ mod streams;
 
 pub use actions_lane::{ActionsBridge, Error};
 use data_lane::DataBridge;
-pub use data_lane::{CtrlTx as DataLaneCtrlTx, DataTx};
+pub use data_lane::{CtrlTx as DataLaneCtrlTx};
 
 use crate::uplink_config::{ActionRoute, Config, DeviceConfig};
 use crate::{Action, ActionCallback, ActionResponse};
@@ -58,7 +58,7 @@ impl Bridge {
         let actions = ActionsBridge::new(
             config,
             actions_rx,
-            data.data_tx().inner.clone(),
+            data.data_tx.clone(),
             actions_callback,
         );
         Self { data, actions }
@@ -66,7 +66,7 @@ impl Bridge {
 
     /// Handle to send data/action status messages
     pub fn bridge_tx(&self) -> BridgeTx {
-        BridgeTx { data_tx: self.data.data_tx(), status_tx: self.actions.status_tx() }
+        BridgeTx { data_tx: self.data.data_tx.clone(), status_tx: self.actions.status_tx.clone() }
     }
 
     pub(crate) fn ctrl_tx(&self) -> data_lane::CtrlTx {
@@ -93,17 +93,17 @@ impl Bridge {
 
 #[derive(Debug, Clone)]
 pub struct BridgeTx {
-    pub data_tx: DataTx,
+    pub data_tx: Sender<Payload>,
     pub status_tx: Sender<ActionResponse>,
 }
 
 impl BridgeTx {
     pub async fn send_payload(&self, payload: Payload) {
-        self.data_tx.send_payload(payload).await
+        let _ = self.data_tx.send_async(payload).await;
     }
 
     pub fn send_payload_sync(&self, payload: Payload) {
-        self.data_tx.send_payload_sync(payload)
+       let _ = self.data_tx.send(payload);
     }
 
     pub async fn send_action_response(&self, response: ActionResponse) {

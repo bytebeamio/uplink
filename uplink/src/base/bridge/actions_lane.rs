@@ -29,7 +29,7 @@ pub struct ActionsBridge {
     /// Full configuration
     config: Arc<Config>,
     /// Tx handle to give to apps
-    status_tx: Sender<ActionResponse>,
+    pub status_tx: Sender<ActionResponse>,
     /// Rx to receive action status from apps
     status_rx: Receiver<ActionResponse>,
     /// Actions incoming from backend
@@ -135,11 +135,6 @@ impl ActionsBridge {
         }
 
         Ok(())
-    }
-
-    /// Handle to send action status messages from connected application
-    pub fn status_tx(&self) -> Sender<ActionResponse> {
-        self.status_tx.clone()
     }
 
     pub async fn start(&mut self) -> Result<(), String> {
