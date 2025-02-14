@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use anyhow::Context;
 use crate::base::bridge::stream::MessageBuffer;
+use crate::base::clock;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -68,20 +69,21 @@ impl ScriptRunner {
     ) -> Result<(), Error> {
         let stdout = child.stdout.take().ok_or(Error::NoStdout)?;
         let mut stdout = BufReader::new(stdout).lines();
+        let mut sequence = 0;
         loop {
             select! {
                 Ok(Some(line)) = stdout.next_line() => {
-                    let mut status: ActionResponse = match serde_json::from_str(&line) {
-                        Ok(status) => status,
-                        Err(e) => {
-                            error!("Failed to deserialize script output: {line:?}; Error: {e}");
-                            continue;
-                        },
-                    };
-                    id.clone_into(&mut status.action_id);
-
-                    debug!("Action status: {:?}", status);
-                    self.forward_status(status).await;
+                    self.forward_status(
+                        ActionResponse {
+                            action_id: id.to_owned(),
+                            sequence,
+                            timestamp: clock() as _,
+                            state: line,
+                            progress: 50,
+                            errors: vec![],
+                            done_response: None,
+                        }
+                    ).await;
                 }
                 // Send a success status at the end of execution
                 status = child.wait() => {
