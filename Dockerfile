@@ -27,6 +27,6 @@ COPY runit/ /etc/runit
 
 CMD ["/usr/bin/runsvdir", "/etc/runit"]
 
-COPY paths/ paths
+COPY scripts/paths/ paths
 COPY simulator.sh .
 
