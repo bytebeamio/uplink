@@ -12,12 +12,10 @@ use log::info;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use crate::base::CtrlTx;
 use crate::base::events::pusher::CREATE_EVENTS_TABLE;
 
 #[derive(Debug, Clone)]
 struct StateHandle {
-    ctrl_tx: CtrlTx,
     downloader_disable: Arc<Mutex<bool>>,
     network_up: Arc<Mutex<bool>>,
     events_db_conn: Option<Arc<Mutex<Connection>>>,
@@ -26,7 +24,6 @@ struct StateHandle {
 #[tokio::main]
 pub async fn start(
     port: u16,
-    ctrl_tx: CtrlTx,
     downloader_disable: Arc<Mutex<bool>>,
     network_up: Arc<Mutex<bool>>,
     events_db_path: Option<PathBuf>,
@@ -65,15 +62,17 @@ pub async fn start(
 
     let state = StateHandle {
         // reload_handle,
-        ctrl_tx, downloader_disable, network_up, events_db_conn };
+        downloader_disable, network_up, events_db_conn
+    };
     let app = app.with_state(state);
 
     axum::Server::bind(&address.parse().unwrap()).serve(app.into_make_service()).await.unwrap();
 }
 
-async fn shutdown(State(state): State<StateHandle>) -> impl IntoResponse {
-    info!("Shutting down uplink");
-    state.ctrl_tx.trigger_shutdown().await;
+async fn shutdown(State(_): State<StateHandle>) -> impl IntoResponse {
+    unsafe {
+        libc::raise(libc::SIGINT);
+    }
 
     StatusCode::OK
 }

@@ -15,6 +15,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
+libc = "0.2.169"
 
 # binary utils
 rusqlite = { version = "0.32.1", features = ["bundled"] }

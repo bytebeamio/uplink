@@ -392,11 +392,10 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
     if config.console.enabled {
         let events_enabled = config.console.enable_events;
         let port = config.console.port;
-        let ctrl_tx = ctrl_tx.clone();
         let events_db_path = config.persistence_path.join("events.db");
         spawn_named_thread("Uplink Console", move || {
             console::start(
-                port, ctrl_tx, downloader_disable, network_up,
+                port, downloader_disable, network_up,
                 events_enabled.then_some(events_db_path)
             )
         });
