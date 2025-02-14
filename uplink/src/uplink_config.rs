@@ -208,9 +208,6 @@ pub struct MqttConfig {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ActionRoute {
     pub name: String,
-    // Can the action handler cancel actions mid execution?
-    #[serde(default)]
-    pub cancellable: bool,
 }
 
 impl From<&ActionRoute> for ActionRoute {

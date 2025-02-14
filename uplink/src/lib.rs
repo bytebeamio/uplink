@@ -237,7 +237,6 @@ impl Uplink {
         if self.config.enable_remote_shell {
             let route = ActionRoute {
                 name: "launch_shell".to_owned(),
-                cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
             let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
@@ -268,7 +267,6 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
-                cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
             let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
@@ -283,7 +281,6 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
-                cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
             let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
@@ -432,7 +429,7 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
                                 ctrl_tx.trigger_shutdown().await;
                                 break;
                             },
-                            s => tracing::error!("Couldn't handle signal: {s}"),
+                            s => error!("Couldn't handle signal: {s}"),
                         }
                     }
                 };

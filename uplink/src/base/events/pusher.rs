@@ -41,8 +41,6 @@ impl EventsPusher {
     pub async fn start(self) {
         use EventsPusherState::*;
 
-        // let _span = tracing::trace_span!("event_pusher_thread").entered();
-
         let conn = match Connection::open(&self.db_path) {
             Ok(c) => Mutex::new(c),
             Err(e) => {

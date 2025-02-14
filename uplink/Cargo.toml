@@ -36,7 +36,6 @@ seahash = "4.1.0"
 # logging
 log = { workspace = true }
 regex = "1.7.1"
-tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 # built-in collectors
