@@ -14,17 +14,6 @@ uplink communicates with the Bytebeam platform over MQTT+TLS, ensuring applicati
 }
 ```
 
-## Using uplink without TLS
-One could use uplink with a broker of their choice, without having to configure TLS. This can be achieved by simply omitting the authentication field in the above JSON and customizing it for use with their setup, MQTT brokers usually listen to port 1883 instead of 8883, which is used in case of MQTT over TLS. i.e:
-```js
-{
-    "project_id": "xxxx",
-    "device_id": "1234",
-    "broker": "example.com",
-    "port": 1883
-}
-```
-
 ## Configuring uplink for use with TLS
 - To use uplink, you need to provide it with an authenication file, let us first source it from the Bytebeam platform.
     1. Login to your account on [demo.bytebeam.io](https://demo.bytebeam.io) and ensure that you are in the right organization.

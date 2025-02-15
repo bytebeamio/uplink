@@ -9,7 +9,7 @@ use serde_json::json;
 use tempdir::TempDir;
 
 use uplink::{
-    base::bridge::{BridgeTx, DataTx},
+    base::bridge::BridgeTx,
     collector::downloader::{DownloadFile, FileDownloader},
     uplink_config::{ActionRoute, Config, DownloaderConfig},
     Action,
@@ -23,7 +23,6 @@ fn test_config(temp_dir: &Path, test_name: &str) -> Config {
     config.downloader = DownloaderConfig {
         actions: vec![ActionRoute {
             name: "firmware_update".to_owned(),
-            cancellable: true,
         }],
         path,
     };
@@ -40,7 +39,7 @@ fn download_file() {
 
     let (tx, _) = bounded(2);
     let (inner, status_rx) = bounded(2);
-    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: inner };
+    let bridge_tx = BridgeTx { data_tx: tx, status_tx: inner };
 
     // Create channels to forward and push actions on
     let (download_tx, download_rx) = bounded(1);
@@ -110,7 +109,7 @@ fn checksum_of_file() {
 
     let (tx, _) = bounded(2);
     let (inner, status_rx) = bounded(2);
-    let bridge_tx = BridgeTx { data_tx: DataTx { inner: tx }, status_tx: inner };
+    let bridge_tx = BridgeTx { data_tx: tx, status_tx: inner };
 
     // Create channels to forward and push action_status on
     let (download_tx, download_rx) = bounded(1);

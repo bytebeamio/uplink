@@ -237,7 +237,6 @@ impl Uplink {
         if self.config.enable_remote_shell {
             let route = ActionRoute {
                 name: "launch_shell".to_owned(),
-                cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
             let tunshell_client = TunshellClient::new(actions_rx, bridge_tx.clone());
@@ -268,7 +267,6 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
-                cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
             let logger = JournalCtl::new(config, actions_rx, bridge_tx.clone());
@@ -283,7 +281,6 @@ impl Uplink {
         if let Some(config) = self.config.logging.clone() {
             let route = ActionRoute {
                 name: "journalctl_config".to_string(),
-                cancellable: false,
             };
             let actions_rx = bridge.register_action_route(route)?;
             let logger = Logcat::new(config, actions_rx, bridge_tx.clone());
@@ -356,7 +353,7 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
     uplink.spawn_builtins(&mut bridge)?;
 
     let bridge_tx = bridge.bridge_tx();
-    let data_tx = bridge_tx.data_tx.inner.clone();
+    let data_tx = bridge_tx.data_tx.clone();
 
     let mut tcpapps = vec![];
     for (app, cfg) in config.tcpapps.clone() {
@@ -392,11 +389,10 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
     if config.console.enabled {
         let events_enabled = config.console.enable_events;
         let port = config.console.port;
-        let ctrl_tx = ctrl_tx.clone();
         let events_db_path = config.persistence_path.join("events.db");
         spawn_named_thread("Uplink Console", move || {
             console::start(
-                port, ctrl_tx, downloader_disable, network_up,
+                port, downloader_disable, network_up,
                 events_enabled.then_some(events_db_path)
             )
         });
@@ -433,7 +429,7 @@ pub fn entrypoint(device_json: String, config_toml: String, actions_callback: Op
                                 ctrl_tx.trigger_shutdown().await;
                                 break;
                             },
-                            s => tracing::error!("Couldn't handle signal: {s}"),
+                            s => error!("Couldn't handle signal: {s}"),
                         }
                     }
                 };
@@ -547,7 +543,7 @@ const DEFAULT_CONFIG: &str = r#"
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     batch_size = 1
     flush_period = 2
-    persistence = { max_file_count = 1 } # Ensures action responses are not lost on restarts
+    persistence = { max_file_size = 10240, max_file_count = 5 } # Ensures action responses are not lost on restarts
     priority = 255 # highest priority for quick delivery of action status info to platform
 
     [streams.device_shadow]

@@ -18,7 +18,7 @@ pub struct DataBridge {
     /// All configuration
     config: Arc<Config>,
     /// Tx handle to give to apps
-    data_tx: Sender<Payload>,
+    pub data_tx: Sender<Payload>,
     /// Rx to receive data from apps
     data_rx: Receiver<Payload>,
     /// Handle to send data over streams
@@ -44,11 +44,6 @@ impl DataBridge {
         Self { data_tx, data_rx, config, streams, ctrl_rx, ctrl_tx }
     }
 
-    /// Handle to send data points from source application
-    pub fn data_tx(&self) -> DataTx {
-        DataTx { inner: self.data_tx.clone() }
-    }
-
     /// Handle to send data lane control message
     pub fn ctrl_tx(&self) -> CtrlTx {
         CtrlTx { inner: self.ctrl_tx.clone() }
@@ -65,7 +60,7 @@ impl DataBridge {
                 }
                 // Flush streams that timeout
                 Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
-                    debug!("Flushing stream = {timedout_stream}");
+                    debug!("Flushing stream({timedout_stream}) because of timeout");
                     if let Err(e) = self.streams.flush_stream(&timedout_stream).await {
                         error!("Failed to flush stream = {timedout_stream}. Error = {e}");
                     }
@@ -84,23 +79,6 @@ impl DataBridge {
                 }
             }
         }
-    }
-}
-
-/// TODO: remove this
-/// Handle for apps to send action status to bridge
-#[derive(Debug, Clone)]
-pub struct DataTx {
-    pub inner: Sender<Payload>,
-}
-
-impl DataTx {
-    pub async fn send_payload(&self, payload: Payload) {
-        self.inner.send_async(payload).await.unwrap()
-    }
-
-    pub fn send_payload_sync(&self, payload: Payload) {
-        self.inner.send(payload).unwrap()
     }
 }
 

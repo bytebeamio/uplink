@@ -75,7 +75,7 @@ impl Monitor {
                             serializer_metrics.push(o);
                             let v = serde_json::to_string(&serializer_metrics).unwrap();
                             serializer_metrics.clear();
-                            self.client.publish(&serializer_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
+                            let _ = self.client.publish(&serializer_metrics_topic, QoS::AtLeastOnce, false, v).await;
                         }
                         SerializerMetrics::Stream(o) => {
                             if stream_metrics_config.blacklist.contains(&o.stream) {
@@ -84,7 +84,7 @@ impl Monitor {
                             serializer_stream_metrics.push(o);
                             let v = serde_json::to_string(&serializer_stream_metrics).unwrap();
                             serializer_stream_metrics.clear();
-                            self.client.publish(&serializer_stream_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
+                            let _ = self.client.publish(&serializer_stream_metrics_topic, QoS::AtLeastOnce, false, v).await;
                         }
                     }
                 }
@@ -93,7 +93,7 @@ impl Monitor {
                     mqtt_metrics.push(o);
                     let v = serde_json::to_string(&mqtt_metrics).unwrap();
                     mqtt_metrics.clear();
-                    self.client.publish(&mqtt_metrics_topic, QoS::AtLeastOnce, false, v).await.unwrap();
+                    let _ = self.client.publish(&mqtt_metrics_topic, QoS::AtLeastOnce, false, v).await;
                 }
             }
         }

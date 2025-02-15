@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use flume::{bounded, Receiver, Sender, TrySendError};
 use log::{debug, error, info};
 use thiserror::Error;
-use tokio::time::Duration;
+use tokio::time::{sleep, Duration};
 use tokio::{select, task};
 
 use std::fs::File;
@@ -119,6 +119,7 @@ impl Mqtt {
             .collect();
 
         if publishes.is_empty() {
+            info!("no inflight messages");
             return Ok(());
         }
 
@@ -130,7 +131,7 @@ impl Mqtt {
         }
 
         file.write(&mut buf)?;
-        debug!("Pending publishes written to disk: {}", file.path().display());
+        info!("Pending publishes written to disk: {}", file.path().display());
 
         Ok(())
     }
@@ -196,9 +197,10 @@ impl Mqtt {
             tokio::task::spawn(pusher_task.start());
         }
 
+        let mut disconnection_wait_timer = None;
         loop {
             select! {
-                event = self.eventloop.poll() => {
+                event = self.eventloop.poll(), if disconnection_wait_timer.is_none() => {
                     match event {
                         Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
                             *self.network_up.lock().unwrap() = true;
@@ -226,11 +228,11 @@ impl Mqtt {
                         Ok(Event::Incoming(packet)) => {
                             debug!("Incoming = {:?}", packet);
                             match packet {
-                                rumqttc::Packet::PubAck(puback) => {
+                                Packet::PubAck(puback) => {
                                     self.metrics.add_puback();
                                     let _ = events_puback_tx.try_send(puback.pkid);
                                 },
-                                rumqttc::Packet::PingResp => {
+                                Packet::PingResp => {
                                     self.metrics.add_pingresp();
                                     let inflight = self.eventloop.state.inflight();
                                     self.metrics.update_inflight(inflight);
@@ -253,12 +255,15 @@ impl Mqtt {
                             *self.network_up.lock().unwrap() = false;
                             self.metrics.add_reconnection();
                             self.check_disconnection_metrics(e);
-                            tokio::time::sleep(Duration::from_secs(3)).await;
+                            disconnection_wait_timer = Some(sleep(Duration::from_secs(3)));
                             continue;
                         }
                     }
                 },
-                Ok(MqttShutdown) = self.ctrl_rx.recv_async() => {
+                _ = disconnection_wait_timer.take().unwrap_or(sleep(Duration::MAX)), if disconnection_wait_timer.is_some() => {
+                    disconnection_wait_timer = None;
+                }
+                Ok(_) = self.ctrl_rx.recv_async() => {
                     break;
                 }
             }

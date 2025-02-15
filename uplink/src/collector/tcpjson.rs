@@ -13,7 +13,7 @@ use std::io;
 use anyhow::Context;
 use crate::base::bridge::BridgeTx;
 use crate::uplink_config::{AppConfig};
-use crate::{Action, ActionResponse, Payload};
+use crate::{Action, Payload};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -86,10 +86,8 @@ impl TcpJson {
             }
 
             {
-                let supports_cancellation = self.config.actions.iter().any(|c| c.cancellable);
                 let mut client_connection = ClientConnection {
                     app_name: self.name.clone(),
-                    supports_cancellation,
                     actions_rx: self.actions_rx.clone(),
                     bridge_tx: self.bridge.clone(),
                 };
@@ -105,7 +103,6 @@ impl TcpJson {
 
 struct ClientConnection {
     app_name: String,
-    supports_cancellation: bool,
     actions_rx: Option<Receiver<Action>>,
     bridge_tx: BridgeTx,
 }
@@ -124,17 +121,8 @@ impl ClientConnection {
                 }
                 action = actions_rx.recv_async() => {
                     let action = action?;
-                    if action.name == "cancel_action" {
-                        if !self.supports_cancellation {
-                            self.bridge_tx.send_action_response(ActionResponse::failure(&action.action_id, "This tcp port isn't configured to support cancellation")).await;
-                        } else {
-                            client.send(serde_json::to_string(&action).unwrap()).await
-                                .context("failed to route action to client")?;
-                        }
-                    } else {
-                        client.send(serde_json::to_string(&action).unwrap()).await
-                            .context("failed to route action to client")?;
-                    }
+                    client.send(serde_json::to_string(&action).unwrap()).await
+                        .context("failed to route action to client")?;
                 }
             }
         }
@@ -143,12 +131,7 @@ impl ClientConnection {
         debug!("{}: Received line = {line:?}", self.app_name);
         let data = serde_json::from_str::<Payload>(&line)?;
 
-        if data.stream == "action_status" {
-            let response = ActionResponse::from_payload(&data)?;
-            self.bridge_tx.send_action_response(response).await;
-        } else {
-            self.bridge_tx.send_payload(data).await;
-        }
+        self.bridge_tx.send_payload(data).await;
 
         Ok(())
     }
