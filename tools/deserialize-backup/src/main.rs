@@ -14,13 +14,13 @@ fn main() {
         Ok(md) => {
             let mut result = Vec::<OutputPayload>::new();
             if md.is_file() {
-                result.extend(extract_messages(args.input.as_path()).into_iter());
+                result.extend(extract_messages(args.input.as_path()));
             } else if md.is_dir() {
                 for child in fs::read_dir(args.input.as_path()).unwrap() {
                     match child {
                         Ok(child) => {
                             if child.file_name().to_str().unwrap().starts_with("backup@") {
-                                result.extend(extract_messages(child.path().as_path()).into_iter());
+                                result.extend(extract_messages(child.path().as_path()));
                             }
                         }
                         Err(e) => {

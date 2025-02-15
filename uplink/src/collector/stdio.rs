@@ -1,6 +1,5 @@
 use std::io::{stdin, BufRead};
 use log::{debug, error, info};
-use crate::ActionResponse;
 use crate::base::bridge::{BridgeTx, Payload};
 
 pub fn stdin_collector(bridge: BridgeTx) {

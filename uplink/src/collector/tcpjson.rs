@@ -13,7 +13,7 @@ use std::io;
 use anyhow::Context;
 use crate::base::bridge::BridgeTx;
 use crate::uplink_config::{AppConfig};
-use crate::{Action, ActionResponse, Payload};
+use crate::{Action, Payload};
 
 #[derive(Error, Debug)]
 pub enum Error {
