@@ -543,7 +543,7 @@ const DEFAULT_CONFIG: &str = r#"
     topic = "/tenants/{tenant_id}/devices/{device_id}/action/status"
     batch_size = 1
     flush_period = 2
-    persistence = { max_file_count = 1 } # Ensures action responses are not lost on restarts
+    persistence = { max_file_size = 10240, max_file_count = 5 } # Ensures action responses are not lost on restarts
     priority = 255 # highest priority for quick delivery of action status info to platform
 
     [streams.device_shadow]

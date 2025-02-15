@@ -131,12 +131,7 @@ impl ClientConnection {
         debug!("{}: Received line = {line:?}", self.app_name);
         let data = serde_json::from_str::<Payload>(&line)?;
 
-        if data.stream == "action_status" {
-            let response = ActionResponse::from_payload(&data)?;
-            self.bridge_tx.send_action_response(response).await;
-        } else {
-            self.bridge_tx.send_payload(data).await;
-        }
+        self.bridge_tx.send_payload(data).await;
 
         Ok(())
     }

@@ -22,11 +22,6 @@ pub fn stdin_collector(bridge: BridgeTx) {
 pub fn queue_payload(bridge: &BridgeTx, line_buffer: &str) -> anyhow::Result<()> {
     debug!("stdin: received data = {line_buffer:?}");
     let data = serde_json::from_str::<Payload>(line_buffer)?;
-    if data.stream == "action_status" {
-        let response = ActionResponse::from_payload(&data)?;
-        bridge.send_action_response_sync(response);
-    } else {
-        bridge.send_payload_sync(data);
-    }
+    bridge.send_payload_sync(data);
     Ok(())
 }

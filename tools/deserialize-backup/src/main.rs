@@ -32,7 +32,12 @@ fn main() {
                 println!("error: symlinks aren't supported");
                 exit(1);
             }
-            fs::write(args.output_file.as_path(), serde_json::to_string_pretty(&result).unwrap()).unwrap()
+            let repr = serde_json::to_string_pretty(&result).unwrap();
+            if let Some(output_file) = &args.output_file {
+                fs::write(output_file.as_path(), repr).unwrap()
+            } else {
+                println!("{repr}");
+            }
         }
         Err(e) => {
             println!("error: can't access input directory: {e}");
@@ -54,17 +59,17 @@ fn extract_messages(path: &Path) -> Vec<OutputPayload> {
         if actual_hash != expected_hash {
             println!("== error: checksum doesn't match, ignoring");
         } else {
-            match Packet::read(&mut buf, 1_000_000) {
-                Ok(Packet::Publish(packet)) => {
-                    let stream = if packet.topic.ends_with("/action/status") {
-                        "action_status".to_owned()
-                    } else {
-                        packet.topic.split("/").nth(6).unwrap().to_owned()
-                    };
-                    unsafe {
-                        match serde_json::from_str::<Vec<StoredPayload>>(std::str::from_utf8_unchecked(
+            loop {
+                match Packet::read(&mut buf, 1_000_000) {
+                    Ok(Packet::Publish(packet)) => {
+                        let stream = if packet.topic.ends_with("/action/status") {
+                            "action_status".to_owned()
+                        } else {
+                            packet.topic.split("/").nth(6).unwrap().to_owned()
+                        };
+                        match serde_json::from_str::<Vec<StoredPayload>>(std::str::from_utf8(
                             packet.payload.iter().as_slice(),
-                        )) {
+                        ).unwrap()) {
                             Ok(messages) => {
                                 for message in messages {
                                     result.push(OutputPayload {
@@ -80,18 +85,25 @@ fn extract_messages(path: &Path) -> Vec<OutputPayload> {
                             }
                         }
                     }
-                }
-                Ok(_p) => {
-                    println!("== error: found unsupported packet type, ignoring");
-                }
-                Err(e) => {
-                    println!("== error: couldn't read packet from file: {e:?}");
+                    Ok(_p) => {
+                        println!("== error: found unsupported packet type, aborting");
+                        break;
+                    }
+                    Err(e) => {
+                        println!("== error: couldn't read packet from file: {e:?}, aborting");
+                        break;
+                    }
                 }
             }
         }
     }
     result
 }
+
+// let broker = Broker::new(port)
+// broker.poll() {
+// }
+// broker.shutdown()
 
 #[derive(Deserialize)]
 struct StoredPayload {
@@ -113,5 +125,5 @@ struct OutputPayload {
 #[derive(structopt::StructOpt)]
 struct CliArgs {
     input: PathBuf,
-    output_file: PathBuf,
+    output_file: Option<PathBuf>,
 }
