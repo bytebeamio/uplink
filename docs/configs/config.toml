@@ -203,34 +203,3 @@ port = 3333
 [device_shadow]
 interval = 30
 
-# The on-device service bus exposes an MQTT interface for inter-process communication
-# Required Parameters
-# - port: the port on which the broker/server is listening for incoming service connections
-# - joins: description of how uplink will join incoming data and push outgoing data streams
-# - console_port: port on which the rumqttd console API is exposed
-[bus]
-port = 1883
-console_port = 3030
-joins = { output_streams = [
-    { name = "location", construct_from = [
-        { input_stream = "gps", select_fields = [
-            "latitude",
-            "longitude",
-        ] },
-        { input_stream = "altimeter", select_fields = [
-            "altitude",
-        ] },
-    ], push_interval_s = 60, no_data_action = "null", publish_on_service_bus = true },
-    { name = "device_shadow", construct_from = [
-        { input_stream = "device_shadow", select_fields = "all" },
-    ], push_interval_s = "on_new_data", no_data_action = "previous_value", publish_on_service_bus = true },
-    { name = "example", construct_from = [
-        { input_stream = "stream_one", select_fields = [
-            "field_x",
-            "field_y",
-        ] },
-        { input_stream = "stream_two", select_fields = [
-            { "field_z" = "field_x" },
-        ] },
-    ], push_interval_s = 120, no_data_action = "previous_value", publish_on_service_bus = false },
-] }

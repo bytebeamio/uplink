@@ -1,6 +1,0 @@
-{
-  "project_id": "demo",
-  "device_id":"1",
-  "broker": "beamd",
-  "port": 1883
-}
