@@ -1,7 +1,7 @@
 use std::{fmt::Debug, mem, sync::Arc, time::Duration};
 
 use flume::{SendError, Sender};
-use log::{debug, trace};
+use log::debug;
 
 use super::{Payload, StreamMetrics};
 use crate::uplink_config::StreamConfig;
@@ -87,8 +87,9 @@ impl Stream {
         self.last_sequence = current_sequence;
         self.last_timestamp = current_timestamp;
 
-        // if max_bATCH_size is breached, flush
+        // if max_batch_size is breached, flush
         let buf = if self.buffer.buffer.len() >= self.config.batch_size {
+            debug!("Flushing stream({}) because the buffer was full", self.name);
             self.metrics.add_batch();
             Some(self.take_buffer())
         } else {
@@ -98,11 +99,9 @@ impl Stream {
         Ok(buf)
     }
 
-    // Returns buffer content, replacing with empty buffer in-place
     fn take_buffer(&mut self) -> MessageBuffer {
         let name = self.name.clone();
         let config = self.config.clone();
-        trace!("Flushing stream name: {name}, topic: {}", config.topic);
 
         mem::replace(&mut self.buffer, MessageBuffer::new(name, config))
     }

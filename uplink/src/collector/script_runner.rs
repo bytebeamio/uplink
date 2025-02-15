@@ -1,5 +1,5 @@
 use flume::{Receiver, RecvError, SendError};
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
@@ -84,6 +84,7 @@ impl ScriptRunner {
                             done_response: None,
                         }
                     ).await;
+                    sequence += 1;
                 }
                 // Send a success status at the end of execution
                 status = child.wait() => {

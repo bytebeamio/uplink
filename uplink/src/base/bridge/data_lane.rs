@@ -60,7 +60,7 @@ impl DataBridge {
                 }
                 // Flush streams that timeout
                 Some(timedout_stream) = self.streams.stream_timeouts.next(), if self.streams.stream_timeouts.has_pending() => {
-                    debug!("Flushing stream = {timedout_stream}");
+                    debug!("Flushing stream({timedout_stream}) because of timeout");
                     if let Err(e) = self.streams.flush_stream(&timedout_stream).await {
                         error!("Failed to flush stream = {timedout_stream}. Error = {e}");
                     }
