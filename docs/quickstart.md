@@ -1,4 +1,4 @@
-## Uplink hello world
+## Uplink quick start
 
 This page is intended to get you up and running with uplink and bytebeam platform.
 
@@ -19,7 +19,7 @@ This file contains device private keys and the ca certificates, everything neede
 
 --- 
 
-Download the uplink executable for your platform from the github releases page and start it by providing the `device.json` file as an argument:
+Download the uplink executable for your platform from the [releases page](https://github.com/bytebeamio/uplink/releases) and start it by providing the `device.json` file as an argument:
 
 ```sh
 ./uplink -a device_1.json -v
