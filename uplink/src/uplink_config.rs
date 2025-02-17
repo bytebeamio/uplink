@@ -12,7 +12,7 @@ pub use crate::base::bridge::stream::MAX_BATCH_SIZE;
 use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(target_os = "android")]
 use crate::collector::logcat::LogcatConfig;
-use crate::DEFAULT_CONFIG;
+use crate::{ActionCallback, DEFAULT_CONFIG};
 
 #[inline]
 fn default_timeout() -> Duration {
@@ -113,13 +113,6 @@ impl Default for Persistence {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct Authentication {
-    pub ca_certificate: String,
-    pub device_certificate: String,
-    pub device_private_key: String,
-}
-
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Stats {
     pub enabled: bool,
@@ -129,31 +122,9 @@ pub struct Stats {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct SimulatorConfig {
-    /// path to directory containing files with gps paths to be used in simulation
-    pub gps_paths: String,
-    /// actions that are to be routed to simulator
-    pub actions: Vec<ActionRoute>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct DownloaderConfig {
-    #[serde(default = "default_download_path")]
-    pub path: PathBuf,
-    pub actions: Vec<ActionRoute>,
-}
-
-impl Default for DownloaderConfig {
-    fn default() -> Self {
-        Self { path: default_download_path(), actions: vec![] }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
 pub struct InstallerConfig {
     pub path: String,
-    pub actions: Vec<ActionRoute>,
-    pub uplink_port: u16,
+    pub actions: Vec<String>,
 }
 
 #[serde_as]
@@ -167,13 +138,10 @@ pub struct StreamMetricsConfig {
     pub timeout: Duration,
 }
 
-#[serde_as]
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SerializerMetricsConfig {
     pub enabled: bool,
     pub topic: String,
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub timeout: Duration,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -204,30 +172,10 @@ pub struct MqttConfig {
     pub network_timeout: u64,
 }
 
-#[serde_as]
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct ActionRoute {
-    pub name: String,
-}
-
-impl From<&ActionRoute> for ActionRoute {
-    fn from(value: &ActionRoute) -> Self {
-        value.clone()
-    }
-}
-
-#[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct DeviceShadowConfig {
     pub enabled: bool,
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub interval: Duration,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PreconditionCheckerConfig {
-    pub path: PathBuf,
-    pub actions: Vec<ActionRoute>,
+    pub interval_seconds: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -240,37 +188,51 @@ pub struct DeviceConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct Authentication {
+    pub ca_certificate: String,
+    pub device_certificate: String,
+    pub device_private_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub console: ConsoleConfig,
-    pub tcpapps: HashMap<String, AppConfig>,
-    pub mqtt: MqttConfig,
     pub max_stream_count: usize,
-    pub processes: Vec<ActionRoute>,
-    pub script_runner: Vec<ActionRoute>,
-    pub actions_subscription: String,
-    pub streams: HashMap<String, StreamConfig>,
+    pub prioritize_live_data: bool,
+    pub enable_remote_shell: bool,
+    pub enable_script_runner: bool,
     #[serde(default = "default_persistence_path")]
     pub persistence_path: PathBuf,
+    #[serde(default = "default_download_path")]
+    pub download_path: PathBuf,
+    pub tcpapps: HashMap<String, AppConfig>,
+    pub stdin_collector_config: StdinCollectorConfig,
+    pub console: ConsoleConfig,
+    pub mqtt: MqttConfig,
+    pub streams: HashMap<String, StreamConfig>,
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
-    #[serde(default)]
-    pub downloader: DownloaderConfig,
     pub system_stats: Stats,
-    pub simulator: Option<SimulatorConfig>,
     #[serde(default)]
     pub ota_installer: InstallerConfig,
     pub device_shadow: DeviceShadowConfig,
-    pub action_redirections: HashMap<String, String>,
     #[cfg(target_os = "linux")]
-    pub logging: Option<JournalCtlConfig>,
+    pub journalctl_args: Option<Vec<String>>,
     #[cfg(target_os = "android")]
-    pub logging: Option<LogcatConfig>,
-    pub precondition_checks: Option<PreconditionCheckerConfig>,
-    pub prioritize_live_data: bool,
-    pub enable_remote_shell: bool,
-    pub wait_for_disk: bool,
-    pub enable_stdin_collector: bool,
+    pub logcat_args: Option<Vec<String>>,
+    pub processes: Vec<ActionRoute>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StdinCollectorConfig {
+    enabled: bool,
+    actions: Vec<ActionRoute>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ActionRoute {
+    pub name: String,
+    pub download: bool,
 }
 
 impl Default for Config {
@@ -279,5 +241,17 @@ impl Default for Config {
             .add_source(File::from_str(DEFAULT_CONFIG, FileFormat::Toml))
             .build().unwrap()
             .try_deserialize::<Config>().unwrap()
+    }
+}
+
+pub struct UplinkConfig {
+    pub app_config: Config,
+    pub credentials: DeviceConfig,
+    pub actions_callback: Option<ActionCallback>,
+}
+
+impl UplinkConfig {
+    pub fn topic_for_stream(&self, name: &str) -> String {
+        format!("/tenants/{}/devices/{}/events/{name}/jsonarray", self.credentials.project_id, self.credentials.device_id)
     }
 }

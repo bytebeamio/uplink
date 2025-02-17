@@ -30,6 +30,7 @@ pub trait Storage: Send {
     fn metrics(&self) -> StorageMetrics;
 }
 
+#[derive(Default)]
 pub struct StorageMetrics {
     pub read_buffer_size: u64,
     pub write_buffer_size: u64,
@@ -39,6 +40,7 @@ pub struct StorageMetrics {
 }
 
 pub enum StorageEnum {
+    Default,
     InMemory(InMemoryStorage),
     Directory(DirectoryStorage),
 }
@@ -520,6 +522,7 @@ impl<'a> PersistenceFile<'a> {
 impl Storage for StorageEnum {
     fn name(&self) -> &str {
         match self {
+            StorageEnum::Default => "<invalid>",
             StorageEnum::InMemory(a) => a.name(),
             StorageEnum::Directory(a) => a.name(),
         }
@@ -527,6 +530,7 @@ impl Storage for StorageEnum {
 
     fn read_packet(&mut self) -> Result<Publish, StorageReadError> {
         match self {
+            StorageEnum::Default => Err(StorageReadError::Empty),
             StorageEnum::InMemory(a) => a.read_packet(),
             StorageEnum::Directory(a) => a.read_packet(),
         }
@@ -534,6 +538,7 @@ impl Storage for StorageEnum {
 
     fn write_packet(&mut self, packet: Publish) -> Result<(), StorageWriteError> {
         match self {
+            StorageEnum::Default => panic!("<illegal state>"),
             StorageEnum::InMemory(a) => a.write_packet(packet),
             StorageEnum::Directory(a) => a.write_packet(packet),
         }
@@ -541,6 +546,7 @@ impl Storage for StorageEnum {
 
     fn flush(&mut self) -> Result<(), StorageFlushError> {
         match self {
+            StorageEnum::Default => Ok(()),
             StorageEnum::InMemory(a) => a.flush(),
             StorageEnum::Directory(a) => a.flush(),
         }
@@ -548,6 +554,7 @@ impl Storage for StorageEnum {
 
     fn to_in_memory(self) -> StorageEnum {
         match self {
+            StorageEnum::Default => panic!("<illegal state>"),
             StorageEnum::InMemory(a) => a.to_in_memory(),
             StorageEnum::Directory(a) => a.to_in_memory(),
         }
@@ -555,6 +562,7 @@ impl Storage for StorageEnum {
 
     fn metrics(&self) -> StorageMetrics {
         match self {
+            StorageEnum::Default => StorageMetrics::default(),
             StorageEnum::InMemory(a) => a.metrics(),
             StorageEnum::Directory(a) => a.metrics(),
         }

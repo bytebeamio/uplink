@@ -9,7 +9,7 @@ use crate::base::clock;
 /// Last 5 fields are derived from data given by the `storage::Storage` implementations
 #[derive(Debug, Serialize, Clone)]
 pub struct Metrics {
-    pub timestamp: u128,
+    pub timestamp: u64,
     pub sequence: u32,
     /// One of "catchup", "normal", or "slow"
     pub mode: &'static str,

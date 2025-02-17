@@ -1,10 +1,11 @@
 use serde::Serialize;
-
+use serde_json::json;
+use crate::base::bridge::Payload;
 use crate::base::clock;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct MqttMetrics {
-    pub timestamp: u128,
+    pub timestamp: u64,
     pub sequence: u32,
     pub publishes: usize,
     pub pubacks: usize,
@@ -74,6 +75,24 @@ impl MqttMetrics {
         self.connections = 0;
         self.connection_retries = 0;
         self.inflight = 0;
+    }
+
+    pub fn to_payload(self) -> Payload {
+        Payload {
+            stream: String::from("uplink_mqtt_metrics"),
+            sequence: self.sequence,
+            timestamp: self.timestamp,
+            payload: json!({
+                "publishes": self.publishes,
+                "pubacks": self.pubacks,
+                "ping_requests": self.ping_requests,
+                "ping_responses": self.ping_responses,
+                "inflight": self.inflight,
+                "actions_received": self.actions_received,
+                "connections": self.connections,
+                "connection_retries": self.connection_retries
+            }),
+        }
     }
 }
 

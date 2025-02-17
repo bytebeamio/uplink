@@ -33,7 +33,7 @@ use collector::process::ProcessHandler;
 use collector::script_runner::ScriptRunner;
 use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
-pub use collector::{simulator, tcpjson::TcpJson};
+pub use collector::{tcpjson::TcpJson};
 use crate::base::bridge::stream::MessageBuffer;
 use crate::collector::stdio::stdin_collector;
 use crate::uplink_config::{AppConfig, Compression, StreamConfig, MAX_BATCH_SIZE};
@@ -205,11 +205,7 @@ impl Uplink {
         spawn_named_thread("Bridge actions_lane", || {
             let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
 
-            rt.block_on(async move {
-                if let Err(e) = actions_lane.start().await {
-                    error!("Actions lane stopped!! Error = {e}");
-                }
-            })
+            rt.block_on(actions_lane.start())
         });
 
         // Bridge thread to batch and forward data

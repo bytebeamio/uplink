@@ -42,7 +42,7 @@ impl DeviceShadow {
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(mut self) {
-        let mut device_shadow_interval = tokio::time::interval(self.config.interval);
+        let mut device_shadow_interval = tokio::time::interval(self.config.interval_seconds);
 
         loop {
             _ = device_shadow_interval.tick().await;

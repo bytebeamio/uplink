@@ -1,57 +1,41 @@
 use std::fmt::Display;
 use std::hash::Hash;
-use std::{collections::HashMap, time::Duration};
-
-use log::warn;
+use std::time::Duration;
+use std::collections::HashSet;
 use tokio_stream::StreamExt;
-use tokio_util::time::{delay_queue::Key, DelayQueue};
+use tokio_util::time::DelayQueue;
 
-/// A map to store and retrieve delays from a DelayQueue.
+/// Like a `DelayQueue`, with an additional `contains` method
 pub struct DelayMap<T> {
-    queue: DelayQueue<T>,
-    map: HashMap<T, Key>,
+    timeouts: DelayQueue<T>,
+    key_set: HashSet<T>,
 }
 
 impl<T: Eq + Hash + Clone + Display> DelayMap<T> {
     pub fn new() -> Self {
-        Self { queue: DelayQueue::new(), map: HashMap::new() }
-    }
-
-    // Removes timeout if it exists, else returns false.
-    pub fn remove(&mut self, item: &T) {
-        let Some(key) = self.map.remove(item) else {
-            warn!("Timeout couldn't be removed from DelayMap: {item}");
-            return;
-        };
-        self.queue.remove(&key);
+        Self { timeouts: DelayQueue::new(), key_set: HashSet::new() }
     }
 
     // Insert new timeout.
-    pub fn insert(&mut self, item: &T, period: Duration) {
-        let key = self.queue.insert(item.clone(), period);
-        if self.map.insert(item.to_owned(), key).is_some() {
-            warn!("Timeout might have already been in DelayMap: {item}");
-        }
+    pub fn insert(&mut self, item: T, period: Duration) {
+        self.timeouts.insert(item.clone(), period);
+        self.key_set.insert(item);
     }
 
-    // Remove a key from map if it has timedout.
     pub async fn next(&mut self) -> Option<T> {
-        if let Some(item) = self.queue.next().await {
-            self.map.remove(item.get_ref());
+        if let Some(item) = self.timeouts.next().await {
+            self.key_set.remove(item.get_ref());
             return Some(item.into_inner());
         }
 
         None
     }
 
-    // Check if queue is empty.
-    pub fn has_pending(&self) -> bool {
-        !self.queue.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.timeouts.is_empty()
     }
-}
 
-impl<T: Eq + Hash + Clone + Display> Default for DelayMap<T> {
-    fn default() -> Self {
-        Self::new()
+    pub fn contains(&self, k: &T) -> bool {
+        self.key_set.contains(k)
     }
 }

@@ -113,6 +113,5 @@ impl ActionResponse {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Cancellation {
     pub action_id: String,
-    #[serde(rename = "name")]
-    pub action_name: String,
+    pub name: String,
 }

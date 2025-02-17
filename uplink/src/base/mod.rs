@@ -3,7 +3,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use flume::Sender;
 use tokio::join;
 
-use self::bridge::DataLaneCtrlTx;
 use self::mqtt::CtrlTx as MqttCtrlTx;
 use crate::collector::downloader::CtrlTx as DownloaderCtrlTx;
 
@@ -14,8 +13,8 @@ pub mod mqtt;
 pub mod serializer;
 pub mod events;
 
-pub fn clock() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
+pub fn clock() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as _
 }
 
 /// Send control messages to the various components in uplink. Currently this is

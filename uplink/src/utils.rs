@@ -4,46 +4,6 @@ use std::fmt::Debug;
 use std::thread::JoinHandle;
 use flume::{SendError, Sender};
 
-/// Map with a maximum size
-///
-/// If too many items are inserted, the oldest entry will be deleted
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct LimitedArrayMap<K, V> {
-    pub(crate) map: VecDeque<(K, V)>,
-}
-
-impl<K: Eq + Clone + Debug, V> LimitedArrayMap<K, V> {
-    pub fn new(max_size: usize) -> Self {
-        Self {
-            map: VecDeque::with_capacity(max_size),
-        }
-    }
-
-    pub fn set(&mut self, key: K, value: V) -> Option<(K, V)> {
-        let mut result = None;
-        match self.map.iter_mut().rev().find(|(k, _)| k == &key) {
-            Some((k, v)) => {
-                result = Some((k.clone(), std::mem::replace(v, value)));
-            }
-            None => {
-                if self.map.len() == self.map.capacity() {
-                    if let Some(oldest_entry) = self.map.pop_front() {
-                        result = Some(oldest_entry);
-                    }
-                }
-                self.map.push_back((key, value));
-            }
-        }
-        result
-    }
-
-    pub fn get(&self, key: &K) -> Option<&V> {
-        self.map.iter().rev()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v)
-    }
-}
-
 /// An iterator that allows user to access the current element
 /// under the cursor of a BTreeMap
 pub struct BTreeCursorMut<'a, K, V> {
@@ -63,6 +23,8 @@ impl<'a, K: Ord, V> BTreeCursorMut<'a, K, V> {
     }
 }
 
+/// Wraps a channel sink and allows only one value to be sent over it
+/// The send_async task/future takes the ownership of the sink
 pub struct SendOnce<T>(pub Sender<T>);
 
 impl<T> SendOnce<T> {

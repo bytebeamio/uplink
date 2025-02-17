@@ -1,7 +1,6 @@
 use bytes::BytesMut;
-use flume::{bounded, Receiver, Sender, TrySendError};
-use log::{debug, error, info};
-use thiserror::Error;
+use flume::{bounded, Receiver, Sender};
+use log::{debug, error, info, warn};
 use tokio::time::{sleep, Duration};
 use tokio::{select, task};
 
@@ -16,97 +15,59 @@ use rumqttc::{
 };
 use std::sync::Arc;
 
-use crate::uplink_config::{Config, DeviceConfig};
+use crate::uplink_config::UplinkConfig;
 use crate::Action;
-use crate::base::serializer::storage::{PersistenceFile, PersistenceError};
+use crate::base::bridge::Payload;
+use crate::base::serializer::storage::PersistenceFile;
 use crate::base::events::pusher::EventsPusher;
 pub use self::metrics::MqttMetrics;
 
 mod metrics;
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Serde error {0}")]
-    Serde(#[from] serde_json::Error),
-    #[error("TrySend error {0}")]
-    TrySend(Box<TrySendError<Action>>),
-    #[error("Io error {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Mqtt error {0}")]
-    Mqtt(#[from] rumqttc::mqttbytes::Error),
-    #[error("Storage error {0}")]
-    Storage(#[from] PersistenceError),
-}
-
-impl From<flume::TrySendError<Action>> for Error {
-    fn from(e: flume::TrySendError<Action>) -> Self {
-        Self::TrySend(Box::new(e))
-    }
-}
-
 /// Interface implementing MQTT protocol to communicate with broker
 pub struct Mqtt {
-    /// Uplink config
-    config: Arc<Config>,
-    device_config: DeviceConfig,
-    /// Client handle
-    client: AsyncClient,
-    /// Event loop handle
+    config: Arc<UplinkConfig>,
+    pub client: AsyncClient,
     eventloop: EventLoop,
-    /// Handles to channels between threads
-    native_actions_tx: Sender<Action>,
-    /// Metrics
+    shutdown_signal: Receiver<()>,
+    actions_tx: Sender<Action>,
     metrics: MqttMetrics,
-    /// Metrics tx
-    metrics_tx: Sender<MqttMetrics>,
-    /// Control handles
-    ctrl_rx: Receiver<MqttShutdown>,
-    ctrl_tx: Sender<MqttShutdown>,
-    /// True when network is connected
+    metrics_tx: Sender<Payload>,
     network_up: Arc<Mutex<bool>>,
+    actions_subscription: String,
     tenant_filter: String,
 }
 
 impl Mqtt {
     pub fn new(
-        config: Arc<Config>,
-        device_config: &DeviceConfig,
+        config: Arc<UplinkConfig>,
         actions_tx: Sender<Action>,
-        metrics_tx: Sender<MqttMetrics>,
+        metrics_tx: Sender<Payload>,
+        shutdown_signal: Receiver<()>,
         network_up: Arc<Mutex<bool>>,
-        tenant_filter: String,
     ) -> Mqtt {
         // create a new eventloop and reuse it during every reconnection
-        let options = mqttoptions(&config, device_config);
+        let options = mqttoptions(&config);
         let (client, mut eventloop) = AsyncClient::new(options, 0);
-        eventloop.network_options.set_connection_timeout(config.mqtt.network_timeout);
-        let (ctrl_tx, ctrl_rx) = bounded(1);
+        eventloop.network_options.set_connection_timeout(config.app_config.mqtt.network_timeout);
+        let actions_subscription = format!("/tenants/{}/devices/{}/actions", config.credentials.project_id, config.credentials.device_id);
+        let tenant_filter = format!("/tenants/{}/devices/{}", config.credentials.project_id, config.credentials.device_id);
         Mqtt {
             config,
-            device_config: device_config.clone(),
             client,
             eventloop,
-            native_actions_tx: actions_tx,
+            shutdown_signal,
+            actions_tx,
             metrics: MqttMetrics::new(),
             metrics_tx,
-            ctrl_tx,
-            ctrl_rx,
             network_up,
+            actions_subscription,
             tenant_filter,
         }
     }
 
-    /// Returns a client handle to MQTT interface
-    pub fn client(&mut self) -> AsyncClient {
-        self.client.clone()
-    }
-
-    pub fn ctrl_tx(&self) -> CtrlTx {
-        CtrlTx { inner: self.ctrl_tx.clone() }
-    }
-
     /// Shutdown eventloop and write inflight publish packets to disk
-    pub fn persist_inflight(&mut self) -> Result<(), Error> {
+    pub fn persist_inflight(&mut self) -> anyhow::Result<()> {
         self.eventloop.clean();
         let publishes: Vec<&Publish> = self
             .eventloop
@@ -123,7 +84,7 @@ impl Mqtt {
             return Ok(());
         }
 
-        let file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string());
+        let file = PersistenceFile::new(&self.config.app_config.persistence_path, "inflight".to_string());
         let mut buf = BytesMut::new();
 
         for publish in publishes {
@@ -138,9 +99,9 @@ impl Mqtt {
 
     /// Checks for and loads data pending in persistence/inflight file
     /// once done, deletes the file, while writing incoming data into storage.
-    fn reload_from_inflight_file(&mut self) -> Result<(), Error> {
+    fn reload_from_inflight_file(&mut self) -> anyhow::Result<()> {
         // Read contents of inflight file into an in-memory buffer
-        let file = PersistenceFile::new(&self.config.persistence_path, "inflight".to_string());
+        let file = PersistenceFile::new(&self.config.app_config.persistence_path, "inflight".to_string());
         let path = file.path();
         if !path.is_file() {
             return Ok(());
@@ -148,7 +109,7 @@ impl Mqtt {
         let mut buf = BytesMut::new();
         file.read(&mut buf)?;
 
-        let max_packet_size = self.config.mqtt.max_packet_size;
+        let max_packet_size = self.config.app_config.mqtt.max_packet_size;
         loop {
             // NOTE: This can fail when packet sizes > max_payload_size in config are written to disk.
             match Packet::read(&mut buf, max_packet_size) {
@@ -179,7 +140,7 @@ impl Mqtt {
         }
 
         let (events_puback_tx, events_puback_rx) = bounded::<u16>(32);
-        if self.config.console.enable_events {
+        if self.config.app_config.console.enable_events {
             // we use two pkids after the rumqttc reserved pkids for events
             // the second pkid won't be sent until uplink has received an acknowledgement for the first pkid
             // and the first pkid won't be sent again until uplink receives an acknowledgement for the second pkid
@@ -189,10 +150,10 @@ impl Mqtt {
             let max_inflight = self.eventloop.mqtt_options.inflight();
             let pusher_task = EventsPusher::new(
                 events_puback_rx, self.client.clone(),
-                self.device_config.project_id.clone(),
-                self.device_config.device_id.clone(),
+                self.config.credentials.project_id.clone(),
+                self.config.credentials.device_id.clone(),
                 [max_inflight+1, max_inflight+2],
-                self.config.persistence_path.join("events.db"),
+                self.config.app_config.persistence_path.join("events.db"),
             );
             tokio::task::spawn(pusher_task.start());
         }
@@ -205,8 +166,8 @@ impl Mqtt {
                         Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
                             *self.network_up.lock().unwrap() = true;
                             info!("Connected to broker. Session present = {}", connack.session_present);
-                            let subscription = self.config.actions_subscription.clone();
-                            let client = self.client();
+                            let subscription = self.actions_subscription.clone();
+                            let client = self.client.clone();
 
                             self.metrics.add_connection();
 
@@ -220,10 +181,7 @@ impl Mqtt {
                             });
                         }
                         Ok(Event::Incoming(Incoming::Publish(p))) => {
-                            self.metrics.add_action();
-                            if let Err(e) = self.handle_incoming_publish(p) {
-                                error!("Incoming publish handle failed. Error = {:?}", e);
-                            }
+                            self.handle_incoming_publish(p)
                         }
                         Ok(Event::Incoming(packet)) => {
                             debug!("Incoming = {:?}", packet);
@@ -236,9 +194,7 @@ impl Mqtt {
                                     self.metrics.add_pingresp();
                                     let inflight = self.eventloop.state.inflight();
                                     self.metrics.update_inflight(inflight);
-                                    if let Err(e) = self.check_and_flush_metrics() {
-                                        debug!("Failed to flush MQTT metrics. Erro = {:?}", e);
-                                    }
+                                    self.check_and_flush_metrics();
                                 }
                                 _ => {}
                             }
@@ -263,7 +219,7 @@ impl Mqtt {
                 _ = disconnection_wait_timer.take().unwrap_or(sleep(Duration::MAX)), if disconnection_wait_timer.is_some() => {
                     disconnection_wait_timer = None;
                 }
-                Ok(_) = self.ctrl_rx.recv_async() => {
+                Ok(_) = self.shutdown_signal.recv_async() => {
                     break;
                 }
             }
@@ -278,17 +234,21 @@ impl Mqtt {
         }
     }
 
-    fn handle_incoming_publish(&mut self, publish: Publish) -> Result<(), Error> {
-        if self.config.actions_subscription != publish.topic {
+    fn handle_incoming_publish(&mut self, publish: Publish) {
+        self.metrics.add_action();
+        if self.actions_subscription != publish.topic {
             error!("Unsolicited publish on {}", publish.topic);
-            return Ok(());
+            return;
         }
-
-        let action: Action = serde_json::from_slice(&publish.payload)?;
-        info!("Action = {:?}", action);
-        self.native_actions_tx.try_send(action)?;
-
-        Ok(())
+        match serde_json::from_slice(&publish.payload) {
+            Ok(action) => {
+                info!("received action: {action:?}");
+                let _ = self.actions_tx.try_send(action);
+            }
+            Err(_) => {
+                error!("received invalid action from broker: {:?}", std::str::from_utf8(publish.payload.as_ref()));
+            }
+        }
     }
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
@@ -305,7 +265,7 @@ impl Mqtt {
     }
 
     // Enable actual metrics timers when there is data. This method is called every minute by the bridge
-    pub fn check_and_flush_metrics(&mut self) -> Result<(), flume::TrySendError<MqttMetrics>> {
+    pub fn check_and_flush_metrics(&mut self) {
         let metrics = self.metrics.clone();
         info!(
             "{:>35}: publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3} inflight = {}",
@@ -317,21 +277,20 @@ impl Mqtt {
             metrics.inflight
         );
 
-        self.metrics_tx.try_send(metrics)?;
+        let _ = self.metrics_tx.try_send(metrics.to_payload());
         self.metrics.prepare_next();
-        Ok(())
     }
 }
 
-fn mqttoptions(config: &Config, device_config: &DeviceConfig) -> MqttOptions {
+fn mqttoptions(config: &UplinkConfig) -> MqttOptions {
     // let (rsa_private, ca) = get_certs(&config.key.unwrap(), &config.ca.unwrap());
     let mut mqttoptions =
-        MqttOptions::new(&device_config.device_id, &device_config.broker, device_config.port);
-    mqttoptions.set_max_packet_size(config.mqtt.max_packet_size, config.mqtt.max_packet_size);
-    mqttoptions.set_keep_alive(Duration::from_secs(config.mqtt.keep_alive));
-    mqttoptions.set_inflight(config.mqtt.max_inflight);
+        MqttOptions::new(&config.credentials.device_id, &config.credentials.broker, config.credentials.port);
+    mqttoptions.set_max_packet_size(config.app_config.mqtt.max_packet_size, config.app_config.mqtt.max_packet_size);
+    mqttoptions.set_keep_alive(Duration::from_secs(config.app_config.mqtt.keep_alive));
+    mqttoptions.set_inflight(config.app_config.mqtt.max_inflight);
 
-    if let Some(auth) = device_config.authentication.clone() {
+    if let Some(auth) = config.credentials.authentication.clone() {
         let ca = auth.ca_certificate.into_bytes();
         let device_certificate = auth.device_certificate.into_bytes();
         let device_private_key = auth.device_private_key.into_bytes();

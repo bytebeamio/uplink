@@ -1,11 +1,12 @@
 use serde::Serialize;
 use std::time::Instant;
-
+use serde_json::json;
+use crate::base::bridge::Payload;
 use crate::base::clock;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct StreamMetrics {
-    pub timestamp: u128,
+    pub timestamp: u64,
     pub sequence: u32,
     pub stream: String,
     pub points: usize,
@@ -21,9 +22,9 @@ pub struct StreamMetrics {
 }
 
 impl StreamMetrics {
-    pub fn new(name: &str, max_batch_points: usize) -> Self {
+    pub fn new(stream: String, max_batch_points: usize) -> Self {
         StreamMetrics {
-            stream: name.to_owned(),
+            stream,
             timestamp: clock(),
             sequence: 1,
             points: 0,
@@ -35,14 +36,6 @@ impl StreamMetrics {
             min_batch_latency: 0,
             max_batch_latency: 0,
         }
-    }
-
-    pub fn stream(&self) -> &String {
-        &self.stream
-    }
-
-    pub fn points(&self) -> usize {
-        self.points
     }
 
     pub fn add_point(&mut self) {
@@ -73,5 +66,22 @@ impl StreamMetrics {
         self.min_batch_latency = 0;
         self.max_batch_latency = 0;
         self.average_batch_latency = 0;
+    }
+
+    pub fn to_payload(&self) -> Payload {
+        Payload {
+            stream: "uplink_stream_metrics".to_owned(),
+            sequence: self.sequence,
+            timestamp: self.timestamp,
+            payload: json!{{
+                "stream": self.stream,
+                "points": self.points,
+                "batches": self.batches,
+                "max_batch_points": self.max_batch_points,
+                "min_batch_latency": self.min_batch_latency,
+                "max_batch_latency": self.max_batch_latency,
+                "average_batch_latency": self.average_batch_latency,
+            }},
+        }
     }
 }
