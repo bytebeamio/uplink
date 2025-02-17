@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use serde::Serialize;
+use serde_json::json;
 use serde_with::{serde_as, DurationSecondsWithFrac};
-
+use crate::base::bridge::Payload;
 use crate::base::clock;
 
 /// Metrics information relating to the operation of the `Serializer`, all values are reset on metrics flush
@@ -47,12 +48,31 @@ impl Metrics {
             sent_size: 0,
         }
     }
+
+    pub fn to_payload(&self) -> Payload {
+        Payload {
+            stream: "uplink_serializer_metrics".to_owned(),
+            sequence: self.sequence,
+            timestamp: self.timestamp,
+            payload: json!{{
+                "mode": self.mode,
+                "batches": self.batches,
+                "write_memory": self.write_memory,
+                "read_memory": self.read_memory,
+                "disk_files": self.disk_files,
+                "disk_utilized": self.disk_utilized,
+                "lost_segments": self.lost_segments,
+                "errors": self.errors,
+                "sent_size": self.sent_size
+            }},
+        }
+    }
 }
 
 #[serde_as]
 #[derive(Debug, Serialize, Clone)]
 pub struct StreamMetrics {
-    pub timestamp: u128,
+    pub timestamp: u64,
     pub sequence: u32,
     pub stream: String,
     pub serialized_data_size: usize,
@@ -120,9 +140,22 @@ impl StreamMetrics {
         self.serialized_data_size = 0;
         self.compressed_data_size = 0;
     }
-}
 
-pub enum SerializerMetrics {
-    Main(Box<Metrics>),
-    Stream(Box<StreamMetrics>),
+    pub fn to_payload(&self) -> Payload {
+        Payload {
+            stream: "uplink_serializer_stream_metrics".to_owned(),
+            sequence: self.sequence,
+            timestamp: self.timestamp,
+            payload: json!{{
+                "serialized_data_size": self.serialized_data_size,
+                "compressed_data_size": self.compressed_data_size,
+                "serializations": self.serializations,
+                "total_serialization_time": self.total_serialization_time,
+                "avg_serialization_time": self.avg_serialization_time,
+                "compressions": self.compressions,
+                "total_compression_time": self.total_compression_time,
+                "avg_compression_time": self.avg_compression_time
+            }},
+        }
+    }
 }

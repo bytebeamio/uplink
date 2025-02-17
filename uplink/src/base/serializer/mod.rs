@@ -1,7 +1,7 @@
 mod metrics;
-pub(crate) mod storage;
+pub mod storage;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io::Write;
 use std::time::Instant;
 use std::{sync::Arc, time::Duration};
@@ -12,13 +12,11 @@ use replace_with::replace_with_or_abort;
 use rumqttc::*;
 use tokio::{select, time::interval};
 
-use crate::uplink_config::{Compression, Persistence, StreamConfig, UplinkConfig};
-use crate::{Config};
-pub use metrics::{Metrics, SerializerMetrics, StreamMetrics};
+use crate::uplink_config::{Persistence, UplinkConfig};
+pub use metrics::{Metrics, StreamMetrics};
 use crate::base::bridge::Payload;
 use crate::base::clock;
 use crate::base::serializer::storage::{Storage, StorageEnum};
-use crate::utils::BTreeCursorMut;
 
 const METRICS_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -120,7 +118,7 @@ pub struct Serializer<C: MqttClient> {
     tenant_filter: String,
     buffers_rx: Receiver<Vec<Payload>>,
     client: C,
-    metrics_tx: Sender<SerializerMetrics>,
+    metrics_tx: Sender<Payload>,
     /// Serializer metrics
     metrics: Metrics,
     /// Updated in `construct_publish` function
@@ -145,13 +143,11 @@ struct StreamStorage {
 }
 
 impl<C: MqttClient> Serializer<C> {
-    /// Construct the uplink Serializer with the necessary configuration details, a receiver handle to accept data payloads from,
-    /// the handle to an MQTT client(This is constructed as such for testing purposes) and a handle to update serailizer metrics.
     pub fn new(
         config: Arc<UplinkConfig>,
         buffers_rx: Receiver<Vec<Payload>>,
         client: C,
-        metrics_tx: Sender<SerializerMetrics>,
+        metrics_tx: Sender<Payload>,
         shutdown_signal: Receiver<()>,
     ) -> Serializer<C> {
         let tenant_filter = format!("/tenants/{}/devices/{}", config.credentials.project_id, config.credentials.device_id);
@@ -199,47 +195,49 @@ impl<C: MqttClient> Serializer<C> {
     /// Returns None if nothing is left (time to move to normal mode)
     /// Prioritize live data over saved data
     /// Prioritize old live data over new live data, to ensure live data for all the streams is pushed
-    fn fetch_next_packet_from_storage(&mut self) -> Option<(Publish, &str)> {
+    fn fetch_next_packet_from_storage(&mut self) -> Option<(Publish, String)> {
         if let Some(storage) = self.sorted_storages.iter_mut()
             .filter(|StreamStorage { live_data, .. }| live_data.is_some())
             .min_by_key(|StreamStorage { live_data_version, .. }| *live_data_version) {
             self.live_data_clock += 1;
             storage.live_data_version = self.live_data_clock;
-            return Some((storage.live_data.take().unwrap(), storage.stream_name.as_str()));
+            return Some((storage.live_data.take().unwrap(), storage.stream_name.clone()));
         }
-        let mut cursor = BTreeCursorMut::new(&mut self.sorted_storages);
-        while let Some((sk, (storage, _, _))) = cursor.current.as_mut() {
-            match storage.read_packet() {
+        let mut idx = 0;
+        while idx < self.sorted_storages.len() {
+            let stream_storage = self.sorted_storages.get_mut(idx).unwrap();
+            match stream_storage.storage.read_packet() {
                 Ok(packet) => {
-                    return Some((packet, sk.clone()));
+                    return Some((packet, stream_storage.stream_name.clone()));
                 }
                 Err(storage::StorageReadError::Empty) => {
-                    cursor.bump();
+                    idx += 1;
                 }
                 Err(storage::StorageReadError::FileSystemError(e)) => {
-                    log::error!("Encountered file system error when reading packet for stream({}): {e}, falling back to in memory persistence", storage.name());
-                    replace_with_or_abort(storage, |s| {
+                    log::error!("Encountered file system error when reading packet for stream({}): {e}, falling back to in memory persistence", stream_storage.stream_name);
+                    replace_with_or_abort(&mut stream_storage.storage, |s| {
                         s.to_in_memory()
                     });
                 }
                 Err(storage::StorageReadError::InvalidPacket(e)) => {
-                    log::error!("Found invalid packet when reading from storage for stream({}): {e}", storage.name());
+                    log::error!("Found invalid packet when reading from storage for stream({}): {e}", stream_storage.stream_name);
                 }
                 Err(storage::StorageReadError::UnsupportedPacketType) => {
-                    log::error!("Found unsupported packet type when reading from storage for stream({})", storage.name());
+                    log::error!("Found unsupported packet type when reading from storage for stream({})", stream_storage.stream_name);
                 }
             }
+
         }
         None
     }
 
     fn write_package_to_storage(&mut self, data: Vec<Payload>) {
         let stream_name = get_buffer_stream(&data);
-        let (stream_topic, compression) = self.config.app_config.streams.get(stream_name)
-            .map(|sk| (sk.topic.clone(), sk.compression))
-            .unwrap_or_else(|| (self.config.topic_for_stream(stream_name), Compression::Disabled));
-        let publish = construct_publish(data, stream_name, stream_topic.as_str(), compression, &mut self.stream_metrics);
-        self.write_publish_to_storage(stream_name, publish);
+        let (stream_topic, compress_data) = self.config.app_config.streams.get(stream_name.as_str())
+            .map(|sk| (sk.topic.clone(), sk.compress_data))
+            .unwrap_or_else(|| (self.config.topic_for_stream(stream_name.as_str()), false));
+        let publish = construct_publish(data, stream_name.as_str(), stream_topic.as_str(), compress_data, &mut self.stream_metrics);
+        self.write_publish_to_storage(stream_name.as_str(), publish);
     }
 
     fn find_storage_for_stream(&mut self, stream_name: &str) -> Option<&mut StreamStorage> {
@@ -249,6 +247,7 @@ impl<C: MqttClient> Serializer<C> {
 
     fn write_publish_to_storage(&mut self, stream_name: &str, mut publish: Publish) {
         publish.pkid = 1;
+        let prioritize_live_data = self.config.app_config.prioritize_live_data;
         let stream_storage = match self.find_storage_for_stream(stream_name) {
             None => {
                 self.sorted_storages.push(StreamStorage {
@@ -263,7 +262,7 @@ impl<C: MqttClient> Serializer<C> {
         };
 
         let mut packet_to_write = Some(publish);
-        if self.config.app_config.prioritize_live_data {
+        if prioritize_live_data {
             std::mem::swap(&mut packet_to_write, &mut stream_storage.live_data);
         }
         if let Some(publish) = packet_to_write {
@@ -271,8 +270,9 @@ impl<C: MqttClient> Serializer<C> {
                 Ok(_) => {}
                 Err(storage::StorageWriteError::FileSystemError(e)) => {
                     log::error!("Encountered file system error when reading packet for stream({}): {e}, falling back to in memory persistence", stream_name);
-                    let old_storage = std::mem::replace(&mut stream_storage.storage, StorageEnum::Default);
-                    stream_storage.storage = old_storage.to_in_memory();
+                    replace_with_or_abort(&mut stream_storage.storage, |old| {
+                        old.to_in_memory()
+                    });
                 }
                 Err(storage::StorageWriteError::InvalidPacket(e)) => {
                     log::error!("Found invalid packet when writing to storage for stream({}): {e}", stream_name);
@@ -328,7 +328,7 @@ impl<C: MqttClient> Serializer<C> {
                 convert(metrics.write_memory as f64),
                 convert(metrics.read_memory as f64),
             );
-            let _ = self.metrics_tx.try_send(SerializerMetrics::Main(Box::new(metrics.clone())));
+            let _ = self.metrics_tx.try_send(metrics.to_payload());
         }
 
         metrics.batches = 0;
@@ -351,7 +351,7 @@ impl<C: MqttClient> Serializer<C> {
             } else {
                 log::info!("{}", log_message);
             }
-            let _ = self.metrics_tx.try_send(SerializerMetrics::Stream(Box::new(metrics.clone())));
+            let _ = self.metrics_tx.try_send(metrics.to_payload());
             metrics.prepare_next();
         }
     }
@@ -456,7 +456,7 @@ impl<C: MqttClient> Serializer<C> {
                             self.write_package_to_storage(data);
                         }
                         Err(_) => {
-                            self.write_publish_to_storage(last_publish_stream, publish_in_transit);
+                            self.write_publish_to_storage(last_publish_stream.as_str(), publish_in_transit);
                             return Status::Shutdown
                         }
                     }
@@ -465,7 +465,7 @@ impl<C: MqttClient> Serializer<C> {
                     match send_result {
                         Ok(_) => {},
                         Err(MqttError::Send(publish)) => {
-                            self.write_publish_to_storage(last_publish_stream, publish);
+                            self.write_publish_to_storage(last_publish_stream.as_str(), publish);
                             return Status::EventLoopCrash;
                         },
                         Err(_) => {},
@@ -512,10 +512,10 @@ impl<C: MqttClient> Serializer<C> {
                     };
                     self.metrics.batches += 1;
                     let stream_name = get_buffer_stream(&data);
-                    let (stream_topic, compression) = self.config.app_config.streams.get(stream_name)
-                        .map(|sk| (sk.topic.clone(), sk.compression))
-                        .unwrap_or_else(|| (self.config.topic_for_stream(stream_name), Compression::Disabled));
-                    let publish = construct_publish(data, stream_name, stream_topic.as_str(), compression, &mut self.stream_metrics);
+                    let (stream_topic, compress_data) = self.config.app_config.streams.get(&stream_name)
+                        .map(|sk| (sk.topic.clone(), sk.compress_data))
+                        .unwrap_or_else(|| (self.config.topic_for_stream(stream_name.as_str()), false));
+                    let publish = construct_publish(data, stream_name.as_str(), stream_topic.as_str(), compress_data, &mut self.stream_metrics);
                     let payload_size = publish.payload.len();
                     match self.client.try_publish(&stream_topic, QoS::AtLeastOnce, false, publish.payload) {
                         Ok(_) => {
@@ -581,7 +581,7 @@ pub fn construct_publish(
     data: Vec<Payload>,
     stream_name: &str,
     stream_topic: &str,
-    compression: Compression,
+    compress_data: bool,
     stream_metrics: &mut HashMap<String, StreamMetrics>,
 ) -> Publish {
     let point_count = data.len();
@@ -590,17 +590,17 @@ pub fn construct_publish(
     if !stream_metrics.contains_key(stream_name) {
         stream_metrics.insert(stream_name.to_owned(), StreamMetrics::new(stream_name));
     }
-    let metrics = stream_metrics.get_mut(stream_name);
+    let metrics = stream_metrics.get_mut(stream_name).unwrap();
 
     let serialization_start = Instant::now();
-    let mut payload = data.serialize();
+    let mut payload = serde_json::to_vec(&data).unwrap();
     let serialization_time = serialization_start.elapsed();
     metrics.add_serialization_time(serialization_time);
 
     let data_size = payload.len();
     let mut compressed_data_size = None;
 
-    if compression == Compression::Lz4 {
+    if compress_data {
         let compression_start = Instant::now();
         lz4_compress(&mut payload);
         let compression_time = compression_start.elapsed();
@@ -614,8 +614,8 @@ pub fn construct_publish(
     Publish::new(stream_topic, QoS::AtLeastOnce, payload)
 }
 
-pub fn get_buffer_stream(buffer: &Vec<Payload>) -> &str {
-    buffer.first().unwrap().stream.as_str()
+pub fn get_buffer_stream(buffer: &Vec<Payload>) -> String {
+    buffer.first().unwrap().stream.clone()
 }
 
 #[cfg(test)]
@@ -793,7 +793,7 @@ pub mod tests {
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
             batch_size: 2,
             flush_period: Duration::from_secs(1),
-            compression: Compression::Disabled,
+            compress_data: Compression::Disabled,
             persistence: Persistence {
                 max_file_size: 10800,
                 max_file_count: 10,
@@ -808,7 +808,7 @@ pub mod tests {
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
             batch_size: 2,
             flush_period: Duration::from_secs(1),
-            compression: Compression::Disabled,
+            compress_data: Compression::Disabled,
             persistence: Persistence {
                 max_file_size: 100000,
                 max_file_count: 100000,
@@ -828,7 +828,7 @@ pub mod tests {
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
             batch_size: 2,
             flush_period: Duration::from_secs(1),
-            compression: Compression::Disabled,
+            compress_data: Compression::Disabled,
             persistence: Persistence {
                 max_file_size,
                 max_file_count,
@@ -897,7 +897,7 @@ pub mod tests {
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
             batch_size: 2,
             flush_period: Duration::from_secs(1),
-            compression: Compression::Disabled,
+            compress_data: Compression::Disabled,
             persistence: Persistence {
                 max_file_size,
                 max_file_count,

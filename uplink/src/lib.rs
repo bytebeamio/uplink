@@ -593,9 +593,8 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
     };
 
     for (stream_name, stream_config) in config.streams.iter_mut() {
-        stream_name.clone_into(&mut stream_config.name);
         if stream_config.topic.is_empty() {
-            stream_config.topic = match stream_config.compression {
+            stream_config.topic = match stream_config.compress_data {
                 Compression::Disabled => format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray"),
                 Compression::Lz4 =>      format!("/tenants/{{tenant_id}}/devices/{{device_id}}/events/{stream_name}/jsonarray/lz4"),
             };

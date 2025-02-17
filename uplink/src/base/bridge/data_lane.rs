@@ -76,7 +76,7 @@ impl DataBridge {
                             metrics.add_batch();
                         }
                     } else {
-                        error!("stream({stream_name}) has a timeout but doesn't have a stream buffer!");
+                        error!("stream({timedout_stream}) has a timeout but doesn't have a stream buffer!");
                     }
                 }
                 _ = metrics_timeout.tick() => {

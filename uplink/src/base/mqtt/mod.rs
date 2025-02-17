@@ -1,6 +1,6 @@
 use bytes::BytesMut;
 use flume::{bounded, Receiver, Sender};
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use tokio::time::{sleep, Duration};
 use tokio::{select, task};
 

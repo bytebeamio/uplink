@@ -1,27 +1,5 @@
-use std::collections::btree_map::IterMut;
-use std::collections::{BTreeMap, VecDeque};
-use std::fmt::Debug;
 use std::thread::JoinHandle;
 use flume::{SendError, Sender};
-
-/// An iterator that allows user to access the current element
-/// under the cursor of a BTreeMap
-pub struct BTreeCursorMut<'a, K, V> {
-    iter: IterMut<'a, K, V>,
-    pub current: Option<(&'a K, &'a mut V)>,
-}
-
-impl<'a, K: Ord, V> BTreeCursorMut<'a, K, V> {
-    pub fn new(map: &'a mut BTreeMap<K, V>) -> Self {
-        let mut iter = map.iter_mut();
-        let current = iter.next();
-        BTreeCursorMut { iter, current }
-    }
-
-    pub fn bump(&mut self) {
-        self.current = self.iter.next();
-    }
-}
 
 /// Wraps a channel sink and allows only one value to be sent over it
 /// The send_async task/future takes the ownership of the sink

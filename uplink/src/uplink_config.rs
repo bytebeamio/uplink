@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::env::current_dir;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -7,109 +6,48 @@ use config::{File, FileFormat};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
 
-pub use crate::base::bridge::stream::MAX_BATCH_SIZE;
-#[cfg(target_os = "linux")]
-use crate::collector::journalctl::JournalCtlConfig;
-#[cfg(target_os = "android")]
-use crate::collector::logcat::LogcatConfig;
+// #[cfg(target_os = "linux")]
+// use crate::collector::journalctl::JournalCtlConfig;
+// #[cfg(target_os = "android")]
+// use crate::collector::logcat::LogcatConfig;
 use crate::{ActionCallback, DEFAULT_CONFIG};
-
-#[inline]
-fn default_timeout() -> Duration {
-    Duration::from_secs(60)
-}
-
-#[inline]
-fn max_batch_size() -> usize {
-    MAX_BATCH_SIZE
-}
-
-pub fn default_file_size() -> usize {
-    10485760 // 10MB
-}
-
-fn default_persistence_path() -> PathBuf {
-    let mut path = current_dir().expect("Couldn't figure out current directory");
-    path.push(".persistence");
-    path
-}
-
-fn default_download_path() -> PathBuf {
-    let mut path = current_dir().expect("Couldn't figure out current directory");
-    path.push(".downloads");
-    path
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq, PartialOrd)]
-pub enum Compression {
-    #[default]
-    Disabled,
-    Lz4,
-}
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct StreamConfig {
-    #[serde(default)]
-    #[serde(skip_deserializing)]
-    pub name: String, // TODO: serializer uses this, remove it
-    #[serde(default)]
     pub topic: String,
-    #[serde(default = "max_batch_size")]
     pub batch_size: usize,
-    #[serde(default = "default_timeout")]
     #[serde_as(as = "DurationSeconds<u64>")]
     /// Duration(in seconds) that bridge collector waits from
     /// receiving first element, before the stream gets flushed.
     pub flush_period: Duration,
-    #[serde(default)]
-    pub compression: Compression,
-    #[serde(default)]
+    pub compress_data: bool,
     pub persistence: Persistence,
-    #[serde(default)]
     pub priority: u8,
 }
 
 impl Default for StreamConfig {
     fn default() -> Self {
         Self {
-            name: "".to_owned(),
             topic: "".to_owned(),
-            batch_size: MAX_BATCH_SIZE,
-            flush_period: default_timeout(),
-            compression: Compression::Disabled,
+            batch_size: 128,
+            flush_period: Duration::from_secs(60),
+            compress_data: false,
             persistence: Persistence::default(),
             priority: 0,
         }
     }
 }
 
-impl Ord for StreamConfig {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self.priority.cmp(&other.priority), self.topic.cmp(&other.topic)) {
-            (Ordering::Equal, o) => o,
-            (o, _) => o.reverse(),
-        }
-    }
-}
-
-impl PartialOrd for StreamConfig {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 #[derive(Debug, Copy, Clone, Deserialize, PartialEq, Eq, PartialOrd)]
 pub struct Persistence {
-    #[serde(default = "default_file_size")]
     pub max_file_size: usize,
-    #[serde(default)]
     pub max_file_count: usize,
 }
 
 impl Default for Persistence {
     fn default() -> Self {
-        Persistence { max_file_size: default_file_size(), max_file_count: 0 }
+        Persistence { max_file_size: 1024000, max_file_count: 0 }
     }
 }
 
@@ -221,6 +159,7 @@ pub struct Config {
     #[cfg(target_os = "android")]
     pub logcat_args: Option<Vec<String>>,
     pub processes: Vec<ActionRoute>,
+    private_field_to_disable_public_constructor: (),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -254,4 +193,16 @@ impl UplinkConfig {
     pub fn topic_for_stream(&self, name: &str) -> String {
         format!("/tenants/{}/devices/{}/events/{name}/jsonarray", self.credentials.project_id, self.credentials.device_id)
     }
+}
+
+fn default_persistence_path() -> PathBuf {
+    let mut path = current_dir().expect("Couldn't figure out current directory");
+    path.push(".persistence");
+    path
+}
+
+fn default_download_path() -> PathBuf {
+    let mut path = current_dir().expect("Couldn't figure out current directory");
+    path.push(".downloads");
+    path
 }
