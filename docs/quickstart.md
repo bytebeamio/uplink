@@ -7,9 +7,9 @@ This page is intended to get you up and running with uplink and bytebeam platfor
 ---
 
 Create a free account on https://cloud.bytebeam.io if you haven't already. After registering you will be prompted to create
-a project. A project is where all your data will live. [This page](https://bytebeamio.mintlify.app/platform-guide/introduction) 
-goes into the details of all the features. You can read it at your leisure but this page will also provide brief overview
-of features needed to follow along.
+a project. Select `linux` as the device type when creating the project. A project is where all your data will live.
+[This page](https://bytebeamio.mintlify.app/platform-guide/introduction) goes into the details of all the features. 
+You can read it at your leisure but this page will also provide brief overview of features needed to follow along.
 
 ---
 
@@ -88,11 +88,11 @@ visualize using our portal. You've already seen examples of some streams that ar
 To do this, you will have to create something called a `tcpapp` in your uplink configuration. Add this to your `config.toml`:
 
 ```toml
-[tcpapps.ui_app]
+[tcpapps.custom_application]
 port = 8049
 ```
 
-`ui_app` is just an identifier and could be anything. `port` is the tcp port on which you want uplink to listen for incoming connections.
+`custom_application` is just an identifier. `port` is the tcp port on which you want uplink to listen for incoming connections.
 One of your programs running on the same device can connect to this tcp port and write data to it, and it will be uploaded to our backend by uplink.
 
 ---
