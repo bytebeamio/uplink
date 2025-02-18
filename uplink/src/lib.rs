@@ -36,7 +36,8 @@ use collector::tunshell::TunshellClient;
 pub use collector::{tcpjson::TcpJson};
 use crate::base::bridge::stream::MessageBuffer;
 use crate::collector::stdio::stdin_collector;
-use crate::uplink_config::{AppConfig, Compression, StreamConfig, MAX_BATCH_SIZE};
+use crate::uplink_config::{AppConfig, Compression, StreamConfig, UplinkConfig, MAX_BATCH_SIZE};
+use crate::utils::SendOnce;
 
 pub type ActionCallback = Box<dyn Fn(Action) + Send>;
 
@@ -59,14 +60,6 @@ pub struct Uplink {
     stream_metrics_rx: Receiver<StreamMetrics>,
     serializer_metrics_tx: Sender<SerializerMetrics>,
     serializer_metrics_rx: Receiver<SerializerMetrics>,
-}
-
-pub struct UplinkController {
-    pub data_tx: Sender<Payload>,
-    /// can be used to trigger shutdown
-    /// uplink will stop everything it's doing and send a message on end_rx when everything has stopped
-    pub shutdown: CtrlTx,
-    pub end_rx: Receiver<()>,
 }
 
 impl Uplink {
@@ -644,4 +637,28 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
     replace_topic_placeholders(&mut config.actions_subscription);
 
     Ok((config, device_config))
+}
+
+pub struct UplinkController {
+    pub data_tx: Sender<Payload>,
+    pub actions_rx: Receiver<Action>,
+    shutdown_tx: SendOnce<()>,
+}
+
+impl UplinkController {
+    pub fn disconnect(self) {
+        if let Err(_) = self.shutdown_tx.send(()) {
+            log::error!("uplink has already terminated");
+        }
+    }
+}
+
+
+pub fn start_uplink(config: Config, credentials: DeviceConfig) -> Result<UplinkController, UplinkInitError> {
+    let (data_tx, data_rx) = bounded(16);
+    let (actions_tx, actions_rx) = bounded(16);
+    let (shutdown_tx, shutdown_rx) = bounded(1);
+    let shutdown_tx = SendOnce(shutdown_tx);
+
+    Ok(UplinkController { data_tx, actions_rx, shutdown_tx })
 }

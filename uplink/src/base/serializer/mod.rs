@@ -792,7 +792,7 @@ pub mod tests {
             name: "test_stream".to_string(),
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
             batch_size: 2,
-            flush_period: Duration::from_secs(1),
+            flush_period_secs: Duration::from_secs(1),
             compress_data: Compression::Disabled,
             persistence: Persistence {
                 max_file_size: 10800,
@@ -807,7 +807,7 @@ pub mod tests {
             name: "test_stream".to_string(),
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
             batch_size: 2,
-            flush_period: Duration::from_secs(1),
+            flush_period_secs: Duration::from_secs(1),
             compress_data: Compression::Disabled,
             persistence: Persistence {
                 max_file_size: 100000,
@@ -827,7 +827,7 @@ pub mod tests {
             name: "test_stream".to_string(),
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
             batch_size: 2,
-            flush_period: Duration::from_secs(1),
+            flush_period_secs: Duration::from_secs(1),
             compress_data: Compression::Disabled,
             persistence: Persistence {
                 max_file_size,
@@ -896,7 +896,7 @@ pub mod tests {
             name: "test_stream".to_string(),
             topic: "/tenants/demo/devices/1/events/test_stream/jsonarray".to_string(),
             batch_size: 2,
-            flush_period: Duration::from_secs(1),
+            flush_period_secs: Duration::from_secs(1),
             compress_data: Compression::Disabled,
             persistence: Persistence {
                 max_file_size,

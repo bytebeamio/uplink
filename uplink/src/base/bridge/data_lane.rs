@@ -100,7 +100,7 @@ impl DataBridge {
             .map(|sk| sk.batch_size)
             .unwrap_or(128);
         let flush_period = sk
-            .map(|sk| sk.flush_period)
+            .map(|sk| sk.flush_period_secs)
             .unwrap_or(Duration::from_secs(60));
         if !self.streams.contains_key(&message.stream) {
             if self.streams.len() >= self.config.app_config.max_stream_count {

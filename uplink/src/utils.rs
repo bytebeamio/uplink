@@ -9,6 +9,10 @@ impl<T> SendOnce<T> {
     pub async fn send_async(self, value: T) -> Result<(), SendError<T>> {
         self.0.send_async(value).await
     }
+
+    pub fn send(self, value: T) -> Result<(), SendError<T>> {
+        self.0.send(value)
+    }
 }
 
 pub struct AsyncTaskContext {
