@@ -11,8 +11,6 @@ jobs:
       fail-fast: false
     steps:
       - uses: actions/checkout@v3
-      - name: perms
-        run: chown root:root .
       - run: sudo apt install unzip
       - run: cargo install cargo-ndk@2.11.0
       - name: Setup Android NDK
