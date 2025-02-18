@@ -47,7 +47,9 @@ devices using our platform:
 #### Linux system stats
 
 Uplink can automatically collect system info like disk, network, cpu usage, memory usage, etc and upload it to our cloud.
-You can visualize this info remotely using our dashboard, like a remote system monitor:
+You can visualize this info remotely using our dashboard, like a remote system monitor. Create a new dashboard and add two line chart panels to it,
+select stream `uplink_system_stats` and field `used_memory` in the first panel and stream `uplink_processor_stats` and field `usage` in the second one.
+You should see something like this:
 
 ![System stats](assets/system_stats.png)
 
@@ -106,14 +108,19 @@ You can connect to uplink over the declared tcp port and push data to it, one me
 ```json
 {"stream": "motor_info", "sequence": 5, "timestamp": 1738581618576, "temperature": 74, "rpm": 650, "vibrations": 0.31}
 ```
-Individual messages should be written to the port separated by ascii newlines (`\n`).
+Individual messages should be written to the port separated by ascii newlines (`\n`). Uplink repository has a utility program that
+you can use to generate some mock data using this command:
+```sh
+cargo run --bin push_data -- --interval 1 --stream motor_info --format temperature:float,rpm:int,vibrations:float --uplink-port localhost:8049 -v
+```
 
-Uplink will buffer and upload data to our cloud and then you can visualize it using our dashboards.
-
-Uplink can also compress your data before uploading it if you want to save on network bandwidth. This compression has to be enabled
-an a per stream basis. Eg. to enable compression for `motor_info` stream, add this to your config.toml:
+Uplink will buffer and upload data to our cloud and then you can visualize it using our dashboards. You should see the dashboards after around a minute or so,
+because 60s is the default buffering interval for streams in uplink. You can configure how the data for a stream should be handled in the toml file like this:
 
 ```toml
 [streams.motor_info]
-compression = "Lz4"
+# flush data after 50 messages have collected, or after 10s, whichever is earlier
+batch_size = 50
+flush_period = 10
+compression = "Lz4" # add this if you want uplink to compress your data before uploading it, if you want to save on network bandwidth.
 ```

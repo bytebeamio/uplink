@@ -321,8 +321,10 @@ checksum = "a21f936df1771bf62b77f047b726c4625ff2e8aa607c01ec06e5a05bd8463401"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-targets 0.52.6",
 ]
 
@@ -3550,8 +3552,10 @@ checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 name = "utils"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "flume",
  "futures-util",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "structopt",
