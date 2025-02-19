@@ -13,3 +13,4 @@ pub mod systemstats;
 pub mod tcpjson;
 pub mod tunshell;
 pub mod stdio;
+pub mod log_reader;

@@ -271,6 +271,9 @@ pub struct Config {
     pub enable_remote_shell: bool,
     pub wait_for_disk: bool,
     pub enable_stdin_collector: bool,
+
+    #[serde(default)]
+    pub log_reader: HashMap<String, crate::collector::log_reader::LogReaderConfig>,
 }
 
 impl Default for Config {
