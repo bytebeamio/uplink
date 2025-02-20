@@ -14,3 +14,4 @@ pub mod tcpjson;
 pub mod tunshell;
 pub mod stdio;
 pub mod log_reader;
+pub mod clickhouse_collector;
