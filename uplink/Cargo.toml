@@ -64,7 +64,6 @@ lazy_static = "1.4.0"
 # installer
 tar = "0.4"
 
-[target.'cfg(target_os = "android")'.dependencies]
 time = "0.3"
 
 [target.'cfg(unix)'.dependencies]
