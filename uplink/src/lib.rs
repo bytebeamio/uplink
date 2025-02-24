@@ -324,8 +324,8 @@ impl Uplink {
         }
 
         if let Some(clickhouse_metrics) = self.config.clickhouse_metrics.as_ref() {
-            ClickhouseCollector::new(clickhouse_metrics, bridge_tx.data_tx.clone())
-                .start();
+            let collector = ClickhouseCollector::new(clickhouse_metrics, bridge_tx.data_tx.clone());
+            thread::spawn(move || collector.start());
         }
 
         if let Some(checker_config) = &self.config.precondition_checks {
