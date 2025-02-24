@@ -1,45 +1,47 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use anyhow::Context;
 use clickhouse::Row;
 use flume::Sender;
-use lazy_static::lazy_static;
 use serde::Deserialize;
-use serde_json::{json, Map, Number, Value};
+use serde_json::{json, Value};
 use time::OffsetDateTime;
 use tokio::time::sleep;
 use crate::base::bridge::Payload;
 use crate::base::clock;
 
+#[derive(Clone, Debug, Deserialize)]
 pub struct ClickhouseCollectorConfig {
     pub url: String,
     pub username: String,
     pub password: String,
 }
 
+#[derive(Clone)]
 pub struct ClickhouseCollector {
-    config: ClickhouseCollectorConfig,
     client: clickhouse::Client,
     data_tx: Sender<Payload>,
 }
 
 impl ClickhouseCollector {
-    pub fn new(config: ClickhouseCollectorConfig, data_tx: Sender<Payload>) -> Self {
+    pub fn new(config: &ClickhouseCollectorConfig, data_tx: Sender<Payload>) -> Self {
         let client = clickhouse::Client::default()
             .with_url(&config.url)
             .with_user(&config.username)
-            .with_password(&config.password)
-            .with_database("system");
+            .with_password(&config.password);
+            // .with_database("system");
 
-        Self { config, client, data_tx }
+        Self { client, data_tx }
     }
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) {
-        tokio::task::spawn(self.query_log_monitor());
-        tokio::task::spawn(self.active_processes_monitor());
+        let _ = tokio::join!(
+            tokio::task::spawn(self.clone().query_log_monitor()),
+            tokio::task::spawn(self.clone().active_processes_monitor()),
+        );
     }
 
-    async fn query_log_monitor(&self) {
+    async fn query_log_monitor(self) {
         let empty_panel_info = PanelInfo {
             dashboard_id: "missing".to_owned(),
             panel_id: "missing".to_owned(),
@@ -52,64 +54,66 @@ impl ClickhouseCollector {
         };
 
         let mut clickhouse_queries_seq = 0;
-        let mut offset = OffsetDateTime::now_utc();
+        let mut offset = clock() as u64 - 15000;
         loop {
-            let queries = self.client.query(
-                &FETCH_QUERY_LOG.replace("%OFFSET%", &offset.to_string())
-            ).fetch_all::<QueryLogEntry>().await.unwrap();
+            let queries = self.client.query(FETCH_QUERY_LOG)
+                .bind(offset)
+                .fetch_all::<QueryLogEntry>().await
+                .unwrap();
+            dbg!(&queries);
             for event in queries {
                 let mut payload = json!({
-                    "query_id": event.query_id,
-                    "db_user": event.db_user,
-                    "database": event.database,
-                    "table": event.table,
-                    "event_time": event.event_time,
-                    "query_start_time": event.query_start_time,
+                    // "query_id": event.query_id,
+                    // "db_user": event.db_user,
+                    // "database": event.database,
+                    // "table": event.table,
+                    "finished_at": event.event_time,
                     "query_duration_ms": event.query_duration_ms,
                     "read_bytes": event.read_bytes,
                     "read_rows": event.read_rows,
                     "result_bytes": event.result_bytes,
                     "memory_usage": event.memory_usage,
-                    "event_type": event.event_type,
-                    "query_kind": event.query_kind,
-                    "error": event.error,
-                    "query": event.query,
-                    "interface": event.interface
+                    // "event_type": event.event_type,
+                    // "query_kind": event.query_kind,
+                    // "error": event.error,
+                    // "query": event.query,
+                    // "interface": event.interface
                 });
                 {
-                    let panel_info = if event.log_comment.is_empty() {
-                        empty_panel_info.clone()
-                    } else {
-                        base64::decode(event.log_comment.as_bytes())
-                            .context("invalid base64 in log_comment")
-                            .and_then(|bytes| serde_json::from_slice::<PanelInfo>(bytes.as_slice())
-                                .context("invalid json in log_comment"))
-                            .unwrap_or_else(|_| invalid_panel_info.clone())
-                    };
-                    if let Value::Object(payload) = &mut payload {
-                        payload.insert("user_email".to_owned(), Value::String(panel_info.user_email.clone()));
-                        payload.insert("dashboard_id".to_owned(), Value::String(panel_info.dashboard_id.clone()));
-                        payload.insert("panel_id".to_owned(), Value::String(panel_info.panel_id.clone()));
-                    }
+                    // let panel_info = if event.log_comment.is_empty() {
+                    //     empty_panel_info.clone()
+                    // } else {
+                    //     base64::decode(event.log_comment.as_bytes())
+                    //         .context("invalid base64 in log_comment")
+                    //         .and_then(|bytes| serde_json::from_slice::<PanelInfo>(bytes.as_slice())
+                    //             .context("invalid json in log_comment"))
+                    //         .unwrap_or_else(|_| invalid_panel_info.clone())
+                    // };
+                    // if let Value::Object(payload) = &mut payload {
+                    //     payload.insert("user_email".to_owned(), Value::String(panel_info.user_email.clone()));
+                    //     payload.insert("dashboard_id".to_owned(), Value::String(panel_info.dashboard_id.clone()));
+                    //     payload.insert("panel_id".to_owned(), Value::String(panel_info.panel_id.clone()));
+                    // }
                 }
-                let _ = self.data_tx.send_async(Payload {
+                let _ = self.data_tx.send_async(dbg!(Payload {
                     stream: "clickhouse_queries".to_string(),
                     sequence: clickhouse_queries_seq,
                     timestamp: clock() as _,
                     payload,
-                }).await;
+                })).await;
                 clickhouse_queries_seq += 1;
                 if event.event_time > offset {
                     offset = event.event_time;
                 }
             }
-            sleep(Duration::from_secs(30)).await;
+            sleep(Duration::from_secs(5)).await;
         }
     }
 
-    async fn active_processes_monitor(&self) {
+    async fn active_processes_monitor(self) {
         let mut active_processes_seq = 0;
         loop {
+            break;
         }
     }
 }
@@ -117,16 +121,15 @@ impl ClickhouseCollector {
 // language=clickhouse
 const FETCH_QUERY_LOG: &'static str = "
 SELECT query_id, user AS db_user, arrayElement(databases, 1) AS database, arrayElement(tables, 1) AS table, arrayElement(views, 1) AS view,
-       event_time, query_start_time, query_duration_ms,
+       toUnixTimestamp64Milli(event_time_microseconds) AS event_time, query_duration_ms,
        read_bytes, read_rows, result_bytes, memory_usage,
        type AS event_type, log_comment, query_kind, exception AS error, query,
-       multiIf(interface = 1, 'TCP', interface = 2, 'HTTP') AS interface
+       multiIf(interface = 1, 'TCP', interface = 2, 'HTTP', 'UNKNOWN') AS interface
 FROM system.query_log
-WHERE query LIKE '%BYTEBEAM_USER_ID=%'
-  AND query NOT ILIKE '%system.query_log%'
+WHERE query NOT ILIKE '%system.query_log%'
   AND type != 'QueryStart'
   AND (event_date = today() OR event_date = yesterday())
-  AND query_log.event_time_microseconds > now() - toDateTime64('%OFFSET%', 3)
+  AND toUnixTimestamp64Milli(query_log.event_time_microseconds) > ?
 ORDER BY event_time DESC
 ";
 
@@ -141,17 +144,15 @@ FROM system.processes
 ";
 
 
-#[derive(Deserialize, Row)]
+#[derive(Deserialize, Row, Debug)]
 struct QueryLogEntry {
-    pub query_id: String,
-    pub db_user: String,
-    pub database: String,
+    // pub query_id: String,
+    // pub db_user: String,
+    // pub database: String,
     // TODO: test these two
-    pub table: String,
-    pub view: String,
+    // pub table: String,
 
-    pub event_time: OffsetDateTime,
-    pub query_start_time: OffsetDateTime,
+    pub event_time: u64,
     pub query_duration_ms: u64,
 
     pub read_bytes: usize,
@@ -159,12 +160,12 @@ struct QueryLogEntry {
     pub result_bytes: usize,
     pub memory_usage: usize,
 
-    pub event_type: String,
-    pub log_comment: String,
-    pub query_kind: String,
-    pub error: String,
-    pub query: String,
-    pub interface: String,
+    // pub event_type: String,
+    // pub query_kind: String,
+    // pub error: String,
+    // pub query: String,
+    // pub interface: String,
+    // pub log_comment: String,
 }
 
 #[derive(Deserialize, Clone)]
