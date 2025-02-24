@@ -35,6 +35,7 @@ use collector::systemstats::StatCollector;
 use collector::tunshell::TunshellClient;
 pub use collector::{simulator, tcpjson::TcpJson};
 use crate::base::bridge::stream::MessageBuffer;
+use crate::collector::clickhouse_collector::ClickhouseCollector;
 use crate::collector::log_reader::LogFileReader;
 use crate::collector::stdio::stdin_collector;
 use crate::uplink_config::{AppConfig, Compression, StreamConfig, MAX_BATCH_SIZE};
@@ -320,6 +321,11 @@ impl Uplink {
         for (name, config) in self.config.log_reader.iter() {
             let stdout_collector = LogFileReader::new(name.clone(), config.clone(), bridge_tx.clone());
             thread::spawn(move || stdout_collector.start());
+        }
+
+        if let Some(clickhouse_metrics) = self.config.clickhouse_metrics.as_ref() {
+            ClickhouseCollector::new(clickhouse_metrics, bridge_tx.data_tx.clone())
+                .start();
         }
 
         if let Some(checker_config) = &self.config.precondition_checks {

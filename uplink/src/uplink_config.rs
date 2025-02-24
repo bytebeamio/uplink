@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
 
 pub use crate::base::bridge::stream::MAX_BATCH_SIZE;
+use crate::collector::clickhouse_collector::ClickhouseCollectorConfig;
 #[cfg(target_os = "linux")]
 use crate::collector::journalctl::JournalCtlConfig;
 #[cfg(target_os = "android")]
@@ -275,6 +276,7 @@ pub struct Config {
 
     #[serde(default)]
     pub log_reader: HashMap<String, crate::collector::log_reader::LogReaderConfig>,
+    pub clickhouse_metrics: Option<ClickhouseCollectorConfig>,
 }
 
 impl Default for Config {

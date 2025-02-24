@@ -62,7 +62,7 @@ sysinfo = { git = "https://github.com/bytebeamio/sysinfo", rev = "fe6ee39f08123f
 lazy_static = "1.4.0"
 # installer
 tar = "0.4"
-clickhouse = "0.13.1"
+clickhouse = { version = "=0.13.1", features = ["rustls-tls"] }
 
 time = { version = "0.3", features = ["serde"] }
 base64 = "0.22.1"
