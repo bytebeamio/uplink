@@ -97,9 +97,9 @@ impl ClickhouseCollector {
                             })
                     };
                     if let Value::Object(payload) = &mut payload {
-                        payload.insert("user_email".to_owned(), Value::String(dbg!(panel_info.user_email).unwrap_or("missing".to_owned()).clone()));
-                        payload.insert("dashboard_id".to_owned(), Value::String(dbg!(panel_info.dashboard_id).unwrap_or("missing".to_owned()).clone()));
-                        payload.insert("panel_id".to_owned(), Value::String(dbg!(panel_info.panel_id).unwrap_or("missing".to_owned()).clone()));
+                        payload.insert("user_email".to_owned(), Value::String(panel_info.user_email.unwrap_or("missing".to_owned()).clone()));
+                        payload.insert("dashboard_id".to_owned(), Value::String(panel_info.dashboard_id.unwrap_or("missing".to_owned()).clone()));
+                        payload.insert("panel_id".to_owned(), Value::String(panel_info.panel_id.unwrap_or("missing".to_owned()).clone()));
                     }
                 }
                 let _ = self.data_tx.send_async(Payload {
