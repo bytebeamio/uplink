@@ -6,6 +6,7 @@ use std::io::Write;
 use std::time::Instant;
 use std::{sync::Arc, time::Duration};
 use flume::{Receiver, Sender};
+use log::trace;
 use lz4_flex::frame::FrameEncoder;
 use pretty_bytes::converter::convert;
 use replace_with::replace_with_or_abort;
@@ -498,6 +499,9 @@ impl<C: MqttClient> Serializer<C> {
                     self.metrics.batches += 1;
                     let stream = data.stream_config.clone();
                     let publish = construct_publish(data, &mut self.stream_metrics);
+                    if let Ok(payload_str) = std::str::from_utf8(publish.payload.as_ref()) {
+                        trace!("publishing payload for stream: {} : {:?}", stream.name, payload_str);
+                    }
                     let payload_size = publish.payload.len();
                     match self.client.try_publish(&stream.topic, QoS::AtLeastOnce, false, publish.payload) {
                         Ok(_) => {
