@@ -52,7 +52,7 @@ impl ClickhouseCollector {
             user_email: Some("invalid".to_owned()),
         };
 
-        let mut clickhouse_queries_seq = 0;
+        let mut clickhouse_queries_seq = 1;
         let mut offset = clock() as u64;
         loop {
             sleep(Duration::from_secs(5)).await;
@@ -79,7 +79,6 @@ impl ClickhouseCollector {
                     "memory_usage": event.memory_usage,
                     "event_type": event.event_type,
                     "query_kind": event.query_kind,
-                    "error": event.error,
                     "query": event.query,
                     "interface": event.interface
                 });
@@ -100,15 +99,17 @@ impl ClickhouseCollector {
                         payload.insert("user_email".to_owned(), Value::String(panel_info.user_email.unwrap_or("missing".to_owned()).clone()));
                         payload.insert("dashboard_id".to_owned(), Value::String(panel_info.dashboard_id.unwrap_or("missing".to_owned()).clone()));
                         payload.insert("panel_id".to_owned(), Value::String(panel_info.panel_id.unwrap_or("missing".to_owned()).clone()));
+
+                        payload.insert("error".to_owned(), if event.error == "" { Value::Null } else { Value::String(event.error) });
                     }
                 }
+                clickhouse_queries_seq += 1;
                 let _ = self.data_tx.send_async(Payload {
                     stream: "clickhouse_queries".to_string(),
                     sequence: clickhouse_queries_seq,
                     timestamp: clock() as _,
                     payload,
                 }).await;
-                clickhouse_queries_seq += 1;
                 if event.event_time > offset {
                     offset = event.event_time;
                 }
@@ -119,15 +120,34 @@ impl ClickhouseCollector {
     async fn active_processes_monitor(self) {
         let mut active_processes_seq = 0;
         loop {
-            break;
+            match self.client.query(FETCH_PROCESSES_STATS)
+                .fetch_one::<ProcessesSnapshot>()
+                .await {
+                Ok(stats) => {
+                    active_processes_seq += 1;
+                    let payload = Payload {
+                        stream: "clickhouse_processes".to_owned(),
+                        sequence: active_processes_seq,
+                        timestamp: clock() as _,
+                        payload: json!({
+                            "processes_count": stats.processes_count,
+                            "max_elapsed_ms": (stats.max_elapsed_secs * 1000.0) as u64,
+                            "max_elapsed_query_id": stats.max_elapsed_query_id,
+                            "total_memory_usage": stats.total_memory_usage,
+                            "max_memory_usage": stats.max_memory_usage,
+                            "max_memory_query_id": stats.max_memory_query_id,
+                        }),
+                    };
+                    // dbg!(&payload);
+                    let _ = self.data_tx.send_async(payload).await;
+                }
+                Err(e) => {
+                    log::error!("couldn't fetch process stats: {e:?}");
+                }
+            }
+            sleep(Duration::from_secs(1)).await;
         }
     }
-}
-
-#[test]
-fn decode_log_comment() -> anyhow::Result<PanelInfo> {
-    let c = "e30=";
-    let json = base64::decode(c.as_bytes()).unwrap();
 }
 
 // language=clickhouse
@@ -154,16 +174,6 @@ ORDER BY event_time DESC
 LIMIT 10
 ";
 
-// language=clickhouse
-const FETCH_PROCESSES_STATS: &'static str = "
-SELECT count(*) as active_queries,
-       max(elapsed) as longest_query_duration,
-       argMax(query_id, elapsed) as longest_query_id,
-       max(memory_usage) AS max_memory_usage,
-       argMax(query_id, memory_usage) AS max_memory_query_id
-FROM system.processes
-";
-
 #[derive(Deserialize, Row, Debug)]
 struct QueryLogEntry {
     pub query_id: String,
@@ -185,6 +195,27 @@ struct QueryLogEntry {
     pub error: String,
     pub query: String,
     pub interface: String,
+}
+
+// language=clickhouse
+const FETCH_PROCESSES_STATS: &'static str = "
+SELECT count(*) as processes_count,
+       max(elapsed) as max_elapsed_secs,
+       argMax(query_id, elapsed) as max_elapsed_query_id,
+       sum(memory_usage) AS total_memory_usage,
+       max(memory_usage) AS max_memory_usage,
+       argMax(query_id, memory_usage) AS max_memory_query_id
+FROM system.processes
+";
+
+#[derive(Deserialize, Row, Debug)]
+struct ProcessesSnapshot {
+    pub processes_count: u64,
+    pub max_elapsed_secs: f64,
+    pub max_elapsed_query_id: String,
+    pub total_memory_usage: u64,
+    pub max_memory_usage: u64,
+    pub max_memory_query_id: String,
 }
 
 #[derive(Deserialize, Clone)]
