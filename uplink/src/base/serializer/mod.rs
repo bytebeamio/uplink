@@ -201,7 +201,12 @@ impl<C: MqttClient> Serializer<C> {
         while let Some((sk, (storage, _, _))) = cursor.current.as_mut() {
             match storage.read_packet() {
                 Ok(packet) => {
-                    return Some((packet, sk.clone()));
+                    if packet.topic.starts_with(&self.tenant_filter) {
+                        return Some((packet, sk.clone()));
+                    } else {
+                        log::warn!("found data for wrong tenant in persistence!");
+                        continue;
+                    }
                 }
                 Err(storage::StorageReadError::Empty) => {
                     cursor.bump();
@@ -451,15 +456,11 @@ impl<C: MqttClient> Serializer<C> {
                     };
                     match self.fetch_next_packet_from_storage() {
                         Some((publish, stream)) => {
-                            if publish.topic.starts_with(&self.tenant_filter) {
-                                self.metrics.sent_size += last_publish_sent_size;
-                                last_publish_stream = stream;
-                                last_publish_sent_size = publish.payload.len();
-                                send.set(send_publish(self.client.clone(), publish.topic.clone(), publish.payload.clone()));
-                                publish_in_transit = publish;
-                            } else {
-                                log::warn!("found data for wrong tenant in persistence!!");
-                            }
+                            self.metrics.sent_size += last_publish_sent_size;
+                            last_publish_stream = stream;
+                            last_publish_sent_size = publish.payload.len();
+                            send.set(send_publish(self.client.clone(), publish.topic.clone(), publish.payload.clone()));
+                            publish_in_transit = publish;
                         }
                         None => {
                             return Status::Normal;
