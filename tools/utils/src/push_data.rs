@@ -1,7 +1,6 @@
 use futures_util::SinkExt;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
-use serde_json;
 use std::time::Duration;
 use structopt::StructOpt;
 use tokio::net::TcpStream;
