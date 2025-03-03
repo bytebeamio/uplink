@@ -1,6 +1,6 @@
 use bytes::BytesMut;
 use flume::{bounded, Receiver, Sender, TrySendError};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use thiserror::Error;
 use tokio::time::{sleep, Duration};
 use tokio::{select, task};
@@ -155,6 +155,8 @@ impl Mqtt {
                 Ok(Packet::Publish(publish)) => {
                     if publish.topic.starts_with(&self.tenant_filter) {
                         self.eventloop.pending.push_back(Request::Publish(publish))
+                    } else {
+                        warn!("inflight file has data with wrong tenant|device!");
                     }
                 }
                 Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
