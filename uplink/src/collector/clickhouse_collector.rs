@@ -3,7 +3,7 @@ use anyhow::Context;
 use clickhouse::Row;
 use flume::Sender;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json, Number, Value};
 use time::OffsetDateTime;
 use tokio::time::sleep;
 use crate::base::bridge::Payload;
@@ -37,6 +37,7 @@ impl ClickhouseCollector {
         let _ = tokio::join!(
             tokio::task::spawn(self.clone().query_log_monitor()),
             tokio::task::spawn(self.clone().active_processes_monitor()),
+            tokio::task::spawn(self.clone().large_tables_monitor()),
         );
     }
 
@@ -148,6 +149,35 @@ impl ClickhouseCollector {
             sleep(Duration::from_secs(1)).await;
         }
     }
+
+    async fn large_tables_monitor(self) {
+        let mut sequence = 0;
+        loop {
+            match self.client.query(FETCH_LARGE_TABLES)
+                .fetch_all::<LargeTables>()
+                .await {
+                Ok(stats) => {
+                    sequence += 1;
+                    let mut payload = serde_json::Map::new();
+                    for (idx, info) in stats.iter().enumerate() {
+                        payload.insert(format!("table_{}", idx+1), Value::String(format!("{}.`{}`", info.database, info.table)));
+                        payload.insert(format!("table_{}_size", idx+1), Value::Number(Number::from_i128(info.size_on_disk as _).unwrap()));
+                    }
+                    let payload = Payload {
+                        stream: "clickhouse_large_tables".to_owned(),
+                        sequence,
+                        timestamp: clock() as _,
+                        payload: Value::Object(payload),
+                    };
+                    let _ = self.data_tx.send_async(payload).await;
+                }
+                Err(e) => {
+                    log::error!("couldn't fetch table size stats: {e:?}");
+                }
+            }
+            sleep(Duration::from_secs(60)).await;
+        }
+    }
 }
 
 // language=clickhouse
@@ -170,6 +200,7 @@ WHERE query NOT ILIKE '%system.query_log%'
   AND type != 'QueryStart'
   AND (event_date = today() OR event_date = yesterday())
   AND toUnixTimestamp64Milli(query_log.event_time_microseconds) > ?
+  AND query not like '%FROM system.%'
 ORDER BY event_time DESC
 LIMIT 10
 ";
@@ -206,6 +237,7 @@ SELECT count(*) as processes_count,
        max(memory_usage) AS max_memory_usage,
        argMax(query_id, memory_usage) AS max_memory_query_id
 FROM system.processes
+WHERE query NOT LIKE '%FROM system.processes%'
 ";
 
 #[derive(Deserialize, Row, Debug)]
@@ -216,6 +248,28 @@ struct ProcessesSnapshot {
     pub total_memory_usage: u64,
     pub max_memory_usage: u64,
     pub max_memory_query_id: String,
+}
+
+// language=clickhouse
+const FETCH_LARGE_TABLES: &'static str = "
+SELECT
+    database,
+    table,
+    sum(bytes_on_disk) AS size_on_disk
+FROM system.parts
+WHERE active
+GROUP BY
+    database,
+    table
+ORDER BY size_on_disk DESC
+LIMIT 5
+";
+
+#[derive(Deserialize, Row, Debug)]
+struct LargeTables {
+    pub database: String,
+    pub table: String,
+    pub size_on_disk: i64,
 }
 
 #[derive(Deserialize, Clone)]
