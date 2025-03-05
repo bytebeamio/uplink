@@ -72,7 +72,6 @@ impl ClickhouseCollector {
                     "db_user": event.db_user,
                     "database": event.database,
                     "table": event.table,
-                    "finished_at": event.event_time,
                     "query_duration_ms": event.query_duration_ms,
                     "read_bytes": event.read_bytes,
                     "read_rows": event.read_rows,
@@ -108,11 +107,11 @@ impl ClickhouseCollector {
                 let _ = self.data_tx.send_async(Payload {
                     stream: "clickhouse_queries".to_string(),
                     sequence: clickhouse_queries_seq,
-                    timestamp: clock() as _,
+                    timestamp: event.event_time_us,
                     payload,
                 }).await;
-                if event.event_time > offset {
-                    offset = event.event_time;
+                if event.event_time_us > offset {
+                    offset = event.event_time_us;
                 }
             }
         }
@@ -186,7 +185,7 @@ SELECT query_id,
        user AS db_user,
        arrayElement(databases, 1) AS database,
        arrayElement(tables, 1) AS table,
-       toUnixTimestamp64Milli(event_time_microseconds) AS event_time,
+       toUnixTimestamp64Milli(event_time_microseconds) AS event_time_us,
        query_duration_ms,
        read_bytes, read_rows, result_bytes, memory_usage,
        toString(type) AS event_type,
@@ -212,7 +211,7 @@ struct QueryLogEntry {
     pub database: String,
     pub table: String,
 
-    pub event_time: u64,
+    pub event_time_us: u64,
     pub query_duration_ms: u64,
 
     pub read_bytes: usize,
