@@ -242,7 +242,7 @@ impl FileDownloader {
         state.current.action.payload = match serde_json::to_value(&state.current.meta)
             .map(|mut v| {
                 if let Value::Object(o) = &mut v {
-                    o.insert("version".to_string(), Value::String(state.current.meta.file_name.clone()));
+                    o.insert("firmware_version".to_string(), Value::String(state.current.meta.file_name.clone()));
                 }
                 v
             })
