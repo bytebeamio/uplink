@@ -20,6 +20,7 @@ use std::{
 };
 use std::{io::Write, path::PathBuf};
 use anyhow::Context;
+use serde_json::Value;
 use crate::base::actions::Cancellation;
 use crate::uplink_config::{Authentication, Config, DownloaderConfig};
 use crate::{base::bridge::BridgeTx, Action, ActionResponse};
@@ -238,7 +239,14 @@ impl FileDownloader {
             return DownloadResult::Err(e.to_string());
         }
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
-        state.current.action.payload = match serde_json::to_string(&state.current.meta) {
+        state.current.action.payload = match serde_json::to_value(&state.current.meta)
+            .map(|mut v| {
+                if let Value::Object(o) = &mut v {
+                    o.insert("version".to_string(), Value::String(state.current.meta.file_name.clone()));
+                }
+                v
+            })
+            .and_then(|r| serde_json::to_string(&r)) {
             Ok(p) => p,
             Err(e) => {
                 return DownloadResult::Err(e.to_string());
