@@ -38,6 +38,7 @@ impl ClickhouseCollector {
             tokio::task::spawn(self.clone().query_log_monitor()),
             tokio::task::spawn(self.clone().active_processes_monitor()),
             tokio::task::spawn(self.clone().large_tables_monitor()),
+            tokio::task::spawn(self.clone().part_log_monitor()),
         );
     }
 
@@ -107,11 +108,11 @@ impl ClickhouseCollector {
                 let _ = self.data_tx.send_async(Payload {
                     stream: "clickhouse_queries".to_string(),
                     sequence: clickhouse_queries_seq,
-                    timestamp: event.event_time_us,
+                    timestamp: event.event_time_ms,
                     payload,
                 }).await;
-                if event.event_time_us > offset {
-                    offset = event.event_time_us;
+                if event.event_time_ms > offset {
+                    offset = event.event_time_ms;
                 }
             }
         }
@@ -177,6 +178,31 @@ impl ClickhouseCollector {
             sleep(Duration::from_secs(60)).await;
         }
     }
+
+    async fn part_log_monitor(self) {
+        let mut sequence = 1;
+        let mut offset = clock() as u64;
+        loop {
+            sleep(Duration::from_secs(30)).await;
+            let merges = match self.client.query(FETCH_MERGE_INFO)
+                .bind(offset)
+                .fetch_all::<PartLogRow>().await {
+                Ok(queries) => queries,
+                Err(e) => {
+                    log::error!("couldn't fetch queries: {e:?}");
+                    continue;
+                }
+            };
+
+            if let Some(max_timestamp) = merges.iter().map(|m| m.event_time_ms)
+                .max() {
+                offset = max_timestamp;
+            }
+            let mut max_
+            for merge in merges {
+            }
+        }
+    }
 }
 
 // language=clickhouse
@@ -185,7 +211,7 @@ SELECT query_id,
        user AS db_user,
        arrayElement(databases, 1) AS database,
        arrayElement(tables, 1) AS table,
-       toUnixTimestamp64Milli(event_time_microseconds) AS event_time_us,
+       toUnixTimestamp64Milli(event_time_microseconds) AS event_time_ms,
        query_duration_ms,
        read_bytes, read_rows, result_bytes, memory_usage,
        toString(type) AS event_type,
@@ -211,7 +237,7 @@ struct QueryLogEntry {
     pub database: String,
     pub table: String,
 
-    pub event_time_us: u64,
+    pub event_time_ms: u64,
     pub query_duration_ms: u64,
 
     pub read_bytes: usize,
@@ -269,6 +295,23 @@ struct LargeTables {
     pub database: String,
     pub table: String,
     pub size_on_disk: i64,
+}
+
+// language=clickhouse
+const FETCH_MERGE_INFO: &'static str = "
+SELECT event_type, toUnixTimestamp64Milli(event_time_microseconds) as event_time_us, duration_ms, read_bytes, peak_memory_usage, table
+FROM part_log
+WHERE toUnixTimestamp64Milli(event_time_microseconds) > ?
+";
+
+#[derive(Deserialize, Row, Debug)]
+struct PartLogRow {
+    pub event_type: String,
+    pub event_time_ms: u64,
+    pub duration_ms: u64,
+    pub read_bytes: u64,
+    pub peak_memory_usage: u64,
+    pub table: String,
 }
 
 #[derive(Deserialize, Clone)]
