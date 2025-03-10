@@ -181,9 +181,8 @@ impl ClickhouseCollector {
 
     async fn part_log_monitor(self) {
         let mut sequence = 1;
-        let mut offset = clock() as u64;
+        let mut offset = clock() as u64 - 10000;
         loop {
-            sleep(Duration::from_secs(30)).await;
             let merges = match self.client.query(FETCH_MERGE_INFO)
                 .bind(offset)
                 .fetch_all::<PartLogRow>().await {
@@ -205,6 +204,7 @@ impl ClickhouseCollector {
             let mut max_size_query_id = "";
             let mut max_read_bytes = 0;
             let mut max_read_bytes_query_id = "";
+            let mut total_read_bytes = 0;
             for merge in merges.iter() {
                 if merge.event_time_ms > offset {
                     offset = merge.event_time_ms;
@@ -231,6 +231,7 @@ impl ClickhouseCollector {
                     max_read_bytes = merge.read_bytes;
                     max_read_bytes_query_id = &merge.query_id;
                 }
+                total_read_bytes += merge.read_bytes;
             }
             sequence += 1;
             let payload = Payload {
@@ -248,11 +249,12 @@ impl ClickhouseCollector {
                     "max_size": max_size,
                     "max_size_query_id": max_size_query_id,
                     "max_read_bytes": max_read_bytes,
-                    "max_read_bytes_query_id": max_read_bytes_query_id
+                    "max_read_bytes_query_id": max_read_bytes_query_id,
+                    "total_read_bytes": total_read_bytes,
                 }),
             };
             let _ = self.data_tx.send_async(payload).await;
-            sleep(Duration::from_secs(60)).await;
+            sleep(Duration::from_secs(30)).await;
         }
     }
 }
@@ -352,7 +354,7 @@ struct LargeTables {
 // language=clickhouse
 const FETCH_MERGE_INFO: &'static str = "
 SELECT query_id, event_type, toUnixTimestamp64Milli(event_time_microseconds) as event_time_ms, duration_ms, size_in_bytes, read_bytes, peak_memory_usage
-FROM part_log
+FROM system.part_log
 WHERE toUnixTimestamp64Milli(event_time_microseconds) > ?
 ";
 
