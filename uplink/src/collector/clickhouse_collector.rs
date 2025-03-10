@@ -1,10 +1,9 @@
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use anyhow::Context;
 use clickhouse::Row;
 use flume::Sender;
 use serde::Deserialize;
 use serde_json::{json, Number, Value};
-use time::OffsetDateTime;
 use tokio::time::sleep;
 use crate::base::bridge::Payload;
 use crate::base::clock;
@@ -87,6 +86,7 @@ impl ClickhouseCollector {
                     let panel_info = if event.log_comment.is_empty() {
                         empty_panel_info.clone()
                     } else {
+                        #[allow(deprecated)]
                         base64::decode(event.log_comment.as_bytes())
                             .context("invalid base64 in log_comment")
                             .and_then(|bytes| serde_json::from_slice::<PanelInfo>(bytes.as_slice())
@@ -194,13 +194,65 @@ impl ClickhouseCollector {
                 }
             };
 
-            if let Some(max_timestamp) = merges.iter().map(|m| m.event_time_ms)
-                .max() {
-                offset = max_timestamp;
+            let mut new_parts = 0;
+            let mut merges_count = 0;
+            let mut mutations_count = 0;
+            let mut max_memory_usage = 0;
+            let mut max_memory_query_id = "";
+            let mut max_duration = 0;
+            let mut max_duration_query_id = "";
+            let mut max_size = 0;
+            let mut max_size_query_id = "";
+            let mut max_read_bytes = 0;
+            let mut max_read_bytes_query_id = "";
+            for merge in merges.iter() {
+                if merge.event_time_ms > offset {
+                    offset = merge.event_time_ms;
+                }
+                match merge.event_type {
+                    1 => new_parts += 1,
+                    2 => merges_count += 1,
+                    5 => mutations_count += 1,
+                    _ => {}
+                }
+                if merge.peak_memory_usage > max_memory_usage {
+                    max_memory_usage = merge.peak_memory_usage;
+                    max_memory_query_id = &merge.query_id;
+                }
+                if merge.duration_ms > max_duration {
+                    max_duration = merge.duration_ms;
+                    max_duration_query_id = &merge.query_id;
+                }
+                if merge.size_in_bytes > max_size {
+                    max_size = merge.size_in_bytes;
+                    max_size_query_id = &merge.query_id;
+                }
+                if merge.read_bytes > max_read_bytes {
+                    max_read_bytes = merge.read_bytes;
+                    max_read_bytes_query_id = &merge.query_id;
+                }
             }
-            let mut max_
-            for merge in merges {
-            }
+            sequence += 1;
+            let payload = Payload {
+                stream: "clickhouse_part_logs".to_owned(),
+                sequence,
+                timestamp: clock() as _,
+                payload: json!({
+                    "new_parts": new_parts,
+                    "merges": merges_count,
+                    "mutations": mutations_count,
+                    "max_memory_usage": max_memory_usage,
+                    "max_memory_query_id": max_memory_query_id,
+                    "max_duration": max_duration,
+                    "max_duration_query_id": max_duration_query_id,
+                    "max_size": max_size,
+                    "max_size_query_id": max_size_query_id,
+                    "max_read_bytes": max_read_bytes,
+                    "max_read_bytes_query_id": max_read_bytes_query_id
+                }),
+            };
+            let _ = self.data_tx.send_async(payload).await;
+            sleep(Duration::from_secs(60)).await;
         }
     }
 }
@@ -299,19 +351,20 @@ struct LargeTables {
 
 // language=clickhouse
 const FETCH_MERGE_INFO: &'static str = "
-SELECT event_type, toUnixTimestamp64Milli(event_time_microseconds) as event_time_us, duration_ms, read_bytes, peak_memory_usage, table
+SELECT query_id, event_type, toUnixTimestamp64Milli(event_time_microseconds) as event_time_ms, duration_ms, size_in_bytes, read_bytes, peak_memory_usage
 FROM part_log
 WHERE toUnixTimestamp64Milli(event_time_microseconds) > ?
 ";
 
 #[derive(Deserialize, Row, Debug)]
 struct PartLogRow {
-    pub event_type: String,
+    pub query_id: String,
+    pub event_type: u8,
     pub event_time_ms: u64,
     pub duration_ms: u64,
+    pub size_in_bytes: u64,
     pub read_bytes: u64,
     pub peak_memory_usage: u64,
-    pub table: String,
 }
 
 #[derive(Deserialize, Clone)]
