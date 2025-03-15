@@ -10,6 +10,11 @@ fn main() -> Result<(), Error> {
         return Ok(());
     }
 
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("Panic occurred: {info}");
+        std::process::abort();
+    }));
+
     let commandline: CommandLine = StructOpt::from_args();
     let device_json = read_to_string(commandline.auth.as_path())
         .context("couldn't read auth json file")?;
