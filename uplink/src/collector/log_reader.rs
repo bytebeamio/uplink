@@ -62,6 +62,7 @@ impl LogEntry {
         line: &str,
         log_template: &Regex,
         timestamp_template: &Regex,
+        append_unmatched_lines: bool,
     ) -> Option<Self> {
         let to_string = |x: Match| x.as_str().to_string();
         let line = line.trim().to_string();
@@ -79,11 +80,13 @@ impl LogEntry {
 
             return current_line.replace(LogEntry { line, tag, level, timestamp, message });
         } else if let Some(log_entry) = current_line {
-            log_entry.line += &format!("\n{line}");
-            match &mut log_entry.message {
-                Some(msg) => *msg += &format!("\n{line}"),
-                _ => log_entry.message = Some(line),
-            };
+            if append_unmatched_lines {
+                log_entry.line += &format!("\n{line}");
+                match &mut log_entry.message {
+                    Some(msg) => *msg += &format!("\n{line}"),
+                    _ => log_entry.message = Some(line),
+                };
+            }
         }
 
         None
@@ -107,11 +110,12 @@ pub struct LogParser<T> {
     log_entry: Option<LogEntry>,
     log_template: Regex,
     timestamp_template: Regex,
+    append_unmatched_lines: bool,
 }
 
 impl<T: AsyncBufReadExt + Unpin> LogParser<T> {
-    fn new(lines: Lines<T>, log_template: Regex, timestamp_template: Regex) -> Self {
-        Self { lines, log_entry: None, log_template, timestamp_template }
+    fn new(lines: Lines<T>, log_template: Regex, timestamp_template: Regex, append_unmatched_lines: bool) -> Self {
+        Self { lines, log_entry: None, log_template, timestamp_template, append_unmatched_lines }
     }
 
     async fn next(&mut self) -> Option<LogEntry> {
@@ -121,6 +125,7 @@ impl<T: AsyncBufReadExt + Unpin> LogParser<T> {
                 &line,
                 &self.log_template,
                 &self.timestamp_template,
+                self.append_unmatched_lines
             ) {
                 return Some(entry);
             }
@@ -166,7 +171,7 @@ impl LogFileReader {
         let file = cmd.stdout.take().expect("Expected stdout");
         let lines = BufReader::new(file).lines();
         let mut parser =
-            LogParser::new(lines, self.log_template.clone(), self.timestamp_template.clone());
+            LogParser::new(lines, self.log_template.clone(), self.timestamp_template.clone(), self.config.append_unmatched_lines);
         let mut sequence = 0;
         let stream_name = self.config.stream_name.to_owned();
         let tx = self.tx.clone();
@@ -194,6 +199,7 @@ mod test {
             lines,
             Regex::new(r"^\s*(?P<timestamp>\d+-\d+-\d+T\d+:\d+:\d+)[\+]00:00\s+(?P<tag>\S+)\s+(?P<level>\S+)\s+(?P<message>.*)").unwrap(),
             Regex::new(r"^(?P<year>\d+)-(?P<month>\d+)-(?P<day>\d+)T(?P<hour>\d+):(?P<minute>\d+):(?P<second>\d+)").unwrap(),
+            true,
         );
         dbg!(parser.next().await);
     }
@@ -207,7 +213,7 @@ mod test {
             Regex::new(r#"^(?P<timestamp>.*)Z\s(?P<level>\S+)\s(?P<tag>\S+):\s(?P<message>.*)"#)
                 .unwrap();
         let timestamp_template = Regex::new(r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+)\.(?P<millisecond>\S\S\S)"#).unwrap();
-        let mut parser = LogParser::new(lines, log_template, timestamp_template);
+        let mut parser = LogParser::new(lines, log_template, timestamp_template, true);
 
         let entry = parser.next().await.unwrap();
         assert_eq!(
@@ -232,7 +238,7 @@ mod test {
 
         let log_template = Regex::new(r#"^(?P<timestamp>.*)"#).unwrap();
         let timestamp_template = Regex::new(r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+)\.(?P<subsecond>\S\S\S)"#).unwrap();
-        let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template);
+        let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template, true);
 
         let entry = parser.next().await.unwrap();
         assert_eq!(entry.timestamp, 1688407162979);
@@ -241,7 +247,7 @@ mod test {
         let lines = BufReader::new(raw.as_bytes()).lines();
 
         let timestamp_template= Regex::new(r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)\s(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+)"#).unwrap();
-        let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template);
+        let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template, true);
 
         let entry = parser.next().await.unwrap();
 
@@ -258,7 +264,7 @@ mod test {
             Regex::new(r#"^(?P<timestamp>.*)Z\s(?P<level>\S+)\s(?P<tag>\S+):\s(?P<message>.*)"#)
                 .unwrap();
         let timestamp_template= Regex::new(r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+)\.(?P<subsecond>\S\S\S)"#).unwrap();
-        let mut parser = LogParser::new(lines, log_template, timestamp_template);
+        let mut parser = LogParser::new(lines, log_template, timestamp_template, true);
 
         let entry = parser.next().await.unwrap();
         assert_eq!(
@@ -301,7 +307,7 @@ mod test {
             Regex::new(r#"^(?P<timestamp>.*)Z\s+(?P<level>\S+)\s+(?P<tag>\S+):\s+(?P<message>.*)"#)
                 .unwrap();
         let timestamp_template= Regex::new(r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)T(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+)\.(?P<subsecond>\S\S\S)"#).unwrap();
-        let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template);
+        let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template, true);
 
         let entry = parser.next().await.unwrap();
         assert_eq!(
@@ -351,7 +357,7 @@ mod test {
 
         let log_template = Regex::new(r#"^(?P<timestamp>\S+-\S+-\S+\s\S+:\S+:\S+)\s+(?P<tag>\S+)\s+(?P<level>\S+)\s+(?P<message>.*)"#).unwrap();
         let timestamp_template = Regex::new(r#"^(?P<year>\S+)-(?P<month>\S+)-(?P<day>\S+)\s(?P<hour>\S+):(?P<minute>\S+):(?P<second>\S+)"#).unwrap();
-        let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template);
+        let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template, true);
 
         let entry = parser.next().await.unwrap();
         assert_eq!(
@@ -375,4 +381,8 @@ pub struct LogReaderConfig {
     pub stream_name: String,
     pub log_template: String,
     pub timestamp_template: String,
+    #[serde(default = "tru")]
+    pub append_unmatched_lines: bool,
 }
+
+fn tru() -> bool { true }
