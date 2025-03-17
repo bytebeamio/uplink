@@ -74,7 +74,15 @@ impl LogEntry {
             }
 
             let timestamp = (date.unix_timestamp_nanos() / 1_000_000) as u64;
-            let level = captures.name("level").map(to_string);
+            let level = captures.name("level")
+                .map(|l| {
+                    let ls = l.as_str();
+                    if ls.is_empty() {
+                        "INFO".to_owned()
+                    } else {
+                        ls.to_owned()
+                    }
+                });
             let tag = captures.name("tag").map(to_string);
             let message = captures.name("message").map(to_string);
 
@@ -193,7 +201,7 @@ mod test {
 
     #[tokio::test]
     async fn consoled_test() {
-        let raw = r#"2025-02-05T05:58:40+00:00 f692999d0e99 INFO [ring.logger:0] - {:email "raviteja@bytebeam.io", :request-id 11644, :name "RaviTeja K", :ring.logger/ms 109, :status 200, :uri "/api/v2/devices", :server-name "stage.bytebeam.io", :ring.logger/type :finish, :request-method :get}"#;
+        let raw = r#"2025-02-05T05:58:40+00:00 consoled INFO [ring.logger:0] - {:email "raviteja@bytebeam.io", :request-id 11644, :name "RaviTeja K", :ring.logger/ms 109, :status 200, :uri "/api/v2/devices", :server-name "stage.bytebeam.io", :ring.logger/type :finish, :request-method :get}"#;
         let lines = BufReader::new(raw.as_bytes()).lines();
         let mut parser = LogParser::new(
             lines,
@@ -201,7 +209,18 @@ mod test {
             Regex::new(r"^(?P<year>\d+)-(?P<month>\d+)-(?P<day>\d+)T(?P<hour>\d+):(?P<minute>\d+):(?P<second>\d+)").unwrap(),
             true,
         );
-        dbg!(parser.next().await);
+        let entry = parser.next().await.unwrap();
+        assert_eq!(
+            entry,
+            LogEntry {
+                line: raw.to_owned(),
+                tag: Some("consoled".to_owned()),
+                level: Some("INFO".to_owned()),
+                timestamp: 1738735120000,
+                message: Some(r#"[ring.logger:0] - {:email "raviteja@bytebeam.io", :request-id 11644, :name "RaviTeja K", :ring.logger/ms 109, :status 200, :uri "/api/v2/devices", :server-name "stage.bytebeam.io", :ring.logger/type :finish, :request-method :get}"#.to_owned()),
+            }
+        );
+        assert!(parser.next().await.is_none());
     }
 
     #[tokio::test]
@@ -373,8 +392,58 @@ mod test {
 
         assert!(parser.next().await.is_none());
     }
+
+    #[tokio::test]
+    async fn parse_dbc_log_lines() {
+        let raw = r#"2025-03-17 07:19:55.212 INFO     [naveentest,ea3e95b7-a186-49d8-a389-b5576443771d,0] [413.861s] Offset: 2025-03-17 07:13:01.351000"#;
+        let lines = BufReader::new(raw.as_bytes()).lines();
+
+        let log_template = Regex::new(r#"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)\s+(?P<level>\S+)\s+\[(?P<tag>[^\]]+)\]\s+(?P<message>.*)$"#).unwrap();
+        let timestamp_template = Regex::new(r#"^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2}) (?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})\.\d+$"#).unwrap();
+        let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template, true);
+
+        let entry = parser.next().await.unwrap();
+        assert_eq!(
+            entry,
+            LogEntry {
+                level: Some("INFO".to_string()),
+                line: raw.to_owned(),
+                timestamp: 1742195995000,
+                message: Some("[413.861s] Offset: 2025-03-17 07:13:01.351000".to_string()),
+                tag: Some("naveentest,ea3e95b7-a186-49d8-a389-b5576443771d,0".to_string())
+            }
+        );
+
+        assert!(parser.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn parse_pg_log_lines() {
+        let raw = r#"2025-03-17 09:15:50.759 UTC [60183] STATEMENT:  select idd from st4_device_metadata ;"#;
+        let lines = BufReader::new(raw.as_bytes()).lines();
+
+        let log_template = Regex::new(r#"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)(?P<tag> )UTC(?P<level>) \[\d+\] (?P<message>.*)$"#).unwrap();
+        let timestamp_template = Regex::new(r#"^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2}) (?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})\.\d+$"#).unwrap();
+        let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template, true);
+
+        let entry = parser.next().await.unwrap();
+        assert_eq!(
+            entry,
+            LogEntry {
+                level: Some("INFO".to_string()),
+                line: raw.to_owned(),
+                timestamp: 1742199601000,
+                message: Some(r#"HINT:  Perhaps you meant to reference the column "st4_device_metadata.id"."#.to_string()),
+                tag: Some(" ".to_string())
+            }
+        );
+
+        assert!(parser.next().await.is_none());
+    }
 }
 
+/**
+*/
 #[derive(Clone, Debug, Deserialize)]
 pub struct LogReaderConfig {
     pub cmd: Vec<String>,
