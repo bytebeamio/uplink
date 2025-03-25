@@ -437,6 +437,10 @@ impl DownloadState {
             u => u,
         };
 
+        let file_path = path.join(&meta.file_name);
+        let _ = remove_file(&file_path);
+        let _ = remove_dir_all(&file_path);
+
         check_disk_size(config, &meta)?;
 
         let url = meta.url.clone();
