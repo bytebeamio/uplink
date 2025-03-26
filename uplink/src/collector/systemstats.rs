@@ -473,6 +473,7 @@ impl StatCollector {
         sys.refresh_networks();
         sys.refresh_memory();
         sys.refresh_cpu();
+        sys.refresh_components_list();
         sys.refresh_components();
 
         let mut map = HashMap::new();
@@ -595,6 +596,7 @@ impl StatCollector {
 
     // Refresh component stats
     fn update_component_stats(&mut self) -> Result<(), Error> {
+        self.sys.refresh_components_list();
         self.sys.refresh_components();
         let timestamp = clock() as u64;
         for comp_data in self.sys.components().iter() {
