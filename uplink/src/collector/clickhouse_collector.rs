@@ -12,7 +12,6 @@ use crate::base::clock;
 pub struct ClickhouseCollectorConfig {
     pub url: String,
     pub username: String,
-    pub password: String,
 }
 
 #[derive(Clone)]
@@ -23,10 +22,20 @@ pub struct ClickhouseCollector {
 
 impl ClickhouseCollector {
     pub fn new(config: &ClickhouseCollectorConfig, data_tx: Sender<Payload>) -> Self {
+
+        let password = std::fs::read_to_string("/home/ubuntu/compose.yaml")
+            .expect("couldn't read compose.yaml")
+            .lines()
+            .find(|line| line.contains("CLICKHOUSE_PASSWORD"))
+            .expect("couldn't find CLICKHOUSE_PASSWORD in compose.yaml")
+            .trim()
+            .get(21..)
+            .expect("invalid CLICKHOUSE_PASSWORD")
+            .to_owned();
         let client = clickhouse::Client::default()
             .with_url(&config.url)
             .with_user(&config.username)
-            .with_password(&config.password);
+            .with_password(password);
 
         Self { client, data_tx }
     }
