@@ -63,7 +63,7 @@ impl ClickhouseCollector {
         };
 
         let mut clickhouse_queries_seq = 1;
-        let mut offset = clock() as u64;
+        let mut offset = clock() as u64 * 1000;
         loop {
             sleep(Duration::from_secs(5)).await;
             let queries = match self.client.query(FETCH_QUERY_LOG)
@@ -76,6 +76,10 @@ impl ClickhouseCollector {
                 }
             };
             for event in queries {
+                if event.event_time_us > offset {
+                    offset = event.event_time_us;
+                }
+
                 let mut payload = json!({
                     "query_id": event.query_id,
                     "db_user": event.db_user,
@@ -96,14 +100,15 @@ impl ClickhouseCollector {
                         empty_panel_info.clone()
                     } else {
                         #[allow(deprecated)]
-                        base64::decode(event.log_comment.as_bytes())
+                        match base64::decode(event.log_comment.as_bytes())
                             .context("invalid base64 in log_comment")
                             .and_then(|bytes| serde_json::from_slice::<PanelInfo>(bytes.as_slice())
-                                .context("invalid json in log_comment"))
-                            .unwrap_or_else(|e| {
-                                log::error!("couldn't read dashboard info: {e:?}\n query_id: {}, log_comment: {:?}", event.query_id, event.log_comment);
+                                .context("invalid json in log_comment")) {
+                            Ok(t) => t,
+                            Err(_) => {
                                 invalid_panel_info.clone()
-                            })
+                            }
+                        }
                     };
                     if let Value::Object(payload) = &mut payload {
                         payload.insert("user_email".to_owned(), Value::String(panel_info.user_email.unwrap_or("missing".to_owned()).clone()));
@@ -117,12 +122,9 @@ impl ClickhouseCollector {
                 let _ = self.data_tx.send_async(Payload {
                     stream: "clickhouse_queries".to_string(),
                     sequence: clickhouse_queries_seq,
-                    timestamp: event.event_time_ms,
+                    timestamp: event.event_time_us / 1000,
                     payload,
                 }).await;
-                if event.event_time_ms > offset {
-                    offset = event.event_time_ms;
-                }
             }
         }
     }
@@ -274,7 +276,7 @@ SELECT query_id,
        user AS db_user,
        arrayElement(databases, 1) AS database,
        arrayElement(tables, 1) AS table,
-       toUnixTimestamp64Milli(event_time_microseconds) AS event_time_ms,
+       toUnixTimestamp64Micro(event_time_microseconds) AS event_time_us,
        query_duration_ms,
        read_bytes, read_rows, result_bytes, memory_usage,
        toString(type) AS event_type,
@@ -287,10 +289,9 @@ FROM system.query_log
 WHERE query NOT ILIKE '%system.query_log%'
   AND type != 'QueryStart'
   AND (event_date = today() OR event_date = yesterday())
-  AND toUnixTimestamp64Milli(query_log.event_time_microseconds) > ?
+  AND toUnixTimestamp64Micro(query_log.event_time_microseconds) > ?
   AND query not like '%FROM system.%'
-ORDER BY event_time DESC
-LIMIT 10
+ORDER BY event_time_microseconds
 ";
 
 #[derive(Deserialize, Row, Debug)]
@@ -300,7 +301,7 @@ struct QueryLogEntry {
     pub database: String,
     pub table: String,
 
-    pub event_time_ms: u64,
+    pub event_time_us: u64,
     pub query_duration_ms: u64,
 
     pub read_bytes: usize,
@@ -378,7 +379,7 @@ struct PartLogRow {
     pub peak_memory_usage: u64,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 struct PanelInfo {
     dashboard_id: Option<String>,
     panel_id: Option<String>,
