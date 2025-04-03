@@ -57,9 +57,7 @@ reqwest = { version = "0.11", default-features = false, features = [
 ] }
 rsa = { version = "0.9.6", features = ["sha2"] }
 # systemstats
-#sysinfo = { git = "https://github.com/bytebeamio/sysinfo", rev = "ae1ee2c4c0bbea7a3aa58bd9b151fb80342ed8cd" }
-sysinfo = { git = "https://github.com/bytebeamio/sysinfo", rev = "f2f31f17ea82f6e75982e6c758603ef43215e74a" }
-#sysinfo = { git = "https://github.com/bytebeamio/sysinfo", rev = "9e6661d570e8b8b0d3e62ca1cc84a2371b9f1624" }
+sysinfo = { git = "https://github.com/bytebeamio/sysinfo", rev = "fe6ee39f08123ffc35f740d41f35f8574fb57ffb" }
 # logcat
 lazy_static = "1.4.0"
 # installer
