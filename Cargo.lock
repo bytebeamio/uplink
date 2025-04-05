@@ -2874,7 +2874,21 @@ checksum = "2047c6ded9c721764247e62cd3b03c09ffc529b2ba5b10ec482ae507a4a70160"
 [[package]]
 name = "sysinfo"
 version = "0.26.9"
-source = "git+https://github.com/bytebeamio/sysinfo#f2f31f17ea82f6e75982e6c758603ef43215e74a"
+source = "git+https://github.com/bytebeamio/sysinfo?rev=fe6ee39f08123ffc35f740d41f35f8574fb57ffb#fe6ee39f08123ffc35f740d41f35f8574fb57ffb"
+dependencies = [
+ "cfg-if 1.0.0",
+ "core-foundation-sys",
+ "libc",
+ "ntapi",
+ "once_cell",
+ "rayon",
+ "winapi 0.3.9",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.26.9"
+source = "git+https://github.com/bytebeamio/sysinfo#ae1ee2c4c0bbea7a3aa58bd9b151fb80342ed8cd"
 dependencies = [
  "cfg-if 1.0.0",
  "core-foundation-sys",
@@ -2930,7 +2944,7 @@ dependencies = [
  "serde_json",
  "simplelog",
  "structopt",
- "sysinfo 0.26.9",
+ "sysinfo 0.26.9 (git+https://github.com/bytebeamio/sysinfo)",
  "thiserror",
  "tokio 1.39.3",
  "tokio-stream",
@@ -3323,12 +3337,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trait_enum"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "130dd741d3c71f76d031e58caffff3624eaaa2db9bd8c4b05406a71885300fc7"
-
-[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3484,7 +3492,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "uplink"
-version = "2.18.3"
+version = "2.18.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3516,7 +3524,7 @@ dependencies = [
  "signal-hook",
  "signal-hook-tokio",
  "structopt",
- "sysinfo 0.26.9",
+ "sysinfo 0.26.9 (git+https://github.com/bytebeamio/sysinfo?rev=fe6ee39f08123ffc35f740d41f35f8574fb57ffb)",
  "tar",
  "tempdir",
  "thiserror",
@@ -3526,7 +3534,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util 0.7.11",
  "tracing-subscriber",
- "trait_enum",
  "tunshell-client",
  "vergen",
 ]

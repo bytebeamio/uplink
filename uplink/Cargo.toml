@@ -1,6 +1,6 @@
 [package]
 name = "uplink"
-version = "2.18.3"
+version = "2.18.4"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 edition = "2021"
 
@@ -47,7 +47,6 @@ fake = { version = "2.5.0", features = ["derive"] }
 rand = { workspace = true }
 # downloader
 fs2 = "0.4"
-trait_enum = "0.5.0"
 replace_with = "0.1.7"
 futures-util = { workspace = true }
 hex = "0.4"
@@ -58,7 +57,7 @@ reqwest = { version = "0.11", default-features = false, features = [
 ] }
 rsa = { version = "0.9.6", features = ["sha2"] }
 # systemstats
-sysinfo = { git = "https://github.com/bytebeamio/sysinfo", ref = "v0.26.9-bugfixes" }
+sysinfo = { git = "https://github.com/bytebeamio/sysinfo", rev = "fe6ee39f08123ffc35f740d41f35f8574fb57ffb" }
 # logcat
 lazy_static = "1.4.0"
 # installer
