@@ -5,14 +5,14 @@ on:
     types: [published]
 
 jobs:
-  build-uplink:
-    name: Build uplink (x86_64-unknown-linux-musl)
+  build-release:
+    name: Build release for x86_64-unknown-linux-musl
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -20,8 +20,16 @@ jobs:
           override: true
           target: x86_64-unknown-linux-musl
 
-      - name: Build uplink binary
-        run: cargo build --release --target x86_64-unknown-linux-musl --bin uplink
+      - name: Use Cross
+        shell: bash
+        run: |
+          cargo install cross
+          echo "CARGO=cross" >> $GITHUB_ENV
+          echo "TARGET_FLAGS=--target x86_64-unknown-linux-musl" >> $GITHUB_ENV
+          echo "TARGET_DIR=./target/x86_64-unknown-linux-musl" >> $GITHUB_ENV
+
+      - name: Build release binary
+        run: cross build --release ${{ env.TARGET_FLAGS }}
 
       - name: Strip binary
         run: strip target/x86_64-unknown-linux-musl/release/uplink
@@ -29,7 +37,7 @@ jobs:
       - name: Rename binary
         run: mv target/x86_64-unknown-linux-musl/release/uplink uplink-x86_64-unknown-linux-musl
 
-      - name: Upload release artifact
+      - name: Upload release archive
         uses: softprops/action-gh-release@v1
         with:
           files: uplink-x86_64-unknown-linux-musl
