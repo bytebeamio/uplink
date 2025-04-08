@@ -64,7 +64,7 @@ lazy_static = "1.4.0"
 tar = "0.4"
 clickhouse = { version = "=0.13.1", features = ["rustls-tls"] }
 
-time = { version = "0.3", features = ["serde"] }
+time = { version = "0.3", features = ["serde", "parsing"] }
 base64 = "0.22.1"
 
 [target.'cfg(unix)'.dependencies]

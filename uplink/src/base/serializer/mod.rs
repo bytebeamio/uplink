@@ -170,19 +170,18 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     fn create_storage_for_stream(&self, config: &StreamConfig) -> StorageEnum {
-        let persistence = config.persistence.unwrap_or(self.config.default_persistence);
-        if persistence.max_file_count == 0 {
-            StorageEnum::InMemory(storage::InMemoryStorage::new(config.name.as_str(), persistence.max_file_size, self.config.mqtt.max_packet_size))
+        if config.persistence.max_file_count == 0 {
+            StorageEnum::InMemory(storage::InMemoryStorage::new(config.name.as_str(), config.persistence.max_file_size, self.config.mqtt.max_packet_size))
         } else {
             match storage::DirectoryStorage::new(
                 self.config.persistence_path.join(config.name.as_str()),
-                persistence.max_file_size, persistence.max_file_count,
+                config.persistence.max_file_size, config.persistence.max_file_count,
                 self.config.mqtt.max_packet_size,
             ) {
                 Ok(s) => StorageEnum::Directory(s),
                 Err(e) => {
                     log::error!("Failed to initialize disk backed storage for {} : {e}, falling back to in memory persistence", config.name);
-                    StorageEnum::InMemory(storage::InMemoryStorage::new(config.name.as_str(), persistence.max_file_size, self.config.mqtt.max_packet_size))
+                    StorageEnum::InMemory(storage::InMemoryStorage::new(config.name.as_str(), config.persistence.max_file_size, self.config.mqtt.max_packet_size))
                 }
             }
         }

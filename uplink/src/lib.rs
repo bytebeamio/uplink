@@ -324,7 +324,7 @@ impl Uplink {
         }
 
         if let Some(clickhouse_metrics) = self.config.clickhouse_metrics.as_ref() {
-            let collector = ClickhouseCollector::new(clickhouse_metrics, bridge_tx.data_tx.clone());
+            let collector = ClickhouseCollector::new(clickhouse_metrics.clone(), bridge_tx.data_tx.clone());
             thread::spawn(move || collector.start());
         }
 
@@ -529,10 +529,6 @@ const DEFAULT_CONFIG: &str = r#"
     script_runner = []
     action_redirections = {}
 
-    [default_persistence]
-    max_file_size = 0
-    max_file_count = 0
-
     [mqtt]
     max_packet_size = 256000
     max_inflight = 100
@@ -639,7 +635,6 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
         ] {
             config.stream_metrics.blacklist.push(stream_name.to_owned());
             let stream_config = StreamConfig {
-                name: stream_name.to_owned(),
                 topic: format!(
                     "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
                 ),
@@ -654,7 +649,6 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
     if let Some(batch_size) = config.logging.as_ref().and_then(|c| c.stream_size) {
         let stream_config =
             config.streams.entry("logs".to_string()).or_insert_with(|| StreamConfig {
-                name: "logs".to_owned(),
                 topic: format!(
                     "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
                 ),

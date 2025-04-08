@@ -1,9 +1,11 @@
-use std::time::Duration;
+use std::collections::HashMap;
+use std::time::{Duration, SystemTime};
 use anyhow::Context;
 use clickhouse::Row;
 use flume::Sender;
 use serde::Deserialize;
 use serde_json::{json, Number, Value};
+use time::format_description;
 use tokio::time::sleep;
 use crate::base::bridge::Payload;
 use crate::base::clock;
@@ -12,18 +14,22 @@ use crate::base::clock;
 pub struct ClickhouseCollectorConfig {
     pub url: String,
     pub username: String,
+    pub client_name: String,
+    pub compose_file: String,
 }
 
 #[derive(Clone)]
 pub struct ClickhouseCollector {
     client: clickhouse::Client,
+    http_client: reqwest::Client,
     data_tx: Sender<Payload>,
+    password: String,
+    config: ClickhouseCollectorConfig,
 }
 
 impl ClickhouseCollector {
-    pub fn new(config: &ClickhouseCollectorConfig, data_tx: Sender<Payload>) -> Self {
-
-        let password = std::fs::read_to_string("/home/ubuntu/compose.yaml")
+    pub fn new(config: ClickhouseCollectorConfig, data_tx: Sender<Payload>) -> Self {
+        let password = std::fs::read_to_string(&config.compose_file)
             .expect("couldn't read compose.yaml")
             .lines()
             .find(|line| line.contains("CLICKHOUSE_PASSWORD"))
@@ -35,18 +41,20 @@ impl ClickhouseCollector {
         let client = clickhouse::Client::default()
             .with_url(&config.url)
             .with_user(&config.username)
-            .with_password(password);
+            .with_password(&password);
+        let http_client = reqwest::Client::new();
 
-        Self { client, data_tx }
+        Self { client, http_client, data_tx, config, password }
     }
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) {
         let _ = tokio::join!(
-            tokio::task::spawn(self.clone().query_log_monitor()),
-            tokio::task::spawn(self.clone().active_processes_monitor()),
-            tokio::task::spawn(self.clone().large_tables_monitor()),
-            tokio::task::spawn(self.clone().part_log_monitor()),
+            // tokio::task::spawn(self.clone().query_log_monitor()),
+            // tokio::task::spawn(self.clone().active_processes_monitor()),
+            // tokio::task::spawn(self.clone().large_tables_monitor()),
+            tokio::task::spawn(self.clone().monitor_log_tables()),
+            tokio::task::spawn(self.clone().monitor_snapshot_tables()),
         );
     }
 
@@ -78,6 +86,9 @@ impl ClickhouseCollector {
             for event in queries {
                 if event.event_time_us > offset {
                     offset = event.event_time_us;
+                }
+                if event.read_bytes <= 1000 {
+                    continue;
                 }
 
                 let mut payload = json!({
@@ -268,6 +279,129 @@ impl ClickhouseCollector {
             sleep(Duration::from_secs(30)).await;
         }
     }
+
+    async fn monitor_log_tables(self) {
+        #[derive(Default)]
+        struct TableState {
+            name: &'static str,
+            filter: &'static str,
+            columns: &'static str,
+            offset: u64,
+            sequence: u32,
+        }
+        let mut tables = vec![
+            TableState { name: "query_log", filter: "WHERE read_bytes > 100000 OR exception !+ '' OR type > 2 OR query_duration_ms > 100", columns: "tables, type, event_time, query_duration_ms, query_id, query, read_bytes, current_database, query_kind, exception_code, exception, stack_trace, databases, written_rows, memory_usage", ..Default::default() },
+            TableState { name: "metric_log", filter: "TRUE", columns: "event_time, event_date, ProfileEvent_Query, ProfileEvent_OSCPUVirtualTimeMicroseconds, CurrentMetric_Query, CurrentMetric_Merge, ProfileEvent_SelectedBytes, ProfileEvent_OSIOWaitMicroseconds, ProfileEvent_OSCPUWaitMicroseconds, ProfileEvent_OSReadBytes, ProfileEvent_OSReadChars, CurrentMetric_MemoryTracking, ProfileEvent_SelectedRows, ProfileEvent_InsertedRows, ProfileEvent_ReadBufferFromS3Microseconds, ProfileEvent_ReadBufferFromS3RequestsErrors, ProfileEvent_ReadBufferFromS3Bytes, CurrentMetric_FilesystemCacheSize, ProfileEvent_DiskS3PutObject, ProfileEvent_DiskS3UploadPart, ProfileEvent_DiskS3CreateMultipartUpload, ProfileEvent_DiskS3CompleteMultipartUpload, ProfileEvent_DiskS3GetObject, ProfileEvent_DiskS3HeadObject, ProfileEvent_DiskS3ListObjects, ProfileEvent_CachedReadBufferReadFromCacheBytes, ProfileEvent_CachedReadBufferReadFromSourceBytes, CurrentMetric_TCPConnection, CurrentMetric_MySQLConnection, CurrentMetric_HTTPConnection, CurrentMetric_InterserverConnection, hostname, ProfileEvent_Query, CurrentMetric_Query, ProfileEvent_QueryTimeMicroseconds, ProfileEvent_OSCPUWaitMicroseconds, ProfileEvent_QueryMemoryLimitExceeded", ..Default::default() },
+            TableState { name: "part_log", filter: "TRUE", columns: "query_id, event_type, merge_algorithm, event_time, database, table, part_name, part_type, disk_name, rows, error, exception", ..Default::default() },
+        ];
+
+        loop {
+            for table in tables.iter_mut() {
+                let select_clause = table.columns;
+                let query = format!(
+                    "SELECT {}, toUnixTimestamp64Milli(event_time_microseconds) as event_time_millis FROM system.{} WHERE event_time_microseconds > toDateTime64({}, 3) AND {} FORMAT JSONEachRow",
+                    select_clause, table.name, table.offset, table.filter
+                );
+
+                match self.execute_query(&query).await
+                {
+                    Ok(rows) => {
+                        for row in rows {
+                            let json: Value = serde_json::from_str(&row).unwrap();
+                            let event_time = json["event_time_millis"].as_u64().unwrap();
+                            if event_time > table.offset {
+                                table.offset = event_time;
+                            }
+                            table.sequence += 1;
+                            let payload = Payload {
+                                stream: format!("{}_system_{}", self.config.client_name, table),
+                                sequence: table.sequence,
+                                timestamp: event_time,
+                                payload: json,
+                            };
+                            let _ = self.data_tx.send_async(payload).await;
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("couldn’t fetch system.{}: {:?}", table, e);
+                    }
+                }
+            }
+            sleep(Duration::from_secs(30)).await;  // Chill for 30 secs
+        }
+    }
+
+    async fn monitor_snapshot_tables(self) {
+        struct TableState {
+            name: &'static str,
+            columns: &'static str,
+            interval: u64,
+            sequence: u32,
+            last_push_at: SystemTime,
+        }
+        let now = SystemTime::now();
+        let mut tables = vec![
+            TableState { name: "tables", columns: "database, table, create_table_query, total_rows", interval: 60 * 15, sequence: 0, last_push_at: now },
+            TableState { name: "parts", columns: "modification_time, table, database, active", interval: 60, sequence: 0, last_push_at: now },
+            TableState { name: "disks", columns: "total_space, free_space, keep_free_space", interval: 3600, sequence: 0, last_push_at: now },
+            TableState { name: "asynchronous_metrics", columns: "value, metric", interval: 60, sequence: 0, last_push_at: now },
+            TableState { name: "merge_tree_settings", columns: "value, name", interval: 60 * 10, sequence: 0, last_push_at: now },
+            TableState { name: "macros", columns: "macro, substitutions", interval: 60 * 5, sequence: 0, last_push_at: now },
+            TableState { name: "dashboards", columns: "*", interval: 3600, sequence: 0, last_push_at: now },
+            TableState { name: "mutations", columns: "*", interval: 3, sequence: 0, last_push_at: now },
+            TableState { name: "processes", columns: "*", interval: 3, sequence: 0, last_push_at: now },
+        ];
+
+        loop {
+            for table in tables.iter_mut() {
+                let now = SystemTime::now();
+                if now.duration_since(table.last_push_at)
+                    .map(|d| d > Duration::from_secs(table.interval))
+                    .unwrap_or(true) {
+                    table.last_push_at = now;
+                    let query = format!("SELECT {} FROM system.{} FORMAT JSONEachRow", table.columns, table.name);
+                    match self.execute_query(&query).await
+                    {
+                        Ok(rows) => {
+                            let snapshot_time = clock() as u64;
+                            for row in rows {
+                                let mut json: serde_json::Value = serde_json::from_str(&row).unwrap();
+                                json["snapshot_time"] = json!(snapshot_time);  // Add snapshot_time
+                                table.sequence += 1;
+                                let payload = Payload {
+                                    stream: format!("{}_system_{}", self.config.client_name, table),
+                                    sequence: table.sequence,
+                                    timestamp: snapshot_time,
+                                    payload: json,
+                                };
+                                let _ = self.data_tx.send_async(payload).await;
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("couldn’t fetch system.{}: {:?}", table, e);
+                        }
+                    }
+                }
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    async fn execute_query(&self, query: &str) -> Result<Vec<String>, reqwest::Error> {
+        let response = self.http_client
+            .post(&self.config.url)
+            .basic_auth(&self.config.username, Some(&self.password))
+            .body(format!("{query} settings log_queries=0,log_profile_events=0", ))
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?
+            .lines()
+            .map(|s| s.to_owned())
+            .collect();
+        Ok(response)
+    }
 }
 
 // language=clickhouse
@@ -385,3 +519,4 @@ struct PanelInfo {
     panel_id: Option<String>,
     user_email: Option<String>,
 }
+
