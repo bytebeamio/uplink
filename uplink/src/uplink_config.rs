@@ -65,7 +65,7 @@ pub struct StreamConfig {
     #[serde(default)]
     pub compression: Compression,
     #[serde(default)]
-    pub persistence: Persistence,
+    pub persistence: Option<Persistence>,
     #[serde(default)]
     pub priority: u8,
 }
@@ -78,7 +78,7 @@ impl Default for StreamConfig {
             batch_size: MAX_BATCH_SIZE,
             flush_period: default_timeout(),
             compression: Compression::Disabled,
-            persistence: Persistence::default(),
+            persistence: None,
             priority: 0,
         }
     }
@@ -251,6 +251,7 @@ pub struct Config {
     pub streams: HashMap<String, StreamConfig>,
     #[serde(default = "default_persistence_path")]
     pub persistence_path: PathBuf,
+    pub default_persistence: Persistence,
     pub stream_metrics: StreamMetricsConfig,
     pub serializer_metrics: SerializerMetricsConfig,
     pub mqtt_metrics: MqttMetricsConfig,
