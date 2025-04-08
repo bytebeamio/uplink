@@ -169,7 +169,7 @@ impl<C: MqttClient> Serializer<C> {
     }
 
     fn create_storage_for_stream(&self, config: &StreamConfig) -> StorageEnum {
-        let persistence = config.persistence.unwrap();
+        let persistence = config.persistence.unwrap_or(self.config.default_persistence);
         if persistence.max_file_count == 0 {
             StorageEnum::InMemory(storage::InMemoryStorage::new(config.name.as_str(), persistence.max_file_size, self.config.mqtt.max_packet_size))
         } else {

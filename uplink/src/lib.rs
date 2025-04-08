@@ -609,11 +609,6 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
             };
         }
         replace_topic_placeholders(&mut stream_config.topic);
-        
-        // Apply default persistence if stream doesn't have its own
-        if stream_config.persistence.is_none() {
-            stream_config.persistence = Some(config.default_persistence.clone());
-        }
     }
 
     replace_topic_placeholders(&mut config.stream_metrics.bridge_topic);
@@ -637,7 +632,6 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
                     "/tenants/{tenant_id}/devices/{device_id}/events/{stream_name}/jsonarray"
                 ),
                 batch_size: config.system_stats.stream_size.unwrap_or(MAX_BATCH_SIZE),
-                persistence: Some(config.default_persistence.clone()),
                 ..Default::default()
             };
             config.streams.insert(stream_name.to_owned(), stream_config);
@@ -653,7 +647,6 @@ fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceC
                     "/tenants/{tenant_id}/devices/{device_id}/events/logs/jsonarray"
                 ),
                 batch_size: 32,
-                persistence: Some(config.default_persistence.clone()),
                 ..Default::default()
             });
         stream_config.batch_size = batch_size;
