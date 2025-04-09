@@ -58,7 +58,11 @@ impl Stream {
         let device_id = device_id.into();
 
         let topic = format!("/tenants/{project_id}/devices/{device_id}/events/{stream_name}/jsonarray");
-        let config = StreamConfig { topic, ..Default::default() };
+        let config = StreamConfig {
+            name: stream_name.clone(),
+            topic,
+            ..Default::default()
+        };
 
         Stream::new(stream_name, config, tx)
     }

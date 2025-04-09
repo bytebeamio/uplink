@@ -73,7 +73,7 @@ pub struct StreamConfig {
 impl Default for StreamConfig {
     fn default() -> Self {
         Self {
-            name: "".to_owned(),
+            name: "<default>".to_owned(),
             topic: "".to_owned(),
             batch_size: MAX_BATCH_SIZE,
             flush_period: default_timeout(),
