@@ -292,7 +292,7 @@ impl ClickhouseCollector {
         let beginning = clock() as u64 - 10000;
         let mut tables = vec![
             TableState { name: "metric_log", filter: "TRUE", columns: "event_time, event_date, ProfileEvent_Query, ProfileEvent_OSCPUVirtualTimeMicroseconds, CurrentMetric_Query, CurrentMetric_Merge, ProfileEvent_SelectedBytes, ProfileEvent_OSIOWaitMicroseconds, ProfileEvent_OSCPUWaitMicroseconds, ProfileEvent_OSReadBytes, ProfileEvent_OSReadChars, CurrentMetric_MemoryTracking, ProfileEvent_SelectedRows, ProfileEvent_InsertedRows, ProfileEvent_ReadBufferFromS3Microseconds, ProfileEvent_ReadBufferFromS3RequestsErrors, ProfileEvent_ReadBufferFromS3Bytes, CurrentMetric_FilesystemCacheSize, ProfileEvent_DiskS3PutObject, ProfileEvent_DiskS3UploadPart, ProfileEvent_DiskS3CreateMultipartUpload, ProfileEvent_DiskS3CompleteMultipartUpload, ProfileEvent_DiskS3GetObject, ProfileEvent_DiskS3HeadObject, ProfileEvent_DiskS3ListObjects, ProfileEvent_CachedReadBufferReadFromCacheBytes, ProfileEvent_CachedReadBufferReadFromSourceBytes, CurrentMetric_TCPConnection, CurrentMetric_MySQLConnection, CurrentMetric_HTTPConnection, CurrentMetric_InterserverConnection, hostname, ProfileEvent_Query, CurrentMetric_Query, ProfileEvent_QueryTimeMicroseconds, ProfileEvent_OSCPUWaitMicroseconds, ProfileEvent_QueryMemoryLimitExceeded", offset: beginning, ..Default::default() },
-            TableState { name: "query_log", filter: "read_bytes > 100000 OR exception != '' OR type > 2 OR query_duration_ms > 50", columns: "tables, type, event_time, query_duration_ms, query_id, query, read_bytes, current_database, query_kind, exception_code, exception, stack_trace, databases, written_rows, memory_usage", offset: beginning, ..Default::default() },
+            TableState { name: "query_log", filter: "read_bytes > 100000 OR exception != '' OR type > 2 OR query_duration_ms > 1000", columns: "tables, type, event_time, query_duration_ms, query_id, query, read_bytes, current_database, query_kind, exception_code, exception, stack_trace, databases, written_rows, memory_usage", offset: beginning, ..Default::default() },
             TableState { name: "part_log", filter: "TRUE", columns: "query_id, event_type, merge_algorithm, event_time, database, table, part_name, part_type, disk_name, rows, error, exception", offset: beginning, ..Default::default() },
         ];
 
@@ -427,6 +427,7 @@ SELECT query_id,
 FROM system.query_log
 WHERE query NOT ILIKE '%system.query_log%'
   AND type != 'QueryStart'
+  AND query_duration_ms > 1000
   AND (event_date = today() OR event_date = yesterday())
   AND toUnixTimestamp64Micro(query_log.event_time_microseconds) > ?
   AND query not like '%FROM system.%'
