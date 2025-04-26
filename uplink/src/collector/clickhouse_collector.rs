@@ -9,6 +9,7 @@ use time::format_description;
 use tokio::time::sleep;
 use crate::base::bridge::Payload;
 use crate::base::clock;
+use serde_with::{serde_as, DisplayFromStr};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ClickhouseCollectorConfig {
@@ -29,15 +30,16 @@ pub struct ClickhouseCollector {
 
 impl ClickhouseCollector {
     pub fn new(config: ClickhouseCollectorConfig, data_tx: Sender<Payload>) -> Self {
-        let password = std::fs::read_to_string(&config.compose_file)
-            .expect("couldn't read compose.yaml")
-            .lines()
-            .find(|line| line.contains("CLICKHOUSE_PASSWORD"))
-            .expect("couldn't find CLICKHOUSE_PASSWORD in compose.yaml")
-            .trim()
-            .get(21..)
-            .expect("invalid CLICKHOUSE_PASSWORD")
-            .to_owned();
+        // let password = std::fs::read_to_string(&config.compose_file)
+        //     .expect("couldn't read compose.yaml")
+        //     .lines()
+        //     .find(|line| line.contains("CLICKHOUSE_PASSWORD"))
+        //     .expect("couldn't find CLICKHOUSE_PASSWORD in compose.yaml")
+        //     .trim()
+        //     .get(21..)
+        //     .expect("invalid CLICKHOUSE_PASSWORD")
+        //     .to_owned();
+        let password = "".to_owned();
         let client = clickhouse::Client::default()
             .with_url(&config.url)
             .with_user(&config.username)
@@ -53,8 +55,9 @@ impl ClickhouseCollector {
             tokio::task::spawn(self.clone().query_log_monitor()),
             tokio::task::spawn(self.clone().active_processes_monitor()),
             tokio::task::spawn(self.clone().large_tables_monitor()),
-            tokio::task::spawn(self.clone().monitor_log_tables()),
-            tokio::task::spawn(self.clone().monitor_snapshot_tables()),
+            tokio::task::spawn(self.clone().query_delta_monitor()),
+            // tokio::task::spawn(self.clone().monitor_log_tables()),
+            // tokio::task::spawn(self.clone().monitor_snapshot_tables()),
         );
     }
 
@@ -389,6 +392,47 @@ impl ClickhouseCollector {
         }
     }
 
+    async fn query_delta_monitor(self) {
+        let mut sequence = 0;
+        loop {
+            let now = clock() as u64;
+            let window_start = now - 60000;
+
+            let query = format!("{} FORMAT JSONEachRow", FETCH_QUERY_COUNTS.replace("?", &window_start.to_string()));
+            match self.execute_query(&query).await {
+                Ok(rows) => {
+                    if let Some(row) = rows.first() {
+                        match serde_json::from_str::<QueryCounts>(row) {
+                            Ok(counts) => {
+                                sequence += 1;
+                                let backlog = counts.started_count.saturating_sub(counts.finished_count);
+
+                                let payload = Payload {
+                                    stream: "clickhouse_query_delta".to_owned(),
+                                    sequence,
+                                    timestamp: now,
+                                    payload: json!({
+                                        "query_delta": backlog,
+                                    }),
+                                };
+                                let _ = self.data_tx.send_async(payload).await;
+                            },
+                            Err(e) => {
+                                log::error!("couldn't parse query counts: {e:?}");
+                            }
+                        }
+                    } else {
+                        log::error!("no query counts returned");
+                    }
+                }
+                Err(e) => {
+                    log::error!("couldn't fetch query counts: {e:?}");
+                }
+            }
+            sleep(Duration::from_secs(60)).await;
+        }
+    }
+
     async fn execute_query(&self, query: &str) -> Result<Vec<String>, String> {
         let res = self.http_client
             .post(&self.config.url)
@@ -526,3 +570,23 @@ struct PanelInfo {
     user_email: Option<String>,
 }
 
+
+// language=clickhouse
+const FETCH_QUERY_COUNTS: &'static str = "
+SELECT
+    countIf(type = 'QueryStart') AS started_count,
+    countIf(type != 'QueryStart') AS finished_count
+FROM system.query_log
+WHERE (event_date = today() OR event_date = yesterday())
+  AND toUnixTimestamp64Milli(event_time_microseconds) >= ?
+  AND query NOT ILIKE '%system.query_log%'
+";
+
+#[serde_as]
+#[derive(Deserialize, Row, Debug)]
+struct QueryCounts {
+    #[serde_as(as = "DisplayFromStr")]
+    pub started_count: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub finished_count: u64,
+}
