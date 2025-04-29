@@ -30,16 +30,16 @@ pub struct ClickhouseCollector {
 
 impl ClickhouseCollector {
     pub fn new(config: ClickhouseCollectorConfig, data_tx: Sender<Payload>) -> Self {
-        // let password = std::fs::read_to_string(&config.compose_file)
-        //     .expect("couldn't read compose.yaml")
-        //     .lines()
-        //     .find(|line| line.contains("CLICKHOUSE_PASSWORD"))
-        //     .expect("couldn't find CLICKHOUSE_PASSWORD in compose.yaml")
-        //     .trim()
-        //     .get(21..)
-        //     .expect("invalid CLICKHOUSE_PASSWORD")
-        //     .to_owned();
-        let password = "".to_owned();
+        let password = std::fs::read_to_string(&config.compose_file)
+            .expect("couldn't read compose.yaml")
+            .lines()
+            .find(|line| line.contains("CLICKHOUSE_PASSWORD"))
+            .expect("couldn't find CLICKHOUSE_PASSWORD in compose.yaml")
+            .trim()
+            .get(21..)
+            .expect("invalid CLICKHOUSE_PASSWORD")
+            .to_owned();
+        // let password = "".to_owned();
         let client = clickhouse::Client::default()
             .with_url(&config.url)
             .with_user(&config.username)
@@ -52,10 +52,11 @@ impl ClickhouseCollector {
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) {
         let _ = tokio::join!(
-            tokio::task::spawn(self.clone().query_log_monitor()),
-            tokio::task::spawn(self.clone().active_processes_monitor()),
-            tokio::task::spawn(self.clone().large_tables_monitor()),
-            tokio::task::spawn(self.clone().query_delta_monitor()),
+            // tokio::task::spawn(self.clone().query_log_monitor()),
+            // tokio::task::spawn(self.clone().active_processes_monitor()),
+            // tokio::task::spawn(self.clone().large_tables_monitor()),
+            // tokio::task::spawn(self.clone().fragmented_tables_monitor()),
+            // tokio::task::spawn(self.clone().query_delta_monitor()),
             // tokio::task::spawn(self.clone().monitor_log_tables()),
             // tokio::task::spawn(self.clone().monitor_snapshot_tables()),
         );
@@ -178,18 +179,67 @@ impl ClickhouseCollector {
     async fn large_tables_monitor(self) {
         let mut sequence = 0;
         loop {
-            match self.client.query(FETCH_LARGE_TABLES)
-                .fetch_all::<LargeTables>()
-                .await {
-                Ok(stats) => {
-                    sequence += 1;
+            match self.execute_query(FETCH_LARGE_TABLES).await {
+                Ok(rows) => {
+                    let mut t_idx = 0;
                     let mut payload = serde_json::Map::new();
-                    for (idx, info) in stats.iter().enumerate() {
-                        payload.insert(format!("table_{}", idx+1), Value::String(format!("{}.`{}`", info.database, info.table)));
-                        payload.insert(format!("table_{}_size", idx+1), Value::Number(Number::from_i128(info.size_on_disk as _).unwrap()));
+                    for row in rows {
+                        match serde_json::from_str::<PartsTableInfo>(&row) {
+                            Ok(pti) => {
+                                sequence += 1;
+                                t_idx += 1;
+                                payload.insert(format!("table_{}", t_idx), Value::String(format!("{}.`{}`", pti.database, pti.table)));
+                                payload.insert(format!("table_{}_size", t_idx), Value::Number(Number::from_i128(pti.size_on_disk as _).unwrap()));
+                                payload.insert(format!("table_{}_parts_count", t_idx), Value::Number(Number::from_i128(pti.parts_count as _).unwrap()));
+                                payload.insert(format!("table_{}_max_parts_count", t_idx), Value::Number(Number::from_i128(pti.max_parts_count as _).unwrap()));
+                                payload.insert(format!("table_{}_parts_fraction", t_idx), Value::Number(Number::from_f64(pti.parts_fraction as _).unwrap()));
+                            }
+                            Err(_) => {
+                                log::error!("received invalid json from clickhouse: {row:?}");
+                            }
+                        }
                     }
                     let payload = Payload {
                         stream: "clickhouse_large_tables".to_owned(),
+                        sequence,
+                        timestamp: clock() as _,
+                        payload: Value::Object(payload),
+                    };
+                    let _ = self.data_tx.send_async(payload).await;
+                }
+                Err(e) => {
+                    log::error!("couldn't fetch table size stats: {e:?}");
+                }
+            }
+            sleep(Duration::from_secs(60)).await;
+        }
+    }
+
+    async fn fragmented_tables_monitor(self) {
+        let mut sequence = 0;
+        loop {
+            match self.execute_query(FETCH_FRAGMENTED_TABLES).await {
+                Ok(rows) => {
+                    let mut t_idx = 0;
+                    let mut payload = serde_json::Map::new();
+                    for row in rows {
+                        match serde_json::from_str::<PartsTableInfo>(&row) {
+                            Ok(pti) => {
+                                sequence += 1;
+                                t_idx += 1;
+                                payload.insert(format!("table_{}", t_idx), Value::String(format!("{}.`{}`", pti.database, pti.table)));
+                                payload.insert(format!("table_{}_size", t_idx), Value::Number(Number::from_i128(pti.size_on_disk as _).unwrap()));
+                                payload.insert(format!("table_{}_parts_count", t_idx), Value::Number(Number::from_i128(pti.parts_count as _).unwrap()));
+                                payload.insert(format!("table_{}_max_parts_count", t_idx), Value::Number(Number::from_i128(pti.max_parts_count as _).unwrap()));
+                                payload.insert(format!("table_{}_parts_fraction", t_idx), Value::Number(Number::from_f64(pti.parts_fraction as _).unwrap()));
+                            }
+                            Err(_) => {
+                                log::error!("received invalid json from clickhouse: {row:?}");
+                            }
+                        }
+                    }
+                    let payload = Payload {
+                        stream: "clickhouse_fragmented_tables".to_owned(),
                         sequence,
                         timestamp: clock() as _,
                         payload: Value::Object(payload),
@@ -471,7 +521,7 @@ SELECT query_id,
 FROM system.query_log
 WHERE query NOT ILIKE '%system.query_log%'
   AND type != 'QueryStart'
-  AND query_duration_ms > 1000
+  AND (query_duration_ms > 40 OR read_bytes > 10240000)
   AND (event_date = today() OR event_date = yesterday())
   AND toUnixTimestamp64Micro(query_log.event_time_microseconds) > ?
   AND query not like '%FROM system.%'
@@ -526,24 +576,53 @@ struct ProcessesSnapshot {
 // language=clickhouse
 const FETCH_LARGE_TABLES: &'static str = "
 SELECT
-    database,
-    table,
-    sum(bytes_on_disk) AS size_on_disk
+    database, table,
+    sum(bytes_on_disk) AS size_on_disk,
+    count(*) AS parts_count,
+    (SELECT IF(toInt32OrZero(value) = 0, 3000, toInt32OrZero(value))
+                   FROM system.merge_tree_settings
+                   WHERE name = 'parts_to_throw_insert') AS max_parts_count,
+    parts_count / max_parts_count AS parts_fraction
 FROM system.parts
-WHERE active
-GROUP BY
-    database,
-    table
+WHERE active AND database != 'system'
+GROUP BY database, table
 ORDER BY size_on_disk DESC
 LIMIT 5
+FORMAT JSONEachRow
+SETTINGS log_queries=0,log_profile_events=0
 ";
 
+#[serde_as]
 #[derive(Deserialize, Row, Debug)]
-struct LargeTables {
+struct PartsTableInfo {
     pub database: String,
     pub table: String,
+    #[serde_as(as = "DisplayFromStr")]
     pub size_on_disk: i64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub parts_count: i64,
+    pub max_parts_count: i64,
+    pub parts_fraction: f64,
 }
+
+// language=clickhouse
+const FETCH_FRAGMENTED_TABLES: &str = "
+SELECT
+    database, table,
+    sum(bytes_on_disk) AS size_on_disk,
+    count(*) AS parts_count,
+    (SELECT IF(toInt32OrZero(value) = 0, 3000, toInt32OrZero(value))
+                   FROM system.merge_tree_settings
+                   WHERE name = 'parts_to_throw_insert') AS max_parts_count,
+    parts_count / max_parts_count AS parts_fraction
+FROM system.parts
+WHERE active AND database != 'system'
+GROUP BY database, table
+ORDER BY parts_fraction DESC
+LIMIT 5
+FORMAT JSONEachRow
+SETTINGS log_queries=0,log_profile_events=0
+";
 
 // language=clickhouse
 const FETCH_MERGE_INFO: &'static str = "
@@ -589,4 +668,10 @@ struct QueryCounts {
     pub started_count: u64,
     #[serde_as(as = "DisplayFromStr")]
     pub finished_count: u64,
+}
+
+#[test]
+fn t1() {
+    let row = "{\"database\":\"reactlabs\",\"table\":\"uplink_stream_metrics\",\"size_on_disk\":\"3756189639\",\"parts_count\":\"1621\",\"parts_fraction\":54.03333333333333}";
+    dbg!(serde_json::from_str::<PartsTableInfo>(row));
 }
