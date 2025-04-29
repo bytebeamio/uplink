@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use anyhow::Context;
-use clickhouse::Row;
 use flume::Sender;
 use serde::Deserialize;
 use serde_json::{json, Number, Value};
@@ -21,7 +20,6 @@ pub struct ClickhouseCollectorConfig {
 
 #[derive(Clone)]
 pub struct ClickhouseCollector {
-    client: clickhouse::Client,
     http_client: reqwest::Client,
     data_tx: Sender<Payload>,
     password: String,
@@ -40,19 +38,15 @@ impl ClickhouseCollector {
             .expect("invalid CLICKHOUSE_PASSWORD")
             .to_owned();
         // let password = "".to_owned();
-        let client = clickhouse::Client::default()
-            .with_url(&config.url)
-            .with_user(&config.username)
-            .with_password(&password);
         let http_client = reqwest::Client::new();
 
-        Self { client, http_client, data_tx, config, password }
+        Self { http_client, data_tx, config, password }
     }
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn start(self) {
         let _ = tokio::join!(
-            // tokio::task::spawn(self.clone().query_log_monitor()),
+            tokio::task::spawn(self.clone().query_log_monitor()),
             // tokio::task::spawn(self.clone().active_processes_monitor()),
             // tokio::task::spawn(self.clone().large_tables_monitor()),
             // tokio::task::spawn(self.clone().fragmented_tables_monitor()),
@@ -78,10 +72,20 @@ impl ClickhouseCollector {
         let mut offset = clock() as u64 * 1000;
         loop {
             sleep(Duration::from_secs(5)).await;
-            let queries = match self.client.query(FETCH_QUERY_LOG)
-                .bind(offset)
-                .fetch_all::<QueryLogEntry>().await {
-                Ok(queries) => queries,
+            let queries = match self.execute_query(&FETCH_QUERY_LOG.replace("?", &offset.to_string())).await {
+                Ok(rows) => {
+                    let mut result = Vec::new();
+                    for row in rows.into_iter() {
+                        match serde_json::from_str::<QueryLogEntry>(&row) {
+                            Ok(row) => result.push(row),
+                            Err(e) => {
+                                log::error!("received invalid row when fetching query log: {row:?} {e:?}");
+                                continue;
+                            }
+                        }
+                    }
+                    result
+                },
                 Err(e) => {
                     log::error!("couldn't fetch queries: {e:?}");
                     continue;
@@ -147,32 +151,42 @@ impl ClickhouseCollector {
     async fn active_processes_monitor(self) {
         let mut active_processes_seq = 0;
         loop {
-            match self.client.query(FETCH_PROCESSES_STATS)
-                .fetch_one::<ProcessesSnapshot>()
-                .await {
-                Ok(stats) => {
-                    active_processes_seq += 1;
-                    let payload = Payload {
-                        stream: "clickhouse_processes".to_owned(),
-                        sequence: active_processes_seq,
-                        timestamp: clock() as _,
-                        payload: json!({
-                            "processes_count": stats.processes_count,
-                            "max_elapsed_ms": (stats.max_elapsed_secs * 1000.0) as u64,
-                            "max_elapsed_query_id": stats.max_elapsed_query_id,
-                            "total_memory_usage": stats.total_memory_usage,
-                            "max_memory_usage": stats.max_memory_usage,
-                            "max_memory_query_id": stats.max_memory_query_id,
-                        }),
-                    };
-                    // dbg!(&payload);
-                    let _ = self.data_tx.send_async(payload).await;
+            sleep(Duration::from_secs(1)).await;
+            match self.execute_query(FETCH_PROCESSES_STATS).await {
+                Ok(rows) => {
+                    if rows.len() == 0 {
+                        log::error!("fetch processes stats query returned nothing!");
+                        continue;
+                    }
+                    let row = rows.get(1).unwrap().as_str();
+                    match serde_json::from_str::<ProcessesSnapshot>(row) {
+                        Ok(stats) => {
+                            active_processes_seq += 1;
+                            let payload = Payload {
+                                stream: "clickhouse_processes".to_owned(),
+                                sequence: active_processes_seq,
+                                timestamp: clock() as _,
+                                payload: json!({
+                                    "processes_count": stats.processes_count,
+                                    "max_elapsed_ms": (stats.max_elapsed_secs * 1000.0) as u64,
+                                    "max_elapsed_query_id": stats.max_elapsed_query_id,
+                                    "total_memory_usage": stats.total_memory_usage,
+                                    "max_memory_usage": stats.max_memory_usage,
+                                    "max_memory_query_id": stats.max_memory_query_id,
+                                }),
+                            };
+                            let _ = self.data_tx.send_async(payload).await;
+                        }
+                        Err(e) => {
+                            log::error!("received invalid json when fetching processes stats: {row:?} {e:?}");
+                        }
+                    }
                 }
                 Err(e) => {
-                    log::error!("couldn't fetch process stats: {e:?}");
+                    log::error!("couldn't fetch processes stats: {e:?}");
+                    continue;
                 }
             }
-            sleep(Duration::from_secs(1)).await;
         }
     }
 
@@ -258,10 +272,20 @@ impl ClickhouseCollector {
         let mut sequence = 1;
         let mut offset = clock() as u64 - 10000;
         loop {
-            let merges = match self.client.query(FETCH_MERGE_INFO)
-                .bind(offset)
-                .fetch_all::<PartLogRow>().await {
-                Ok(queries) => queries,
+            let merges = match self.execute_query(&FETCH_MERGE_INFO.replace("?", &offset.to_string())).await {
+                Ok(rows) => {
+                    let mut result = Vec::new();
+                    for row in rows.into_iter() {
+                        match serde_json::from_str::<PartLogRow>(&row) {
+                            Ok(row) => result.push(row),
+                            Err(e) => {
+                                log::error!("received invalid row when fetching merge info: {row:?} {e:?}");
+                                continue;
+                            }
+                        }
+                    }
+                    result
+                }
                 Err(e) => {
                     log::error!("couldn't fetch queries: {e:?}");
                     continue;
@@ -353,7 +377,7 @@ impl ClickhouseCollector {
             for table in tables.iter_mut() {
                 let select_clause = table.columns;
                 let query = format!(
-                    "SELECT {}, toUnixTimestamp64Milli(event_time_microseconds) as event_time_millis FROM system.{} WHERE event_time_microseconds > toDateTime64({} / 1000.0, 3) AND ({}) FORMAT JSONEachRow",
+                    "SELECT {}, toUnixTimestamp64Milli(event_time_microseconds) as event_time_millis FROM system.{} WHERE event_time_microseconds > toDateTime64({} / 1000.0, 3) AND ({})",
                     select_clause, table.name, table.offset, table.filter
                 );
                 match self.execute_query(&query).await
@@ -414,7 +438,7 @@ impl ClickhouseCollector {
                     .map(|d| d > Duration::from_secs(table.interval))
                     .unwrap_or(true) {
                     table.last_push_at = now;
-                    let query = format!("SELECT {} FROM system.{} FORMAT JSONEachRow", table.columns, table.name);
+                    let query = format!("SELECT {} FROM system.{}", table.columns, table.name);
                     match self.execute_query(&query).await
                     {
                         Ok(rows) => {
@@ -448,7 +472,7 @@ impl ClickhouseCollector {
             let now = clock() as u64;
             let window_start = now - 60000;
 
-            let query = format!("{} FORMAT JSONEachRow", FETCH_QUERY_COUNTS.replace("?", &window_start.to_string()));
+            let query = FETCH_QUERY_COUNTS.replace("?", &window_start.to_string());
             match self.execute_query(&query).await {
                 Ok(rows) => {
                     if let Some(row) = rows.first() {
@@ -487,7 +511,7 @@ impl ClickhouseCollector {
         let res = self.http_client
             .post(&self.config.url)
             .basic_auth(&self.config.username, Some(&self.password))
-            .body(format!("{query} settings log_queries=0,log_profile_events=0"))
+            .body(format!("{query} FORMAT JSONEachRow settings log_queries=0,log_profile_events=0"))
             .send()
             .await
             .map_err(|e| format!("Request error: {}", e))?;
@@ -528,19 +552,26 @@ WHERE query NOT ILIKE '%system.query_log%'
 ORDER BY event_time_microseconds
 ";
 
-#[derive(Deserialize, Row, Debug)]
+#[serde_as]
+#[derive(Deserialize, Debug)]
 struct QueryLogEntry {
     pub query_id: String,
     pub db_user: String,
     pub database: String,
     pub table: String,
 
+    #[serde_as(as = "DisplayFromStr")]
     pub event_time_us: u64,
+    #[serde_as(as = "DisplayFromStr")]
     pub query_duration_ms: u64,
 
+    #[serde_as(as = "DisplayFromStr")]
     pub read_bytes: usize,
+    #[serde_as(as = "DisplayFromStr")]
     pub read_rows: usize,
+    #[serde_as(as = "DisplayFromStr")]
     pub result_bytes: usize,
+    #[serde_as(as = "DisplayFromStr")]
     pub memory_usage: usize,
 
     pub event_type: String,
@@ -563,7 +594,7 @@ FROM system.processes
 WHERE query NOT LIKE '%FROM system.processes%'
 ";
 
-#[derive(Deserialize, Row, Debug)]
+#[derive(Deserialize, Debug)]
 struct ProcessesSnapshot {
     pub processes_count: u64,
     pub max_elapsed_secs: f64,
@@ -588,12 +619,10 @@ WHERE active AND database != 'system'
 GROUP BY database, table
 ORDER BY size_on_disk DESC
 LIMIT 5
-FORMAT JSONEachRow
-SETTINGS log_queries=0,log_profile_events=0
 ";
 
 #[serde_as]
-#[derive(Deserialize, Row, Debug)]
+#[derive(Deserialize, Debug)]
 struct PartsTableInfo {
     pub database: String,
     pub table: String,
@@ -620,8 +649,6 @@ WHERE active AND database != 'system'
 GROUP BY database, table
 ORDER BY parts_fraction DESC
 LIMIT 5
-FORMAT JSONEachRow
-SETTINGS log_queries=0,log_profile_events=0
 ";
 
 // language=clickhouse
@@ -631,7 +658,7 @@ FROM system.part_log
 WHERE toUnixTimestamp64Milli(event_time_microseconds) > ?
 ";
 
-#[derive(Deserialize, Row, Debug)]
+#[derive(Deserialize, Debug)]
 struct PartLogRow {
     pub query_id: String,
     pub event_type: u8,
@@ -662,7 +689,7 @@ WHERE (event_date = today() OR event_date = yesterday())
 ";
 
 #[serde_as]
-#[derive(Deserialize, Row, Debug)]
+#[derive(Deserialize, Debug)]
 struct QueryCounts {
     #[serde_as(as = "DisplayFromStr")]
     pub started_count: u64,
@@ -672,6 +699,6 @@ struct QueryCounts {
 
 #[test]
 fn t1() {
-    let row = "{\"database\":\"reactlabs\",\"table\":\"uplink_stream_metrics\",\"size_on_disk\":\"3756189639\",\"parts_count\":\"1621\",\"parts_fraction\":54.03333333333333}";
-    dbg!(serde_json::from_str::<PartsTableInfo>(row));
+    let row = "{\"query_id\":\"50177688-4c54-4467-a6b1-7b0dca253bdf\",\"db_user\":\"freshbus_user\",\"database\":\"system\",\"table\":\"system.one\",\"event_time_us\":\"1745926178139679\",\"query_duration_ms\":\"42\",\"read_bytes\":\"1567994\",\"read_rows\":\"7099\",\"result_bytes\":\"2005\",\"memory_usage\":\"4200855\",\"event_type\":\"QueryFinish\",\"log_comment\":\"eyJkYXNoYm9hcmRfaWQiOiIxMDA4IiwicGFuZWxfaWQiOiIwZmE5NTg5Ml9jMDI0XzQyMmRfOTAxOF8wOWYwOTUwNjlmYWQiLCJ1c2VyX2VtYWlsIjoic3VuZWV0aGFAbWFydmVsZXZtLmluIn0=\",\"query_kind\":\"Select\",\"error\":\"\",\"query\":\"select currentUser() user, timezone() timezone, version() version, toUInt8(ifnull((select value from system.settings where name = 'readonly'), '0')) as readonly, toInt8(ifnull((select value from system.settings where name = 'throw_on_unsupported_query_inside_transaction'), '-1')) as throw_on_unsupported_query_inside_transaction, (ifnull((select value from system.settings where name = 'wait_changes_become_visible_after_commit_mode'), '')) as wait_changes_become_visible_after_commit_mode,toInt8(ifnull((select value from system.settings where name = 'implicit_transaction'), '-1')) as implicit_transaction, toUInt64(ifnull((select value from system.settings where name = 'max_insert_block_size'), '0')) as max_insert_block_size, toInt8(ifnull((select value from system.settings where name = 'allow_experimental_lightweight_delete'), '-1')) as allow_experimental_lightweight_delete, (ifnull((select value from system.settings where name = 'custom_jdbc_config'), '')) as custom_jdbc_config FORMAT RowBinaryWithNamesAndTypes\",\"interface\":\"HTTP\"}";
+    dbg!(serde_json::from_str::<QueryLogEntry>(row));
 }
