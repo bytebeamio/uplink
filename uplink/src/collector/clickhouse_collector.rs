@@ -548,7 +548,7 @@ WHERE database != 'system'
   AND type != 'QueryStart'
   AND (query_duration_ms > 100 OR read_bytes > 10240000 OR type = 'ExceptionWhileProcessing')
   AND (event_date = today() OR event_date = yesterday())
-  AND toUnixTimestamp64Micro(query_log.event_time_microseconds) > ?
+  AND toUnixTimestamp64Micro(query_log.event_time_microseconds) >= ?
 ORDER BY event_time_microseconds
 ";
 
@@ -659,7 +659,7 @@ LIMIT 5
 const FETCH_MERGE_INFO: &'static str = "
 SELECT query_id, event_type, toUnixTimestamp64Milli(event_time_microseconds) as event_time_ms, duration_ms, size_in_bytes, read_bytes, peak_memory_usage
 FROM system.part_log
-WHERE toUnixTimestamp64Milli(event_time_microseconds) > ?
+WHERE toUnixTimestamp64Milli(event_time_microseconds) >= ?
 ";
 
 #[derive(Deserialize, Debug)]
