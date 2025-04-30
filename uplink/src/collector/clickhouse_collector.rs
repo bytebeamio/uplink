@@ -273,6 +273,7 @@ impl ClickhouseCollector {
         let mut sequence = 1;
         let mut offset = clock() as u64 - 10000;
         loop {
+            sleep(Duration::from_secs(30)).await;
             let merges = match self.execute_query(&FETCH_MERGE_INFO.replace("?", &offset.to_string())).await {
                 Ok(rows) => {
                     let mut result = Vec::new();
@@ -354,7 +355,47 @@ impl ClickhouseCollector {
                 }),
             };
             let _ = self.data_tx.send_async(payload).await;
-            sleep(Duration::from_secs(30)).await;
+        }
+    }
+
+    async fn query_delta_monitor(self) {
+        let mut sequence = 0;
+        loop {
+            let now = clock() as u64;
+            let window_start = now - 60000;
+
+            let query = FETCH_QUERY_COUNTS.replace("?", &window_start.to_string());
+            match self.execute_query(&query).await {
+                Ok(rows) => {
+                    if let Some(row) = rows.first() {
+                        match serde_json::from_str::<QueryCounts>(row) {
+                            Ok(counts) => {
+                                sequence += 1;
+                                let backlog = counts.started_count.saturating_sub(counts.finished_count);
+
+                                let payload = Payload {
+                                    stream: "clickhouse_query_delta".to_owned(),
+                                    sequence,
+                                    timestamp: now,
+                                    payload: json!({
+                                        "query_delta": backlog,
+                                    }),
+                                };
+                                let _ = self.data_tx.send_async(payload).await;
+                            },
+                            Err(e) => {
+                                log::error!("couldn't parse query counts: {e:?}");
+                            }
+                        }
+                    } else {
+                        log::error!("no query counts returned");
+                    }
+                }
+                Err(e) => {
+                    log::error!("couldn't fetch query counts: {e:?}");
+                }
+            }
+            sleep(Duration::from_secs(60)).await;
         }
     }
 
@@ -467,47 +508,6 @@ impl ClickhouseCollector {
         }
     }
 
-    async fn query_delta_monitor(self) {
-        let mut sequence = 0;
-        loop {
-            let now = clock() as u64;
-            let window_start = now - 60000;
-
-            let query = FETCH_QUERY_COUNTS.replace("?", &window_start.to_string());
-            match self.execute_query(&query).await {
-                Ok(rows) => {
-                    if let Some(row) = rows.first() {
-                        match serde_json::from_str::<QueryCounts>(row) {
-                            Ok(counts) => {
-                                sequence += 1;
-                                let backlog = counts.started_count.saturating_sub(counts.finished_count);
-
-                                let payload = Payload {
-                                    stream: "clickhouse_query_delta".to_owned(),
-                                    sequence,
-                                    timestamp: now,
-                                    payload: json!({
-                                        "query_delta": backlog,
-                                    }),
-                                };
-                                let _ = self.data_tx.send_async(payload).await;
-                            },
-                            Err(e) => {
-                                log::error!("couldn't parse query counts: {e:?}");
-                            }
-                        }
-                    } else {
-                        log::error!("no query counts returned");
-                    }
-                }
-                Err(e) => {
-                    log::error!("couldn't fetch query counts: {e:?}");
-                }
-            }
-            sleep(Duration::from_secs(60)).await;
-        }
-    }
-
     async fn execute_query(&self, query: &str) -> Result<Vec<String>, String> {
         let res = self.http_client
             .post(&self.config.url)
@@ -544,12 +544,11 @@ SELECT query_id,
        query,
        multiIf(interface = 1, 'TCP', interface = 2, 'HTTP', 'UNKNOWN') AS interface
 FROM system.query_log
-WHERE query NOT ILIKE '%system.query_log%'
+WHERE database != 'system'
   AND type != 'QueryStart'
-  AND (query_duration_ms > 40 OR read_bytes > 10240000)
+  AND (query_duration_ms > 100 OR read_bytes > 10240000)
   AND (event_date = today() OR event_date = yesterday())
   AND toUnixTimestamp64Micro(query_log.event_time_microseconds) > ?
-  AND query not like '%FROM system.%'
 ORDER BY event_time_microseconds
 ";
 
