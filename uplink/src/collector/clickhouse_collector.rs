@@ -546,7 +546,7 @@ SELECT query_id,
 FROM system.query_log
 WHERE database != 'system'
   AND type != 'QueryStart'
-  AND (query_duration_ms > 100 OR read_bytes > 10240000)
+  AND (query_duration_ms > 100 OR read_bytes > 10240000 OR type = 'ExceptionWhileProcessing')
   AND (event_date = today() OR event_date = yesterday())
   AND toUnixTimestamp64Micro(query_log.event_time_microseconds) > ?
 ORDER BY event_time_microseconds
