@@ -47,10 +47,11 @@ impl ClickhouseCollector {
     pub async fn start(self) {
         let _ = tokio::join!(
             tokio::task::spawn(self.clone().query_log_monitor()),
-            // tokio::task::spawn(self.clone().active_processes_monitor()),
-            // tokio::task::spawn(self.clone().large_tables_monitor()),
-            // tokio::task::spawn(self.clone().fragmented_tables_monitor()),
-            // tokio::task::spawn(self.clone().query_delta_monitor()),
+            tokio::task::spawn(self.clone().active_processes_monitor()),
+            tokio::task::spawn(self.clone().part_log_monitor()),
+            tokio::task::spawn(self.clone().large_tables_monitor()),
+            tokio::task::spawn(self.clone().fragmented_tables_monitor()),
+            tokio::task::spawn(self.clone().query_delta_monitor()),
             // tokio::task::spawn(self.clone().monitor_log_tables()),
             // tokio::task::spawn(self.clone().monitor_snapshot_tables()),
         );
@@ -158,7 +159,7 @@ impl ClickhouseCollector {
                         log::error!("fetch processes stats query returned nothing!");
                         continue;
                     }
-                    let row = rows.get(1).unwrap().as_str();
+                    let row = rows.get(0).unwrap().as_str();
                     match serde_json::from_str::<ProcessesSnapshot>(row) {
                         Ok(stats) => {
                             active_processes_seq += 1;
@@ -594,12 +595,16 @@ FROM system.processes
 WHERE query NOT LIKE '%FROM system.processes%'
 ";
 
+#[serde_as]
 #[derive(Deserialize, Debug)]
 struct ProcessesSnapshot {
+    #[serde_as(as = "DisplayFromStr")]
     pub processes_count: u64,
     pub max_elapsed_secs: f64,
     pub max_elapsed_query_id: String,
+    #[serde_as(as = "DisplayFromStr")]
     pub total_memory_usage: u64,
+    #[serde_as(as = "DisplayFromStr")]
     pub max_memory_usage: u64,
     pub max_memory_query_id: String,
 }
