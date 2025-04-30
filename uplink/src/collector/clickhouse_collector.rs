@@ -52,6 +52,8 @@ impl ClickhouseCollector {
             tokio::task::spawn(self.clone().large_tables_monitor()),
             tokio::task::spawn(self.clone().fragmented_tables_monitor()),
             tokio::task::spawn(self.clone().query_delta_monitor()),
+            tokio::task::spawn(self.clone().failed_inserts_monitor()),
+            tokio::task::spawn(self.clone().modification_queries_monitor()),
             // tokio::task::spawn(self.clone().monitor_log_tables()),
             // tokio::task::spawn(self.clone().monitor_snapshot_tables()),
         );
@@ -146,6 +148,91 @@ impl ClickhouseCollector {
                     payload,
                 }).await;
             }
+        }
+    }
+
+    async fn modification_queries_monitor(self) {
+        let mut sequence = 0;
+        let mut offset = clock() as u64 - 60000;
+        loop {
+            let q = FETCH_MODIFICATION_QUERIES.replace("?", &offset.to_string());
+            match self.execute_query(&q).await {
+                Ok(rows) => {
+                    for row in rows.into_iter() {
+                        match serde_json::from_str::<ModificationQuery>(&row) {
+                            Ok(row) => {
+                                if row.event_time_ms > offset {
+                                    offset = row.event_time_ms;
+                                }
+                                sequence += 1;
+                                let _ = self.data_tx.send_async(Payload {
+                                    stream: "clickhouse_modification_queries".to_string(),
+                                    sequence,
+                                    timestamp: row.event_time_ms,
+                                    payload: json!({
+                                        "query_id": row.query_id,
+                                        "query": row.query,
+                                        "db_user": row.user,
+                                        "event_type": row.event_type,
+                                        "query_duration_ms": row.query_duration_ms,
+                                    }),
+                                }).await;
+                            },
+                            Err(e) => {
+                                log::error!("received invalid row from clickhouse when monitoring modification queries: {row:?} {e:?}");
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    log::error!("modification queries monitor query failed: {q:?} {e:?}");
+                }
+            }
+            sleep(Duration::from_secs(60)).await;
+        }
+    }
+
+    async fn failed_inserts_monitor(self) {
+        let mut sequence = 0;
+        let mut offset = clock() as u64 - 60000;
+        loop {
+            let q = FETCH_FAILED_INSERTS.replace("?", &offset.to_string());
+            match self.execute_query(&q).await {
+                Ok(rows) => {
+                    for row in rows.into_iter() {
+                        match serde_json::from_str::<FailedInsert>(&row) {
+                            Ok(row) => {
+                                if row.event_time_ms > offset {
+                                    offset = row.event_time_ms;
+                                }
+                                sequence += 1;
+                                let _ = self.data_tx.send_async(Payload {
+                                    stream: "clickhouse_failed_inserts".to_string(),
+                                    sequence,
+                                    timestamp: row.event_time_ms,
+                                    payload: json!({
+                                        "query_id": row.query_id,
+                                        "database": row.database,
+                                        "table": row.table,
+                                        "written_rows": row.written_rows,
+                                        "query": row.query,
+                                        "db_user": row.user,
+                                        "event_type": row.event_type,
+                                        "query_duration_ms": row.query_duration_ms,
+                                    }),
+                                }).await;
+                            },
+                            Err(e) => {
+                                log::error!("received invalid row from clickhouse when monitoring modification queries: {row:?} {e:?}");
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    log::error!("modification queries monitor query failed: {q:?} {e:?}");
+                }
+            }
+            sleep(Duration::from_secs(60)).await;
         }
     }
 
@@ -699,6 +786,64 @@ struct QueryCounts {
     pub started_count: u64,
     #[serde_as(as = "DisplayFromStr")]
     pub finished_count: u64,
+}
+
+// language=clickhouse
+const FETCH_MODIFICATION_QUERIES: &str = "
+SELECT query_id, query, toUnixTimestamp64Milli(event_time_microseconds) AS event_time_ms, user, toString(type) AS event_type, query_duration_ms
+FROM system.query_log
+WHERE
+    (event_date = today() OR event_date = yesterday()) AND toUnixTimestamp64Milli(event_time_microseconds) >= ?
+    AND type != 'QueryStart'
+    AND ((query ILIKE 'DROP%') OR (query ILIKE 'SYSTEM%') OR (query ILIKE 'ALTER%') OR (query ILIKE 'truncate%'))
+ORDER BY event_time_microseconds
+";
+#[serde_as]
+#[derive(Deserialize, Debug)]
+struct ModificationQuery {
+    pub query_id: String,
+    pub query: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub event_time_ms: u64,
+    pub user: String,
+    pub event_type: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub query_duration_ms: u64,
+}
+
+// language=clickhouse
+const FETCH_FAILED_INSERTS: &str = "
+SELECT
+    query_id, query,
+    arrayElement(databases, 1) AS database,
+    arrayElement(tables, 1) AS table,
+    toUnixTimestamp64Milli(event_time_microseconds) AS event_time_ms,
+    written_rows,
+    user,
+    toString(type) AS event_type,
+    query_duration_ms
+FROM system.query_log
+WHERE
+    (event_date = today() OR event_date = yesterday()) AND toUnixTimestamp64Milli(event_time_microseconds) >= ?
+    AND type = 'ExceptionWhileProcessing'
+    AND query_kind = 'Insert'
+ORDER BY event_time_microseconds
+";
+#[serde_as]
+#[derive(Deserialize, Debug)]
+struct FailedInsert {
+    pub query_id: String,
+    pub query: String,
+    pub database: String,
+    pub table: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub event_time_ms: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub written_rows: u64,
+    pub user: String,
+    pub event_type: String,
+    #[serde_as(as = "DisplayFromStr")]
+    pub query_duration_ms: u64,
 }
 
 #[test]
