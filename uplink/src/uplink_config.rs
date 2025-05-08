@@ -276,6 +276,15 @@ pub struct Config {
     #[serde(default)]
     pub log_reader: HashMap<String, crate::collector::log_reader::LogReaderConfig>,
     pub clickhouse_metrics: Option<ClickhouseCollectorConfig>,
+    pub docker_stats: DockerStatsConfig
+}
+
+#[serde_as]
+#[derive(Default, Clone, Debug, Deserialize)]
+pub struct DockerStatsConfig {
+    pub enabled: bool,
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub interval: Duration,
 }
 
 impl Default for Config {

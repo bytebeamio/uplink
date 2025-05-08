@@ -15,3 +15,4 @@ pub mod tunshell;
 pub mod stdio;
 pub mod log_reader;
 pub mod clickhouse_collector;
+pub mod docker_stats;

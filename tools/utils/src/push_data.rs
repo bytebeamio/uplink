@@ -6,7 +6,6 @@ use structopt::StructOpt;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 use tokio_util::codec::{Framed, LinesCodec};
-use chrono::Utc;
 use uplink::base::clock;
 
 #[derive(Debug, StructOpt)]
@@ -110,6 +109,7 @@ async fn main() {
                     serde_json::Value::String(s)
                 }
                 FieldType::IsoDateTime => {
+                    
                     let dt = Utc::now().to_rfc3339();
                     serde_json::Value::String(dt)
                 }

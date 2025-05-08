@@ -36,6 +36,7 @@ use collector::tunshell::TunshellClient;
 pub use collector::{simulator, tcpjson::TcpJson};
 use crate::base::bridge::stream::MessageBuffer;
 use crate::collector::clickhouse_collector::ClickhouseCollector;
+use crate::collector::docker_stats::DockerStatsCollector;
 use crate::collector::log_reader::LogFileReader;
 use crate::collector::stdio::stdin_collector;
 use crate::uplink_config::{AppConfig, Compression, StreamConfig, MAX_BATCH_SIZE};
@@ -327,6 +328,17 @@ impl Uplink {
             let collector = ClickhouseCollector::new(clickhouse_metrics.clone(), bridge_tx.data_tx.clone());
             thread::spawn(move || collector.start());
         }
+        
+        if self.config.docker_stats.enabled {
+            match DockerStatsCollector::new(self.config.docker_stats.clone()) {
+                Ok(collector) => {
+                    thread::spawn(move || collector.start());
+                }
+                Err(e) => {
+                    log::error!("can't do shit: {e:?}");
+                }
+            }
+        }
 
         if let Some(checker_config) = &self.config.precondition_checks {
             let actions_rx = bridge.register_action_routes(&checker_config.actions)?;
@@ -578,6 +590,10 @@ const DEFAULT_CONFIG: &str = r#"
     enabled = false
     port = 0
     enable_events = false
+    
+    [docker_stats]
+    enabled = false
+    interval = 10
 "#;
 
 fn parse_config(device_json: &str, config_toml: &str) -> Result<(Config, DeviceConfig), Error> {

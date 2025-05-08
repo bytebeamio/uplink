@@ -41,7 +41,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 # built-in collectors
 # tunshell
 tokio-compat-02 = "0.2.0"
-tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "bytebeam-changes" }
+tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "testing-js-sys" }
 # simulator
 fake = { version = "2.5.0", features = ["derive"] }
 rand = { workspace = true }
@@ -51,9 +51,9 @@ replace_with = "0.1.7"
 futures-util = { workspace = true }
 hex = "0.4"
 human_bytes = "0.4"
-reqwest = { version = "0.11", default-features = false, features = [
+reqwest = { git = "https://github.com/seanmonstar/reqwest", rev = "c50e9d3df14c8b63697b865d77dcfa73b09f0884", default-features = false, features = [
     "stream",
-    "rustls-tls",
+    "rustls-tls"
 ] }
 rsa = { version = "0.9.6", features = ["sha2"] }
 # systemstats
