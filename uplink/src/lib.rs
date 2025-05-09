@@ -330,14 +330,24 @@ impl Uplink {
         }
         
         if self.config.docker_stats.enabled {
-            match DockerStatsCollector::new(self.config.docker_stats.clone()) {
-                Ok(collector) => {
-                    thread::spawn(move || collector.start());
-                }
-                Err(e) => {
-                    log::error!("can't do shit: {e:?}");
-                }
-            }
+            let data_tx = bridge_tx.data_tx.clone();
+            let config = self.config.docker_stats.clone();
+            thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_io()
+                    .enable_time()
+                    .build().unwrap();
+                rt.block_on(async move {
+                    match DockerStatsCollector::new(config, data_tx).await {
+                        Ok(collector) => {
+                            collector.start().await;
+                        }
+                        Err(e) => {
+                            log::error!("can't do shit: {e:?}");
+                        }
+                    }
+                })
+            });
         }
 
         if let Some(checker_config) = &self.config.precondition_checks {
