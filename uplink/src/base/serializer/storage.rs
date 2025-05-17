@@ -490,7 +490,7 @@ impl<'a> PersistenceFile<'a> {
         let hash = seahash::hash(&buf[..]);
         file.write_all(&hash.to_be_bytes())?;
         file.write_all(&buf[..])?;
-        file.flush()?;
+        file.sync_data()?;
 
         Ok(())
     }
