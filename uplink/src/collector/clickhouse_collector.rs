@@ -54,8 +54,8 @@ impl ClickhouseCollector {
             tokio::task::spawn(self.clone().query_delta_monitor()),
             tokio::task::spawn(self.clone().failed_inserts_monitor()),
             tokio::task::spawn(self.clone().modification_queries_monitor()),
-            tokio::task::spawn(self.clone().monitor_log_tables()),
-            tokio::task::spawn(self.clone().monitor_snapshot_tables()),
+            // tokio::task::spawn(self.clone().monitor_log_tables()),
+            // tokio::task::spawn(self.clone().monitor_snapshot_tables()),
         );
     }
 

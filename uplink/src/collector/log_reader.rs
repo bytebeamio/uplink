@@ -440,6 +440,30 @@ mod test {
 
         assert!(parser.next().await.is_none());
     }
+
+    #[tokio::test]
+    async fn parse_traefik_log_lines() {
+        let raw = r#"2025-05-16T08:26:04Z DBG github.com/traefik/traefik/v3/pkg/server/service/loadbalancer/wrr/wrr.go:196 > Service selected by WRR: a05865dfc33d322e"#;
+        let lines = BufReader::new(raw.as_bytes()).lines();
+
+        let log_template = Regex::new(r#"^(?P<timestamp>\d+-\d+-\d+T\d+:\d+:\d+)Z (?P<level>\S+) (?P<tag>[^:+]+):\d+ (?P<message>.*)$"#).unwrap();
+        let timestamp_template = Regex::new(r#"^(?P<year>\d+)-(?P<month>\d+)-(?P<day>\d+)T(?P<hour>\d+):(?P<minute>\d+):(?P<second>\d+)$"#).unwrap();
+        let mut parser = LogParser::new(lines, log_template.clone(), timestamp_template, true);
+
+        let entry = parser.next().await.unwrap();
+        assert_eq!(
+            entry,
+            LogEntry {
+                level: Some("INFO".to_string()),
+                line: raw.to_owned(),
+                timestamp: 1747383329000,
+                message: Some(r#"> Service selected by WRR: a05865dfc33d322e"#.to_string()),
+                tag: Some("github.com/traefik/traefik/v3/pkg/server/service/loadbalancer/wrr/wrr.go".to_string())
+            }
+        );
+
+        assert!(parser.next().await.is_none());
+    }
 }
 
 /**
