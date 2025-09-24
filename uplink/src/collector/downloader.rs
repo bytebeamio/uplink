@@ -65,7 +65,6 @@ enum DownloadResult {
 pub struct FileDownloader {
     config: DownloaderConfig,
     actions_rx: Receiver<Action>,
-    action_id: String,
     bridge_tx: BridgeTx,
     client: Client,
     shutdown_rx: Receiver<DownloaderShutdown>,
@@ -102,7 +101,6 @@ impl FileDownloader {
             actions_rx,
             client,
             bridge_tx,
-            action_id: String::default(),
             shutdown_rx,
             disabled,
         })
@@ -116,28 +114,28 @@ impl FileDownloader {
 
         info!("Downloader thread is ready to receive download actions");
         while let Ok(action) = self.actions_rx.recv_async().await {
-            action.action_id.clone_into(&mut self.action_id);
+            let action_id = action.action_id.clone();
             let mut state = match DownloadState::new(action, &self.config) {
                 Ok(s) => s,
                 Err(e) => {
-                    self.forward_error(e).await;
+                    self.bridge_tx.send_action_response(ActionResponse::failure(&action_id, e.to_string())).await;
                     continue;
                 }
             };
 
             // Update action status for process initiated
-            let status = ActionResponse::progress(&self.action_id, "Downloading", 0);
+            let status = ActionResponse::progress(&state.current.action.action_id, "Downloading", 0);
             self.bridge_tx.send_action_response(status).await;
 
             match self.download(&mut state).await {
                 DownloadResult::Ok => {
                     // Forward updated action as part of response
                     let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
-                    let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
+                    let status = ActionResponse::done(&action.action_id, "Downloaded", Some(action));
                     self.bridge_tx.send_action_response(status).await;
                 }
                 DownloadResult::Err(e) => {
-                    self.bridge_tx.send_action_response(ActionResponse::failure(&self.action_id, e)).await;
+                    self.bridge_tx.send_action_response(ActionResponse::failure(&state.current.action.action_id, e)).await;
                 }
                 DownloadResult::Suspended => {
                     break
@@ -158,17 +156,16 @@ impl FileDownloader {
                 return;
             }
         };
-        state.current.action.action_id.clone_into(&mut self.action_id);
 
         match self.download(&mut state).await {
             DownloadResult::Ok => {
                 // Forward updated action as part of response
                 let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
-                let status = ActionResponse::done(&self.action_id, "Downloaded", Some(action));
+                let status = ActionResponse::done(&action.action_id, "Downloaded", Some(action));
                 self.bridge_tx.send_action_response(status).await;
             }
             DownloadResult::Err(e) => {
-                self.bridge_tx.send_action_response(ActionResponse::failure(&self.action_id, e)).await;
+                self.bridge_tx.send_action_response(ActionResponse::failure(&state.current.action.action_id, e)).await;
             }
             DownloadResult::Suspended => {}
         }
@@ -187,7 +184,7 @@ impl FileDownloader {
                     }
                 },
                 Ok(action) = self.actions_rx.recv_async() => {
-                    if action.action_id == self.action_id {
+                    if action.action_id == &state.current.action.action_id {
                         // This handles the edge case when the device is able to receive actions
                         // from the broker but for something goes wrong when pushing action statuses back to the backend
                         // In this case the backend will try sending the same action again
@@ -202,10 +199,10 @@ impl FileDownloader {
                         match serde_json::from_str::<Cancellation>(&action.payload)
                             .context("Invalid cancel action payload")
                             .and_then(|cancellation| {
-                                if cancellation.action_id == self.action_id {
+                                if cancellation.action_id == state.current.action.action_id {
                                     Ok(())
                                 } else {
-                                    Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, self.action_id)))
+                                    Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, &state.current.action.action_id)))
                                 }
                             })
                             .and_then(|_| {
@@ -233,7 +230,7 @@ impl FileDownloader {
             }
         }
 
-        self.bridge_tx.send_action_response(ActionResponse::progress(self.action_id.as_str(), "VerifyingChecksum", 99)).await;
+        self.bridge_tx.send_action_response(ActionResponse::progress(&state.current.action.action_id, "VerifyingChecksum", 99)).await;
         if let Err(e) = state.current.meta.verify_checksum() {
             return DownloadResult::Err(e.to_string());
         }
@@ -284,7 +281,7 @@ impl FileDownloader {
                     // Retry non-status errors
                     Err(e) if !e.is_status() => {
                         let status =
-                            ActionResponse::progress(&self.action_id, "Download Failed", 0)
+                            ActionResponse::progress(&state.current.action.action_id, "Download Failed", 0)
                                 .add_error(e.to_string());
                         self.bridge_tx.send_action_response(status).await;
                         error!("Download failed: {e:?}");
@@ -296,7 +293,7 @@ impl FileDownloader {
                 };
                 if let Some(percentage) = state.write_bytes(&chunk)? {
                     let status =
-                        ActionResponse::progress(&self.action_id, "Downloading", percentage);
+                        ActionResponse::progress(&state.current.action.action_id, "Downloading", percentage);
                     self.bridge_tx.send_action_response(status).await;
                 }
             }
@@ -306,12 +303,6 @@ impl FileDownloader {
         }
 
         Ok(())
-    }
-
-    // Forward errors as action response to bridge
-    async fn forward_error(&mut self, err: Error) {
-        let status = ActionResponse::failure(&self.action_id, err.to_string());
-        self.bridge_tx.send_action_response(status).await;
     }
 }
 
