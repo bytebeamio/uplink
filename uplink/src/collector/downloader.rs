@@ -131,7 +131,8 @@ impl FileDownloader {
                 DownloadResult::Ok => {
                     // Forward updated action as part of response
                     let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
-                    let status = ActionResponse::done(&action.action_id, "Downloaded", Some(action));
+                    let mut status = ActionResponse::new(&action.action_id, "Downloaded", 100, vec![]);
+                    status.done_response = Some(action);
                     self.bridge_tx.send_action_response(status).await;
                 }
                 DownloadResult::Err(e) => {
@@ -161,7 +162,8 @@ impl FileDownloader {
             DownloadResult::Ok => {
                 // Forward updated action as part of response
                 let DownloadState { current: CurrentDownload { action, .. }, .. } = state;
-                let status = ActionResponse::done(&action.action_id, "Downloaded", Some(action));
+                let mut status = ActionResponse::new(&action.action_id, "Downloaded", 100, vec![]);
+                status.done_response = Some(action);
                 self.bridge_tx.send_action_response(status).await;
             }
             DownloadResult::Err(e) => {
@@ -173,66 +175,70 @@ impl FileDownloader {
 
     // Accepts `DownloadState`, sets a timeout for the action
     async fn download(&mut self, state: &mut DownloadState) -> DownloadResult {
-        let shutdown_rx = self.shutdown_rx.clone();
-        loop {
-            select! {
-                o = self.continuous_retry(state) => {
-                    if let Err(e) = o {
-                        return DownloadResult::Err(e.to_string());
-                    } else {
-                        break;
-                    }
-                },
-                Ok(action) = self.actions_rx.recv_async() => {
-                    if action.action_id == &state.current.action.action_id {
-                        // This handles the edge case when the device is able to receive actions
-                        // from the broker but for something goes wrong when pushing action statuses back to the backend
-                        // In this case the backend will try sending the same action again
-                        //
-                        // TODO: Right now we use the action status pushed by device as confirmation that it
-                        // has received the action. It is not very reliable because as of now the action status pipeline can drop messages.
-                        // Would it be better if the backend used MQTT Ack of the action message instead?
-                        log::error!("Backend tried sending the same action again!");
-                    } else if action.name != "cancel_action" {
-                        self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), "Downloader is already occupied")).await;
-                    } else {
-                        match serde_json::from_str::<Cancellation>(&action.payload)
-                            .context("Invalid cancel action payload")
-                            .and_then(|cancellation| {
-                                if cancellation.action_id == state.current.action.action_id {
-                                    Ok(())
-                                } else {
-                                    Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, &state.current.action.action_id)))
-                                }
-                            })
-                            .and_then(|_| {
-                                state.clean()
-                                    .context("Couldn't couldn't perform cleanup")
-                            }) {
-                            Ok(_) => {
-                                self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
-                                return DownloadResult::Err("action has been cancelled!".to_string());
-                            },
-                            Err(e) => {
-                                self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
-                            },
+        if state.bytes_written < state.current.meta.content_length {
+            let shutdown_rx = self.shutdown_rx.clone();
+            loop {
+                select! {
+                    o = self.continuous_retry(state) => {
+                        if let Err(e) = o {
+                            return DownloadResult::Err(e.to_string());
+                        } else {
+                            break;
                         }
-                    }
-                },
+                    },
+                    Ok(action) = self.actions_rx.recv_async() => {
+                        if &action.action_id == &state.current.action.action_id {
+                            // This handles the edge case when the device is able to receive actions
+                            // from the broker but for something goes wrong when pushing action statuses back to the backend
+                            // In this case the backend will try sending the same action again
+                            //
+                            // TODO: Right now we use the action status pushed by device as confirmation that it
+                            // has received the action. It is not very reliable because as of now the action status pipeline can drop messages.
+                            // Would it be better if the backend used MQTT Ack of the action message instead?
+                            log::error!("Backend tried sending the same action again!");
+                        } else if action.name != "cancel_action" {
+                            self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), "Downloader is already occupied")).await;
+                        } else {
+                            match serde_json::from_str::<Cancellation>(&action.payload)
+                                .context("Invalid cancel action payload")
+                                .and_then(|cancellation| {
+                                    if cancellation.action_id == state.current.action.action_id {
+                                        Ok(())
+                                    } else {
+                                        Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, &state.current.action.action_id)))
+                                    }
+                                })
+                                .and_then(|_| {
+                                    state.clean()
+                                        .context("Couldn't couldn't perform cleanup")
+                                }) {
+                                Ok(_) => {
+                                    self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
+                                    return DownloadResult::Err("action has been cancelled!".to_string());
+                                },
+                                Err(e) => {
+                                    self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
+                                },
+                            }
+                        }
+                    },
 
-                Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
-                    if let Err(e) = state.save(&self.config) {
-                        error!("Error saving current_download: {e:?}");
-                    }
+                    Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
+                        if let Err(e) = state.save(&self.config) {
+                            error!("Error saving current_download: {e:?}");
+                        }
 
-                    return DownloadResult::Suspended;
-                },
+                        return DownloadResult::Suspended;
+                    },
+                }
             }
         }
 
         self.bridge_tx.send_action_response(ActionResponse::progress(&state.current.action.action_id, "VerifyingChecksum", 99)).await;
-        if let Err(e) = state.current.meta.verify_checksum() {
-            return DownloadResult::Err(e.to_string());
+        if state.current.meta.checksum.is_some() {
+            if let Err(e) = state.current.meta.verify_checksum() {
+                return DownloadResult::Err(e.to_string());
+            }
         }
         // Update Action payload with `download_path`, i.e. downloaded file's location in fs
         state.current.action.payload = match serde_json::to_string(&state.current.meta) {
@@ -324,9 +330,7 @@ fn create_dirs_with_perms(path: &Path, perms: Permissions) -> std::io::Result<()
 }
 
 /// Creates file to download into
-fn create_file(download_path: &PathBuf, file_name: &str) -> Result<(File, PathBuf), Error> {
-    let mut file_path = download_path.to_owned();
-    file_path.push(file_name);
+fn create_file(file_path: &Path) -> Result<File, Error> {
     // NOTE: if file_path is occupied by a directory due to previous working of uplink, remove it
     if let Ok(f) = metadata(&file_path) {
         if f.is_dir() {
@@ -337,7 +341,7 @@ fn create_file(download_path: &PathBuf, file_name: &str) -> Result<(File, PathBu
     #[cfg(unix)]
     file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666))?;
 
-    Ok((file, file_path))
+    Ok(file)
 }
 
 fn check_disk_size(config: &DownloaderConfig, download: &DownloadFile) -> Result<(), Error> {
@@ -372,14 +376,13 @@ pub struct DownloadFile {
 
 impl DownloadFile {
     fn verify_checksum(&self) -> Result<(), Error> {
-        let Some(checksum) = &self.checksum else { return Ok(()) };
         let path = self.download_path.as_ref().expect("Downloader didn't set \"download_path\"");
         let mut file = File::open(path)?;
         let mut hasher = Sha256::new();
         io::copy(&mut file, &mut hasher)?;
         let hash = hasher.finalize();
 
-        if checksum != &hex::encode(hash) {
+        if self.checksum.as_ref().unwrap() != &hex::encode(hash) {
             return Err(Error::BadChecksum);
         }
 
@@ -429,6 +432,19 @@ impl DownloadState {
         };
 
         let file_path = path.join(&meta.file_name);
+        meta.download_path = Some(file_path.clone());
+        if meta.checksum.is_some() && meta.verify_checksum().is_ok() {
+            // TODO: verify that range of size zero works as expected with consoled, platform,
+            info!("file has already been downloaded and its checksum matches, skipping download...");
+            return Ok(Self {
+                bytes_written: meta.content_length,
+                current: CurrentDownload { action, meta },
+                file: File::open("/dev/null")?,
+                percentage_downloaded: 100,
+                start: Instant::now(),
+            });
+        }
+
         let _ = remove_file(&file_path);
         let _ = remove_dir_all(&file_path);
 
@@ -437,7 +453,7 @@ impl DownloadState {
         let url = meta.url.clone();
 
         // Create file to actually download into
-        let (file, file_path) = create_file(&path, &meta.file_name)?;
+        let file = create_file(&file_path)?;
         // Retry downloading upto 3 times in case of connectivity issues
         // TODO: Error out for 1XX/3XX responses
         info!(
@@ -445,7 +461,6 @@ impl DownloadState {
             file_path.display(),
             human_bytes(meta.content_length as f64)
         );
-        meta.download_path = Some(file_path);
         let current = CurrentDownload { action, meta };
 
         Ok(Self {

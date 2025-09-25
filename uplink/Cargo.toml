@@ -2,7 +2,7 @@
 name = "uplink"
 version = "2.18.4"
 authors = ["tekjar <raviteja@bytebeam.io>"]
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 bytes = { workspace = true }
