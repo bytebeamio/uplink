@@ -175,62 +175,64 @@ impl FileDownloader {
 
     // Accepts `DownloadState`, sets a timeout for the action
     async fn download(&mut self, state: &mut DownloadState) -> DownloadResult {
-        if state.bytes_written < state.current.meta.content_length {
-            let shutdown_rx = self.shutdown_rx.clone();
-            loop {
-                select! {
-                    o = self.continuous_retry(state) => {
-                        if let Err(e) = o {
-                            return DownloadResult::Err(e.to_string());
-                        } else {
-                            break;
-                        }
-                    },
-                    Ok(action) = self.actions_rx.recv_async() => {
-                        if &action.action_id == &state.current.action.action_id {
-                            // This handles the edge case when the device is able to receive actions
-                            // from the broker but for something goes wrong when pushing action statuses back to the backend
-                            // In this case the backend will try sending the same action again
-                            //
-                            // TODO: Right now we use the action status pushed by device as confirmation that it
-                            // has received the action. It is not very reliable because as of now the action status pipeline can drop messages.
-                            // Would it be better if the backend used MQTT Ack of the action message instead?
-                            log::error!("Backend tried sending the same action again!");
-                        } else if action.name != "cancel_action" {
-                            self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), "Downloader is already occupied")).await;
-                        } else {
-                            match serde_json::from_str::<Cancellation>(&action.payload)
-                                .context("Invalid cancel action payload")
-                                .and_then(|cancellation| {
-                                    if cancellation.action_id == state.current.action.action_id {
-                                        Ok(())
-                                    } else {
-                                        Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, &state.current.action.action_id)))
-                                    }
-                                })
-                                .and_then(|_| {
-                                    state.clean()
-                                        .context("Couldn't couldn't perform cleanup")
-                                }) {
-                                Ok(_) => {
-                                    self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
-                                    return DownloadResult::Err("action has been cancelled!".to_string());
-                                },
-                                Err(e) => {
-                                    self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
-                                },
-                            }
-                        }
-                    },
+        if state.already_downloaded {
+            return DownloadResult::Ok;
+        }
 
-                    Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
-                        if let Err(e) = state.save(&self.config) {
-                            error!("Error saving current_download: {e:?}");
+        let shutdown_rx = self.shutdown_rx.clone();
+        loop {
+            select! {
+                o = self.continuous_retry(state) => {
+                    if let Err(e) = o {
+                        return DownloadResult::Err(e.to_string());
+                    } else {
+                        break;
+                    }
+                },
+                Ok(action) = self.actions_rx.recv_async() => {
+                    if &action.action_id == &state.current.action.action_id {
+                        // This handles the edge case when the device is able to receive actions
+                        // from the broker but for something goes wrong when pushing action statuses back to the backend
+                        // In this case the backend will try sending the same action again
+                        //
+                        // TODO: Right now we use the action status pushed by device as confirmation that it
+                        // has received the action. It is not very reliable because as of now the action status pipeline can drop messages.
+                        // Would it be better if the backend used MQTT Ack of the action message instead?
+                        log::error!("Backend tried sending the same action again!");
+                    } else if action.name != "cancel_action" {
+                        self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), "Downloader is already occupied")).await;
+                    } else {
+                        match serde_json::from_str::<Cancellation>(&action.payload)
+                            .context("Invalid cancel action payload")
+                            .and_then(|cancellation| {
+                                if cancellation.action_id == state.current.action.action_id {
+                                    Ok(())
+                                } else {
+                                    Err(anyhow::Error::msg(format!("Cancel action target ({}) doesn't match active download action id ({})", cancellation.action_id, &state.current.action.action_id)))
+                                }
+                            })
+                            .and_then(|_| {
+                                state.clean()
+                                    .context("Couldn't couldn't perform cleanup")
+                            }) {
+                            Ok(_) => {
+                                self.bridge_tx.send_action_response(ActionResponse::success(action.action_id.as_str())).await;
+                                return DownloadResult::Err("action has been cancelled!".to_string());
+                            },
+                            Err(e) => {
+                                self.bridge_tx.send_action_response(ActionResponse::failure(action.action_id.as_str(), format!("Could not stop download: {e:?}"))).await;
+                            },
                         }
+                    }
+                },
 
-                        return DownloadResult::Suspended;
-                    },
-                }
+                Ok(_) = shutdown_rx.recv_async(), if !shutdown_rx.is_disconnected() => {
+                    if let Err(e) = state.save(&self.config) {
+                        error!("Error saving current_download: {e:?}");
+                    }
+
+                    return DownloadResult::Suspended;
+                },
             }
         }
 
@@ -404,6 +406,7 @@ struct DownloadState {
     file: File,
     bytes_written: usize,
     percentage_downloaded: u8,
+    already_downloaded: bool,
     start: Instant,
 }
 
@@ -441,6 +444,7 @@ impl DownloadState {
                 current: CurrentDownload { action, meta },
                 file: File::open("/dev/null")?,
                 percentage_downloaded: 100,
+                already_downloaded: true,
                 start: Instant::now(),
             });
         }
@@ -468,6 +472,7 @@ impl DownloadState {
             file,
             bytes_written: 0,
             percentage_downloaded: 0,
+            already_downloaded: false,
             start: Instant::now(),
         })
     }
@@ -495,6 +500,7 @@ impl DownloadState {
             file,
             bytes_written,
             percentage_downloaded: 0,
+            already_downloaded: false,
             start: Instant::now(),
         })
     }
