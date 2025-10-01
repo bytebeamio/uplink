@@ -34,7 +34,7 @@ pub struct ActionResponse {
 }
 
 impl ActionResponse {
-    fn new(id: &str, state: &str, progress: u8, errors: Vec<String>) -> Self {
+    pub fn new(id: &str, state: &str, progress: u8, errors: Vec<String>) -> Self {
         let timestamp = clock() as u64;
 
         ActionResponse {
