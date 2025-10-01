@@ -437,7 +437,6 @@ impl DownloadState {
         let file_path = path.join(&meta.file_name);
         meta.download_path = Some(file_path.clone());
         if meta.checksum.is_some() && meta.verify_checksum().is_ok() {
-            // TODO: verify that range of size zero works as expected with consoled, platform,
             info!("file has already been downloaded and its checksum matches, skipping download...");
             return Ok(Self {
                 bytes_written: meta.content_length,
