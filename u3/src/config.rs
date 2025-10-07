@@ -21,11 +21,24 @@ pub struct UplinkConfig {
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct StreamConfig {
     pub compress: bool,
-    #[serde(default)]
+    pub buffer_size: u64,
+    pub flush_interval: u32,
     pub persistence: Option<PersistenceConfig>,
+    pub http_delivery: bool,
+}
+impl Default for StreamConfig {
+    fn default() -> Self {
+        StreamConfig {
+            compress: false,
+            buffer_size: 64,
+            flush_interval: 10,
+            persistence: None,
+            http_delivery: false,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -125,6 +138,15 @@ pub fn parse_config(config_path: &str, auth_file_path: &str) -> Result<(UplinkCo
         }
     };
 
+    for (stream_name, stream_cfg) in cfg.streams.iter() {
+        if stream_name == "action_status" {
+            return Err("action_status is a special stream and cannot be configured".into());
+        }
+        if stream_cfg.http_delivery && stream_cfg.persistence.is_some() {
+            return Err(format!("[streams.{stream_name}]: persistence should not be specified if http_delivery is enabled"));
+        }
+    }
+
     if cfg.lib_actions.is_some() {
         return Err("unsupported parameter 'lib_actions'".into());
     }
@@ -149,10 +171,10 @@ pub fn parse_config(config_path: &str, auth_file_path: &str) -> Result<(UplinkCo
         }
     };
 
-    Certificate::from_pem(auth.authentication.ca_certificate.as_bytes()).map_err("invalid ca certificate".into())?;
+    Certificate::from_pem(auth.authentication.ca_certificate.as_bytes()).map_err(|_| "invalid ca certificate".to_owned())?;
     let mut buf = BytesMut::from(auth.authentication.device_private_key.as_bytes());
     buf.extend_from_slice(auth.authentication.device_certificate.as_bytes());
-    Identity::from_pem(&buf).map_err("invalid device certificates".into())?;
+    Identity::from_pem(&buf).map_err(|_| "invalid device certificates".to_owned())?;
 
     Ok((cfg, auth))
 }
