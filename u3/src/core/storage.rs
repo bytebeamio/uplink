@@ -416,6 +416,7 @@ fn id(path: &Path) -> Option<i32> {
 
 /// A utility handle to a persistence file on disk
 /// You can do operations like, read, write, delete, save it to a special location if corrupted
+/// TODO: unexpected files and dirs
 pub struct PersistenceFile<'a> {
     /// Path to the persistence directory
     dir: &'a Path,

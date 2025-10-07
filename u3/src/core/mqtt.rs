@@ -1,14 +1,18 @@
 use std::collections::HashMap;
+use std::io::Error;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
+use bytes::BytesMut;
 use flume::{Receiver, Sender};
-use log::{debug, error, info};
-use rumqttc::{AsyncClient, Event, EventLoop, Incoming, MqttOptions, Packet, QoS, TlsConfiguration, Transport};
+use log::{debug, error, info, warn};
+use rumqttc::{AsyncClient, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS, Request, TlsConfiguration, Transport};
 use serde::Serialize;
 use serde_json::json;
 use tokio::select;
 use tokio::time::sleep;
 use crate::{AppConfig, DataRow, PublishItem, CONFIG};
+use crate::core::storage::PersistenceFile;
 use crate::utils::clock;
 
 pub struct Action {
@@ -49,15 +53,24 @@ impl MqttConnectionHandler {
             let options = mqttoptions(config);
             let (client, mut eventloop) = AsyncClient::new(options, 0);
             eventloop.network_options.set_connection_timeout(config.cfg.mqtt.network_timeout);
-            // TODO: load inflight messages from disk
-            (client.clone(), Self {
+            let mut handler = Self {
                 data_tx,
                 actions_mapping,
-                client,
+                client: client.clone(),
                 eventloop,
                 metrics_sequence: 0,
                 metrics: MqttMetrics::default(),
-            })
+            };
+            use std::str::FromStr;
+            CONFIG.with(|c| {
+                let persistence_file = PersistenceFile::new(&c.cfg.persistence_path, "inflight.bin".to_owned());
+                if let Err(e) = handler.reload_from_inflight_file(&persistence_file) {
+                    error!("couldn't read inflight file: {e:?}");
+                }
+                let _ = persistence_file.delete();
+            });
+
+            (client, handler)
         })
     }
 
@@ -164,11 +177,79 @@ impl MqttConnectionHandler {
         self.metrics.connection_retries = 0;
         self.metrics.inflight = 0;
     }
+
+    /// Checks for and loads data pending in persistence/inflight file
+    /// once done, deletes the file, while writing incoming data into storage.
+    fn reload_from_inflight_file(&mut self, file: &PersistenceFile) -> anyhow::Result<()> {
+        let (max_packet_size, tenant_filter) = CONFIG.with(|c| {
+            (
+                c.cfg.mqtt.max_packet_size,
+                format!("/tenants/{}/devices/{}", c.auth.project_id, c.auth.device_id),
+            )
+        });
+        let path = file.path();
+        if !path.is_file() {
+            return Ok(());
+        }
+        let mut buf = BytesMut::new();
+        file.read(&mut buf)?;
+
+        loop {
+            match Packet::read(&mut buf, max_packet_size) {
+                Ok(Packet::Publish(publish)) => {
+                    if publish.topic.starts_with(&tenant_filter) {
+                        self.eventloop.pending.push_back(Request::Publish(publish))
+                    } else {
+                        warn!("inflight file has data with wrong tenant|device!");
+                    }
+                }
+                Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+                Err(rumqttc::Error::InsufficientBytes(_)) => break,
+                Err(e) => {
+                    error!("Error reading from file: {e}");
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for MqttConnectionHandler {
     fn drop(&mut self) {
-        // TODO: save inflight messages to disk
+        self.eventloop.clean();
+        let publishes: Vec<&Publish> = self
+            .eventloop
+            .pending
+            .iter()
+            .filter_map(|request| match request {
+                Request::Publish(publish) => Some(publish),
+                _ => None,
+            })
+            .collect();
+
+        if publishes.is_empty() {
+            info!("no inflight messages");
+        } else {
+            CONFIG.with(|c| {
+                let file = PersistenceFile::new(&c.cfg.persistence_path, "inflight.bin".to_string());
+                let mut buf = BytesMut::new();
+                for publish in publishes {
+                    if let Err(e) = publish.write(&mut buf) {
+                        error!("couldn't serialize an inflight message: {e:?}");
+                    }
+                }
+                match file.write(&mut buf) {
+                    Ok(_) => {
+                        info!("Pending publishes written to disk: {}", file.path().display());
+                    }
+                    Err(e) => {
+                        error!("couldn't write inflight messages to disk: {e:?}");
+                    }
+                }
+            });
+        }
     }
 }
 

@@ -7,7 +7,8 @@ use crate::collectors::device_shadow::device_shadow_task;
 use crate::collectors::remote_shell::remote_shell_task;
 use crate::config::{AuthConfig, UplinkConfig};
 use crate::core::mqtt::MqttConnectionHandler;
-use crate::core::serializer::data_task;
+use crate::core::serializer::SerializerStorageHandler;
+use crate::core::streams_buffer::StreamsBufferHandler;
 
 pub mod config;
 pub mod utils;
@@ -48,11 +49,9 @@ pub struct AppConfig {
 }
 // TODO(3): logs are difficult to read and understand right now. how can that be fixed?
 async fn uplink_task(cfg: UplinkConfig, auth: AuthConfig, lib_actions_tx: Sender<ActionPayload>, lib_data_rx: Receiver<DataRow>) -> anyhow::Result<()> {
-    // serialize input, raw messages will be written to it and read by serializer
     let (data_tx, data_rx) = flume::bounded(1024);
 
     let mut tasks_to_run = Vec::<Pin<Box<dyn Future<Output=()>>>>::new();
-    // push data written by lib users
     tasks_to_run.push({
         let data_tx = data_tx.clone();
         Box::pin(async move {
@@ -63,8 +62,6 @@ async fn uplink_task(cfg: UplinkConfig, auth: AuthConfig, lib_actions_tx: Sender
     });
 
     let mut actions_mapping = HashMap::new();
-    // tasks for collectors
-    // tasks_to_run.push(system_stats_task(data_tx.clone()));
     if cfg.builtin_collectors.device_shadow.enable {
         tasks_to_run.push(Box::pin(device_shadow_task(data_tx.clone())));
     }
@@ -74,14 +71,12 @@ async fn uplink_task(cfg: UplinkConfig, auth: AuthConfig, lib_actions_tx: Sender
         tasks_to_run.push(Box::pin(remote_shell_task(data_tx.clone(), action_rx)));
     }
 
-    // create mqtt task (receives batches from data task and writes to cloud, receives actions from cloud and dispatches to task for that action)
-    //  * It'll save inflight messages to disk on Drop
     let (mqtt_client, mqtt_handler) = MqttConnectionHandler::new(data_tx.clone(), actions_mapping);
     tasks_to_run.push(Box::pin(mqtt_handler.run()));
 
-    // create data task (receives all outgoing data, batches and flushes as per stream config, handles persistence of batches as well)
-    //  * It'll save in memory buffers to disk on Drop
-    tasks_to_run.push(Box::pin(data_task(data_rx, mqtt_client)));
+    let (buffers_batch_tx, buffers_batch_rx) = flume::bounded(32);
+    tasks_to_run.push(Box::pin(StreamsBufferHandler::new(data_rx, buffers_batch_tx).run()));
+    tasks_to_run.push(Box::pin(SerializerStorageHandler::new(data_tx, buffers_batch_rx, mqtt_client).run()));
 
     // create a task for each collector and action handler
     //  * there'll be a mapping from action name to handler
@@ -99,6 +94,6 @@ async fn uplink_task(cfg: UplinkConfig, auth: AuthConfig, lib_actions_tx: Sender
     //  * internally it will use events api
 
     // await all these tasks
-    futures::future::join_all(tasks_to_run).await;
+    CONFIG.scope(AppConfig { cfg, auth }, futures::future::join_all(tasks_to_run)).await;
     Ok(())
 }

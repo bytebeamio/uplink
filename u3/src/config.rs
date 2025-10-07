@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use crate::utils::byte_offset_to_position;
 use std::str::FromStr;
@@ -9,11 +9,14 @@ use bytes::BytesMut;
 #[derive(Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields, default)]
 pub struct UplinkConfig {
-    pub download_path: String,
-    pub persistence_path: String,
-    pub prioritize_live_data: bool,
+    #[serde(with = "crate::utils::path_parser")]
+    pub download_path: PathBuf,
+    #[serde(with = "crate::utils::path_parser")]
+    pub persistence_path: PathBuf,
     pub enable_certificate_renewal: bool,
     pub enable_remote_shell: bool,
+    #[serde(default = "default_streams_count")]
+    pub max_dynamic_streams_count: u16,
 
     pub streams: HashMap<String, StreamConfig>,
     pub socket_clients: HashMap<String, SocketClientConfig>,
@@ -21,33 +24,40 @@ pub struct UplinkConfig {
     pub builtin_collectors: BuiltinCollectorsConfig,
     pub mqtt: MqttConfig,
 }
+fn default_streams_count() -> u16 { 5 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct StreamConfig {
     pub compress: bool,
-    pub buffer_size: u64,
-    pub flush_interval: u32,
-    pub persistence: Option<PersistenceConfig>,
-    pub http_delivery: bool,
+    pub buffer_size: usize,
+    pub flush_interval: u64,
+    pub persistence: PersistenceConfig,
 }
 impl Default for StreamConfig {
     fn default() -> Self {
         StreamConfig {
             compress: false,
-            buffer_size: 64,
+            buffer_size: 128,
             flush_interval: 10,
-            persistence: None,
-            http_delivery: false,
+            persistence: PersistenceConfig::default(),
         }
     }
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
 pub struct PersistenceConfig {
-    pub max_file_size: u64,
-    pub max_file_count: u64,
+    pub max_file_size: usize,
+    pub max_file_count: usize,
+}
+impl Default for PersistenceConfig {
+    fn default() -> Self {
+        Self {
+            max_file_size: 1024 * 1024,
+            max_file_count: 0,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -162,19 +172,16 @@ pub fn parse_config(config_path: &str, auth_file_path: &str) -> Result<(UplinkCo
         if stream_name == "action_status" {
             return Err("action_status is a special stream and cannot be configured".into());
         }
-        if stream_cfg.http_delivery && stream_cfg.persistence.is_some() {
-            return Err(format!("[streams.{stream_name}]: persistence should not be specified if http_delivery is enabled"));
-        }
     }
 
     if cfg.lib_actions.is_some() {
         return Err("unsupported parameter 'lib_actions'".into());
     }
     if let Err(e) = validate_dir_permissions(&cfg.download_path) {
-        return Err(format!("encountered a problem with download_path({}):\n{e}", &cfg.download_path))
+        return Err(format!("encountered a problem with download_path({:?}):\n{e}", &cfg.download_path))
     }
     if let Err(e) = validate_dir_permissions(&cfg.persistence_path) {
-        return Err(format!("encountered a problem with persistence_path({}):\n{e}", &cfg.persistence_path))
+        return Err(format!("encountered a problem with persistence_path({:?}):\n{e}", &cfg.persistence_path))
     }
 
     let auth_str = match std::fs::read_to_string(auth_file_path) {
@@ -201,8 +208,10 @@ pub fn parse_config(config_path: &str, auth_file_path: &str) -> Result<(UplinkCo
     Ok((cfg, auth))
 }
 
-fn validate_dir_permissions(path: &str) -> Result<(), String> {
-    let path = PathBuf::from_str(path).unwrap();
+fn validate_dir_permissions(path: &Path) -> Result<(), String> {
+    if path.is_relative() {
+        return Err("path has to be absolute".into());
+    }
     std::fs::create_dir_all(&path)
         .map_err(|e| format!("couldn't create directory: {e:?}"))?;
     let test_file = path.join(format!("fs_test_{}", rand::random::<u32>()));

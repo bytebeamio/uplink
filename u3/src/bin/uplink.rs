@@ -2,7 +2,7 @@ use std::time::{Duration, SystemTime};
 use log::error;
 use structopt::StructOpt;
 use tokio::select;
-use u3::config::{parse_config, AuthConfig, UplinkConfig};
+use u3::config::parse_config;
 
 #[tokio::main]
 async fn main() {
