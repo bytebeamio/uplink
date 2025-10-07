@@ -4,7 +4,7 @@ use std::{collections::HashMap, time::Duration};
 
 use log::warn;
 use tokio_stream::StreamExt;
-use tokio_util::time::{delay_queue::Key, DelayQueue};
+use tokio_util::time::{DelayQueue, delay_queue::Key};
 
 /// A map to store and retrieve delays from a DelayQueue.
 pub struct DelayMap<T> {

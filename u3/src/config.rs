@@ -1,10 +1,10 @@
+use crate::utils::byte_offset_to_position;
+use bytes::BytesMut;
+use reqwest::{Certificate, Identity};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
-use crate::utils::byte_offset_to_position;
 use std::str::FromStr;
-use reqwest::{Certificate, Identity};
-use bytes::BytesMut;
 
 #[derive(Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields, default)]
@@ -24,7 +24,9 @@ pub struct UplinkConfig {
     pub builtin_collectors: BuiltinCollectorsConfig,
     pub mqtt: MqttConfig,
 }
-fn default_streams_count() -> u16 { 5 }
+fn default_streams_count() -> u16 {
+    5
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
@@ -53,10 +55,7 @@ pub struct PersistenceConfig {
 }
 impl Default for PersistenceConfig {
     fn default() -> Self {
-        Self {
-            max_file_size: 1024 * 1024,
-            max_file_count: 0,
-        }
+        Self { max_file_size: 1024 * 1024, max_file_count: 0 }
     }
 }
 
@@ -64,7 +63,7 @@ impl Default for PersistenceConfig {
 #[serde(deny_unknown_fields)]
 pub struct SocketClientConfig {
     pub socket_path: String,
-    pub actions: Vec<ActionConfig>
+    pub actions: Vec<ActionConfig>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -90,10 +89,7 @@ pub struct DeviceShadowConfig {
 }
 impl Default for DeviceShadowConfig {
     fn default() -> Self {
-        Self {
-            enable: true,
-            interval_seconds: 20,
-        }
+        Self { enable: true, interval_seconds: 20 }
     }
 }
 
@@ -104,9 +100,7 @@ pub struct UplinkMetricsConfig {
 }
 impl Default for UplinkMetricsConfig {
     fn default() -> Self {
-        Self {
-            enable: true,
-        }
+        Self { enable: true }
     }
 }
 
@@ -123,16 +117,11 @@ pub struct MqttConfig {
     pub max_packet_size: usize,
     pub keep_alive: u64,
     pub max_inflight: u16,
-    pub network_timeout: u64
+    pub network_timeout: u64,
 }
 impl Default for MqttConfig {
     fn default() -> Self {
-        Self {
-            max_packet_size: 1024000,
-            max_inflight: 100,
-            keep_alive: 30,
-            network_timeout: 30,
-        }
+        Self { max_packet_size: 1024000, max_inflight: 100, keep_alive: 30, network_timeout: 30 }
     }
 }
 
@@ -145,8 +134,10 @@ pub struct AuthConfig {
     pub authentication: Option<MtlsCerts>,
 }
 
-
-pub fn parse_config(config_path: &str, auth_file_path: &str) -> Result<(UplinkConfig, AuthConfig), String> {
+pub fn parse_config(
+    config_path: &str,
+    auth_file_path: &str,
+) -> Result<(UplinkConfig, AuthConfig), String> {
     let config_str = match std::fs::read_to_string(config_path) {
         Ok(s) => s,
         Err(e) => {
@@ -159,7 +150,7 @@ pub fn parse_config(config_path: &str, auth_file_path: &str) -> Result<(UplinkCo
         Err(e) => {
             let mut msg = "Couldn't parse config file:\n".to_owned();
             if let Some(span) = e.span() {
-                if let Ok((line, column )) = byte_offset_to_position(&config_str, span.start) {
+                if let Ok((line, column)) = byte_offset_to_position(&config_str, span.start) {
                     msg.push_str(&format!("Error at: line {line}, column {column}\n"));
                 }
             }
@@ -178,10 +169,16 @@ pub fn parse_config(config_path: &str, auth_file_path: &str) -> Result<(UplinkCo
         return Err("unsupported parameter 'lib_actions'".into());
     }
     if let Err(e) = validate_dir_permissions(&cfg.download_path) {
-        return Err(format!("encountered a problem with download_path({:?}):\n{e}", &cfg.download_path))
+        return Err(format!(
+            "encountered a problem with download_path({:?}):\n{e}",
+            &cfg.download_path
+        ));
     }
     if let Err(e) = validate_dir_permissions(&cfg.persistence_path) {
-        return Err(format!("encountered a problem with persistence_path({:?}):\n{e}", &cfg.persistence_path))
+        return Err(format!(
+            "encountered a problem with persistence_path({:?}):\n{e}",
+            &cfg.persistence_path
+        ));
     }
 
     let auth_str = match std::fs::read_to_string(auth_file_path) {
@@ -194,12 +191,18 @@ pub fn parse_config(config_path: &str, auth_file_path: &str) -> Result<(UplinkCo
     let auth = match serde_json::from_str::<AuthConfig>(&auth_str) {
         Ok(r) => r,
         Err(e) => {
-            return Err(format!("Couldn't parse auth file: error at line: {}, column: {}, message: {}", e.line(), e.column(), e));
+            return Err(format!(
+                "Couldn't parse auth file: error at line: {}, column: {}, message: {}",
+                e.line(),
+                e.column(),
+                e
+            ));
         }
     };
 
     if let Some(auth) = &auth.authentication {
-        Certificate::from_pem(auth.ca_certificate.as_bytes()).map_err(|_| "invalid ca certificate".to_owned())?;
+        Certificate::from_pem(auth.ca_certificate.as_bytes())
+            .map_err(|_| "invalid ca certificate".to_owned())?;
         let mut buf = BytesMut::from(auth.device_private_key.as_bytes());
         buf.extend_from_slice(auth.device_certificate.as_bytes());
         Identity::from_pem(&buf).map_err(|_| "invalid device certificates".to_owned())?;
@@ -212,8 +215,7 @@ fn validate_dir_permissions(path: &Path) -> Result<(), String> {
     if path.is_relative() {
         return Err("path has to be absolute".into());
     }
-    std::fs::create_dir_all(&path)
-        .map_err(|e| format!("couldn't create directory: {e:?}"))?;
+    std::fs::create_dir_all(&path).map_err(|e| format!("couldn't create directory: {e:?}"))?;
     let test_file = path.join(format!("fs_test_{}", rand::random::<u32>()));
     std::fs::write(&test_file, "test_file")
         .map_err(|e| format!("can't create files in this directory: {e:?}"))?;

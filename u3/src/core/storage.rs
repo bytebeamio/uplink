@@ -1,10 +1,10 @@
+use anyhow::Context;
+use bytes::{Buf, BufMut, BytesMut};
+use rumqttc::{Packet, Publish};
 use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use anyhow::Context;
-use bytes::{Buf, BufMut, BytesMut};
-use rumqttc::{Packet, Publish};
 
 /// A persistent queue abstraction used by Serializer
 /// Data coming from system is written to it using `write_packet`
@@ -86,12 +86,8 @@ impl Storage for InMemoryStorage {
             }
         }
         match Packet::read(&mut self.read_buffer, self.max_packet_size) {
-            Ok(Packet::Publish(packet)) => {
-                Ok(packet)
-            }
-            Ok(_p) => {
-                Err(StorageReadError::UnsupportedPacketType)
-            }
+            Ok(Packet::Publish(packet)) => Ok(packet),
+            Ok(_p) => Err(StorageReadError::UnsupportedPacketType),
             Err(e) => {
                 self.read_buffer.clear();
                 Err(StorageReadError::InvalidPacket(e))
@@ -101,7 +97,10 @@ impl Storage for InMemoryStorage {
 
     fn write_packet(&mut self, packet: Publish) -> Result<(), StorageWriteError> {
         if packet.size() >= self.max_packet_size {
-            return Err(StorageWriteError::InvalidPacket(rumqttc::Error::OutgoingPacketTooLarge { pkt_size: packet.size(), max: self.max_packet_size }));
+            return Err(StorageWriteError::InvalidPacket(rumqttc::Error::OutgoingPacketTooLarge {
+                pkt_size: packet.size(),
+                max: self.max_packet_size,
+            }));
         }
         if self.write_buffer.len() + packet.size() > self.buf_size {
             log::info!("Storage::write_packet({}) Full! Rotating in memory buffers.", self.name);
@@ -113,9 +112,7 @@ impl Storage for InMemoryStorage {
         }
         match packet.write(&mut self.write_buffer) {
             Ok(_) => Ok(()),
-            Err(e) => {
-                Err(StorageWriteError::InvalidPacket(e))
-            }
+            Err(e) => Err(StorageWriteError::InvalidPacket(e)),
         }
     }
 
@@ -125,10 +122,11 @@ impl Storage for InMemoryStorage {
         Ok(())
     }
 
-    fn to_in_memory(self) -> StorageEnum { StorageEnum::InMemory(self) }
+    fn to_in_memory(self) -> StorageEnum {
+        StorageEnum::InMemory(self)
+    }
 
     fn metrics(&self) -> StorageMetrics {
-        
         StorageMetrics {
             read_buffer_size: self.read_buffer.len() as _,
             write_buffer_size: self.write_buffer.len() as _,
@@ -155,7 +153,12 @@ pub struct DirectoryStorage {
 }
 
 impl DirectoryStorage {
-    pub fn new(dir: PathBuf, max_file_size: usize, max_file_count: usize, max_packet_size: usize) -> anyhow::Result<Self> {
+    pub fn new(
+        dir: PathBuf,
+        max_file_size: usize,
+        max_file_count: usize,
+        max_packet_size: usize,
+    ) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&dir)
             .context(format!("couldn't create persistence directory: {dir:?}"))?;
         let mut result = Self {
@@ -169,7 +172,8 @@ impl DirectoryStorage {
             bytes_on_disk: 0,
             lost_files: 0,
         };
-        result.load_file_ids()
+        result
+            .load_file_ids()
             .context(format!("Failed to load persistence files from ({:?})", result.dir))?;
         log::info!("Loaded file ids: {:?}", result.files_queue);
         Ok(result)
@@ -201,7 +205,10 @@ impl DirectoryStorage {
             let to_drop = file_ids.len() - self.max_file_count;
             for (path, _, _) in file_ids.iter().take(to_drop) {
                 if let Err(e) = std::fs::remove_file(path) {
-                    log::error!("Storage::load_file_ids({}) Couldn't delete excess persistence files: {e}", self.name());
+                    log::error!(
+                        "Storage::load_file_ids({}) Couldn't delete excess persistence files: {e}",
+                        self.name()
+                    );
                 }
             }
             file_ids.drain(0..to_drop);
@@ -217,8 +224,7 @@ impl DirectoryStorage {
 
 impl Storage for DirectoryStorage {
     fn name(&self) -> &str {
-        self.dir.to_str()
-            .unwrap_or("{}")
+        self.dir.to_str().unwrap_or("{}")
     }
 
     /// if read_buffer_is_empty() {
@@ -245,7 +251,8 @@ impl Storage for DirectoryStorage {
                 }
                 Some(id) => {
                     match PersistenceFile::new(self.dir.as_path(), format!("backup@{id}"))
-                        .load_into(&mut self.read_buffer) {
+                        .load_into(&mut self.read_buffer)
+                    {
                         Ok(deleted_size) => {
                             self.bytes_on_disk -= deleted_size;
                         }
@@ -258,12 +265,8 @@ impl Storage for DirectoryStorage {
             }
         }
         match Packet::read(&mut self.read_buffer, self.max_packet_size) {
-            Ok(Packet::Publish(packet)) => {
-                Ok(packet)
-            }
-            Ok(_p) => {
-                Err(StorageReadError::UnsupportedPacketType)
-            }
+            Ok(Packet::Publish(packet)) => Ok(packet),
+            Ok(_p) => Err(StorageReadError::UnsupportedPacketType),
             Err(e) => {
                 self.read_buffer.clear();
                 Err(StorageReadError::InvalidPacket(e))
@@ -281,7 +284,10 @@ impl Storage for DirectoryStorage {
     /// append_to_write_buffer();
     fn write_packet(&mut self, packet: Publish) -> Result<(), StorageWriteError> {
         if packet.size() >= self.max_packet_size {
-            return Err(StorageWriteError::InvalidPacket(rumqttc::Error::OutgoingPacketTooLarge { pkt_size: packet.size(), max: self.max_packet_size }));
+            return Err(StorageWriteError::InvalidPacket(rumqttc::Error::OutgoingPacketTooLarge {
+                pkt_size: packet.size(),
+                max: self.max_packet_size,
+            }));
         }
         if self.write_buffer.len() >= self.max_file_size {
             if self.files_queue.len() >= self.max_file_count {
@@ -291,7 +297,11 @@ impl Storage for DirectoryStorage {
                 let pf = PersistenceFile::new(self.dir.as_path(), format!("backup@{id}"));
                 match pf.load_into(&mut self.read_buffer) {
                     Ok(deleted_size) => {
-                        log::info!("File count reached, deleted oldest persistence file ({}):({})", self.name(), pf.file_name);
+                        log::info!(
+                            "File count reached, deleted oldest persistence file ({}):({})",
+                            self.name(),
+                            pf.file_name
+                        );
                         self.bytes_on_disk -= deleted_size;
                     }
                     Err(PersistenceError::CorruptedFile(_path)) => {}
@@ -317,9 +327,7 @@ impl Storage for DirectoryStorage {
 
         match packet.write(&mut self.write_buffer) {
             Ok(_) => Ok(()),
-            Err(e) => {
-                Err(StorageWriteError::InvalidPacket(e))
-            }
+            Err(e) => Err(StorageWriteError::InvalidPacket(e)),
         }
     }
 
@@ -327,17 +335,21 @@ impl Storage for DirectoryStorage {
     /// save_write_buffer_to_disk();
     fn flush(&mut self) -> Result<(), StorageFlushError> {
         let mut result = Ok(());
-        if ! self.read_buffer.is_empty() {
+        if !self.read_buffer.is_empty() {
             let read_file_id = self.files_queue.iter().next().cloned().unwrap_or(1) - 1;
-            if let Err(e) = PersistenceFile::new(self.dir.as_path(), format!("backup@{read_file_id}"))
-                .write(&mut self.read_buffer) {
+            if let Err(e) =
+                PersistenceFile::new(self.dir.as_path(), format!("backup@{read_file_id}"))
+                    .write(&mut self.read_buffer)
+            {
                 result = Err(StorageFlushError::FileSystemError(e));
             }
         }
-        if ! self.write_buffer.is_empty() {
+        if !self.write_buffer.is_empty() {
             let write_file_id = self.files_queue.iter().last().cloned().unwrap_or(1) + 1;
-            if let Err(e) = PersistenceFile::new(self.dir.as_path(), format!("backup@{write_file_id}"))
-                .write(&mut self.write_buffer) {
+            if let Err(e) =
+                PersistenceFile::new(self.dir.as_path(), format!("backup@{write_file_id}"))
+                    .write(&mut self.write_buffer)
+            {
                 result = Err(StorageFlushError::FileSystemError(e));
             }
         }
@@ -400,13 +412,7 @@ pub enum StorageFlushError {
 fn id(path: &Path) -> Option<i32> {
     if let Some(file_name) = path.file_name() {
         let file_name = file_name.to_str()?;
-        if !file_name.starts_with("backup@") {
-            None
-        } else {
-            file_name[7..]
-                .parse()
-                .ok()
-        }
+        if !file_name.starts_with("backup@") { None } else { file_name[7..].parse().ok() }
     } else {
         None
     }
@@ -566,16 +572,17 @@ impl Storage for StorageEnum {
 
 #[cfg(test)]
 pub mod test {
+    use super::{DirectoryStorage, Storage, StorageReadError};
     use bytes::Bytes;
     use rumqttc::{Publish, QoS};
-    use super::{DirectoryStorage, Storage, StorageReadError};
 
     #[test]
     fn corrupted_files() {
         let dir = tempdir::TempDir::new("uplink").unwrap();
         std::fs::write(dir.path().join("backup@1"), "invalid content").unwrap();
         std::fs::write(dir.path().join("backup@2"), "invalid content").unwrap();
-        let mut storage = DirectoryStorage::new(dir.path().to_owned(), 100, 10, 1024 * 1000).unwrap();
+        let mut storage =
+            DirectoryStorage::new(dir.path().to_owned(), 100, 10, 1024 * 1000).unwrap();
         storage.write_packet(create_publish("test_topic", 1)).unwrap();
         match storage.read_packet() {
             Err(StorageReadError::InvalidPacket(_)) => {}
@@ -602,16 +609,16 @@ pub mod test {
     #[test]
     fn extra_files_in_backup() {
         let dir = tempdir::TempDir::new("uplink").unwrap();
-        let mut storage = DirectoryStorage::new(dir.path().to_owned(), 100, 10, 1024 * 1000).unwrap();
+        let mut storage =
+            DirectoryStorage::new(dir.path().to_owned(), 100, 10, 1024 * 1000).unwrap();
         for idx in 0..10 {
             storage.write_packet(create_publish("test_topic", idx)).unwrap();
         }
         storage.flush().unwrap();
         drop(storage);
 
-        let mut files = std::fs::read_dir(dir.path()).unwrap()
-            .filter_map(|e| e.ok())
-            .collect::<Vec<_>>();
+        let mut files =
+            std::fs::read_dir(dir.path()).unwrap().filter_map(|e| e.ok()).collect::<Vec<_>>();
         assert_eq!(files.len(), 2);
         files.sort_by_key(|e| e.file_name());
         let file = files.get(1).unwrap().path();
@@ -619,11 +626,11 @@ pub mod test {
         std::fs::copy(file.as_path(), dir.path().join("backup@4")).unwrap();
         std::fs::copy(file.as_path(), dir.path().join("extra_file")).unwrap();
 
-        let mut storage = DirectoryStorage::new(dir.path().to_owned(), 100, 3, 1024 * 1000).unwrap();
+        let mut storage =
+            DirectoryStorage::new(dir.path().to_owned(), 100, 3, 1024 * 1000).unwrap();
         assert_eq!(storage.files_queue.len(), 3);
-        let files = std::fs::read_dir(dir.path()).unwrap()
-            .filter_map(|e| e.ok())
-            .collect::<Vec<_>>();
+        let files =
+            std::fs::read_dir(dir.path()).unwrap().filter_map(|e| e.ok()).collect::<Vec<_>>();
         assert_eq!(files.len(), 4);
 
         for idx in (7..10).chain(7..10).chain(7..10) {

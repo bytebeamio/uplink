@@ -7,9 +7,8 @@ async fn main() {
         }
         else => {}
     }
-
 }
 
 async fn g(n: u32) -> u32 {
-    n+1
+    n + 1
 }

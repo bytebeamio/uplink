@@ -1,5 +1,5 @@
-use std::time::{Duration, SystemTime};
 use log::error;
+use std::time::{Duration, SystemTime};
 use structopt::StructOpt;
 use tokio::select;
 use u3::config::parse_config;
@@ -33,7 +33,7 @@ struct Cli {
     #[structopt(short, long)]
     pub config: String,
     #[structopt(short, long)]
-    pub authentication: String
+    pub authentication: String,
 }
 
 pub fn initialize_logging(verbosity: u8, file_path: Option<String>) {
@@ -76,7 +76,8 @@ pub fn initialize_logging(verbosity: u8, file_path: Option<String>) {
                             last_modified = modified;
                             match std::fs::read_to_string(&file_path) {
                                 Ok(new_filter_str) => {
-                                    let new_filter = tracing_subscriber::EnvFilter::new(new_filter_str.trim());
+                                    let new_filter =
+                                        tracing_subscriber::EnvFilter::new(new_filter_str.trim());
                                     println!("reloading {file_path}");
                                     if let Err(e) = reload_handle.reload(new_filter) {
                                         println!("Failed to reload filter: {e:?}");

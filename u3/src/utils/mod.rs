@@ -2,7 +2,10 @@ pub mod delaymap;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub fn byte_offset_to_position(content: &str, offset: usize) -> Result<(usize, usize), &'static str> {
+pub fn byte_offset_to_position(
+    content: &str,
+    offset: usize,
+) -> Result<(usize, usize), &'static str> {
     let mut line = 1;
     let mut column = 1;
     let mut current_byte = 0;
@@ -28,11 +31,11 @@ pub fn clock() -> u64 {
 }
 
 pub mod path_parser {
-    use std::path::PathBuf;
-    use serde::de::Deserializer;
-    use serde::de::Deserialize;
-    use serde::ser::Serializer;
     use serde::Serialize;
+    use serde::de::Deserialize;
+    use serde::de::Deserializer;
+    use serde::ser::Serializer;
+    use std::path::PathBuf;
 
     pub fn serialize<S>(p: &PathBuf, serializer: S) -> Result<S::Ok, S::Error>
     where

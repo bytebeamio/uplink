@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use std::time::Duration;
-use flume::{Receiver, Sender};
-use log::error;
-use tokio::select;
-use crate::{DataRow, PublishItem, CONFIG};
 use crate::config::StreamConfig;
 use crate::utils::delaymap::DelayMap;
+use crate::{CONFIG, DataRow, PublishItem};
+use flume::{Receiver, Sender};
+use log::error;
+use std::collections::HashMap;
+use std::time::Duration;
+use tokio::select;
 
 pub struct StreamsBufferHandler {
     data_rx: Receiver<DataRow>,
@@ -15,18 +15,18 @@ pub struct StreamsBufferHandler {
 }
 
 impl StreamsBufferHandler {
-    pub fn new(data_rx: Receiver<DataRow>, buffers_batch_tx: Sender<(String, Vec<PublishItem>)>) -> Self {
-        Self {
-            data_rx, buffers_batch_tx,
-            buffers: HashMap::new(),
-            timeouts: DelayMap::new(),
-        }
+    pub fn new(
+        data_rx: Receiver<DataRow>,
+        buffers_batch_tx: Sender<(String, Vec<PublishItem>)>,
+    ) -> Self {
+        Self { data_rx, buffers_batch_tx, buffers: HashMap::new(), timeouts: DelayMap::new() }
     }
 
     pub async fn run(mut self) {
         let max_dynamic_streams_count = CONFIG.with(|c| {
             for (name, cfg) in c.cfg.streams.iter() {
-                self.buffers.insert(name.clone(), (Vec::with_capacity(cfg.buffer_size), cfg.clone()));
+                self.buffers
+                    .insert(name.clone(), (Vec::with_capacity(cfg.buffer_size), cfg.clone()));
             }
             c.cfg.max_dynamic_streams_count as usize
         });

@@ -1,19 +1,22 @@
+use crate::core::storage::PersistenceFile;
+use crate::utils::clock;
+use crate::{AppConfig, CONFIG, DataRow, PublishItem};
+use bytes::BytesMut;
+use flume::{Receiver, Sender};
+use log::{debug, error, info, warn};
+use rumqttc::{
+    AsyncClient, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS, Request,
+    TlsConfiguration, Transport,
+};
+use serde::Serialize;
+use serde_json::json;
 use std::collections::HashMap;
 use std::io::Error;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
-use bytes::BytesMut;
-use flume::{Receiver, Sender};
-use log::{debug, error, info, warn};
-use rumqttc::{AsyncClient, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS, Request, TlsConfiguration, Transport};
-use serde::Serialize;
-use serde_json::json;
 use tokio::select;
 use tokio::time::sleep;
-use crate::{AppConfig, DataRow, PublishItem, CONFIG};
-use crate::core::storage::PersistenceFile;
-use crate::utils::clock;
 
 pub struct Action {
     pub action_id: String,
@@ -21,20 +24,28 @@ pub struct Action {
     pub payload: String,
 }
 
-pub async fn send_action_response(data_tx: &Sender<DataRow>, action_id: impl ToString, state: impl ToString, progress: u8, errors: &[String]) {
-    let _ = data_tx.send_async(DataRow {
-        stream: "action_status".to_string(),
-        data: PublishItem {
-            sequence: 0,
-            timestamp: clock(),
-            data: json!({
-                "action_id": action_id.to_string(),
-                "state": state.to_string(),
-                "progress": progress,
-                "errors": errors
-            }),
-        },
-    }).await;
+pub async fn send_action_response(
+    data_tx: &Sender<DataRow>,
+    action_id: impl ToString,
+    state: impl ToString,
+    progress: u8,
+    errors: &[String],
+) {
+    let _ = data_tx
+        .send_async(DataRow {
+            stream: "action_status".to_string(),
+            data: PublishItem {
+                sequence: 0,
+                timestamp: clock(),
+                data: json!({
+                    "action_id": action_id.to_string(),
+                    "state": state.to_string(),
+                    "progress": progress,
+                    "errors": errors
+                }),
+            },
+        })
+        .await;
 }
 
 pub struct MqttConnectionHandler {
@@ -48,7 +59,10 @@ pub struct MqttConnectionHandler {
 }
 
 impl MqttConnectionHandler {
-    pub fn new(data_tx: Sender<DataRow>, actions_mapping: HashMap<String, Sender<Action>>) -> (AsyncClient, Self) {
+    pub fn new(
+        data_tx: Sender<DataRow>,
+        actions_mapping: HashMap<String, Sender<Action>>,
+    ) -> (AsyncClient, Self) {
         CONFIG.with(|config| {
             let options = mqttoptions(config);
             let (client, mut eventloop) = AsyncClient::new(options, 0);
@@ -63,7 +77,8 @@ impl MqttConnectionHandler {
             };
             use std::str::FromStr;
             CONFIG.with(|c| {
-                let persistence_file = PersistenceFile::new(&c.cfg.persistence_path, "inflight.bin".to_owned());
+                let persistence_file =
+                    PersistenceFile::new(&c.cfg.persistence_path, "inflight.bin".to_owned());
                 if let Err(e) = handler.reload_from_inflight_file(&persistence_file) {
                     error!("couldn't read inflight file: {e:?}");
                 }
@@ -77,7 +92,9 @@ impl MqttConnectionHandler {
     pub async fn run(mut self) {
         let mut disconnection_wait_timer = None;
         let mut subscribe_for_actions = false;
-        let actions_topic = CONFIG.with(|c| format!("/tenants/{}/devices/{}/actions", c.auth.project_id, c.auth.device_id));
+        let actions_topic = CONFIG.with(|c| {
+            format!("/tenants/{}/devices/{}/actions", c.auth.project_id, c.auth.device_id)
+        });
         let client = self.client.clone();
         loop {
             select! {
@@ -233,7 +250,8 @@ impl Drop for MqttConnectionHandler {
             info!("no inflight messages");
         } else {
             CONFIG.with(|c| {
-                let file = PersistenceFile::new(&c.cfg.persistence_path, "inflight.bin".to_string());
+                let file =
+                    PersistenceFile::new(&c.cfg.persistence_path, "inflight.bin".to_string());
                 let mut buf = BytesMut::new();
                 for publish in publishes {
                     if let Err(e) = publish.write(&mut buf) {
@@ -256,7 +274,8 @@ impl Drop for MqttConnectionHandler {
 fn mqttoptions(config: &AppConfig) -> MqttOptions {
     let mut mqttoptions =
         MqttOptions::new(&config.auth.device_id, &config.auth.broker, config.auth.port);
-    mqttoptions.set_max_packet_size(config.cfg.mqtt.max_packet_size, config.cfg.mqtt.max_packet_size);
+    mqttoptions
+        .set_max_packet_size(config.cfg.mqtt.max_packet_size, config.cfg.mqtt.max_packet_size);
     mqttoptions.set_keep_alive(Duration::from_secs(config.cfg.mqtt.keep_alive));
     mqttoptions.set_inflight(config.cfg.mqtt.max_inflight);
 
