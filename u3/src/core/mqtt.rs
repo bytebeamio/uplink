@@ -1,6 +1,6 @@
 use crate::core::storage::PersistenceFile;
 use crate::utils::clock;
-use crate::{AppConfig, CONFIG, DataRow, PublishItem};
+use crate::{AppConfig, DataRow, PublishItem, CONFIG};
 use bytes::BytesMut;
 use flume::{Receiver, Sender};
 use log::{debug, error, info, warn};

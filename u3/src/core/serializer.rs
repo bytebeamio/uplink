@@ -86,11 +86,10 @@ impl SerializerStorageHandler {
                             current_publish_task = self.current_publish.clone()
                                 .map(|(_, publish)| mqtt_client.send_async(Request::Publish(publish)));
                         }
-                        Err(SendError(Request::Publish(publish))) => {
+                        Err(_) => {
                             current_publish_task = self.current_publish.clone()
                                 .map(|(_, publish)| mqtt_client.send_async(Request::Publish(publish)));
                         }
-                        _ => {}
                     }
                 }
             }
@@ -127,7 +126,11 @@ impl SerializerStorageHandler {
             match state.storage.write_packet(publish) {
                 Ok(_) => {}
                 Err(StorageWriteError::FileSystemError(e)) => {
-                    // TODO: log and downgrade to in memory
+                    log::error!(
+                        "Encountered file system error when reading packet for stream({}): {e}, falling back to in memory persistence",
+                        state.storage.name()
+                    );
+                    replace_with_or_abort(&mut state.storage, |s| s.to_in_memory());
                 }
                 Err(StorageWriteError::InvalidPacket(e)) => {
                     log::error!(

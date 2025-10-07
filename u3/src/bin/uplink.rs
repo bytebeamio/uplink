@@ -16,7 +16,7 @@ async fn main() {
         }
     };
 
-    let (action_rx, data_tx, task) = u3::start_uplink(cfg, auth);
+    let (_action_rx, _data_tx, task) = u3::start_uplink(cfg, auth);
     let task = Box::into_pin(task);
     select! {
         _ = tokio::signal::ctrl_c() => {},

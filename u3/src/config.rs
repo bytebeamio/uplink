@@ -4,7 +4,6 @@ use reqwest::{Certificate, Identity};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 
 #[derive(Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields, default)]
@@ -159,7 +158,7 @@ pub fn parse_config(
         }
     };
 
-    for (stream_name, stream_cfg) in cfg.streams.iter() {
+    for (stream_name, _) in cfg.streams.iter() {
         if stream_name == "action_status" {
             return Err("action_status is a special stream and cannot be configured".into());
         }
