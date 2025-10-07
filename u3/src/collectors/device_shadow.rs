@@ -1,7 +1,7 @@
 use std::time::Duration;
 use flume::Sender;
 use serde_json::json;
-use crate::{DataRow, PublishPayload};
+use crate::{DataRow, PublishItem};
 use crate::utils::clock;
 
 pub async fn device_shadow_task(data_tx: Sender<DataRow>) {
@@ -9,7 +9,7 @@ pub async fn device_shadow_task(data_tx: Sender<DataRow>) {
     loop {
         let _ = data_tx.send_async(DataRow {
             stream: "device_shadow".to_owned(),
-            data: PublishPayload {
+            data: PublishItem {
                 sequence,
                 timestamp: clock(),
                 data: json!({

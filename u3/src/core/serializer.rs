@@ -1,8 +1,10 @@
 use flume::{Receiver, Sender};
-use crate::{PublishPayload, DataRow};
+use rumqttc::{AsyncClient, QoS};
+use crate::{PublishItem, DataRow};
 
-pub async fn data_task(data_rx: Receiver<DataRow>, batch_tx: Sender<(String, Vec<PublishPayload>)>) {
+pub async fn data_task(data_rx: Receiver<DataRow>, batch_tx: AsyncClient) {
     while let Ok(msg) = data_rx.recv_async().await {
-        let _ = batch_tx.send_async((msg.stream, vec![msg.data])).await;
+        let data = serde_json::to_vec(&[msg.data]).unwrap();
+        let _ = batch_tx.publish(String::new(), QoS::AtLeastOnce, false, data).await;
     }
 }

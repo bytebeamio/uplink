@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::pin::Pin;
 use flume::{Receiver, Sender};
+use serde::Serialize;
 use tokio::task_local;
 use crate::collectors::device_shadow::device_shadow_task;
 use crate::collectors::remote_shell::remote_shell_task;
 use crate::config::{AuthConfig, UplinkConfig};
-use crate::core::mqtt::mqtt_task;
+use crate::core::mqtt::MqttConnectionHandler;
 use crate::core::serializer::data_task;
 
 pub mod config;
@@ -27,12 +28,14 @@ pub struct ActionPayload {
 
 pub struct DataRow {
     pub stream: String,
-    pub data: PublishPayload,
+    pub data: PublishItem,
 }
 
-pub struct PublishPayload {
+#[derive(Serialize)]
+pub struct PublishItem {
     pub sequence: u32,
     pub timestamp: u64,
+    #[serde(flatten)]
     pub data: serde_json::Value,
 }
 
@@ -47,8 +50,6 @@ pub struct AppConfig {
 async fn uplink_task(cfg: UplinkConfig, auth: AuthConfig, lib_actions_tx: Sender<ActionPayload>, lib_data_rx: Receiver<DataRow>) -> anyhow::Result<()> {
     // serialize input, raw messages will be written to it and read by serializer
     let (data_tx, data_rx) = flume::bounded(1024);
-    // mqtt publish input, batches will be written to it and read by mqtt
-    let (batch_tx, batch_rx) = flume::bounded(32);
 
     let mut tasks_to_run = Vec::<Pin<Box<dyn Future<Output=()>>>>::new();
     // push data written by lib users
@@ -60,10 +61,6 @@ async fn uplink_task(cfg: UplinkConfig, auth: AuthConfig, lib_actions_tx: Sender
             }
         })
     });
-
-    // create data task (receives all outgoing data, batches and flushes as per stream config, handles persistence of batches as well)
-    //  * It'll save in memory buffers to disk on Drop
-    tasks_to_run.push(Box::pin(data_task(data_rx, batch_tx)));
 
     let mut actions_mapping = HashMap::new();
     // tasks for collectors
@@ -79,7 +76,12 @@ async fn uplink_task(cfg: UplinkConfig, auth: AuthConfig, lib_actions_tx: Sender
 
     // create mqtt task (receives batches from data task and writes to cloud, receives actions from cloud and dispatches to task for that action)
     //  * It'll save inflight messages to disk on Drop
-    tasks_to_run.push(Box::pin(mqtt_task(batch_rx, actions_mapping)));
+    let (mqtt_client, mqtt_handler) = MqttConnectionHandler::new(data_tx.clone(), actions_mapping);
+    tasks_to_run.push(Box::pin(mqtt_handler.run()));
+
+    // create data task (receives all outgoing data, batches and flushes as per stream config, handles persistence of batches as well)
+    //  * It'll save in memory buffers to disk on Drop
+    tasks_to_run.push(Box::pin(data_task(data_rx, mqtt_client)));
 
     // create a task for each collector and action handler
     //  * there'll be a mapping from action name to handler

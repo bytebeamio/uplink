@@ -19,6 +19,7 @@ pub struct UplinkConfig {
     pub socket_clients: HashMap<String, SocketClientConfig>,
     pub lib_actions: Option<Vec<ActionConfig>>,
     pub builtin_collectors: BuiltinCollectorsConfig,
+    pub mqtt: MqttConfig,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -77,7 +78,6 @@ pub struct DeviceShadowConfig {
     pub enable: bool,
     pub interval_seconds: u32,
 }
-
 impl Default for DeviceShadowConfig {
     fn default() -> Self {
         Self {
@@ -92,11 +92,36 @@ impl Default for DeviceShadowConfig {
 pub struct UplinkMetricsConfig {
     pub enable: bool,
 }
-
 impl Default for UplinkMetricsConfig {
     fn default() -> Self {
         Self {
             enable: true,
+        }
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct MtlsCerts {
+    pub ca_certificate: String,
+    pub device_certificate: String,
+    pub device_private_key: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct MqttConfig {
+    pub max_packet_size: usize,
+    pub keep_alive: u64,
+    pub max_inflight: u16,
+    pub network_timeout: u64
+}
+impl Default for MqttConfig {
+    fn default() -> Self {
+        Self {
+            max_packet_size: 1024000,
+            max_inflight: 100,
+            keep_alive: 30,
+            network_timeout: 30,
         }
     }
 }
@@ -107,15 +132,9 @@ pub struct AuthConfig {
     pub device_id: String,
     pub broker: String,
     pub port: u16,
-    pub authentication: MtlsCerts,
+    pub authentication: Option<MtlsCerts>,
 }
 
-#[derive(Deserialize, Serialize)]
-pub struct MtlsCerts {
-    pub ca_certificate: String,
-    pub device_certificate: String,
-    pub device_private_key: String,
-}
 
 pub fn parse_config(config_path: &str, auth_file_path: &str) -> Result<(UplinkConfig, AuthConfig), String> {
     let config_str = match std::fs::read_to_string(config_path) {
@@ -172,10 +191,12 @@ pub fn parse_config(config_path: &str, auth_file_path: &str) -> Result<(UplinkCo
         }
     };
 
-    Certificate::from_pem(auth.authentication.ca_certificate.as_bytes()).map_err(|_| "invalid ca certificate".to_owned())?;
-    let mut buf = BytesMut::from(auth.authentication.device_private_key.as_bytes());
-    buf.extend_from_slice(auth.authentication.device_certificate.as_bytes());
-    Identity::from_pem(&buf).map_err(|_| "invalid device certificates".to_owned())?;
+    if let Some(auth) = &auth.authentication {
+        Certificate::from_pem(auth.ca_certificate.as_bytes()).map_err(|_| "invalid ca certificate".to_owned())?;
+        let mut buf = BytesMut::from(auth.device_private_key.as_bytes());
+        buf.extend_from_slice(auth.device_certificate.as_bytes());
+        Identity::from_pem(&buf).map_err(|_| "invalid device certificates".to_owned())?;
+    }
 
     Ok((cfg, auth))
 }

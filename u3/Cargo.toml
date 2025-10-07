@@ -1,6 +1,6 @@
 [package]
 name = "u3"
-version = "0.1.0"
+version = "3.0.0"
 edition = "2024"
 
 [dependencies]
@@ -14,7 +14,13 @@ reqwest = { version = "0.12.23", features = ["rustls-tls"] }
 flume = "0.11.1"
 futures = "0.3.31"
 tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch = "bytebeam-changes" }
+rumqttc = { git = "https://github.com/bytebeamio/rumqtt", rev = "b7ae6b5693d8c9c972d5eb857b2293fb901d57d9" }
+seahash = "4.1.0"
 anyhow = "1.0.100"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "local-time"] }
 log = "0.4.28"
 bytes = "1.10.1"
+thiserror = "2.0.17"
+
+[dev-dependencies]
+tempdir = "0.3.7"
