@@ -13,6 +13,7 @@ pub struct UplinkConfig {
     pub persistence_path: String,
     pub prioritize_live_data: bool,
     pub enable_certificate_renewal: bool,
+    pub enable_remote_shell: bool,
 
     pub streams: HashMap<String, StreamConfig>,
     pub socket_clients: HashMap<String, SocketClientConfig>,
@@ -73,8 +74,8 @@ pub struct BuiltinCollectorsConfig {
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct DeviceShadowConfig {
-    enable: bool,
-    interval_seconds: u32,
+    pub enable: bool,
+    pub interval_seconds: u32,
 }
 
 impl Default for DeviceShadowConfig {
@@ -89,7 +90,7 @@ impl Default for DeviceShadowConfig {
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct UplinkMetricsConfig {
-    enable: bool,
+    pub enable: bool,
 }
 
 impl Default for UplinkMetricsConfig {

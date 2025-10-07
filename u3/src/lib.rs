@@ -1,9 +1,17 @@
+use std::collections::HashMap;
+use std::pin::Pin;
 use flume::{Receiver, Sender};
 use tokio::task_local;
+use crate::collectors::device_shadow::device_shadow_task;
+use crate::collectors::remote_shell::remote_shell_task;
 use crate::config::{AuthConfig, UplinkConfig};
+use crate::core::mqtt::mqtt_task;
+use crate::core::serializer::data_task;
 
 pub mod config;
 pub mod utils;
+pub mod core;
+pub mod collectors;
 
 pub fn start_uplink(cfg: UplinkConfig, auth: AuthConfig) -> (Receiver<ActionPayload>, Sender<DataRow>, Box<dyn Future<Output=anyhow::Result<()>>>) {
     let (actions_tx, actions_rx) = flume::bounded(8);
@@ -19,6 +27,10 @@ pub struct ActionPayload {
 
 pub struct DataRow {
     pub stream: String,
+    pub data: PublishPayload,
+}
+
+pub struct PublishPayload {
     pub sequence: u32,
     pub timestamp: u64,
     pub data: serde_json::Value,
@@ -32,11 +44,43 @@ pub struct AppConfig {
     pub auth: AuthConfig,
 }
 // TODO(3): logs are difficult to read and understand right now. how can that be fixed?
-async fn uplink_task(cfg: UplinkConfig, auth: AuthConfig, actions_tx: Sender<ActionPayload>, data_rx: Receiver<DataRow>) -> anyhow::Result<()> {
-    // create mqtt task (receives batches from data task and writes to cloud, receives actions from cloud and dispatches to task for that action)
-    //  * It'll save inflight messages to disk on Drop
+async fn uplink_task(cfg: UplinkConfig, auth: AuthConfig, lib_actions_tx: Sender<ActionPayload>, lib_data_rx: Receiver<DataRow>) -> anyhow::Result<()> {
+    // serialize input, raw messages will be written to it and read by serializer
+    let (data_tx, data_rx) = flume::bounded(1024);
+    // mqtt publish input, batches will be written to it and read by mqtt
+    let (batch_tx, batch_rx) = flume::bounded(32);
+
+    let mut tasks_to_run = Vec::<Pin<Box<dyn Future<Output=()>>>>::new();
+    // push data written by lib users
+    tasks_to_run.push({
+        let data_tx = data_tx.clone();
+        Box::pin(async move {
+            while let Ok(msg) = lib_data_rx.recv_async().await {
+                let _ = data_tx.send_async(msg);
+            }
+        })
+    });
+
     // create data task (receives all outgoing data, batches and flushes as per stream config, handles persistence of batches as well)
     //  * It'll save in memory buffers to disk on Drop
+    tasks_to_run.push(Box::pin(data_task(data_rx, batch_tx)));
+
+    let mut actions_mapping = HashMap::new();
+    // tasks for collectors
+    // tasks_to_run.push(system_stats_task(data_tx.clone()));
+    if cfg.builtin_collectors.device_shadow.enable {
+        tasks_to_run.push(Box::pin(device_shadow_task(data_tx.clone())));
+    }
+    if cfg.enable_remote_shell {
+        let (action_tx, action_rx) = flume::bounded(4);
+        actions_mapping.insert("launch_shell".to_owned(), action_tx);
+        tasks_to_run.push(Box::pin(remote_shell_task(data_tx.clone(), action_rx)));
+    }
+
+    // create mqtt task (receives batches from data task and writes to cloud, receives actions from cloud and dispatches to task for that action)
+    //  * It'll save inflight messages to disk on Drop
+    tasks_to_run.push(Box::pin(mqtt_task(batch_rx, actions_mapping)));
+
     // create a task for each collector and action handler
     //  * there'll be a mapping from action name to handler
     // create a downloader task
@@ -51,6 +95,8 @@ async fn uplink_task(cfg: UplinkConfig, auth: AuthConfig, actions_tx: Sender<Act
     // action_status
     //  * users cannot configure this stream
     //  * internally it will use events api
+
     // await all these tasks
+    futures::future::join_all(tasks_to_run).await;
     Ok(())
 }

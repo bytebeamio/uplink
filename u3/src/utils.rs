@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 pub fn byte_offset_to_position(content: &str, offset: usize) -> Result<(usize, usize), &'static str> {
     let mut line = 1;
     let mut column = 1;
@@ -19,3 +21,6 @@ pub fn byte_offset_to_position(content: &str, offset: usize) -> Result<(usize, u
     Ok((line, column))
 }
 
+pub fn clock() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+}
