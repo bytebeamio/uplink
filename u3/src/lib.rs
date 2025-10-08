@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::task::JoinSet;
-use tokio::task_local;
 
 pub mod collectors;
 pub mod config;
@@ -46,10 +45,7 @@ pub struct PublishItem {
     pub data: serde_json::Value,
 }
 
-task_local! {
-    pub static CONFIG: Arc<AppConfig>;
-}
-pub struct AppConfig {
+pub struct AppContext {
     pub cfg: UplinkConfig,
     pub auth: AuthConfig,
 }
@@ -61,6 +57,7 @@ async fn uplink_task(
     lib_data_rx: Receiver<DataRow>,
 ) {
     let (data_tx, data_rx) = flume::bounded(1024);
+    let ctx = Arc::new(AppContext { cfg, auth });
 
     let mut tasks_to_run = Vec::<Box<dyn Creator>>::new();
     tasks_to_run.push(Box::new(RetryableTask {
@@ -73,13 +70,13 @@ async fn uplink_task(
     }));
 
     let mut actions_mapping = HashMap::new();
-    if cfg.builtin_collectors.device_shadow.enable {
+    if ctx.cfg.builtin_collectors.device_shadow.enable {
         tasks_to_run.push(Box::new(RetryableTask {
             context: data_tx.clone(),
             task: |data_tx| Box::pin(device_shadow_task(data_tx)),
         }));
     }
-    if cfg.enable_remote_shell {
+    if ctx.cfg.enable_remote_shell {
         let (action_tx, action_rx) = flume::bounded(4);
         actions_mapping.insert("launch_shell".to_owned(), action_tx);
         tasks_to_run.push(Box::new(RetryableTask {
@@ -90,20 +87,20 @@ async fn uplink_task(
 
     let (mqtt_tx, mqtt_rx) = flume::bounded(0);
     tasks_to_run.push(Box::new(RetryableTask {
-        context: (data_tx.clone(), mqtt_rx, actions_mapping),
-        task: |(data_tx, mqtt_rx, actions_mapping)| Box::pin(
-            MqttConnectionHandler::new(data_tx, mqtt_rx, actions_mapping).run()
+        context: (ctx.clone(), data_tx.clone(), mqtt_rx, actions_mapping),
+        task: |(ctx, data_tx, mqtt_rx, actions_mapping)| Box::pin(
+            MqttConnectionHandler::new(ctx, data_tx, mqtt_rx, actions_mapping).run()
         ),
     }));
 
     let (buffers_batch_tx, buffers_batch_rx) = flume::bounded(32);
     tasks_to_run.push(Box::new(RetryableTask {
-        context: (data_rx.clone(), buffers_batch_tx),
-        task: |(data_rx, buffers_batch_tx)| Box::pin(StreamsBufferHandler::new(data_rx, buffers_batch_tx).run()),
+        context: (ctx.clone(), data_rx.clone(), buffers_batch_tx),
+        task: |(ctx, data_rx, buffers_batch_tx)| Box::pin(StreamsBufferHandler::new(ctx, data_rx, buffers_batch_tx).run()),
     }));
     tasks_to_run.push(Box::new(RetryableTask {
-        context: (data_tx, buffers_batch_rx, mqtt_tx),
-        task: |(data_tx, buffers_batch_rx, mqtt_tx)| Box::pin(SerializerStorageHandler::new(data_tx, buffers_batch_rx, mqtt_tx).run()),
+        context: (ctx.clone(), data_tx, buffers_batch_rx, mqtt_tx),
+        task: |(ctx, data_tx, buffers_batch_rx, mqtt_tx)| Box::pin(SerializerStorageHandler::new(ctx, data_tx, buffers_batch_rx, mqtt_tx).run()),
     }));
 
     // create a task for each collector and action handler
@@ -123,10 +120,9 @@ async fn uplink_task(
 
     // await all these tasks
     let mut js = JoinSet::new();
-    let ctx = Arc::new(AppConfig { cfg, auth });
     for task in tasks_to_run {
         // TODO: restart these tasks on panic
-        js.spawn(run_with_retry(ctx.clone(), task));
+        js.spawn(run_with_retry(task));
     }
     js.join_all().await;
 }
@@ -151,11 +147,10 @@ impl<C: Clone + Send> Creator for RetryableTask<C> {
 }
 
 async fn run_with_retry(
-    ctx: Arc<AppConfig>,
     task: Box<dyn Creator>
 ) {
     loop {
-        let result = AssertUnwindSafe(CONFIG.scope(ctx.clone(), task.create())).catch_unwind().await;
+        let result = AssertUnwindSafe(task.create()).catch_unwind().await;
 
         if let Err(_) = result {
             println!("Future panicked, retrying...");

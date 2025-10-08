@@ -1,6 +1,6 @@
 use crate::core::storage::PersistenceFile;
 use crate::utils::{clock, chain};
-use crate::{AppConfig, DataRow, PublishItem, CONFIG};
+use crate::{AppContext, DataRow, PublishItem};
 use bytes::BytesMut;
 use flume::{Receiver, Sender};
 use log::{debug, error, info, warn};
@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::io::Error;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tokio::time::sleep;
@@ -49,6 +50,7 @@ pub async fn send_action_response(
 }
 
 pub struct MqttConnectionHandler {
+    context: Arc<AppContext>,
     data_tx: Sender<DataRow>,
     mqtt_rx: Receiver<Publish>,
     actions_mapping: HashMap<String, Sender<Action>>,
@@ -61,34 +63,32 @@ pub struct MqttConnectionHandler {
 
 impl MqttConnectionHandler {
     pub fn new(
+        context: Arc<AppContext>,
         data_tx: Sender<DataRow>,
         mqtt_rx: Receiver<Publish>,
         actions_mapping: HashMap<String, Sender<Action>>,
     ) -> Self {
-        CONFIG.with(|config| {
-            let options = mqttoptions(config);
-            let (client, mut eventloop) = AsyncClient::new(options, 0);
-            eventloop.network_options.set_connection_timeout(config.cfg.mqtt.network_timeout);
-            let mut handler = Self {
-                data_tx,
-                mqtt_rx,
-                actions_mapping,
-                client: client.clone(),
-                eventloop,
-                metrics_sequence: 0,
-                metrics: MqttMetrics::default(),
-            };
-            use std::str::FromStr;
-            CONFIG.with(|c| {
-                let persistence_file =
-                    PersistenceFile::new(&c.cfg.persistence_path, "inflight.bin".to_owned());
-                if let Err(e) = handler.reload_from_inflight_file(&persistence_file) {
-                    error!("couldn't read inflight file: {e:?}");
-                }
-                let _ = persistence_file.delete();
-            });
-            handler
-        })
+        let options = mqttoptions(&context);
+        let (client, mut eventloop) = AsyncClient::new(options, 0);
+        eventloop.network_options.set_connection_timeout(context.cfg.mqtt.network_timeout);
+        let mut handler = Self {
+            context: context.clone(),
+            data_tx,
+            mqtt_rx,
+            actions_mapping,
+            client: client.clone(),
+            eventloop,
+            metrics_sequence: 0,
+            metrics: MqttMetrics::default(),
+        };
+        use std::str::FromStr;
+        let persistence_file =
+            PersistenceFile::new(&context.cfg.persistence_path, "inflight.bin".to_owned());
+        if let Err(e) = handler.reload_from_inflight_file(&persistence_file) {
+            error!("couldn't read inflight file: {e:?}");
+        }
+        let _ = persistence_file.delete();
+        handler
     }
 
     pub async fn run(mut self) {
@@ -96,9 +96,7 @@ impl MqttConnectionHandler {
         tokio::pin!(transfer_task);
         let mut disconnection_wait_timer = None;
         let mut subscribe_for_actions = false;
-        let actions_topic = CONFIG.with(|c| {
-            format!("/tenants/{}/devices/{}/actions", c.auth.project_id, c.auth.device_id)
-        });
+        let actions_topic = format!("/tenants/{}/devices/{}/actions", self.context.auth.project_id, self.context.auth.device_id);
         let client = self.client.clone();
         loop {
             select! {
@@ -203,12 +201,7 @@ impl MqttConnectionHandler {
     /// Checks for and loads data pending in persistence/inflight file
     /// once done, deletes the file, while writing incoming data into storage.
     fn reload_from_inflight_file(&mut self, file: &PersistenceFile) -> anyhow::Result<()> {
-        let (max_packet_size, tenant_filter) = CONFIG.with(|c| {
-            (
-                c.cfg.mqtt.max_packet_size,
-                format!("/tenants/{}/devices/{}", c.auth.project_id, c.auth.device_id),
-            )
-        });
+        let tenant_filter = format!("/tenants/{}/devices/{}", self.context.auth.project_id, self.context.auth.device_id);
         let path = file.path();
         if !path.is_file() {
             return Ok(());
@@ -217,7 +210,7 @@ impl MqttConnectionHandler {
         file.read(&mut buf)?;
 
         loop {
-            match Packet::read(&mut buf, max_packet_size) {
+            match Packet::read(&mut buf, self.context.cfg.mqtt.max_packet_size) {
                 Ok(Packet::Publish(publish)) => {
                     if publish.topic.starts_with(&tenant_filter) {
                         self.eventloop.pending.push_back(Request::Publish(publish))
@@ -254,29 +247,27 @@ impl Drop for MqttConnectionHandler {
         if publishes.is_empty() {
             info!("no inflight messages");
         } else {
-            CONFIG.with(|c| {
-                let file =
-                    PersistenceFile::new(&c.cfg.persistence_path, "inflight.bin".to_string());
-                let mut buf = BytesMut::new();
-                for publish in publishes {
-                    if let Err(e) = publish.write(&mut buf) {
-                        error!("couldn't serialize an inflight message: {e:?}");
-                    }
+            let file =
+                PersistenceFile::new(&self.context.cfg.persistence_path, "inflight.bin".to_string());
+            let mut buf = BytesMut::new();
+            for publish in publishes {
+                if let Err(e) = publish.write(&mut buf) {
+                    error!("couldn't serialize an inflight message: {e:?}");
                 }
-                match file.write(&mut buf) {
-                    Ok(_) => {
-                        info!("Pending publishes written to disk: {}", file.path().display());
-                    }
-                    Err(e) => {
-                        error!("couldn't write inflight messages to disk: {e:?}");
-                    }
+            }
+            match file.write(&mut buf) {
+                Ok(_) => {
+                    info!("Pending publishes written to disk: {}", file.path().display());
                 }
-            });
+                Err(e) => {
+                    error!("couldn't write inflight messages to disk: {e:?}");
+                }
+            }
         }
     }
 }
 
-fn mqttoptions(config: &AppConfig) -> MqttOptions {
+fn mqttoptions(config: &AppContext) -> MqttOptions {
     let mut mqttoptions =
         MqttOptions::new(&config.auth.device_id, &config.auth.broker, config.auth.port);
     mqttoptions

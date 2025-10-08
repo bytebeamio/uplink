@@ -33,7 +33,7 @@ pub struct UplinkConfig {
     pub enable_certificate_renewal: bool,
     pub enable_remote_shell: bool,
     #[serde(default = "default_streams_count")]
-    pub max_dynamic_streams_count: u16,
+    pub max_dynamic_streams_count: usize,
 
     pub streams: HashMap<String, StreamConfig>,
     pub socket_clients: HashMap<String, SocketClientConfig>,
@@ -41,7 +41,7 @@ pub struct UplinkConfig {
     pub builtin_collectors: BuiltinCollectorsConfig,
     pub mqtt: MqttConfig,
 }
-fn default_streams_count() -> u16 {
+fn default_streams_count() -> usize {
     5
 }
 
@@ -92,7 +92,7 @@ pub struct ActionConfig {
 }
 
 #[derive(Deserialize, Serialize, Default)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct BuiltinCollectorsConfig {
     pub device_shadow: DeviceShadowConfig,
     pub uplink_metrics: UplinkMetricsConfig,

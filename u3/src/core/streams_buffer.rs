@@ -1,13 +1,15 @@
 use crate::config::StreamConfig;
 use crate::utils::delaymap::DelayMap;
-use crate::{CONFIG, DataRow, PublishItem};
+use crate::{DataRow, PublishItem, AppContext};
 use flume::{Receiver, Sender};
 use log::error;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 
 pub struct StreamsBufferHandler {
+    context: Arc<AppContext>,
     data_rx: Receiver<DataRow>,
     buffers_batch_tx: Sender<(String, Vec<PublishItem>)>,
     buffers: HashMap<String, (Vec<PublishItem>, StreamConfig)>,
@@ -16,20 +18,18 @@ pub struct StreamsBufferHandler {
 
 impl StreamsBufferHandler {
     pub fn new(
+        context: Arc<AppContext>,
         data_rx: Receiver<DataRow>,
         buffers_batch_tx: Sender<(String, Vec<PublishItem>)>,
     ) -> Self {
-        Self { data_rx, buffers_batch_tx, buffers: HashMap::new(), timeouts: DelayMap::new() }
+        Self { context: context, data_rx, buffers_batch_tx, buffers: HashMap::new(), timeouts: DelayMap::new() }
     }
 
     pub async fn run(mut self) {
-        let max_dynamic_streams_count = CONFIG.with(|c| {
-            for (name, cfg) in c.cfg.streams.iter() {
-                self.buffers
-                    .insert(name.clone(), (Vec::with_capacity(cfg.buffer_size), cfg.clone()));
-            }
-            c.cfg.max_dynamic_streams_count as usize
-        });
+        for (name, cfg) in self.context.cfg.streams.iter() {
+            self.buffers
+                .insert(name.clone(), (Vec::with_capacity(cfg.buffer_size), cfg.clone()));
+        }
         let declared_streams_count = self.buffers.len();
         loop {
             select! {
@@ -44,7 +44,7 @@ impl StreamsBufferHandler {
                             }
                         }
                         None => {
-                            if self.buffers.len() - declared_streams_count >= max_dynamic_streams_count {
+                            if self.buffers.len() - declared_streams_count >= self.context.cfg.max_dynamic_streams_count {
                                 error!("too many dynamic streams, ignoring data for stream({})", row.stream);
                                 continue;
                             } else {

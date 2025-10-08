@@ -1,7 +1,7 @@
 use crate::config::StreamConfig;
 use crate::core::storage;
 use crate::core::storage::{Storage, StorageEnum, StorageWriteError};
-use crate::{CONFIG, DataRow, PublishItem};
+use crate::{DataRow, PublishItem, AppContext};
 use flume::{Receiver, SendError, Sender};
 use log::error;
 use lz4_flex::frame::FrameEncoder;
@@ -9,10 +9,12 @@ use replace_with::replace_with_or_abort;
 use rumqttc::{AsyncClient, Publish, QoS, Request};
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::select;
 
 pub struct SerializerStorageHandler {
+    context: Arc<AppContext>,
     data_tx: Sender<DataRow>,
     buffers_batch_rx: Receiver<(String, Vec<PublishItem>)>,
     topic_prefix: String,
@@ -31,14 +33,15 @@ struct StorageState {
 
 impl SerializerStorageHandler {
     pub fn new(
+        context: Arc<AppContext>,
         data_tx: Sender<DataRow>,
         buffers_batch_rx: Receiver<(String, Vec<PublishItem>)>,
         mqtt_client: Sender<Publish>,
     ) -> Self {
-        let (topic_prefix, storages) = CONFIG.with(|c| {
+        let (topic_prefix, storages) = {
             let topic_prefix =
-                format!("/tenants/{}/devices/{}", c.auth.project_id, c.auth.device_id);
-            let storages = c
+                format!("/tenants/{}/devices/{}", context.auth.project_id, context.auth.device_id);
+            let storages = context
                 .cfg
                 .streams
                 .iter()
@@ -46,7 +49,7 @@ impl SerializerStorageHandler {
                     (
                         name.clone(),
                         StorageState {
-                            storage: create_storage_for_stream(name, cfg),
+                            storage: create_storage_for_stream(&context, name, cfg),
                             stream_config: cfg.clone(),
                             live_data: None,
                             live_data_pushed_at: 0,
@@ -55,8 +58,9 @@ impl SerializerStorageHandler {
                 })
                 .collect();
             (topic_prefix, storages)
-        });
+        };
         Self {
+            context: context,
             data_tx,
             buffers_batch_rx,
             topic_prefix,
@@ -113,7 +117,7 @@ impl SerializerStorageHandler {
             self.storages.insert(
                 stream_name.to_owned(),
                 StorageState {
-                    storage: create_storage_for_stream(&stream_name, &stream_config),
+                    storage: create_storage_for_stream(&self.context, &stream_name, &stream_config),
                     stream_config,
                     live_data: None,
                     live_data_pushed_at: self.live_data_clock,
@@ -208,9 +212,8 @@ impl Drop for SerializerStorageHandler {
     }
 }
 
-fn create_storage_for_stream(name: &str, config: &StreamConfig) -> StorageEnum {
-    let (max_packet_size, directory) =
-        CONFIG.with(|c| (c.cfg.mqtt.max_packet_size, c.cfg.persistence_path.join(name)));
+fn create_storage_for_stream(ctx: &AppContext, name: &str, config: &StreamConfig) -> StorageEnum {
+    let (max_packet_size, directory) = (ctx.cfg.mqtt.max_packet_size, ctx.cfg.persistence_path.join(name));
     if config.persistence.max_file_count == 0 {
         StorageEnum::InMemory(storage::InMemoryStorage::new(
             name,
@@ -273,7 +276,9 @@ fn create_publish(
 
     // metrics.add_serialized_sizes(data_size, compressed_data_size);
 
-    Publish::new(topic, QoS::AtLeastOnce, payload)
+    let mut result = Publish::new(topic, QoS::AtLeastOnce, payload);
+    result.pkid = 1;
+    result
 }
 
 fn lz4_compress(payload: &mut Vec<u8>) {
