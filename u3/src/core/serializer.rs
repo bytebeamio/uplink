@@ -16,7 +16,7 @@ pub struct SerializerStorageHandler {
     data_tx: Sender<DataRow>,
     buffers_batch_rx: Receiver<(String, Vec<PublishItem>)>,
     topic_prefix: String,
-    mqtt_client: AsyncClient,
+    mqtt_client: Sender<Publish>,
     storages: HashMap<String, StorageState>,
     live_data_clock: usize,
     current_publish: Option<(String, Publish)>,
@@ -33,7 +33,7 @@ impl SerializerStorageHandler {
     pub fn new(
         data_tx: Sender<DataRow>,
         buffers_batch_rx: Receiver<(String, Vec<PublishItem>)>,
-        mqtt_client: AsyncClient,
+        mqtt_client: Sender<Publish>,
     ) -> Self {
         let (topic_prefix, storages) = CONFIG.with(|c| {
             let topic_prefix =
@@ -68,12 +68,12 @@ impl SerializerStorageHandler {
     }
 
     pub async fn run(mut self) {
-        let mqtt_client = self.mqtt_client.request_tx.clone();
+        let mqtt_client = self.mqtt_client.clone();
         self.current_publish = self.get_next_publish();
         let mut current_publish_task = self
             .current_publish
             .clone()
-            .map(|(_, publish)| mqtt_client.send_async(Request::Publish(publish)));
+            .map(|(_, publish)| mqtt_client.send_async(publish));
         loop {
             select! {
                 Ok(buf) = self.buffers_batch_rx.recv_async() => {
@@ -84,11 +84,11 @@ impl SerializerStorageHandler {
                         Ok(_) => {
                             self.current_publish = self.get_next_publish();
                             current_publish_task = self.current_publish.clone()
-                                .map(|(_, publish)| mqtt_client.send_async(Request::Publish(publish)));
+                                .map(|(_, publish)| mqtt_client.send_async(publish));
                         }
                         Err(_) => {
                             current_publish_task = self.current_publish.clone()
-                                .map(|(_, publish)| mqtt_client.send_async(Request::Publish(publish)));
+                                .map(|(_, publish)| mqtt_client.send_async(publish));
                         }
                     }
                 }

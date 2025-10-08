@@ -1,6 +1,8 @@
 pub mod delaymap;
 
 use std::time::{SystemTime, UNIX_EPOCH};
+use flume::{Receiver, Sender};
+use rumqttc::{Publish, Request};
 
 pub fn byte_offset_to_position(
     content: &str,
@@ -48,5 +50,13 @@ pub mod path_parser {
         D: Deserializer<'de>,
     {
         Ok(PathBuf::deserialize(deserializer)?)
+    }
+}
+
+pub async fn chain(rx: Receiver<Publish>, tx: Sender<Request>) {
+    while let Ok(item) = rx.recv_async().await {
+        if tx.send_async(Request::Publish(item)).await.is_err() {
+            break;
+        }
     }
 }

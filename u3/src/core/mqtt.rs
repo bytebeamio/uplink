@@ -1,5 +1,5 @@
 use crate::core::storage::PersistenceFile;
-use crate::utils::clock;
+use crate::utils::{clock, chain};
 use crate::{AppConfig, DataRow, PublishItem, CONFIG};
 use bytes::BytesMut;
 use flume::{Receiver, Sender};
@@ -50,6 +50,7 @@ pub async fn send_action_response(
 
 pub struct MqttConnectionHandler {
     data_tx: Sender<DataRow>,
+    mqtt_rx: Receiver<Publish>,
     actions_mapping: HashMap<String, Sender<Action>>,
 
     client: AsyncClient,
@@ -61,14 +62,16 @@ pub struct MqttConnectionHandler {
 impl MqttConnectionHandler {
     pub fn new(
         data_tx: Sender<DataRow>,
+        mqtt_rx: Receiver<Publish>,
         actions_mapping: HashMap<String, Sender<Action>>,
-    ) -> (AsyncClient, Self) {
+    ) -> Self {
         CONFIG.with(|config| {
             let options = mqttoptions(config);
             let (client, mut eventloop) = AsyncClient::new(options, 0);
             eventloop.network_options.set_connection_timeout(config.cfg.mqtt.network_timeout);
             let mut handler = Self {
                 data_tx,
+                mqtt_rx,
                 actions_mapping,
                 client: client.clone(),
                 eventloop,
@@ -84,12 +87,13 @@ impl MqttConnectionHandler {
                 }
                 let _ = persistence_file.delete();
             });
-
-            (client, handler)
+            handler
         })
     }
 
     pub async fn run(mut self) {
+        let mut transfer_task = chain(self.mqtt_rx.clone(), self.client.request_tx.clone());
+        tokio::pin!(transfer_task);
         let mut disconnection_wait_timer = None;
         let mut subscribe_for_actions = false;
         let actions_topic = CONFIG.with(|c| {
@@ -98,6 +102,7 @@ impl MqttConnectionHandler {
         let client = self.client.clone();
         loop {
             select! {
+                _ = &mut transfer_task => {},
                 event = self.eventloop.poll(), if disconnection_wait_timer.is_none() => {
                     match event {
                         Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
