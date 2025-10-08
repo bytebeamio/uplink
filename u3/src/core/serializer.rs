@@ -82,6 +82,11 @@ impl SerializerStorageHandler {
             select! {
                 Ok(buf) = self.buffers_batch_rx.recv_async() => {
                     self.write_buffer_to_storage(buf);
+                    if current_publish_task.is_none() {
+                        self.current_publish = self.get_next_publish();
+                        current_publish_task = self.current_publish.clone()
+                            .map(|(_, publish)| mqtt_client.send_async(publish));
+                    }
                 }
                 res = async { current_publish_task.as_mut().unwrap().await }, if current_publish_task.is_some() => {
                     match res {

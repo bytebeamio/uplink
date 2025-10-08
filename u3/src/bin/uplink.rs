@@ -40,10 +40,10 @@ struct Cli {
 
 pub fn initialize_logging(verbosity: u8, file_path: Option<String>) {
     let filter_str = match verbosity {
-        0 => "info,platform=warn",
-        1 => "info,platform=info",
-        2 => "info,platform=debug",
-        _ => "info,platform=trace",
+        0 => "info,u3=warn",
+        1 => "info,u3=info",
+        2 => "info,u3=debug",
+        _ => "info,u3=trace",
     };
     if let Some(file_path) = file_path.as_ref() {
         if let Err(e) = std::fs::write(file_path, filter_str) {

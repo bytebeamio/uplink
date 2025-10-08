@@ -22,7 +22,7 @@ impl StreamsBufferHandler {
         data_rx: Receiver<DataRow>,
         buffers_batch_tx: Sender<(String, Vec<PublishItem>)>,
     ) -> Self {
-        Self { context: context, data_rx, buffers_batch_tx, buffers: HashMap::new(), timeouts: DelayMap::new() }
+        Self { context, data_rx, buffers_batch_tx, buffers: HashMap::new(), timeouts: DelayMap::new() }
     }
 
     pub async fn run(mut self) {
