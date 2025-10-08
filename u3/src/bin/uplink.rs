@@ -7,7 +7,6 @@ use u3::config::parse_config;
 
 #[tokio::main]
 async fn main() {
-    // clean_stacktraces();
     let args = Cli::from_args();
     initialize_logging(args.verbosity, args.log_filters_file_path);
     let (cfg, auth) = match parse_config(&args.config, &args.authentication) {
@@ -99,38 +98,4 @@ pub fn initialize_logging(verbosity: u8, file_path: Option<String>) {
             }
         });
     }
-}
-
-pub fn clean_stacktraces() {
-    std::panic::set_hook(Box::new(move |info| {
-        let orig = format!("{:?}", Backtrace::new());
-        println!("{orig}");
-        log::error!(
-            "=> panic occurred: {}\n=> backtrace:\n{}",
-            info,
-            clean_stacktrace_impl(&orig)
-        );
-    }));
-}
-
-fn clean_stacktrace_impl(s: &str) -> String {
-    let lines = s.lines().collect::<Vec<_>>();
-    let mut resp = String::new();
-    let mut first = true;
-    for idx in 0..lines.len() {
-        let line = lines[idx];
-        if line.trim().starts_with("at ") && line.contains("/uplink/") {
-            if first {
-                first = false;
-            } else {
-                if idx > 0 {
-                    resp.push_str(lines[idx - 1]);
-                    resp.push('\n');
-                }
-                resp.push_str(line);
-                resp.push('\n');
-            }
-        }
-    }
-    resp
 }
