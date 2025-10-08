@@ -5,6 +5,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+// persistence_path is mandatory
+// download_path is mandatory if any downloads are enabled
+// directory structures
+// - <download directory>
+//   - <file version>
+//     - <file name>
+//     - metadata.txt - download url, checksum, size, how much has been downloaded
+// - persistence
+//   - uplink_metadata
+//     - active_actions.json - on shutdown, collectors can save active actions to this file, it will be reloaded on reboot
+//     - uplink_config.txt - will contain hash of config file and uplink version, uplink will throw away the state on disk if it doesn't match
+//   - inflight.bin - mqtt inflight messages
+//   - backup@corrupted
+//   - <stream name>
+//     - backum@1
+//     - backup@2
+//     - backup@corrupted
+//
 #[derive(Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields, default)]
 pub struct UplinkConfig {

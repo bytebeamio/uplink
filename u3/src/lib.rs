@@ -8,6 +8,9 @@ use flume::{Receiver, Sender};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
+use futures::task::SpawnExt;
+use tokio::task::JoinSet;
 use tokio::task_local;
 
 pub mod collectors;
@@ -18,7 +21,7 @@ pub mod utils;
 pub fn start_uplink(
     cfg: UplinkConfig,
     auth: AuthConfig,
-) -> (Receiver<ActionPayload>, Sender<DataRow>, Box<dyn Future<Output = anyhow::Result<()>>>) {
+) -> (Receiver<ActionPayload>, Sender<DataRow>, Box<dyn Future<Output=()>>) {
     let (actions_tx, actions_rx) = flume::bounded(8);
     let (data_tx, data_rx) = flume::bounded(128);
     (actions_rx, data_tx, Box::new(uplink_task(cfg, auth, actions_tx, data_rx)))
@@ -44,7 +47,7 @@ pub struct PublishItem {
 }
 
 task_local! {
-    pub static CONFIG: AppConfig;
+    pub static CONFIG: Arc<AppConfig>;
 }
 pub struct AppConfig {
     pub cfg: UplinkConfig,
@@ -56,10 +59,10 @@ async fn uplink_task(
     auth: AuthConfig,
     lib_actions_tx: Sender<ActionPayload>,
     lib_data_rx: Receiver<DataRow>,
-) -> anyhow::Result<()> {
+) {
     let (data_tx, data_rx) = flume::bounded(1024);
 
-    let mut tasks_to_run = Vec::<Pin<Box<dyn Future<Output = ()>>>>::new();
+    let mut tasks_to_run = Vec::<Pin<Box<dyn Future<Output = ()> + Send>>>::new();
     tasks_to_run.push({
         let data_tx = data_tx.clone();
         Box::pin(async move {
@@ -104,6 +107,10 @@ async fn uplink_task(
     //  * internally it will use events api
 
     // await all these tasks
-    CONFIG.scope(AppConfig { cfg, auth }, futures::future::join_all(tasks_to_run)).await;
-    Ok(())
+    let mut js = JoinSet::new();
+    let ctx = Arc::new(AppConfig { cfg, auth });
+    for task in tasks_to_run {
+        js.spawn(CONFIG.scope(ctx.clone(), task));
+    }
+    js.join_all().await;
 }
