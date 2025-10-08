@@ -44,15 +44,11 @@ pub fn initialize_logging(verbosity: u8, file_path: Option<String>) {
         2 => "info,u3=debug",
         _ => "info,u3=trace",
     };
-    if let Some(file_path) = file_path.as_ref() {
-        if let Err(e) = std::fs::write(file_path, filter_str) {
-            println!("Couldn't write log filters file, log level cannot be reloaded: {e}")
-        }
-    }
     let builder = tracing_subscriber::fmt()
         .pretty()
         .with_line_number(false)
         .with_file(false)
+        .compact()
         .with_thread_ids(false)
         .with_thread_names(false)
         .with_env_filter(filter_str)
@@ -62,6 +58,11 @@ pub fn initialize_logging(verbosity: u8, file_path: Option<String>) {
 
     if let Some(file_path) = file_path {
         tokio::spawn(async move {
+            if let Err(e) = std::fs::write(&file_path, filter_str) {
+                println!("Couldn't write log filters file, log level cannot be reloaded: {e}");
+                return;
+            }
+
             let mut last_modified = SystemTime::now();
             loop {
                 match std::fs::metadata(&file_path) {

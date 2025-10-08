@@ -104,20 +104,20 @@ impl MqttConnectionHandler {
                 event = self.eventloop.poll(), if disconnection_wait_timer.is_none() => {
                     match event {
                         Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
-                            info!("Connected to broker. Session present = {}", connack.session_present);
+                            info!("connected to broker");
                             self.metrics.connections += 1;
                             subscribe_for_actions = true;
                         }
                         Ok(Event::Incoming(Incoming::Publish(p))) => {
                             self.metrics.actions_received += 1;
                             if p.topic != actions_topic {
-                                error!("Unsolicited publish on topic({:?})", p.topic);
+                                error!("unsolicited publish on topic({:?})", p.topic);
                             } else {
                                 // TODO: send action to collector
                             }
                         }
                         Ok(Event::Incoming(packet)) => {
-                            debug!("Incoming = {:?}", packet);
+                            debug!("incoming = {:?}", packet);
                             match packet {
                                 Packet::PubAck(puback) => {
                                     self.metrics.pubacks += 1;
@@ -131,7 +131,7 @@ impl MqttConnectionHandler {
                             }
                         }
                         Ok(Event::Outgoing(packet)) => {
-                            debug!("Outgoing = {:?}", packet);
+                            debug!("outgoing = {:?}", packet);
                             match packet {
                                 rumqttc::Outgoing::Publish(_) => self.metrics.publishes += 1,
                                 rumqttc::Outgoing::PingReq => self.metrics.ping_requests += 1,
@@ -155,9 +155,8 @@ impl MqttConnectionHandler {
                 },
                 resp = client.subscribe(&actions_topic, QoS::AtLeastOnce), if subscribe_for_actions => {
                     subscribe_for_actions = false;
-                    match resp {
-                        Ok(..) => info!("Subscribe -> {:?}", actions_topic),
-                        Err(e) => error!("Failed to send subscription. Error = {:?}", e),
+                    if let Err(e) = resp {
+                        error!("failed to subscribe for actions. Error = {:?}", e);
                     }
                 }
                 _ = async { disconnection_wait_timer.take().unwrap() }, if disconnection_wait_timer.is_some() => {
