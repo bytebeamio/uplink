@@ -12,12 +12,11 @@ pub async fn remote_shell_task(data_tx: Sender<DataRow>, action_rx: Receiver<Act
     let mut shells = FuturesUnordered::<Pin<Box<dyn Future<Output = ()> + Send>>>::new();
     loop {
         select! {
-            action = action_rx.recv_async(), if !action_rx.is_disconnected() => {
-                if let Ok(action) = action {
-                    shells.push(Box::pin(run_remote_shell(action, data_tx.clone())));
-                }
+            Ok(action) = action_rx.recv_async() => {
+                shells.push(Box::pin(run_remote_shell(action, data_tx.clone())));
             }
             _ = shells.next(), if !shells.is_empty() => {}
+            else => break
         }
     }
 }

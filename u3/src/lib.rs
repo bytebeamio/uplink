@@ -110,6 +110,7 @@ async fn uplink_task(
     let mut js = JoinSet::new();
     let ctx = Arc::new(AppConfig { cfg, auth });
     for task in tasks_to_run {
+        // TODO: restart these tasks on panic
         js.spawn(CONFIG.scope(ctx.clone(), task));
     }
     js.join_all().await;

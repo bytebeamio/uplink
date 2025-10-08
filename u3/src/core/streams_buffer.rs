@@ -61,6 +61,7 @@ impl StreamsBufferHandler {
                     let data = self.buffers.get_mut(&stream_name).unwrap().0.drain(..).collect();
                     let _ = self.buffers_batch_tx.send_async((stream_name, data)).await;
                 }
+                else => break
             }
         }
     }

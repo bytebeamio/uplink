@@ -92,6 +92,7 @@ impl SerializerStorageHandler {
                         }
                     }
                 }
+                else => break
             }
         }
     }

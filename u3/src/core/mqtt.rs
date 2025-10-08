@@ -157,7 +157,7 @@ impl MqttConnectionHandler {
                         Err(e) => error!("Failed to send subscription. Error = {:?}", e),
                     }
                 }
-                _ = disconnection_wait_timer.take().unwrap_or(sleep(Duration::MAX)), if disconnection_wait_timer.is_some() => {
+                _ = async { disconnection_wait_timer.take().unwrap() }, if disconnection_wait_timer.is_some() => {
                     disconnection_wait_timer = None;
                 }
             }
