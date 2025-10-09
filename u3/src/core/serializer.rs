@@ -210,6 +210,9 @@ impl Drop for SerializerStorageHandler {
             self.write_buffer_to_storage(buf);
         }
         for (name, storage) in self.storages.iter_mut() {
+            if let Some(publish) = storage.live_data.take() {
+                let _ = storage.storage.write_packet(publish);
+            }
             if let Err(e) = storage.storage.flush() {
                 error!("couldn't flush storage for stream({name:?}) : {e:?}");
             }

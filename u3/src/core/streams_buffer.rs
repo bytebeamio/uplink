@@ -13,6 +13,7 @@ pub struct StreamsBufferHandler {
     data_rx: Receiver<DataRow>,
     buffers_batch_tx: Sender<(String, Vec<PublishItem>)>,
     buffers: HashMap<String, (Vec<PublishItem>, StreamConfig)>,
+    declared_streams_count: usize,
     timeouts: DelayMap<String>,
 }
 
@@ -22,41 +23,19 @@ impl StreamsBufferHandler {
         data_rx: Receiver<DataRow>,
         buffers_batch_tx: Sender<(String, Vec<PublishItem>)>,
     ) -> Self {
-        Self { context, data_rx, buffers_batch_tx, buffers: HashMap::new(), timeouts: DelayMap::new() }
+        let mut buffers = HashMap::new();
+        for (name, cfg) in context.cfg.streams.iter() {
+            buffers.insert(name.clone(), (Vec::with_capacity(cfg.buffer_size), cfg.clone()));
+        }
+        let declared_streams_count = buffers.len();
+
+        Self { context, data_rx, buffers_batch_tx, buffers, declared_streams_count, timeouts: DelayMap::new() }
     }
 
     pub async fn run(mut self) {
-        for (name, cfg) in self.context.cfg.streams.iter() {
-            self.buffers
-                .insert(name.clone(), (Vec::with_capacity(cfg.buffer_size), cfg.clone()));
-        }
-        let declared_streams_count = self.buffers.len();
         loop {
             select! {
-                Ok(row) = self.data_rx.recv_async() => {
-                    match self.buffers.get_mut(&row.stream) {
-                        Some((buf, cfg)) => {
-                            buf.push(row.data);
-                            if buf.len() >= cfg.buffer_size {
-                                let _ = self.buffers_batch_tx.send_async((row.stream, buf.drain(..).collect())).await;
-                            } else if buf.len() == 1 {
-                                self.timeouts.insert(&row.stream, Duration::from_secs(cfg.flush_interval));
-                            }
-                        }
-                        None => {
-                            if self.buffers.len() - declared_streams_count >= self.context.cfg.max_dynamic_streams_count {
-                                error!("too many dynamic streams, ignoring data for stream({})", row.stream);
-                                continue;
-                            } else {
-                                let cfg = StreamConfig::default();
-                                let mut buf = Vec::with_capacity(cfg.buffer_size);
-                                buf.push(row.data);
-                                self.timeouts.insert(&row.stream, Duration::from_secs(cfg.flush_interval));
-                                self.buffers.insert(row.stream.clone(), (buf, cfg));
-                            }
-                        }
-                    }
-                }
+                Ok(row) = self.data_rx.recv_async() => self.save_row(row),
                 Some(stream_name) = self.timeouts.next(), if self.timeouts.has_pending() => {
                     let data = self.buffers.get_mut(&stream_name).unwrap().0.drain(..).collect();
                     let _ = self.buffers_batch_tx.send_async((stream_name, data)).await;
@@ -65,10 +44,37 @@ impl StreamsBufferHandler {
             }
         }
     }
+
+    async fn save_row(&mut self, row: DataRow) {
+        match self.buffers.get_mut(&row.stream) {
+            Some((buf, cfg)) => {
+                buf.push(row.data);
+                if buf.len() >= cfg.buffer_size {
+                    let _ = self.buffers_batch_tx.send_async((row.stream, buf.drain(..).collect())).await;
+                } else if buf.len() == 1 {
+                    self.timeouts.insert(&row.stream, Duration::from_secs(cfg.flush_interval));
+                }
+            }
+            None => {
+                if self.buffers.len() - self.declared_streams_count >= self.context.cfg.max_dynamic_streams_count {
+                    error!("too many dynamic streams, ignoring data for stream({})", row.stream);
+                } else {
+                    let cfg = StreamConfig::default();
+                    let mut buf = Vec::with_capacity(cfg.buffer_size);
+                    buf.push(row.data);
+                    self.timeouts.insert(&row.stream, Duration::from_secs(cfg.flush_interval));
+                    self.buffers.insert(row.stream.clone(), (buf, cfg));
+                }
+            }
+        }
+    }
 }
 
 impl Drop for StreamsBufferHandler {
     fn drop(&mut self) {
+        while let Ok(msg) = self.data_rx.try_recv() {
+            self.save_row(msg);
+        }
         for (stream_name, (buf, _)) in self.buffers.drain() {
             if self.buffers_batch_tx.send((stream_name, buf)).is_err() {
                 error!("couldn't flush stream buffers during shutdown");
