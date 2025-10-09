@@ -257,10 +257,14 @@ fn create_publish(
     let point_count = data.len();
     log::trace!("Data received on stream: {stream_name}; message count = {point_count}");
 
-    let topic = format!(
-        "{topic_prefix}/events/{stream_name}/jsonarray{}",
-        if compress { "/lz4" } else { "" }
-    );
+    let topic = if stream_name == "action_status" {
+        format!("{topic_prefix}/action/status")
+    } else {
+        format!(
+            "{topic_prefix}/events/{stream_name}/jsonarray{}",
+            if compress { "/lz4" } else { "" }
+        )
+    };
 
     let serialization_start = Instant::now();
     let mut payload = serde_json::to_vec(data).unwrap();

@@ -8,7 +8,7 @@ use rumqttc::{
     AsyncClient, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS, Request,
     TlsConfiguration, Transport,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::Error;
@@ -19,8 +19,9 @@ use std::time::Duration;
 use tokio::select;
 use tokio::time::sleep;
 
+#[derive(Deserialize)]
 pub struct Action {
-    pub action_id: String,
+    pub id: String,
     pub name: String,
     pub payload: String,
 }
@@ -113,7 +114,29 @@ impl MqttConnectionHandler {
                             if p.topic != actions_topic {
                                 error!("unsolicited publish on topic({:?})", p.topic);
                             } else {
-                                // TODO: send action to collector
+                                let s = std::str::from_utf8(&p.payload).unwrap();
+                                if let Ok(action) = serde_json::from_str::<Action>(s) {
+                                    // TODO: send_async inside mqtt select
+                                    if let Some(handler) = self.actions_mapping.get(&action.name) {
+                                        let _ = handler.send_async(action).await;
+                                    } else {
+                                        let _ = self.data_tx.send_async(DataRow {
+                                            stream: "action_status".to_string(),
+                                            data: PublishItem {
+                                                sequence: 0,
+                                                timestamp: clock(),
+                                                data: json!({
+                                                    "action_id": action.id,
+                                                    "state": "Failed",
+                                                    "progress": 100,
+                                                    "errors": "uplink isn't configured to handler this action",
+                                                }),
+                                            },
+                                        }).await;
+                                    }
+                                } else {
+                                    error!("received invalid payload from broker as action: {s}");
+                                }
                             }
                         }
                         Ok(Event::Incoming(packet)) => {

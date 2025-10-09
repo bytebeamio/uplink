@@ -1,5 +1,6 @@
 download_path = "/tmp/uplink/downloads"
 persistence_path = "/tmp/uplink/persistence"
+enable_remote_shell = true
 
 [builtin_collectors.device_shadow]
 interval_seconds = 1
