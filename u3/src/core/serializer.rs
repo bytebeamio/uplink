@@ -166,10 +166,10 @@ impl SerializerStorageHandler {
             let storage = &mut storage.storage;
             match storage.read_packet() {
                 Ok(packet) => {
-                    if packet.topic.starts_with(&"TODO:") {
+                    if packet.topic.starts_with(&self.topic_prefix) {
                         return Some((name.clone(), packet));
                     } else {
-                        log::warn!("found data for wrong tenant in persistence!");
+                        log::warn!("found data for wrong tenant in persistence!: {}", packet.topic);
                         continue;
                     }
                 }

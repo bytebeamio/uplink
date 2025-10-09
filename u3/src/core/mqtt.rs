@@ -182,7 +182,7 @@ impl MqttConnectionHandler {
                         error!("failed to subscribe for actions. Error = {:?}", e);
                     }
                 }
-                _ = async { disconnection_wait_timer.take().unwrap() }, if disconnection_wait_timer.is_some() => {
+                _ = async { disconnection_wait_timer.take().unwrap().await }, if disconnection_wait_timer.is_some() => {
                     disconnection_wait_timer = None;
                 }
             }
@@ -228,6 +228,7 @@ impl MqttConnectionHandler {
         if !path.is_file() {
             return Ok(());
         }
+        info!("reloading mqtt inflight messages from last shutdown");
         let mut buf = BytesMut::new();
         file.read(&mut buf)?;
 
@@ -248,7 +249,7 @@ impl MqttConnectionHandler {
                 }
             }
         }
-
+        info!("mqtt inflight messages loaded successfully");
         Ok(())
     }
 }

@@ -48,6 +48,7 @@ async fn run_remote_shell_impl(action: &Action) -> Result<(), String> {
         false,
     );
     let mut client = Client::new(config, HostShell::new().unwrap());
+    // TODO: update tunshell to use tokio 1.0 and remove printlns in tunshell_client
     let status = client.start_session().compat().await.map_err(|e| format!("tunshell-client: {e:?}"))?;
     if status == 0 {
         Ok(())

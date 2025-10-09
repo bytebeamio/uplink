@@ -4,3 +4,6 @@ enable_remote_shell = true
 
 [builtin_collectors.device_shadow]
 interval_seconds = 1
+
+[streams.device_shadow]
+persistence = { max_file_size = 102400, max_file_count = 10 }
