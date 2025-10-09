@@ -3,7 +3,6 @@ use crate::collectors::remote_shell::remote_shell_task;
 use crate::config::{AuthConfig, UplinkConfig};
 use crate::core::mqtt::MqttConnectionHandler;
 use crate::core::serializer::SerializerStorageHandler;
-use crate::core::streams_buffer::StreamsBufferHandler;
 use flume::{Receiver, Sender};
 use futures::task::SpawnExt;
 use serde::Serialize;
@@ -56,7 +55,10 @@ async fn uplink_task(
     lib_actions_tx: Sender<ActionPayload>,
     lib_data_rx: Receiver<DataRow>,
 ) {
+    // SerializerStorageHandler reads from both data_rx and metrics_rx, but it'll only save data from data_rx on shutdown
+    // all data written by collectors is guaranteed to be saved to disk on clean shutdown
     let (data_tx, data_rx) = flume::bounded(1024);
+    let (metrics_tx, metrics_rx) = flume::bounded(8);
     let ctx = Arc::new(AppContext { cfg, auth });
 
     let mut tasks_to_run = Vec::<Box<dyn Creator>>::new();
@@ -87,20 +89,15 @@ async fn uplink_task(
 
     let (mqtt_tx, mqtt_rx) = flume::bounded(0);
     tasks_to_run.push(Box::new(RetryableTask {
-        context: (ctx.clone(), data_tx.clone(), mqtt_rx, actions_mapping),
+        context: (ctx.clone(), metrics_tx.clone(), mqtt_rx, actions_mapping),
         task: |(ctx, data_tx, mqtt_rx, actions_mapping)| Box::pin(
             MqttConnectionHandler::new(ctx, data_tx, mqtt_rx, actions_mapping).run()
         ),
     }));
 
-    let (buffers_batch_tx, buffers_batch_rx) = flume::bounded(32);
     tasks_to_run.push(Box::new(RetryableTask {
-        context: (ctx.clone(), data_rx.clone(), buffers_batch_tx),
-        task: |(ctx, data_rx, buffers_batch_tx)| Box::pin(StreamsBufferHandler::new(ctx, data_rx, buffers_batch_tx).run()),
-    }));
-    tasks_to_run.push(Box::new(RetryableTask {
-        context: (ctx.clone(), data_tx, buffers_batch_rx, mqtt_tx),
-        task: |(ctx, data_tx, buffers_batch_rx, mqtt_tx)| Box::pin(SerializerStorageHandler::new(ctx, data_tx, buffers_batch_rx, mqtt_tx).run()),
+        context: (ctx.clone(), data_rx, metrics_rx, mqtt_tx),
+        task: |(ctx, data_rx, metrics_rx, mqtt_tx)| Box::pin(SerializerStorageHandler::new(ctx, data_rx, metrics_rx, mqtt_tx).run()),
     }));
 
     // create a task for each collector and action handler

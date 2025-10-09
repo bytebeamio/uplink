@@ -10,13 +10,23 @@ use rumqttc::{AsyncClient, Publish, QoS, Request};
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use flume::r#async::SendFut;
 use tokio::select;
+use crate::utils::delaymap::DelayMap;
 
 pub struct SerializerStorageHandler {
     context: Arc<AppContext>,
-    data_tx: Sender<DataRow>,
-    buffers_batch_rx: Receiver<(String, Vec<PublishItem>)>,
+
+    // handles stream buffers and timeouts
+    // along with action_status
+    data_rx: Receiver<DataRow>,
+    mqtt_rx: Receiver<DataRow>,
+    buffers: HashMap<String, (Vec<PublishItem>, StreamConfig)>,
+    declared_streams_count: usize,
+    timeouts: DelayMap<String>,
+
+    // handler storage and persistence
     topic_prefix: String,
     mqtt_client: Sender<Publish>,
     storages: HashMap<String, StorageState>,
@@ -34,10 +44,16 @@ struct StorageState {
 impl SerializerStorageHandler {
     pub fn new(
         context: Arc<AppContext>,
-        data_tx: Sender<DataRow>,
-        buffers_batch_rx: Receiver<(String, Vec<PublishItem>)>,
+        data_rx: Receiver<DataRow>,
+        mqtt_rx: Receiver<DataRow>,
         mqtt_client: Sender<Publish>,
     ) -> Self {
+        let mut buffers = HashMap::new();
+        for (name, cfg) in context.cfg.streams.iter() {
+            buffers.insert(name.clone(), (Vec::with_capacity(cfg.buffer_size), cfg.clone()));
+        }
+        let declared_streams_count = buffers.len();
+
         let (topic_prefix, storages) = {
             let topic_prefix =
                 format!("/tenants/{}/devices/{}", context.auth.project_id, context.auth.device_id);
@@ -60,9 +76,14 @@ impl SerializerStorageHandler {
             (topic_prefix, storages)
         };
         Self {
-            context: context,
-            data_tx,
-            buffers_batch_rx,
+            context,
+
+            data_rx,
+            mqtt_rx,
+            buffers,
+            declared_streams_count,
+            timeouts: DelayMap::new(),
+
             topic_prefix,
             mqtt_client,
             storages,
@@ -73,37 +94,76 @@ impl SerializerStorageHandler {
 
     pub async fn run(mut self) {
         let mqtt_client = self.mqtt_client.clone();
-        self.current_publish = self.get_next_publish();
-        let mut current_publish_task = self
-            .current_publish
-            .clone()
-            .map(|(_, publish)| mqtt_client.send_async(publish));
+        let mut current_publish_task = None;
+        macro_rules! retry_current_publish {
+            () => {
+                current_publish_task = self
+                    .current_publish
+                    .clone()
+                    .map(|(_, publish)| mqtt_client.send_async(publish));
+            }
+        }
+        macro_rules! queue_next_publish {
+            () => {{
+                self.current_publish = self.get_next_publish();
+                retry_current_publish!();
+            }}
+        }
+        queue_next_publish!();
+
         loop {
             select! {
-                Ok(buf) = self.buffers_batch_rx.recv_async() => {
-                    self.write_buffer_to_storage(buf);
+                // first two tasks read data points, and move them to storage according to stream buffer size and timeout config
+                Ok(row) = self.data_rx.recv_async() => if let Some(filled_buffer) = self.buffer_row(row) {
+                    self.write_buffer_to_storage(filled_buffer);
                     if current_publish_task.is_none() {
-                        self.current_publish = self.get_next_publish();
-                        current_publish_task = self.current_publish.clone()
-                            .map(|(_, publish)| mqtt_client.send_async(publish));
+                        queue_next_publish!();
+                    }
+                },
+                Some(stream_name) = self.timeouts.next(), if self.timeouts.has_pending() => {
+                    let data = self.buffers.get_mut(&stream_name).unwrap().0.drain(..).collect();
+                    self.write_buffer_to_storage((stream_name, data));
+                    if current_publish_task.is_none() {
+                        queue_next_publish!();
                     }
                 }
+
+                // moves data from storage to mqtt client
                 res = async { current_publish_task.as_mut().unwrap().await }, if current_publish_task.is_some() => {
                     match res {
-                        Ok(_) => {
-                            self.current_publish = self.get_next_publish();
-                            current_publish_task = self.current_publish.clone()
-                                .map(|(_, publish)| mqtt_client.send_async(publish));
-                        }
-                        Err(_) => {
-                            current_publish_task = self.current_publish.clone()
-                                .map(|(_, publish)| mqtt_client.send_async(publish));
-                        }
+                        Ok(_) => queue_next_publish!(),
+                        Err(_) => retry_current_publish!(),
                     }
                 }
                 else => break
             }
         }
+    }
+
+    fn buffer_row(&mut self, row: DataRow) -> Option<(String, Vec<PublishItem>)> {
+        match self.buffers.get_mut(&row.stream) {
+            Some((buf, cfg)) => {
+                buf.push(row.data);
+                if buf.len() >= cfg.buffer_size {
+                    let data = std::mem::replace(buf, Vec::with_capacity(cfg.buffer_size));
+                    return Some((row.stream, data));
+                } else if buf.len() == 1 {
+                    self.timeouts.insert(&row.stream, Duration::from_secs(cfg.flush_interval));
+                }
+            }
+            None => {
+                if self.buffers.len() - self.declared_streams_count >= self.context.cfg.max_dynamic_streams_count {
+                    error!("too many dynamic streams, ignoring data for stream({})", row.stream);
+                } else {
+                    let cfg = StreamConfig::default();
+                    let mut buf = Vec::with_capacity(cfg.buffer_size);
+                    buf.push(row.data);
+                    self.timeouts.insert(&row.stream, Duration::from_secs(cfg.flush_interval));
+                    self.buffers.insert(row.stream.clone(), (buf, cfg));
+                }
+            }
+        }
+        None
     }
 
     fn write_buffer_to_storage(&mut self, (stream_name, data): (String, Vec<PublishItem>)) {
@@ -203,12 +263,21 @@ impl SerializerStorageHandler {
 
 impl Drop for SerializerStorageHandler {
     fn drop(&mut self) {
+        // read all inflight data from all collectors and save it
+        while let Ok(row) = self.data_rx.recv() {
+            if let Some(buffer) = self.buffer_row(row) {
+                self.write_buffer_to_storage(buffer);
+            }
+        }
+        // write any unflushed buffers to storage
+        for (stream_name, (data, _)) in std::mem::replace(&mut self.buffers, HashMap::new()) {
+            self.write_buffer_to_storage((stream_name, data));
+        }
+        // write inflight publish to storage
         if let Some((name, publish)) = self.current_publish.take() {
             self.write_publish_to_storage(name, publish);
         }
-        while let Ok(buf) = self.buffers_batch_rx.recv() {
-            self.write_buffer_to_storage(buf);
-        }
+        // flush all the storages to disk
         for (name, storage) in self.storages.iter_mut() {
             if let Some(publish) = storage.live_data.take() {
                 let _ = storage.storage.write_packet(publish);
