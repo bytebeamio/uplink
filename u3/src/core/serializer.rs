@@ -22,14 +22,14 @@ pub struct SerializerStorageHandler {
     // handles stream buffers and timeouts
     // along with action_status
     data_rx: Receiver<DataRow>,
-    mqtt_rx: Receiver<DataRow>,
+    metrics_rx: Receiver<DataRow>,
     buffers: HashMap<String, (Vec<PublishItem>, StreamConfig)>,
     declared_streams_count: usize,
     timeouts: DelayMap<String>,
 
     // handler storage and persistence
     topic_prefix: String,
-    mqtt_client: Sender<Publish>,
+    mqtt_client: AsyncClient,
     storages: HashMap<String, StorageState>,
     live_data_clock: usize,
     current_publish: Option<(String, Publish)>,
@@ -46,8 +46,8 @@ impl SerializerStorageHandler {
     pub fn new(
         context: Arc<AppContext>,
         data_rx: Receiver<DataRow>,
-        mqtt_rx: Receiver<DataRow>,
-        mqtt_client: Sender<Publish>,
+        metrics_rx: Receiver<DataRow>,
+        mqtt_client: AsyncClient,
     ) -> Self {
         let mut buffers = HashMap::new();
         for (name, cfg) in context.cfg.streams.iter() {
@@ -80,7 +80,7 @@ impl SerializerStorageHandler {
             context,
 
             data_rx,
-            mqtt_rx,
+            metrics_rx,
             buffers,
             declared_streams_count,
             timeouts: DelayMap::new(),
@@ -101,7 +101,7 @@ impl SerializerStorageHandler {
                 current_publish_task = self
                     .current_publish
                     .clone()
-                    .map(|(_, publish)| mqtt_client.send_async(publish));
+                    .map(|(_, publish)| Box::pin(mqtt_client.publish(publish.topic, publish.qos, publish.retain, publish.payload)));
             }}
         }
         macro_rules! queue_next_publish {

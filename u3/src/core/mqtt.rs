@@ -1,5 +1,5 @@
 use crate::core::storage::PersistenceFile;
-use crate::utils::{clock, chain};
+use crate::utils::*;
 use crate::{AppContext, DataRow, PublishItem};
 use bytes::BytesMut;
 use flume::{Receiver, Sender};
@@ -53,7 +53,6 @@ pub async fn send_action_response(
 pub struct MqttConnectionHandler {
     context: Arc<AppContext>,
     data_tx: Sender<DataRow>,
-    mqtt_rx: Receiver<Publish>,
     actions_mapping: HashMap<String, Sender<Action>>,
 
     client: AsyncClient,
@@ -66,16 +65,14 @@ impl MqttConnectionHandler {
     pub fn new(
         context: Arc<AppContext>,
         data_tx: Sender<DataRow>,
-        mqtt_rx: Receiver<Publish>,
         actions_mapping: HashMap<String, Sender<Action>>,
-    ) -> Self {
+    ) -> (AsyncClient, Self) {
         let options = mqttoptions(&context);
         let (client, mut eventloop) = AsyncClient::new(options, 0);
         eventloop.network_options.set_connection_timeout(context.cfg.mqtt.network_timeout);
         let mut handler = Self {
             context: context.clone(),
             data_tx,
-            mqtt_rx,
             actions_mapping,
             client: client.clone(),
             eventloop,
@@ -89,19 +86,16 @@ impl MqttConnectionHandler {
             error!("couldn't read inflight file: {e:?}");
         }
         let _ = persistence_file.delete();
-        handler
+        (client, handler)
     }
 
     pub async fn run(mut self) {
-        let mut transfer_task = chain(self.mqtt_rx.clone(), self.client.request_tx.clone());
-        tokio::pin!(transfer_task);
         let mut disconnection_wait_timer = None;
         let mut subscribe_for_actions = false;
         let actions_topic = format!("/tenants/{}/devices/{}/actions", self.context.auth.project_id, self.context.auth.device_id);
         let client = self.client.clone();
         loop {
             select! {
-                _ = &mut transfer_task => {},
                 event = self.eventloop.poll(), if disconnection_wait_timer.is_none() => {
                     match event {
                         Ok(Event::Incoming(Incoming::ConnAck(connack))) => {

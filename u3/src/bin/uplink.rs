@@ -5,7 +5,7 @@ use backtrace::Backtrace;
 use structopt::StructOpt;
 use tokio::select;
 use u3::config::parse_config;
-use u3::{uplink_task, MIN_WORKERS};
+use u3::{uplink_task};
 use u3::utils::num_cores;
 
 fn main() {
@@ -24,7 +24,7 @@ fn main() {
     let task = Box::pin(uplink_task(cfg, auth, actions_tx, data_rx));
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(max(MIN_WORKERS, num_cores()))
+        .worker_threads(max(4, num_cores()))
         .enable_all()
         .build()
         .expect("Failed to build Tokio runtime");
