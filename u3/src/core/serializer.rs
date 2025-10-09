@@ -3,12 +3,13 @@ use crate::core::storage;
 use crate::core::storage::{Storage, StorageEnum, StorageWriteError};
 use crate::{DataRow, PublishItem, AppContext};
 use flume::{Receiver, SendError, Sender};
-use log::error;
+use log::{error, info};
 use lz4_flex::frame::FrameEncoder;
 use replace_with::replace_with_or_abort;
 use rumqttc::{AsyncClient, Publish, QoS, Request};
 use std::collections::HashMap;
 use std::io::Write;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use flume::r#async::SendFut;
@@ -96,12 +97,12 @@ impl SerializerStorageHandler {
         let mqtt_client = self.mqtt_client.clone();
         let mut current_publish_task = None;
         macro_rules! retry_current_publish {
-            () => {
+            () => {{
                 current_publish_task = self
                     .current_publish
                     .clone()
                     .map(|(_, publish)| mqtt_client.send_async(publish));
-            }
+            }}
         }
         macro_rules! queue_next_publish {
             () => {{
@@ -263,7 +264,7 @@ impl SerializerStorageHandler {
 
 impl Drop for SerializerStorageHandler {
     fn drop(&mut self) {
-        // read all inflight data from all collectors and save it
+        // read all inflight data from all collectors and save them
         while let Ok(row) = self.data_rx.recv() {
             if let Some(buffer) = self.buffer_row(row) {
                 self.write_buffer_to_storage(buffer);

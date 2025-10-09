@@ -1,5 +1,6 @@
 [toolchain]
-channel = "1.85.0"
+channel = "1.90.0"
+#channel = "nightly-2025-10-09"
 targets = [
     "x86_64-linux-android",
     "i686-linux-android",

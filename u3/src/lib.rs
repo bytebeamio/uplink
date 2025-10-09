@@ -16,15 +16,6 @@ pub mod config;
 pub mod core;
 pub mod utils;
 
-pub fn start_uplink(
-    cfg: UplinkConfig,
-    auth: AuthConfig,
-) -> (Receiver<ActionPayload>, Sender<DataRow>, Box<dyn Future<Output = ()>>) {
-    let (actions_tx, actions_rx) = flume::bounded(8);
-    let (data_tx, data_rx) = flume::bounded(128);
-    (actions_rx, data_tx, Box::new(uplink_task(cfg, auth, actions_tx, data_rx)))
-}
-
 pub struct ActionPayload {
     pub name: String,
     pub action_id: String,
@@ -50,13 +41,15 @@ pub struct AppContext {
     pub cfg: UplinkConfig,
     pub auth: AuthConfig,
 }
+pub const MIN_WORKERS: usize = 4;
 // TODO(3): logs are difficult to read and understand right now. how can that be fixed?
-async fn uplink_task(
+pub async fn uplink_task(
     cfg: UplinkConfig,
     auth: AuthConfig,
     lib_actions_tx: Sender<ActionPayload>,
     lib_data_rx: Receiver<DataRow>,
 ) {
+    assert!(tokio::runtime::Handle::current().metrics().num_workers() > MIN_WORKERS);
     // SerializerStorageHandler reads from both data_rx and metrics_rx, but it'll only save data from data_rx on shutdown
     // all data written by collectors is guaranteed to be saved to disk on clean shutdown
     let (data_tx, data_rx) = flume::bounded(1024);

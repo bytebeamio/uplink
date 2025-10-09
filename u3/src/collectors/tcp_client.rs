@@ -85,5 +85,4 @@ pub async fn tcp_client_task(port: u16, data_tx: Sender<DataRow>, actions_rx: Re
             }
         }
     }
-
 }

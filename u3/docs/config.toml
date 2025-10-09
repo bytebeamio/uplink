@@ -6,6 +6,7 @@ enable_remote_shell = true
 interval_seconds = 1
 
 [streams.device_shadow]
+buffer_size = 1
 persistence = { max_file_size = 102400, max_file_count = 10 }
 
 [tcp_clients.first_one]

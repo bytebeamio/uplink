@@ -1,12 +1,14 @@
+use std::cmp::{max, min};
 use log::error;
 use std::time::{Duration, SystemTime};
 use backtrace::Backtrace;
 use structopt::StructOpt;
 use tokio::select;
 use u3::config::parse_config;
+use u3::{uplink_task, MIN_WORKERS};
+use u3::utils::num_cores;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let args = Cli::from_args();
     initialize_logging(args.verbosity, args.log_filters_file_path);
     let (cfg, auth) = match parse_config(&args.config, &args.authentication) {
@@ -17,12 +19,21 @@ async fn main() {
         }
     };
 
-    let (_action_rx, _data_tx, task) = u3::start_uplink(cfg, auth);
-    let task = Box::into_pin(task);
-    select! {
-        _ = tokio::signal::ctrl_c() => {},
-        _ = task => {}
-    }
+    let (actions_tx, _actions_rx) = flume::bounded(8);
+    let (_data_tx, data_rx) = flume::bounded(128);
+    let task = Box::pin(uplink_task(cfg, auth, actions_tx, data_rx));
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(max(MIN_WORKERS, num_cores()))
+        .enable_all()
+        .build()
+        .expect("Failed to build Tokio runtime");
+    runtime.block_on(async move {
+        select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = task => {}
+        }
+    });
 }
 
 #[derive(StructOpt)]

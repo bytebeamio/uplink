@@ -53,10 +53,15 @@ pub mod path_parser {
     }
 }
 
+// TODO: this might drop a buffer on shutdown
 pub async fn chain(rx: Receiver<Publish>, tx: Sender<Request>) {
     while let Ok(item) = rx.recv_async().await {
         if tx.send_async(Request::Publish(item)).await.is_err() {
             break;
         }
     }
+}
+
+pub fn num_cores() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
 }
