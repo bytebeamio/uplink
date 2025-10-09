@@ -7,3 +7,7 @@ interval_seconds = 1
 
 [streams.device_shadow]
 persistence = { max_file_size = 102400, max_file_count = 10 }
+
+[tcp_clients.first_one]
+port = 8032
+actions = [{ "name" = "a" }]

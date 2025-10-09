@@ -36,7 +36,7 @@ pub struct UplinkConfig {
     pub max_dynamic_streams_count: usize,
 
     pub streams: HashMap<String, StreamConfig>,
-    pub socket_clients: HashMap<String, SocketClientConfig>,
+    pub tcp_clients: HashMap<String, TcpClientConfig>,
     pub lib_actions: Option<Vec<ActionConfig>>,
     pub builtin_collectors: BuiltinCollectorsConfig,
     pub mqtt: MqttConfig,
@@ -78,8 +78,8 @@ impl Default for PersistenceConfig {
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SocketClientConfig {
-    pub socket_path: String,
+pub struct TcpClientConfig {
+    pub port: u16,
     pub actions: Vec<ActionConfig>,
 }
 
@@ -162,7 +162,7 @@ pub fn parse_config(
         }
     };
 
-    let cfg = match toml::from_str::<UplinkConfig>(&config_str) {
+    let mut cfg = match toml::from_str::<UplinkConfig>(&config_str) {
         Ok(r) => r,
         Err(e) => {
             let mut msg = "Couldn't parse config file:\n".to_owned();
@@ -181,6 +181,15 @@ pub fn parse_config(
             return Err("action_status is a special stream and cannot be configured".into());
         }
     }
+    cfg.streams.insert("action_status".into(), StreamConfig {
+        compress: false,
+        buffer_size: 1,
+        flush_interval: 5,
+        persistence: PersistenceConfig {
+            max_file_size: 102400,
+            max_file_count: 10,
+        },
+    });
 
     if cfg.lib_actions.is_some() {
         return Err("unsupported parameter 'lib_actions'".into());

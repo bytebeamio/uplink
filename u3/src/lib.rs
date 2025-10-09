@@ -5,7 +5,7 @@ use crate::core::mqtt::MqttConnectionHandler;
 use crate::core::serializer::SerializerStorageHandler;
 use flume::{Receiver, Sender};
 use futures::task::SpawnExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -31,12 +31,14 @@ pub struct ActionPayload {
     pub payload: serde_json::Value,
 }
 
+#[derive(Deserialize)]
 pub struct DataRow {
     pub stream: String,
+    #[serde(flatten)]
     pub data: PublishItem,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct PublishItem {
     pub sequence: u32,
     pub timestamp: u64,
@@ -79,11 +81,22 @@ async fn uplink_task(
         }));
     }
     if ctx.cfg.enable_remote_shell {
-        let (action_tx, action_rx) = flume::bounded(4);
+        let (action_tx, action_rx) = flume::bounded(0);
         actions_mapping.insert("launch_shell".to_owned(), action_tx);
         tasks_to_run.push(Box::new(RetryableTask {
             context: (data_tx.clone(), action_rx),
             task: |(data_tx, action_rx)| Box::pin(remote_shell_task(data_tx, action_rx)),
+        }));
+    }
+    for (name, cfg) in ctx.cfg.tcp_clients.iter() {
+        let (action_tx, action_rx) = flume::bounded(0);
+        for action in cfg.actions.iter() {
+            actions_mapping.insert(action.name.clone(), action_tx.clone());
+        }
+        tasks_to_run.push(Box::new(RetryableTask {
+            context: (name.clone(), cfg.port, data_tx.clone(), action_rx),
+            task: |(name, port, data_tx, action_rx)| Box::pin(tcp_client_task(port, data_tx, action_rx)
+                .instrument(tracing::info_span!("tcp_client", name = name))),
         }));
     }
 
@@ -128,6 +141,8 @@ use futures::FutureExt;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use tokio::time::{Duration, sleep};
+use tracing::Instrument;
+use crate::collectors::tcp_client::tcp_client_task;
 
 type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
 struct RetryableTask<C: Clone> {

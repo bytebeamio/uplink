@@ -19,7 +19,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio::time::sleep;
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Action {
     pub id: String,
     pub name: String,

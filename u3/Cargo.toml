@@ -19,6 +19,7 @@ tunshell-client = { git = "https://github.com/bytebeamio/tunshell.git", branch =
 rumqttc = { git = "https://github.com/bytebeamio/rumqtt", rev = "b7ae6b5693d8c9c972d5eb857b2293fb901d57d9" }
 seahash = "4.1.0"
 anyhow = "1.0.100"
+tracing = { version = "0.1.41", features = [] }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "local-time"] }
 log = "0.4.28"
 bytes = "1.10.1"
