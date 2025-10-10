@@ -137,7 +137,7 @@ impl MqttConnectionHandler {
                             }
                         }
                         Ok(Event::Incoming(packet)) => {
-                            trace!("incoming = {:?}", packet);
+                            debug!("incoming = {:?}", packet);
                             match packet {
                                 Packet::PubAck(puback) => {
                                     self.metrics.pubacks += 1;
@@ -151,7 +151,7 @@ impl MqttConnectionHandler {
                             }
                         }
                         Ok(Event::Outgoing(packet)) => {
-                            trace!("outgoing = {:?}", packet);
+                            debug!("outgoing = {:?}", packet);
                             match packet {
                                 rumqttc::Outgoing::Publish(_) => self.metrics.publishes += 1,
                                 rumqttc::Outgoing::PingReq => self.metrics.ping_requests += 1,

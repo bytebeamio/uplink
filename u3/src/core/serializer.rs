@@ -123,7 +123,13 @@ impl SerializerStorageHandler {
         loop {
             select! {
                 // first two tasks read data points, and move them to storage according to stream buffer size and timeout config
-                Ok(row) = self.data_rx.recv_async() => if let Some(filled_buffer) = self.buffer_row(row) {
+                Some(row) = async {
+                    select! {
+                        Ok(row) = self.data_rx.recv_async() => Some(row),
+                        Ok(row) = self.metrics_rx.recv_async() => Some(row),
+                        else => None
+                    }
+                } => if let Some(filled_buffer) = self.buffer_row(row) {
                     debug!("flushing {} because the buffer is full", &filled_buffer.0);
                     self.write_buffer_to_storage(filled_buffer);
                     if current_publish_task.is_none() {
