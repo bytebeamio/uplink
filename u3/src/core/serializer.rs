@@ -43,6 +43,14 @@ struct StorageState {
 }
 
 impl SerializerStorageHandler {
+    /// * Receive data from `data_rx` and `metrics_rx`
+    /// * Buffer and timeout as per the stream config
+    /// * Save the buffers to disk as per the persistence config
+    /// * Upload to cloud using mqtt_client
+    /// * Flush in memory data to disk on shutdown
+    ///
+    /// `metrics_rx` is lower priority than `data_rx`
+    /// Data from `metrics_rx` isn't saved on shutdown
     pub fn new(
         context: Arc<AppContext>,
         data_rx: Receiver<DataRow>,

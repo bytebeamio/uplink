@@ -52,7 +52,7 @@ pub async fn send_action_response(
 
 pub struct MqttConnectionHandler {
     context: Arc<AppContext>,
-    data_tx: Sender<DataRow>,
+    metrics_tx: Sender<DataRow>,
     actions_mapping: HashMap<String, Sender<Action>>,
 
     client: AsyncClient,
@@ -62,9 +62,11 @@ pub struct MqttConnectionHandler {
 }
 
 impl MqttConnectionHandler {
+    /// manages mqtt connection
+    /// also saves inflight messages to disk on shutdown
     pub fn new(
         context: Arc<AppContext>,
-        data_tx: Sender<DataRow>,
+        metrics_tx: Sender<DataRow>,
         actions_mapping: HashMap<String, Sender<Action>>,
     ) -> (AsyncClient, Self) {
         let options = mqttoptions(&context);
@@ -72,7 +74,7 @@ impl MqttConnectionHandler {
         eventloop.network_options.set_connection_timeout(context.cfg.mqtt.network_timeout);
         let mut handler = Self {
             context: context.clone(),
-            data_tx,
+            metrics_tx,
             actions_mapping,
             client: client.clone(),
             eventloop,
@@ -115,7 +117,7 @@ impl MqttConnectionHandler {
                                     if let Some(handler) = self.actions_mapping.get(&action.name) {
                                         let _ = handler.send_async(action).await;
                                     } else {
-                                        let _ = self.data_tx.send_async(DataRow {
+                                        let _ = self.metrics_tx.send_async(DataRow {
                                             stream: "action_status".to_string(),
                                             data: PublishItem {
                                                 sequence: 0,
@@ -197,7 +199,7 @@ impl MqttConnectionHandler {
         );
 
         // this goes to serializer which is supposed to never block
-        let _ = self.data_tx.send(DataRow {
+        let _ = self.metrics_tx.send(DataRow {
             stream: "uplink_mqtt_metrics".to_string(),
             data: PublishItem {
                 sequence: self.metrics_sequence,
@@ -215,8 +217,6 @@ impl MqttConnectionHandler {
         self.metrics.inflight = 0;
     }
 
-    /// Checks for and loads data pending in persistence/inflight file
-    /// once done, deletes the file, while writing incoming data into storage.
     fn reload_from_inflight_file(&mut self, file: &PersistenceFile) -> anyhow::Result<()> {
         let tenant_filter = format!("/tenants/{}/devices/{}", self.context.auth.project_id, self.context.auth.device_id);
         let path = file.path();
@@ -236,7 +236,7 @@ impl MqttConnectionHandler {
                         warn!("inflight file has data with wrong tenant|device!");
                     }
                 }
-                Ok(packet) => unreachable!("Unexpected packet: {:?}", packet),
+                Ok(packet) => warn!("unexpected packet: {:?}", packet),
                 Err(rumqttc::Error::InsufficientBytes(_)) => break,
                 Err(e) => {
                     error!("Error reading from file: {e}");
