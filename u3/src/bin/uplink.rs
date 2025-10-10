@@ -10,25 +10,25 @@ use u3::utils::num_cores;
 
 fn main() {
     let args = Cli::from_args();
-    initialize_logging(args.verbosity, args.log_filters_file_path);
-    let (cfg, auth) = match parse_config(&args.config, &args.authentication) {
-        Ok(r) => r,
-        Err(e) => {
-            error!("{e}");
-            return;
-        }
-    };
-
-    let (actions_tx, _actions_rx) = flume::bounded(8);
-    let (_data_tx, data_rx) = flume::bounded(128);
-    let task = Box::pin(uplink_task(cfg, auth, actions_tx, data_rx));
-
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(max(4, num_cores()))
         .enable_all()
         .build()
         .expect("Failed to build Tokio runtime");
     runtime.block_on(async move {
+        initialize_logging(args.verbosity, args.log_filters_file_path);
+        let (cfg, auth) = match parse_config(&args.config, &args.authentication) {
+            Ok(r) => r,
+            Err(e) => {
+                error!("{e}");
+                return;
+            }
+        };
+
+        let (actions_tx, _actions_rx) = flume::bounded(8);
+        let (_data_tx, data_rx) = flume::bounded(128);
+        let task = Box::pin(uplink_task(cfg, auth, actions_tx, data_rx));
+
         select! {
             _ = tokio::signal::ctrl_c() => {},
             _ = task => {}
