@@ -108,6 +108,7 @@ impl MqttConnectionHandler {
                             if p.topic != actions_topic {
                                 error!("unsolicited publish on topic({:?})", p.topic);
                             } else {
+                                // TODO: handle this unwrap
                                 let s = std::str::from_utf8(&p.payload).unwrap();
                                 if let Ok(action) = serde_json::from_str::<Action>(s) {
                                     // TODO: send_async inside mqtt select

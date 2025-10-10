@@ -365,8 +365,6 @@ fn create_publish(
 
 fn lz4_compress(payload: &mut Vec<u8>) {
     let mut compressor = FrameEncoder::new(vec![]);
-    // Below functions fail in case of IO errors
-    // so these unwraps are safe because we are doing in memory compression
     compressor.write_all(payload).unwrap();
     *payload = compressor.finish().unwrap();
 }
