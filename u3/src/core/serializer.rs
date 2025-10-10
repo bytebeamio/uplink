@@ -130,7 +130,7 @@ impl SerializerStorageHandler {
                         else => None
                     }
                 } => if let Some(filled_buffer) = self.buffer_row(row) {
-                    debug!("flushing {} because the buffer is full", &filled_buffer.0);
+                    debug!("flushing {}", &filled_buffer.0);
                     self.write_buffer_to_storage(filled_buffer);
                     if current_publish_task.is_none() {
                         queue_next_publish!();
@@ -184,6 +184,11 @@ impl SerializerStorageHandler {
         None
     }
 
+    // TODO: heavy functions
+    // called synchronously in the serializer main loop
+    // might be slow for big batch size, needs to be benchmarked
+    // does compression and disk io
+    // if these block on disk, serializer will stop reading data points
     fn write_buffer_to_storage(&mut self, (stream_name, data): (String, Vec<PublishItem>)) {
         let compress = self
             .storages
@@ -339,7 +344,6 @@ fn create_storage_for_stream(ctx: &AppContext, name: &str, config: &StreamConfig
     }
 }
 
-// TODO: we should probably move it off of tokio context because it'll do compression
 fn create_publish(
     stream_name: &str,
     data: &[PublishItem],

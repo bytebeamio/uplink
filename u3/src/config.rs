@@ -95,7 +95,6 @@ pub struct ActionConfig {
 #[serde(deny_unknown_fields, default)]
 pub struct BuiltinCollectorsConfig {
     pub device_shadow: DeviceShadowConfig,
-    pub uplink_metrics: UplinkMetricsConfig,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -107,17 +106,6 @@ pub struct DeviceShadowConfig {
 impl Default for DeviceShadowConfig {
     fn default() -> Self {
         Self { enable: true, interval_seconds: 20 }
-    }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
-pub struct UplinkMetricsConfig {
-    pub enable: bool,
-}
-impl Default for UplinkMetricsConfig {
-    fn default() -> Self {
-        Self { enable: true }
     }
 }
 
@@ -190,6 +178,17 @@ pub fn parse_config(
             max_file_count: 10,
         },
     });
+    for metrics_stream in ["uplink_mqtt_metrics", "uplink_serializer_metrics"] {
+        cfg.streams.insert(metrics_stream.into(), StreamConfig {
+            compress: false,
+            buffer_size: 1,
+            flush_interval: 10,
+            persistence: PersistenceConfig {
+                max_file_size: 102400,
+                max_file_count: 10,
+            },
+        });
+    }
 
     if cfg.lib_actions.is_some() {
         return Err("unsupported parameter 'lib_actions'".into());

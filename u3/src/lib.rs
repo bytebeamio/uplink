@@ -54,9 +54,7 @@ pub async fn uplink_task(
 ) {
     let ctx = Arc::new(AppContext { cfg, auth });
 
-    // SerializerStorageHandler reads from both data_rx and metrics_rx, but it'll only save data from data_rx on shutdown
-    // all data written by collectors is guaranteed to be saved to disk on clean shutdown
-    let (data_tx, data_rx) = flume::bounded(1024);
+    let (data_tx, data_rx) = flume::bounded(decide_data_buffer_size(&ctx));
     let (metrics_tx, metrics_rx) = flume::bounded(8);
 
     let mut tasks_to_run = Vec::<Task>::new();
@@ -117,6 +115,13 @@ pub async fn uplink_task(
         js.spawn(task);
     }
     js.join_all().await;
+}
+
+fn decide_data_buffer_size(ctx: &AppContext) -> usize {
+    let max_buffer_size = ctx.cfg.streams.iter().map(|(_, s)| s.buffer_size)
+        .max()
+        .unwrap_or(5);
+    max_buffer_size * 500
 }
 
 type Task = Pin<Box<dyn Future<Output=()> + Send>>;

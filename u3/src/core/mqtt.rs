@@ -198,7 +198,6 @@ impl MqttConnectionHandler {
             metrics.inflight
         );
 
-        // this goes to serializer which is supposed to never block
         let _ = self.metrics_tx.send(DataRow {
             stream: "uplink_mqtt_metrics".to_string(),
             data: PublishItem {
