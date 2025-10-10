@@ -3,7 +3,7 @@ use crate::utils::*;
 use crate::{AppContext, DataRow, PublishItem};
 use bytes::BytesMut;
 use flume::{Receiver, Sender};
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use rumqttc::{
     AsyncClient, Event, EventLoop, Incoming, MqttOptions, Packet, Publish, QoS, Request,
     TlsConfiguration, Transport,
@@ -137,7 +137,7 @@ impl MqttConnectionHandler {
                             }
                         }
                         Ok(Event::Incoming(packet)) => {
-                            debug!("incoming = {:?}", packet);
+                            trace!("incoming = {:?}", packet);
                             match packet {
                                 Packet::PubAck(puback) => {
                                     self.metrics.pubacks += 1;
@@ -151,7 +151,7 @@ impl MqttConnectionHandler {
                             }
                         }
                         Ok(Event::Outgoing(packet)) => {
-                            debug!("outgoing = {:?}", packet);
+                            trace!("outgoing = {:?}", packet);
                             match packet {
                                 rumqttc::Outgoing::Publish(_) => self.metrics.publishes += 1,
                                 rumqttc::Outgoing::PingReq => self.metrics.ping_requests += 1,

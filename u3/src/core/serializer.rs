@@ -3,7 +3,7 @@ use crate::core::storage;
 use crate::core::storage::{Storage, StorageEnum, StorageWriteError};
 use crate::{DataRow, PublishItem, AppContext};
 use flume::{Receiver, SendError, Sender};
-use log::{error, info};
+use log::{debug, error, info};
 use lz4_flex::frame::FrameEncoder;
 use replace_with::replace_with_or_abort;
 use rumqttc::{AsyncClient, Publish, QoS, Request};
@@ -124,13 +124,15 @@ impl SerializerStorageHandler {
             select! {
                 // first two tasks read data points, and move them to storage according to stream buffer size and timeout config
                 Ok(row) = self.data_rx.recv_async() => if let Some(filled_buffer) = self.buffer_row(row) {
+                    debug!("flushing {} because the buffer is full", &filled_buffer.0);
                     self.write_buffer_to_storage(filled_buffer);
                     if current_publish_task.is_none() {
                         queue_next_publish!();
                     }
                 },
                 Some(stream_name) = self.timeouts.next(), if self.timeouts.has_pending() => {
-                    let data = self.buffers.get_mut(&stream_name).unwrap().0.drain(..).collect();
+                    debug!("flushing {stream_name} because of timeout");
+                    let data = std::mem::take(&mut self.buffers.get_mut(&stream_name).unwrap().0);
                     self.write_buffer_to_storage((stream_name, data));
                     if current_publish_task.is_none() {
                         queue_next_publish!();
@@ -154,6 +156,7 @@ impl SerializerStorageHandler {
             Some((buf, cfg)) => {
                 buf.push(row.data);
                 if buf.len() >= cfg.buffer_size {
+                    self.timeouts.remove(&row.stream);
                     let data = std::mem::replace(buf, Vec::with_capacity(cfg.buffer_size));
                     return Some((row.stream, data));
                 } else if buf.len() == 1 {
@@ -280,7 +283,9 @@ impl Drop for SerializerStorageHandler {
         }
         // write any unflushed buffers to storage
         for (stream_name, (data, _)) in std::mem::take(&mut self.buffers) {
-            self.write_buffer_to_storage((stream_name, data));
+            if !data.is_empty() {
+                self.write_buffer_to_storage((stream_name, data));
+            }
         }
         // write inflight publish to storage
         if let Some((name, publish)) = self.current_publish.take() {
