@@ -265,13 +265,13 @@ impl SerializerStorageHandler {
 impl Drop for SerializerStorageHandler {
     fn drop(&mut self) {
         // read all inflight data from all collectors and save them
-        while let Ok(row) = self.data_rx.recv() {
+        while let Ok(row) = self.data_rx.recv_timeout(Duration::from_millis(500)) {
             if let Some(buffer) = self.buffer_row(row) {
                 self.write_buffer_to_storage(buffer);
             }
         }
         // write any unflushed buffers to storage
-        for (stream_name, (data, _)) in std::mem::replace(&mut self.buffers, HashMap::new()) {
+        for (stream_name, (data, _)) in std::mem::take(&mut self.buffers) {
             self.write_buffer_to_storage((stream_name, data));
         }
         // write inflight publish to storage
