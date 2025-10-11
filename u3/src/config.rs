@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 //     - backup@2
 //     - backup@corrupted
 //
-#[derive(Deserialize, Serialize, Default)]
+#[derive(Clone, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields, default)]
 pub struct UplinkConfig {
     #[serde(with = "crate::utils::path_parser")]
@@ -37,7 +37,7 @@ pub struct UplinkConfig {
 
     pub streams: HashMap<String, StreamConfig>,
     pub tcp_clients: HashMap<String, TcpClientConfig>,
-    pub lib_actions: Option<Vec<ActionConfig>>,
+    pub lib_actions: Vec<ActionConfig>,
     pub builtin_collectors: BuiltinCollectorsConfig,
     pub mqtt: MqttConfig,
 }
@@ -76,14 +76,14 @@ impl Default for PersistenceConfig {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TcpClientConfig {
     pub port: u16,
     pub actions: Vec<ActionConfig>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActionConfig {
     pub name: String,
@@ -91,13 +91,13 @@ pub struct ActionConfig {
     pub download_fw: bool,
 }
 
-#[derive(Deserialize, Serialize, Default)]
+#[derive(Clone, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields, default)]
 pub struct BuiltinCollectorsConfig {
     pub device_shadow: DeviceShadowConfig,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct DeviceShadowConfig {
     pub enable: bool,
@@ -115,8 +115,13 @@ pub struct MtlsCerts {
     pub device_certificate: String,
     pub device_private_key: String,
 }
+#[derive(Clone, Deserialize, Serialize)]
+pub struct HttpCreds {
+    pub api_key: String,
+    pub api_url: String,
+}
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct MqttConfig {
     pub max_packet_size: usize,
@@ -130,19 +135,19 @@ impl Default for MqttConfig {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct AuthConfig {
     pub project_id: String,
     pub device_id: String,
     pub broker: String,
     pub port: u16,
     pub authentication: Option<MtlsCerts>,
+    pub http_credentials: HttpCreds,
 }
 
 pub fn parse_config(
     config_path: &str,
-    auth_file_path: &str,
-) -> Result<(UplinkConfig, AuthConfig), String> {
+) -> Result<UplinkConfig, String> {
     let config_str = match std::fs::read_to_string(config_path) {
         Ok(s) => s,
         Err(e) => {
@@ -190,9 +195,19 @@ pub fn parse_config(
         });
     }
 
-    if cfg.lib_actions.is_some() {
+    if !cfg.lib_actions.is_empty() {
         return Err("unsupported parameter 'lib_actions'".into());
     }
+    cfg.lib_actions = vec![
+        ActionConfig {
+            name: "renew_cert".to_string(),
+            download_fw: false,
+        },
+        ActionConfig {
+            name: "update_uplink".to_string(),
+            download_fw: false,
+        }
+    ];
     if let Err(e) = validate_dir_permissions(&cfg.download_path) {
         return Err(format!(
             "encountered a problem with download_path({:?}):\n{e}",
@@ -206,6 +221,12 @@ pub fn parse_config(
         ));
     }
 
+    Ok(cfg)
+}
+
+pub fn parse_auth_file(
+    auth_file_path: &str,
+) -> Result<AuthConfig, String> {
     let auth_str = match std::fs::read_to_string(auth_file_path) {
         Ok(s) => s,
         Err(e) => {
@@ -233,7 +254,7 @@ pub fn parse_config(
         Identity::from_pem(&buf).map_err(|_| "invalid device certificates".to_owned())?;
     }
 
-    Ok((cfg, auth))
+    Ok(auth)
 }
 
 fn validate_dir_permissions(path: &Path) -> Result<(), String> {

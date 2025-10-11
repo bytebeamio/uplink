@@ -1,8 +1,8 @@
 use std::cmp::max;
 use crate::collectors::device_shadow::device_shadow_task;
 use crate::collectors::remote_shell::remote_shell_task;
-use crate::config::{AuthConfig, UplinkConfig};
-use crate::core::mqtt::MqttConnectionHandler;
+use crate::config::{AuthConfig, HttpCreds, UplinkConfig};
+use crate::core::mqtt::{send_action_response, Action, MqttConnectionHandler};
 use crate::core::serializer::SerializerStorageHandler;
 use flume::{Receiver, Sender};
 use futures::task::SpawnExt;
@@ -19,12 +19,6 @@ pub mod collectors;
 pub mod config;
 pub mod core;
 pub mod utils;
-
-pub struct ActionPayload {
-    pub name: String,
-    pub action_id: String,
-    pub payload: serde_json::Value,
-}
 
 #[derive(Deserialize)]
 pub struct DataRow {
@@ -49,7 +43,7 @@ pub struct AppContext {
 pub async fn uplink_task(
     cfg: UplinkConfig,
     auth: AuthConfig,
-    lib_actions_tx: Sender<ActionPayload>,
+    lib_actions_tx: Sender<Action>,
     lib_data_rx: Receiver<DataRow>,
 ) {
     let ctx = Arc::new(AppContext { cfg, auth });
@@ -68,6 +62,9 @@ pub async fn uplink_task(
     }));
 
     let mut actions_mapping = HashMap::new();
+    for action in ctx.cfg.lib_actions.iter() {
+        actions_mapping.insert(action.name.clone(), lib_actions_tx.clone());
+    }
     if ctx.cfg.builtin_collectors.device_shadow.enable {
         tasks_to_run.push(Box::pin(device_shadow_task(data_tx.clone())));
     }

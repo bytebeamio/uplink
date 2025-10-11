@@ -175,7 +175,9 @@ impl DirectoryStorage {
         result
             .load_file_ids()
             .context(format!("Failed to load persistence files from ({:?})", result.dir))?;
-        log::info!("Loaded file ids: {:?}", result.files_queue);
+        if !result.files_queue.is_empty() {
+            log::info!("{}: loaded file ids: {:?}", result.name(), result.files_queue);
+        }
         Ok(result)
     }
 

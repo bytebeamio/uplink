@@ -3,6 +3,7 @@ pub mod delaymap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use flume::{Receiver, Sender};
 use rumqttc::{Publish, Request};
+use tokio::task::JoinHandle;
 
 pub fn byte_offset_to_position(
     content: &str,
@@ -55,4 +56,24 @@ pub mod path_parser {
 
 pub fn num_cores() -> usize {
     std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+}
+
+pub struct TaskManager<T>(pub JoinHandle<T>);
+impl<T> TaskManager<T> {
+    pub fn spawn<F>(future: F) -> Self
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let handle = tokio::spawn(future);
+        Self(handle)
+    }
+}
+
+impl<T> Drop for TaskManager<T> {
+    fn drop(&mut self) {
+        if !self.0.is_finished() {
+            self.0.abort();
+        }
+    }
 }
