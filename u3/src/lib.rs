@@ -13,6 +13,7 @@ use std::cmp::max;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 use log::warn;
 use tokio::task::{JoinError, JoinHandle, JoinSet};
 use tracing::Instrument;
@@ -173,7 +174,10 @@ impl Drop for Uplink {
             let serializer_task =
                 std::mem::replace(&mut self.serializer_task, tokio::spawn(async {}));
             let mqtt_task = std::mem::replace(&mut self.mqtt_task, tokio::spawn(async {}));
-            tokio::spawn(Self::terminate_impl(plugin_tasks, vec![serializer_task, mqtt_task]));
+            // workaround because async Drop isn't stable yet
+            let _ = futures::executor::block_on(
+                tokio::spawn(tokio::time::timeout(Duration::from_secs(2), Self::terminate_impl(plugin_tasks, vec![serializer_task, mqtt_task])))
+            );
         }
     }
 }

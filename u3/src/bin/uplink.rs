@@ -1,7 +1,7 @@
 use std::cmp::{max, min};
 use std::fs::OpenOptions;
 use std::io::Write;
-use log::error;
+use log::{error, info};
 use std::time::{Duration, SystemTime};
 use backtrace::Backtrace;
 use reqwest::{Error, Response};
@@ -68,7 +68,8 @@ fn main() {
                                     continue;
                                 }
                             };
-                            // validate that we can connect using new credentials
+                            info!("received new certificated from server. project_id = {}, device_id = {}", new_credentials.project_id, new_credentials.device_id);
+                            // TODO: validate that we can connect using new credentials
                             if let Err(e) = OpenOptions::new()
                                 .write(true)
                                 .open(&args.authentication)
@@ -78,6 +79,7 @@ fn main() {
                             }
                             submit_action_response(&auth.http_credentials, now + 300, action.id.clone(), "Completed", 100, vec![]);
                             auth = new_credentials;
+                            info!("saved new certificates, reconnecting to the server...");
                             uplink.update_credentials(auth.clone()).await;
                         }
                         "update_uplink" => {
@@ -98,6 +100,7 @@ fn main() {
 fn submit_action_response(auth: &HttpCreds, timestamp: u64, action_id: String, status: &'static str, progress: u8, errors: Vec<String>) {
     // we send the action response using http api because mqtt is async and cannot guarantee delivery
     // these messages have to be sent to server before the reboot because otherwise the responses might end up in the wrong tenant
+    // and action will not make progress on dashboard, and broker will try sending the action again, and we will be sad
     let auth = auth.clone();
     let errors = errors.clone();
     tokio::spawn(async move {

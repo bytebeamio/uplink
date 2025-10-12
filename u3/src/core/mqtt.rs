@@ -148,11 +148,7 @@ impl MqttConnectionHandler {
                         Ok(Event::Incoming(packet)) => {
                             debug!("incoming = {:?}", packet);
                             match packet {
-                                Packet::PubAck(puback) => {
-                                    self.metrics.pubacks += 1;
-                                },
                                 Packet::PingResp => {
-                                    self.metrics.ping_responses += 1;
                                     self.metrics.inflight = self.eventloop.state.inflight();
                                     self.check_and_flush_metrics();
                                 }
@@ -163,21 +159,17 @@ impl MqttConnectionHandler {
                             debug!("outgoing = {:?}", packet);
                             match packet {
                                 rumqttc::Outgoing::Publish(_) => self.metrics.publishes += 1,
-                                rumqttc::Outgoing::PingReq => self.metrics.ping_requests += 1,
                                 _ => {}
                             }
                         }
                         Err(error) => {
                             self.metrics.connection_retries += 1;
                             error!(
-                                "disconnected: reconnects = {:<3} publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3} error = \"{error:>20}\"",
+                                "disconnected: reconnects = {:<3} publishes = {:<3} error = \"{error:>20}\"",
                                 self.metrics.connection_retries,
                                 self.metrics.publishes,
-                                self.metrics.pubacks,
-                                self.metrics.ping_requests,
-                                self.metrics.ping_responses,
                             );
-                            disconnection_wait_timer = Some(sleep(Duration::from_secs(3)));
+                            disconnection_wait_timer = Some(sleep(Duration::from_secs(10)));
                             continue;
                         }
                     }
@@ -198,20 +190,14 @@ impl MqttConnectionHandler {
     pub fn check_and_flush_metrics(&mut self) {
         let metrics = self.metrics.clone();
         info!(
-            "{:>35}: publishes = {:<3} pubacks = {:<3} pingreqs = {:<3} pingresps = {:<3} inflight = {}",
+            "{:>35}: publishes = {:<3} inflight = {}",
             "connected",
             metrics.publishes,
-            metrics.pubacks,
-            metrics.ping_requests,
-            metrics.ping_responses,
             metrics.inflight
         );
 
         self.metrics_sequence += 1;
         self.metrics.publishes = 0;
-        self.metrics.pubacks = 0;
-        self.metrics.ping_requests = 0;
-        self.metrics.ping_responses = 0;
         self.metrics.connections = 0;
         self.metrics.connection_retries = 0;
         self.metrics.inflight = 0;
@@ -261,9 +247,7 @@ impl Drop for MqttConnectionHandler {
             })
             .collect();
 
-        if publishes.is_empty() {
-            info!("no inflight messages");
-        } else {
+        if !publishes.is_empty() {
             let file =
                 PersistenceFile::new(&self.context.persistence_path, "inflight.bin".to_string());
             let mut buf = BytesMut::new();
@@ -311,9 +295,6 @@ fn mqttoptions(config: &MqttTaskContext) -> MqttOptions {
 #[derive(Debug, Serialize, Clone, Default)]
 pub struct MqttMetrics {
     pub publishes: usize,
-    pub pubacks: usize,
-    pub ping_requests: usize,
-    pub ping_responses: usize,
     pub inflight: u16,
     pub actions_received: usize,
     pub connections: usize,
