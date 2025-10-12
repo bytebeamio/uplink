@@ -13,6 +13,7 @@ use std::cmp::max;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
+use log::warn;
 use tokio::task::{JoinError, JoinHandle, JoinSet};
 use tracing::Instrument;
 
@@ -54,6 +55,7 @@ pub struct Uplink {
     mqtt_task: JoinHandle<()>,
     serializer_task: JoinHandle<()>,
     plugin_tasks: JoinSet<()>,
+    cleanup_done: bool,
 }
 
 impl Uplink {
@@ -123,6 +125,7 @@ impl Uplink {
             mqtt_task,
             serializer_task,
             plugin_tasks,
+            cleanup_done: false,
         }
     }
 
@@ -130,7 +133,6 @@ impl Uplink {
         self.mqtt_task.abort();
         let old_task = std::mem::replace(&mut self.mqtt_task, tokio::spawn(async {}));
         let _ = old_task.await;
-        // delete inflight file
         self.auth = new_credentials;
         self.mqtt_task = tokio::spawn(Box::pin(
             MqttConnectionHandler::new(MqttTaskContext {
@@ -143,13 +145,36 @@ impl Uplink {
             .run(),
         ))
     }
+
+    pub async fn terminate(&mut self) {
+        let plugin_tasks = std::mem::replace(&mut self.plugin_tasks, JoinSet::new());
+        let serializer_task =
+            std::mem::replace(&mut self.serializer_task, tokio::spawn(async {}));
+        let mqtt_task = std::mem::replace(&mut self.mqtt_task, tokio::spawn(async {}));
+        Self::terminate_impl(plugin_tasks, vec![serializer_task, mqtt_task]).await;
+        self.cleanup_done = true;
+    }
+
+    async fn terminate_impl(mut plugin_tasks: JoinSet<()>, core_tasks: Vec<JoinHandle<()>>) {
+        plugin_tasks.abort_all();
+        while let Some(_) = plugin_tasks.join_next().await {}
+        for task in core_tasks {
+            task.abort();
+            let _ = task.await;
+        }
+    }
 }
 
 impl Drop for Uplink {
     fn drop(&mut self) {
-        self.plugin_tasks.abort_all();
-        self.serializer_task.abort();
-        self.mqtt_task.abort();
+        if !self.cleanup_done {
+            warn!("Uplink::terminate() needs to be called manually to perform a clean shutdown");
+            let plugin_tasks = std::mem::replace(&mut self.plugin_tasks, JoinSet::new());
+            let serializer_task =
+                std::mem::replace(&mut self.serializer_task, tokio::spawn(async {}));
+            let mqtt_task = std::mem::replace(&mut self.mqtt_task, tokio::spawn(async {}));
+            tokio::spawn(Self::terminate_impl(plugin_tasks, vec![serializer_task, mqtt_task]));
+        }
     }
 }
 

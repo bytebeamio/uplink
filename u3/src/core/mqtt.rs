@@ -111,6 +111,7 @@ impl MqttConnectionHandler {
                     publish.topic = format!("{}{}", topic_prefix, publish.topic);
                     let _ = client.request_tx.try_send(Request::Publish(publish));
                 }
+                tokio::time::sleep(Duration::MAX).await;
             })
         };
 

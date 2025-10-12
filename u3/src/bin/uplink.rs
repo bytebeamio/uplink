@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::json;
 use structopt::StructOpt;
 use tokio::select;
+use tokio::signal::unix::{signal, SignalKind};
 use u3::config::{parse_auth_file, parse_config, AuthConfig, HttpCreds};
 use u3::{DataRow, PublishItem, Uplink};
 use u3::core::mqtt::Action;
@@ -44,10 +45,16 @@ fn main() {
         };
 
         let mut uplink = Uplink::spawn(cfg.clone(), auth.clone(), actions_tx.clone(), data_rx.clone());
-
+        let mut sigterm = signal(SignalKind::terminate()).unwrap();
         loop {
             select! {
-                _ = tokio::signal::ctrl_c() => {
+                _ = async {
+                    select! {
+                        _ = tokio::signal::ctrl_c() => {}
+                        _ = sigterm.recv() => {}
+                    }
+                } => {
+                    uplink.terminate().await;
                     break;
                 },
                 Ok(action) = actions_rx.recv_async() => {

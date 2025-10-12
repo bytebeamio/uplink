@@ -87,8 +87,6 @@ pub struct TcpClientConfig {
 #[serde(deny_unknown_fields)]
 pub struct ActionConfig {
     pub name: String,
-    #[serde(default)]
-    pub download_fw: bool,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default)]
@@ -201,11 +199,9 @@ pub fn parse_config(
     cfg.lib_actions = vec![
         ActionConfig {
             name: "renew_cert".to_string(),
-            download_fw: false,
         },
         ActionConfig {
             name: "update_uplink".to_string(),
-            download_fw: false,
         }
     ];
     if let Err(e) = validate_dir_permissions(&cfg.download_path) {
