@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tokio::time::sleep;
+use crate::config::{AuthConfig, MqttConfig};
 
 #[derive(Serialize, Deserialize)]
 pub struct Action {
@@ -51,53 +52,72 @@ pub async fn send_action_response(
 }
 
 pub struct MqttConnectionHandler {
-    context: Arc<AppContext>,
-    metrics_tx: Sender<DataRow>,
-    actions_mapping: HashMap<String, Sender<Action>>,
+    context: MqttTaskContext,
 
+    topic_prefix: String,
     client: AsyncClient,
     eventloop: EventLoop,
     metrics_sequence: u32,
     metrics: MqttMetrics,
 }
 
+pub struct MqttTaskContext {
+    pub publish_rx: Receiver<Publish>,
+    pub actions_mapping: HashMap<String, Sender<Action>>,
+    pub auth: AuthConfig,
+    pub mqtt: MqttConfig,
+    pub persistence_path: PathBuf,
+}
+
 impl MqttConnectionHandler {
     /// manages mqtt connection
     /// also saves inflight messages to disk on shutdown
     pub fn new(
-        context: Arc<AppContext>,
-        metrics_tx: Sender<DataRow>,
-        actions_mapping: HashMap<String, Sender<Action>>,
-    ) -> (AsyncClient, Self) {
+        context: MqttTaskContext,
+    ) -> Self {
         let options = mqttoptions(&context);
+        let topic_prefix = format!("/tenants/{}/devices/{}", context.auth.project_id, context.auth.device_id);
         let (client, mut eventloop) = AsyncClient::new(options, 0);
-        eventloop.network_options.set_connection_timeout(context.cfg.mqtt.network_timeout);
+        eventloop.network_options.set_connection_timeout(context.mqtt.network_timeout);
         let mut handler = Self {
-            context: context.clone(),
-            metrics_tx,
-            actions_mapping,
-            client: client.clone(),
+            context,
+            topic_prefix,
+            client,
             eventloop,
             metrics_sequence: 0,
             metrics: MqttMetrics::default(),
         };
-        use std::str::FromStr;
+        let persistence_path = handler.context.persistence_path.clone();
         let persistence_file =
-            PersistenceFile::new(&context.cfg.persistence_path, "inflight.bin".to_owned());
+            PersistenceFile::new(&persistence_path, "inflight.bin".to_owned());
         if let Err(e) = handler.reload_from_inflight_file(&persistence_file) {
             error!("couldn't read inflight file: {e:?}");
         }
         let _ = persistence_file.delete();
-        (client, handler)
+        handler
     }
 
     pub async fn run(mut self) {
         let mut disconnection_wait_timer = None;
         let mut subscribe_for_actions = false;
-        let actions_topic = format!("/tenants/{}/devices/{}/actions", self.context.auth.project_id, self.context.auth.device_id);
+
+        let actions_topic = format!("{}/actions", self.topic_prefix);
+        let mut publish_task = {
+            let client = self.client.clone();
+            let topic_prefix = self.topic_prefix.clone();
+            let publish_rx = self.context.publish_rx.clone();
+            Box::pin(async move {
+                while let Ok(mut publish) = publish_rx.recv_async().await {
+                    publish.topic = format!("{}{}", topic_prefix, publish.topic);
+                    let _ = client.request_tx.try_send(Request::Publish(publish));
+                }
+            })
+        };
+
         let client = self.client.clone();
         loop {
             select! {
+                _ = &mut publish_task => {}
                 event = self.eventloop.poll(), if disconnection_wait_timer.is_none() => {
                     match event {
                         Ok(Event::Incoming(Incoming::ConnAck(connack))) => {
@@ -114,22 +134,10 @@ impl MqttConnectionHandler {
                                 let s = std::str::from_utf8(&p.payload).unwrap();
                                 if let Ok(action) = serde_json::from_str::<Action>(s) {
                                     // TODO: send_async inside mqtt select
-                                    if let Some(handler) = self.actions_mapping.get(&action.name) {
+                                    if let Some(handler) = self.context.actions_mapping.get(&action.name) {
                                         let _ = handler.send_async(action).await;
                                     } else {
-                                        let _ = self.metrics_tx.send_async(DataRow {
-                                            stream: "action_status".to_string(),
-                                            data: PublishItem {
-                                                sequence: 0,
-                                                timestamp: clock(),
-                                                data: json!({
-                                                    "action_id": action.id,
-                                                    "state": "Failed",
-                                                    "progress": 100,
-                                                    "errors": "uplink isn't configured to handler this action",
-                                                }),
-                                            },
-                                        }).await;
+                                        // send failed response
                                     }
                                 } else {
                                     error!("received invalid payload from broker as action: {s}");
@@ -198,14 +206,6 @@ impl MqttConnectionHandler {
             metrics.inflight
         );
 
-        let _ = self.metrics_tx.send(DataRow {
-            stream: "uplink_mqtt_metrics".to_string(),
-            data: PublishItem {
-                sequence: self.metrics_sequence,
-                timestamp: clock(),
-                data: serde_json::to_value(&self.metrics).unwrap(),
-            },
-        });
         self.metrics_sequence += 1;
         self.metrics.publishes = 0;
         self.metrics.pubacks = 0;
@@ -217,7 +217,6 @@ impl MqttConnectionHandler {
     }
 
     fn reload_from_inflight_file(&mut self, file: &PersistenceFile) -> anyhow::Result<()> {
-        let tenant_filter = format!("/tenants/{}/devices/{}", self.context.auth.project_id, self.context.auth.device_id);
         let path = file.path();
         if !path.is_file() {
             return Ok(());
@@ -227,9 +226,9 @@ impl MqttConnectionHandler {
         file.read(&mut buf)?;
 
         loop {
-            match Packet::read(&mut buf, self.context.cfg.mqtt.max_packet_size) {
+            match Packet::read(&mut buf, self.context.mqtt.max_packet_size) {
                 Ok(Packet::Publish(publish)) => {
-                    if publish.topic.starts_with(&tenant_filter) {
+                    if publish.topic.starts_with(&self.topic_prefix) {
                         self.eventloop.pending.push_back(Request::Publish(publish))
                     } else {
                         warn!("inflight file has data with wrong tenant|device!");
@@ -265,7 +264,7 @@ impl Drop for MqttConnectionHandler {
             info!("no inflight messages");
         } else {
             let file =
-                PersistenceFile::new(&self.context.cfg.persistence_path, "inflight.bin".to_string());
+                PersistenceFile::new(&self.context.persistence_path, "inflight.bin".to_string());
             let mut buf = BytesMut::new();
             for publish in publishes {
                 if let Err(e) = publish.write(&mut buf) {
@@ -284,13 +283,13 @@ impl Drop for MqttConnectionHandler {
     }
 }
 
-fn mqttoptions(config: &AppContext) -> MqttOptions {
+fn mqttoptions(config: &MqttTaskContext) -> MqttOptions {
     let mut mqttoptions =
         MqttOptions::new(&config.auth.device_id, &config.auth.broker, config.auth.port);
     mqttoptions
-        .set_max_packet_size(config.cfg.mqtt.max_packet_size, config.cfg.mqtt.max_packet_size);
-    mqttoptions.set_keep_alive(Duration::from_secs(config.cfg.mqtt.keep_alive));
-    mqttoptions.set_inflight(config.cfg.mqtt.max_inflight);
+        .set_max_packet_size(config.mqtt.max_packet_size, config.mqtt.max_packet_size);
+    mqttoptions.set_keep_alive(Duration::from_secs(config.mqtt.keep_alive));
+    mqttoptions.set_inflight(config.mqtt.max_inflight);
 
     if let Some(auth) = config.auth.authentication.clone() {
         let ca = auth.ca_certificate.into_bytes();

@@ -1,7 +1,9 @@
 use crate::config::StreamConfig;
 use crate::core::storage;
 use crate::core::storage::{Storage, StorageEnum, StorageWriteError};
-use crate::{DataRow, PublishItem, AppContext};
+use crate::utils::delaymap::DelayMap;
+use crate::{AppContext, DataRow, PublishItem};
+use flume::r#async::SendFut;
 use flume::{Receiver, SendError, Sender};
 use log::{debug, error, info};
 use lz4_flex::frame::FrameEncoder;
@@ -9,30 +11,33 @@ use replace_with::replace_with_or_abort;
 use rumqttc::{AsyncClient, Publish, QoS, Request};
 use std::collections::HashMap;
 use std::io::Write;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use flume::r#async::SendFut;
 use tokio::select;
-use crate::utils::delaymap::DelayMap;
 
 pub struct SerializerStorageHandler {
-    context: Arc<AppContext>,
+    context: SerializerConfig,
 
-    // handles stream buffers and timeouts
-    // along with action_status
+    // handles stream buffers and timeouts along with action_status
     data_rx: Receiver<DataRow>,
-    metrics_rx: Receiver<DataRow>,
     buffers: HashMap<String, (Vec<PublishItem>, StreamConfig)>,
     declared_streams_count: usize,
     timeouts: DelayMap<String>,
 
     // handler storage and persistence
-    topic_prefix: String,
-    mqtt_client: AsyncClient,
+    mqtt_client: Sender<Publish>,
     storages: HashMap<String, StorageState>,
     live_data_clock: usize,
     current_publish: Option<(String, Publish)>,
+}
+
+pub struct SerializerConfig {
+    pub streams: HashMap<String, StreamConfig>,
+    pub mqtt_max_packet_size: usize,
+    pub max_dynamic_streams_count: usize,
+    pub persistence_path: PathBuf,
 }
 
 struct StorageState {
@@ -52,48 +57,39 @@ impl SerializerStorageHandler {
     /// `metrics_rx` is lower priority than `data_rx`
     /// Data from `metrics_rx` isn't saved on shutdown
     pub fn new(
-        context: Arc<AppContext>,
+        context: SerializerConfig,
         data_rx: Receiver<DataRow>,
-        metrics_rx: Receiver<DataRow>,
-        mqtt_client: AsyncClient,
+        mqtt_client: Sender<Publish>,
     ) -> Self {
         let mut buffers = HashMap::new();
-        for (name, cfg) in context.cfg.streams.iter() {
+        for (name, cfg) in context.streams.iter() {
             buffers.insert(name.clone(), (Vec::with_capacity(cfg.buffer_size), cfg.clone()));
         }
         let declared_streams_count = buffers.len();
 
-        let (topic_prefix, storages) = {
-            let topic_prefix =
-                format!("/tenants/{}/devices/{}", context.auth.project_id, context.auth.device_id);
-            let storages = context
-                .cfg
-                .streams
-                .iter()
-                .map(|(name, cfg)| {
-                    (
-                        name.clone(),
-                        StorageState {
-                            storage: create_storage_for_stream(&context, name, cfg),
-                            stream_config: cfg.clone(),
-                            live_data: None,
-                            live_data_pushed_at: 0,
-                        },
-                    )
-                })
-                .collect();
-            (topic_prefix, storages)
-        };
+        let storages = context
+            .streams
+            .iter()
+            .map(|(name, cfg)| {
+                (
+                    name.clone(),
+                    StorageState {
+                        storage: create_storage_for_stream(&context, name, cfg),
+                        stream_config: cfg.clone(),
+                        live_data: None,
+                        live_data_pushed_at: 0,
+                    },
+                )
+            })
+            .collect();
         Self {
             context,
 
             data_rx,
-            metrics_rx,
             buffers,
             declared_streams_count,
             timeouts: DelayMap::new(),
 
-            topic_prefix,
             mqtt_client,
             storages,
             live_data_clock: 0,
@@ -106,17 +102,16 @@ impl SerializerStorageHandler {
         let mut current_publish_task = None;
         macro_rules! retry_current_publish {
             () => {{
-                current_publish_task = self
-                    .current_publish
-                    .clone()
-                    .map(|(_, publish)| Box::pin(mqtt_client.publish(publish.topic, publish.qos, publish.retain, publish.payload)));
-            }}
+                current_publish_task = self.current_publish.clone().map(|(_, publish)| {
+                    Box::pin(mqtt_client.send_async(publish))
+                });
+            }};
         }
         macro_rules! queue_next_publish {
             () => {{
                 self.current_publish = self.get_next_publish();
                 retry_current_publish!();
-            }}
+            }};
         }
         queue_next_publish!();
 
@@ -126,7 +121,6 @@ impl SerializerStorageHandler {
                 Some(row) = async {
                     select! {
                         Ok(row) = self.data_rx.recv_async() => Some(row),
-                        Ok(row) = self.metrics_rx.recv_async() => Some(row),
                         else => None
                     }
                 } => if let Some(filled_buffer) = self.buffer_row(row) {
@@ -170,7 +164,9 @@ impl SerializerStorageHandler {
                 }
             }
             None => {
-                if self.buffers.len() - self.declared_streams_count >= self.context.cfg.max_dynamic_streams_count {
+                if self.buffers.len() - self.declared_streams_count
+                    >= self.context.max_dynamic_streams_count
+                {
                     error!("too many dynamic streams, ignoring data for stream({})", row.stream);
                 } else {
                     let cfg = StreamConfig::default();
@@ -195,7 +191,7 @@ impl SerializerStorageHandler {
             .get(&stream_name)
             .map(|storage| storage.stream_config.compress)
             .unwrap_or(false);
-        let publish = create_publish(&stream_name, &data, &self.topic_prefix, compress);
+        let publish = create_publish(&stream_name, &data, compress);
         self.write_publish_to_storage(stream_name, publish);
     }
 
@@ -249,12 +245,7 @@ impl SerializerStorageHandler {
             let storage = &mut storage.storage;
             match storage.read_packet() {
                 Ok(packet) => {
-                    if packet.topic.starts_with(&self.topic_prefix) {
-                        return Some((name.clone(), packet));
-                    } else {
-                        log::warn!("found data for wrong tenant in persistence!: {}", packet.topic);
-                        continue;
-                    }
+                    return Some((name.clone(), packet));
                 }
                 Err(storage::StorageReadError::Empty) => {
                     continue;
@@ -314,8 +305,9 @@ impl Drop for SerializerStorageHandler {
     }
 }
 
-fn create_storage_for_stream(ctx: &AppContext, name: &str, config: &StreamConfig) -> StorageEnum {
-    let (max_packet_size, directory) = (ctx.cfg.mqtt.max_packet_size, ctx.cfg.persistence_path.join(name));
+fn create_storage_for_stream(ctx: &SerializerConfig, name: &str, config: &StreamConfig) -> StorageEnum {
+    let (max_packet_size, directory) =
+        (ctx.mqtt_max_packet_size, ctx.persistence_path.join(name));
     if config.persistence.max_file_count == 0 {
         StorageEnum::InMemory(storage::InMemoryStorage::new(
             name,
@@ -344,22 +336,14 @@ fn create_storage_for_stream(ctx: &AppContext, name: &str, config: &StreamConfig
     }
 }
 
-fn create_publish(
-    stream_name: &str,
-    data: &[PublishItem],
-    topic_prefix: &str,
-    compress: bool,
-) -> Publish {
+fn create_publish(stream_name: &str, data: &[PublishItem], compress: bool) -> Publish {
     let point_count = data.len();
     log::trace!("Data received on stream: {stream_name}; message count = {point_count}");
 
     let topic = if stream_name == "action_status" {
-        format!("{topic_prefix}/action/status")
+        "/action/status".to_owned()
     } else {
-        format!(
-            "{topic_prefix}/events/{stream_name}/jsonarray{}",
-            if compress { "/lz4" } else { "" }
-        )
+        format!("/events/{stream_name}/jsonarray{}", if compress { "/lz4" } else { "" })
     };
 
     let serialization_start = Instant::now();

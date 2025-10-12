@@ -441,6 +441,7 @@ pub enum PersistenceError {
 }
 
 impl<'a> PersistenceFile<'a> {
+    // TODO: it should take a PathBuf
     pub fn new(dir: &'a Path, file_name: String) -> Self {
         Self { dir, file_name }
     }

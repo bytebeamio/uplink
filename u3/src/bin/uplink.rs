@@ -10,7 +10,7 @@ use serde_json::json;
 use structopt::StructOpt;
 use tokio::select;
 use u3::config::{parse_auth_file, parse_config, AuthConfig, HttpCreds};
-use u3::{uplink_task, DataRow, PublishItem};
+use u3::{DataRow, PublishItem, Uplink};
 use u3::core::mqtt::Action;
 use u3::utils::{clock, num_cores};
 
@@ -43,11 +43,10 @@ fn main() {
             }
         };
 
-        let mut uplink_fut = Box::pin(uplink_task(cfg.clone(), auth.clone(), actions_tx.clone(), data_rx.clone()));
+        let mut uplink = Uplink::spawn(cfg.clone(), auth.clone(), actions_tx.clone(), data_rx.clone());
 
         loop {
             select! {
-                _ = &mut uplink_fut => {}
                 _ = tokio::signal::ctrl_c() => {
                     break;
                 },
@@ -72,7 +71,7 @@ fn main() {
                             }
                             submit_action_response(&auth.http_credentials, now + 300, action.id.clone(), "Completed", 100, vec![]);
                             auth = new_credentials;
-                            uplink_fut = Box::pin(uplink_task(cfg.clone(), auth.clone(), actions_tx.clone(), data_rx.clone()))
+                            uplink.update_credentials(auth.clone()).await;
                         }
                         "update_uplink" => {
                             // check if we can update uplink exe file
