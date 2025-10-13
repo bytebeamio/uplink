@@ -1,6 +1,6 @@
-use u3::core::storage::{DirectoryStorage, Storage, StorageReadError};
 use bytes::Bytes;
 use rumqttc::{Publish, QoS};
+use u3::core::storage::{DirectoryStorage, Storage, StorageReadError};
 
 #[test]
 fn corrupted_files() {

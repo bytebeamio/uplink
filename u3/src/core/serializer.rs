@@ -102,9 +102,10 @@ impl SerializerStorageHandler {
         let mut current_publish_task = None;
         macro_rules! retry_current_publish {
             () => {{
-                current_publish_task = self.current_publish.clone().map(|(_, publish)| {
-                    Box::pin(mqtt_client.send_async(publish))
-                });
+                current_publish_task = self
+                    .current_publish
+                    .clone()
+                    .map(|(_, publish)| Box::pin(mqtt_client.send_async(publish)));
             }};
         }
         macro_rules! queue_next_publish {
@@ -305,7 +306,11 @@ impl Drop for SerializerStorageHandler {
     }
 }
 
-fn create_storage_for_stream(ctx: &SerializerConfig, name: &str, config: &StreamConfig) -> StorageEnum {
+fn create_storage_for_stream(
+    ctx: &SerializerConfig,
+    name: &str,
+    config: &StreamConfig,
+) -> StorageEnum {
     if config.persistence.max_file_count == 0 {
         StorageEnum::InMemory(storage::InMemoryStorage::new(
             name,

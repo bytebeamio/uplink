@@ -7,6 +7,7 @@ use crate::core::serializer::{SerializerConfig, SerializerStorageHandler};
 use crate::utils::num_cores;
 use flume::{Receiver, Sender};
 use futures::task::SpawnExt;
+use log::warn;
 use rumqttc::Publish;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
@@ -14,7 +15,6 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use log::warn;
 use tokio::task::{JoinError, JoinHandle, JoinSet};
 use tracing::Instrument;
 
@@ -149,8 +149,7 @@ impl Uplink {
 
     pub async fn terminate(&mut self) {
         let plugin_tasks = std::mem::replace(&mut self.plugin_tasks, JoinSet::new());
-        let serializer_task =
-            std::mem::replace(&mut self.serializer_task, tokio::spawn(async {}));
+        let serializer_task = std::mem::replace(&mut self.serializer_task, tokio::spawn(async {}));
         let mqtt_task = std::mem::replace(&mut self.mqtt_task, tokio::spawn(async {}));
         Self::terminate_impl(plugin_tasks, vec![serializer_task, mqtt_task]).await;
         self.cleanup_done = true;
@@ -175,9 +174,10 @@ impl Drop for Uplink {
                 std::mem::replace(&mut self.serializer_task, tokio::spawn(async {}));
             let mqtt_task = std::mem::replace(&mut self.mqtt_task, tokio::spawn(async {}));
             // workaround because async Drop isn't stable yet
-            let _ = futures::executor::block_on(
-                tokio::spawn(tokio::time::timeout(Duration::from_secs(2), Self::terminate_impl(plugin_tasks, vec![serializer_task, mqtt_task])))
-            );
+            let _ = futures::executor::block_on(tokio::spawn(tokio::time::timeout(
+                Duration::from_secs(2),
+                Self::terminate_impl(plugin_tasks, vec![serializer_task, mqtt_task]),
+            )));
         }
     }
 }

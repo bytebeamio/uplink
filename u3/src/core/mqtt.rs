@@ -1,3 +1,4 @@
+use crate::config::{AuthConfig, MqttConfig};
 use crate::core::storage::PersistenceFile;
 use crate::utils::*;
 use crate::{AppContext, DataRow, PublishItem};
@@ -18,7 +19,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tokio::time::sleep;
-use crate::config::{AuthConfig, MqttConfig};
 
 #[derive(Serialize, Deserialize)]
 pub struct Action {
@@ -72,11 +72,10 @@ pub struct MqttTaskContext {
 impl MqttConnectionHandler {
     /// manages mqtt connection
     /// also saves inflight messages to disk on shutdown
-    pub fn new(
-        context: MqttTaskContext,
-    ) -> Self {
+    pub fn new(context: MqttTaskContext) -> Self {
         let options = mqttoptions(&context);
-        let topic_prefix = format!("/tenants/{}/devices/{}", context.auth.project_id, context.auth.device_id);
+        let topic_prefix =
+            format!("/tenants/{}/devices/{}", context.auth.project_id, context.auth.device_id);
         let (client, mut eventloop) = AsyncClient::new(options, 0);
         eventloop.network_options.set_connection_timeout(context.mqtt.network_timeout);
         let mut handler = Self {
@@ -88,8 +87,7 @@ impl MqttConnectionHandler {
             metrics: MqttMetrics::default(),
         };
         if let Some(p) = handler.context.persistence_path.clone() {
-            let persistence_file =
-                PersistenceFile::new(&p, "inflight.bin".to_owned());
+            let persistence_file = PersistenceFile::new(&p, "inflight.bin".to_owned());
             if let Err(e) = handler.reload_from_inflight_file(&persistence_file) {
                 error!("couldn't read inflight file: {e:?}");
             }
@@ -192,9 +190,7 @@ impl MqttConnectionHandler {
         let metrics = self.metrics.clone();
         info!(
             "{:>35}: publishes = {:<3} inflight = {}",
-            "connected",
-            metrics.publishes,
-            metrics.inflight
+            "connected", metrics.publishes, metrics.inflight
         );
 
         self.metrics_sequence += 1;
@@ -250,8 +246,7 @@ impl Drop for MqttConnectionHandler {
                 .collect();
 
             if !publishes.is_empty() {
-                let file =
-                    PersistenceFile::new(p, "inflight.bin".to_string());
+                let file = PersistenceFile::new(p, "inflight.bin".to_string());
                 let mut buf = BytesMut::new();
                 for publish in publishes {
                     if let Err(e) = publish.write(&mut buf) {
@@ -274,8 +269,7 @@ impl Drop for MqttConnectionHandler {
 fn mqttoptions(config: &MqttTaskContext) -> MqttOptions {
     let mut mqttoptions =
         MqttOptions::new(&config.auth.device_id, &config.auth.broker, config.auth.port);
-    mqttoptions
-        .set_max_packet_size(config.mqtt.max_packet_size, config.mqtt.max_packet_size);
+    mqttoptions.set_max_packet_size(config.mqtt.max_packet_size, config.mqtt.max_packet_size);
     mqttoptions.set_keep_alive(Duration::from_secs(config.mqtt.keep_alive));
     mqttoptions.set_inflight(config.mqtt.max_inflight);
 

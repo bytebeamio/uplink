@@ -1,8 +1,8 @@
 pub mod delaymap;
 
-use std::time::{SystemTime, UNIX_EPOCH};
 use flume::{Receiver, Sender};
 use rumqttc::{Publish, Request};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::task::JoinHandle;
 
 pub fn byte_offset_to_position(
@@ -44,9 +44,7 @@ pub mod path_parser {
     where
         S: Serializer,
     {
-        p.as_ref()
-            .map(|p| p.as_os_str())
-            .serialize(serializer)
+        p.as_ref().map(|p| p.as_os_str()).serialize(serializer)
     }
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<PathBuf>, D::Error>
     where

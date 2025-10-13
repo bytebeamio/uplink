@@ -1,10 +1,10 @@
 use crate::utils::byte_offset_to_position;
 use bytes::BytesMut;
+use log::warn;
 use reqwest::{Certificate, Identity};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use log::warn;
 
 // persistence_path is mandatory
 // download_path is mandatory if any downloads are enabled
@@ -156,9 +156,7 @@ pub struct AuthConfig {
     pub http_credentials: HttpCreds,
 }
 
-pub fn parse_config(
-    config_path: &str,
-) -> Result<UplinkConfig, String> {
+pub fn parse_config(config_path: &str) -> Result<UplinkConfig, String> {
     let config_str = match std::fs::read_to_string(config_path) {
         Ok(s) => s,
         Err(e) => {
@@ -186,40 +184,32 @@ pub fn parse_config(
         }
     }
     for metrics_stream in ["action_status", "uplink_mqtt_metrics", "uplink_serializer_metrics"] {
-        cfg.streams.insert(metrics_stream.into(), StreamConfig {
-            compress: false,
-            buffer_size: 1,
-            flush_interval: 5,
-            persistence: PersistenceConfig {
-                max_file_size: 102400,
-                max_file_count: 10,
+        cfg.streams.insert(
+            metrics_stream.into(),
+            StreamConfig {
+                compress: false,
+                buffer_size: 1,
+                flush_interval: 5,
+                persistence: PersistenceConfig { max_file_size: 102400, max_file_count: 10 },
             },
-        });
+        );
     }
 
     if !cfg.lib_actions.is_empty() {
         return Err("unsupported parameter 'lib_actions'".into());
     }
     cfg.lib_actions = vec![
-        ActionConfig {
-            name: "renew_cert".to_string(),
-        },
-        ActionConfig {
-            name: "update_uplink".to_string(),
-        }
+        ActionConfig { name: "renew_cert".to_string() },
+        ActionConfig { name: "update_uplink".to_string() },
     ];
     if let Some(p) = &cfg.download_path {
         if let Err(e) = validate_dir_permissions(p) {
-            return Err(format!(
-                "encountered a problem with download_path({p:?}):\n{e}",
-            ));
+            return Err(format!("encountered a problem with download_path({p:?}):\n{e}",));
         }
     }
     if let Some(p) = &cfg.persistence_path {
         if let Err(e) = validate_dir_permissions(p) {
-            return Err(format!(
-                "encountered a problem with persistence_path({p:?}):\n{e}",
-            ));
+            return Err(format!("encountered a problem with persistence_path({p:?}):\n{e}",));
         }
     } else {
         warn!("persistence_path not specified, persistence disabled!");
@@ -231,9 +221,7 @@ pub fn parse_config(
     Ok(cfg)
 }
 
-pub fn parse_auth_file(
-    auth_file_path: &str,
-) -> Result<AuthConfig, String> {
+pub fn parse_auth_file(auth_file_path: &str) -> Result<AuthConfig, String> {
     let auth_str = match std::fs::read_to_string(auth_file_path) {
         Ok(s) => s,
         Err(e) => {

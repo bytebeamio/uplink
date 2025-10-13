@@ -1,19 +1,19 @@
-use std::cmp::{max, min};
-use std::fs::OpenOptions;
-use std::io::Write;
-use log::{error, info};
-use std::time::{Duration, SystemTime};
 use backtrace::Backtrace;
+use log::{error, info};
 use reqwest::{Error, Response};
 use serde::Deserialize;
 use serde_json::json;
+use std::cmp::{max, min};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::time::{Duration, SystemTime};
 use structopt::StructOpt;
 use tokio::select;
-use tokio::signal::unix::{signal, SignalKind};
-use u3::config::{parse_auth_file, parse_config, AuthConfig, HttpCreds};
-use u3::{DataRow, PublishItem, Uplink};
+use tokio::signal::unix::{SignalKind, signal};
+use u3::config::{AuthConfig, HttpCreds, parse_auth_file, parse_config};
 use u3::core::mqtt::Action;
 use u3::utils::{clock, num_cores};
+use u3::{DataRow, PublishItem, Uplink};
 
 fn main() {
     let args = Cli::from_args();
@@ -97,7 +97,14 @@ fn main() {
     });
 }
 
-fn submit_action_response(auth: &HttpCreds, timestamp: u64, action_id: String, status: &'static str, progress: u8, errors: Vec<String>) {
+fn submit_action_response(
+    auth: &HttpCreds,
+    timestamp: u64,
+    action_id: String,
+    status: &'static str,
+    progress: u8,
+    errors: Vec<String>,
+) {
     // we send the action response using http api because mqtt is async and cannot guarantee delivery
     // these messages have to be sent to server before the reboot because otherwise the responses might end up in the wrong tenant
     // and action will not make progress on dashboard, and broker will try sending the action again, and we will be sad
@@ -132,13 +139,8 @@ fn submit_action_response(auth: &HttpCreds, timestamp: u64, action_id: String, s
 async fn reqwest_error_for_status(resp: Response) -> Result<String, (reqwest::StatusCode, String)> {
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
-    if status.is_success() {
-        Ok(body)
-    } else {
-        Err((status, body))
-    }
+    if status.is_success() { Ok(body) } else { Err((status, body)) }
 }
-
 
 #[derive(Deserialize)]
 struct ReprovisionParams {

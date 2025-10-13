@@ -1,15 +1,15 @@
-use std::time::Duration;
+use crate::DataRow;
+use crate::core::mqtt::Action;
 use flume::{Receiver, Sender};
 use futures::SinkExt;
 use log::{debug, error, info, warn};
+use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec};
-use crate::core::mqtt::Action;
-use crate::DataRow;
 
 pub async fn tcp_client_task(port: u16, data_tx: Sender<DataRow>, actions_rx: Receiver<Action>) {
     let addr = format!("0.0.0.0:{}", port);
@@ -17,10 +17,7 @@ pub async fn tcp_client_task(port: u16, data_tx: Sender<DataRow>, actions_rx: Re
         match TcpListener::bind(&addr).await {
             Ok(s) => break s,
             Err(e) => {
-                error!(
-                    "couldn't bind to port: {}; Error = {e}; retrying in 5s",
-                    port
-                );
+                error!("couldn't bind to port: {}; Error = {e}; retrying in 5s", port);
                 sleep(Duration::from_secs(5)).await;
             }
         }

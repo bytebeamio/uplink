@@ -1,13 +1,13 @@
 use crate::DataRow;
 use crate::core::mqtt::{Action, send_action_response};
 use flume::{Receiver, Sender};
-use futures::{StreamExt, TryFutureExt};
 use futures::stream::FuturesUnordered;
+use futures::{StreamExt, TryFutureExt};
 use serde::Deserialize;
 use std::pin::Pin;
 use tokio::select;
-use tunshell_client::{Client, ClientMode, Config, HostShell};
 use tokio_compat_02::FutureExt;
+use tunshell_client::{Client, ClientMode, Config, HostShell};
 
 pub async fn remote_shell_task(data_tx: Sender<DataRow>, action_rx: Receiver<Action>) {
     let mut shells = FuturesUnordered::<Pin<Box<dyn Future<Output = ()> + Send>>>::new();
@@ -49,7 +49,8 @@ async fn run_remote_shell_impl(action: &Action) -> Result<(), String> {
     );
     let mut client = Client::new(config, HostShell::new().unwrap());
     // TODO: update tunshell to use tokio 1.0 and remove printlns in tunshell_client
-    let status = client.start_session().compat().await.map_err(|e| format!("tunshell-client: {e:?}"))?;
+    let status =
+        client.start_session().compat().await.map_err(|e| format!("tunshell-client: {e:?}"))?;
     if status == 0 {
         Ok(())
     } else {
