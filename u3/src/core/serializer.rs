@@ -22,15 +22,21 @@ pub struct SerializerStorageHandler {
 
     // handles stream buffers and timeouts along with action_status
     data_rx: Receiver<DataRow>,
-    buffers: HashMap<String, (Vec<PublishItem>, StreamConfig)>,
-    declared_streams_count: usize,
+    buffers: HashMap<String, BufferState>,
     timeouts: DelayMap<String>,
+    dynamic_streams_count: usize,
 
     // handler storage and persistence
     mqtt_client: Sender<Publish>,
     storages: HashMap<String, StorageState>,
     live_data_clock: usize,
     current_publish: Option<(String, Publish)>,
+}
+
+struct BufferState {
+    data: Vec<PublishItem>,
+    stream_config: StreamConfig,
+    json_payload_size: usize,
 }
 
 pub struct SerializerConfig {
@@ -63,9 +69,12 @@ impl SerializerStorageHandler {
     ) -> Self {
         let mut buffers = HashMap::new();
         for (name, cfg) in context.streams.iter() {
-            buffers.insert(name.clone(), (Vec::with_capacity(cfg.buffer_size), cfg.clone()));
+            buffers.insert(name.clone(), BufferState {
+                data: Vec::with_capacity(cfg.buffer_size),
+                stream_config: cfg.clone(),
+                json_payload_size: 2,
+            });
         }
-        let declared_streams_count = buffers.len();
 
         let storages = context
             .streams
@@ -87,8 +96,8 @@ impl SerializerStorageHandler {
 
             data_rx,
             buffers,
-            declared_streams_count,
             timeouts: DelayMap::new(),
+            dynamic_streams_count: 0,
 
             mqtt_client,
             storages,
@@ -133,7 +142,9 @@ impl SerializerStorageHandler {
                 },
                 Some(stream_name) = self.timeouts.next(), if self.timeouts.has_pending() => {
                     debug!("flushing {stream_name} because of timeout");
-                    let data = std::mem::take(&mut self.buffers.get_mut(&stream_name).unwrap().0);
+                    let stream_state = self.buffers.get_mut(&stream_name).unwrap();
+                    let data = std::mem::take(&mut stream_state.data);
+                    stream_state.json_payload_size = 2;
                     self.write_buffer_to_storage((stream_name, data));
                     if current_publish_task.is_none() {
                         queue_next_publish!();
@@ -154,27 +165,43 @@ impl SerializerStorageHandler {
 
     fn buffer_row(&mut self, row: DataRow) -> Option<(String, Vec<PublishItem>)> {
         match self.buffers.get_mut(&row.stream) {
-            Some((buf, cfg)) => {
-                buf.push(row.data);
-                if buf.len() >= cfg.buffer_size {
+            Some(BufferState { data, stream_config, json_payload_size }) => {
+                let row_size = serde_json::to_string(&row.data).unwrap().len() + if data.len() == 0 { 0 } else { 1 };
+                let new_size = *json_payload_size + row_size;
+                let mqtt_max_packet_size = if stream_config.compress {
+                    self.context.mqtt_max_packet_size
+                } else {
+                    self.context.mqtt_max_packet_size * 5 / 2
+                };
+                if new_size > mqtt_max_packet_size {
                     self.timeouts.remove(&row.stream);
-                    let data = std::mem::replace(buf, Vec::with_capacity(cfg.buffer_size));
+                    let data = std::mem::replace(data, Vec::with_capacity(stream_config.buffer_size));
+                    *json_payload_size = 2;
                     return Some((row.stream, data));
-                } else if buf.len() == 1 {
-                    self.timeouts.insert(&row.stream, Duration::from_secs(cfg.flush_interval));
+                } else {
+                    *json_payload_size = new_size;
+                }
+
+                data.push(row.data);
+                if data.len() > stream_config.buffer_size {
+                    self.timeouts.remove(&row.stream);
+                    let data = std::mem::replace(data, Vec::with_capacity(stream_config.buffer_size));
+                    *json_payload_size = 0;
+                    return Some((row.stream, data));
+                } else if data.len() == 1 {
+                    self.timeouts.insert(&row.stream, Duration::from_secs(stream_config.flush_interval));
                 }
             }
             None => {
-                if self.buffers.len() - self.declared_streams_count
-                    >= self.context.max_dynamic_streams_count
-                {
+                if self.dynamic_streams_count >= self.context.max_dynamic_streams_count {
                     error!("too many dynamic streams, ignoring data for stream({})", row.stream);
                 } else {
-                    let cfg = StreamConfig::default();
-                    let mut buf = Vec::with_capacity(cfg.buffer_size);
-                    buf.push(row.data);
-                    self.timeouts.insert(&row.stream, Duration::from_secs(cfg.flush_interval));
-                    self.buffers.insert(row.stream.clone(), (buf, cfg));
+                    let stream_config = StreamConfig::default();
+                    let mut data = Vec::with_capacity(stream_config.buffer_size);
+                    data.push(row.data);
+                    self.timeouts.insert(&row.stream, Duration::from_secs(stream_config.flush_interval));
+                    self.buffers.insert(row.stream.clone(), BufferState { data, stream_config, json_payload_size: 2 });
+                    self.dynamic_streams_count += 1;
                 }
             }
         }
@@ -285,9 +312,9 @@ impl Drop for SerializerStorageHandler {
             }
         }
         // write any unflushed buffers to storage
-        for (stream_name, (data, _)) in std::mem::take(&mut self.buffers) {
-            if !data.is_empty() {
-                self.write_buffer_to_storage((stream_name, data));
+        for (stream_name, buf) in std::mem::take(&mut self.buffers) {
+            if !buf.data.is_empty() {
+                self.write_buffer_to_storage((stream_name, buf.data));
             }
         }
         // write inflight publish to storage
@@ -315,14 +342,14 @@ fn create_storage_for_stream(
         StorageEnum::InMemory(storage::InMemoryStorage::new(
             name,
             config.persistence.max_file_size,
-            ctx.mqtt_max_packet_size,
+            usize::MAX,
         ))
     } else {
         match storage::DirectoryStorage::new(
             ctx.persistence_path.as_ref().unwrap().join(name),
             config.persistence.max_file_size,
             config.persistence.max_file_count,
-            ctx.mqtt_max_packet_size,
+            usize::MAX,
         ) {
             Ok(s) => StorageEnum::Directory(s),
             Err(e) => {
@@ -332,7 +359,7 @@ fn create_storage_for_stream(
                 StorageEnum::InMemory(storage::InMemoryStorage::new(
                     name,
                     config.persistence.max_file_size,
-                    ctx.mqtt_max_packet_size,
+                    usize::MAX,
                 ))
             }
         }

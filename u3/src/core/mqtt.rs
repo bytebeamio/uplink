@@ -105,10 +105,18 @@ impl MqttConnectionHandler {
             let client = self.client.clone();
             let topic_prefix = self.topic_prefix.clone();
             let publish_rx = self.context.publish_rx.clone();
+            let max_packet_size = self.context.mqtt.max_packet_size;
             Box::pin(async move {
                 while let Ok(mut publish) = publish_rx.recv_async().await {
                     publish.topic = format!("{}{}", topic_prefix, publish.topic);
-                    let _ = client.request_tx.try_send(Request::Publish(publish));
+                    if publish.payload.len() > max_packet_size {
+                        warn!(
+                            "attempted to publish a payload of size {} on topic {}, mqtt.max_packet_size is {}! please increase the max_packet_size parameter or decrease buffer_size for this stream",
+                            publish.payload.len(), publish.topic, max_packet_size
+                        );
+                    } else {
+                        let _ = client.request_tx.try_send(Request::Publish(publish));
+                    }
                 }
                 tokio::time::sleep(Duration::MAX).await;
             })
