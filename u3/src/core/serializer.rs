@@ -175,7 +175,7 @@ impl SerializerStorageHandler {
                 let mqtt_max_packet_size = if stream_config.compress {
                     self.context.mqtt_max_packet_size
                 } else {
-                    self.context.mqtt_max_packet_size * 5 / 2
+                    self.context.mqtt_max_packet_size * 12/5
                 };
                 if new_size > mqtt_max_packet_size {
                     self.timeouts.remove(&row.stream);
