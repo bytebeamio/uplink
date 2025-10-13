@@ -4,6 +4,7 @@ use reqwest::{Certificate, Identity};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use log::warn;
 
 // persistence_path is mandatory
 // download_path is mandatory if any downloads are enabled
@@ -23,16 +24,15 @@ use std::path::{Path, PathBuf};
 //     - backup@2
 //     - backup@corrupted
 //
-#[derive(Clone, Deserialize, Serialize, Default)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct UplinkConfig {
     #[serde(with = "crate::utils::path_parser")]
-    pub download_path: PathBuf,
+    pub download_path: Option<PathBuf>,
     #[serde(with = "crate::utils::path_parser")]
-    pub persistence_path: PathBuf,
+    pub persistence_path: Option<PathBuf>,
     pub enable_certificate_renewal: bool,
     pub enable_remote_shell: bool,
-    #[serde(default = "default_streams_count")]
     pub max_dynamic_streams_count: usize,
 
     pub streams: HashMap<String, StreamConfig>,
@@ -41,8 +41,21 @@ pub struct UplinkConfig {
     pub builtin_collectors: BuiltinCollectorsConfig,
     pub mqtt: MqttConfig,
 }
-fn default_streams_count() -> usize {
-    5
+impl Default for UplinkConfig {
+    fn default() -> Self {
+        Self {
+            download_path: None,
+            persistence_path: None,
+            enable_certificate_renewal: true,
+            enable_remote_shell: true,
+            max_dynamic_streams_count: 5,
+            streams: Default::default(),
+            tcp_clients: Default::default(),
+            lib_actions: vec![],
+            builtin_collectors: Default::default(),
+            mqtt: Default::default(),
+        }
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -172,20 +185,11 @@ pub fn parse_config(
             return Err("action_status is a special stream and cannot be configured".into());
         }
     }
-    cfg.streams.insert("action_status".into(), StreamConfig {
-        compress: false,
-        buffer_size: 1,
-        flush_interval: 5,
-        persistence: PersistenceConfig {
-            max_file_size: 102400,
-            max_file_count: 10,
-        },
-    });
-    for metrics_stream in ["uplink_mqtt_metrics", "uplink_serializer_metrics"] {
+    for metrics_stream in ["action_status", "uplink_mqtt_metrics", "uplink_serializer_metrics"] {
         cfg.streams.insert(metrics_stream.into(), StreamConfig {
             compress: false,
             buffer_size: 1,
-            flush_interval: 10,
+            flush_interval: 5,
             persistence: PersistenceConfig {
                 max_file_size: 102400,
                 max_file_count: 10,
@@ -204,17 +208,24 @@ pub fn parse_config(
             name: "update_uplink".to_string(),
         }
     ];
-    if let Err(e) = validate_dir_permissions(&cfg.download_path) {
-        return Err(format!(
-            "encountered a problem with download_path({:?}):\n{e}",
-            &cfg.download_path
-        ));
+    if let Some(p) = &cfg.download_path {
+        if let Err(e) = validate_dir_permissions(p) {
+            return Err(format!(
+                "encountered a problem with download_path({p:?}):\n{e}",
+            ));
+        }
     }
-    if let Err(e) = validate_dir_permissions(&cfg.persistence_path) {
-        return Err(format!(
-            "encountered a problem with persistence_path({:?}):\n{e}",
-            &cfg.persistence_path
-        ));
+    if let Some(p) = &cfg.persistence_path {
+        if let Err(e) = validate_dir_permissions(p) {
+            return Err(format!(
+                "encountered a problem with persistence_path({p:?}):\n{e}",
+            ));
+        }
+    } else {
+        warn!("persistence_path not specified, persistence disabled!");
+        for cfg in cfg.streams.values_mut() {
+            cfg.persistence.max_file_count = 0;
+        }
     }
 
     Ok(cfg)

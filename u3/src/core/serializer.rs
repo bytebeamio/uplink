@@ -37,7 +37,7 @@ pub struct SerializerConfig {
     pub streams: HashMap<String, StreamConfig>,
     pub mqtt_max_packet_size: usize,
     pub max_dynamic_streams_count: usize,
-    pub persistence_path: PathBuf,
+    pub persistence_path: Option<PathBuf>,
 }
 
 struct StorageState {
@@ -306,20 +306,18 @@ impl Drop for SerializerStorageHandler {
 }
 
 fn create_storage_for_stream(ctx: &SerializerConfig, name: &str, config: &StreamConfig) -> StorageEnum {
-    let (max_packet_size, directory) =
-        (ctx.mqtt_max_packet_size, ctx.persistence_path.join(name));
     if config.persistence.max_file_count == 0 {
         StorageEnum::InMemory(storage::InMemoryStorage::new(
             name,
             config.persistence.max_file_size,
-            max_packet_size,
+            ctx.mqtt_max_packet_size,
         ))
     } else {
         match storage::DirectoryStorage::new(
-            directory,
+            ctx.persistence_path.as_ref().unwrap().join(name),
             config.persistence.max_file_size,
             config.persistence.max_file_count,
-            max_packet_size,
+            ctx.mqtt_max_packet_size,
         ) {
             Ok(s) => StorageEnum::Directory(s),
             Err(e) => {
@@ -329,7 +327,7 @@ fn create_storage_for_stream(ctx: &SerializerConfig, name: &str, config: &Stream
                 StorageEnum::InMemory(storage::InMemoryStorage::new(
                     name,
                     config.persistence.max_file_size,
-                    max_packet_size,
+                    ctx.mqtt_max_packet_size,
                 ))
             }
         }

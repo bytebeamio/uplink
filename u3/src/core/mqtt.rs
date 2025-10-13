@@ -66,7 +66,7 @@ pub struct MqttTaskContext {
     pub actions_mapping: HashMap<String, Sender<Action>>,
     pub auth: AuthConfig,
     pub mqtt: MqttConfig,
-    pub persistence_path: PathBuf,
+    pub persistence_path: Option<PathBuf>,
 }
 
 impl MqttConnectionHandler {
@@ -87,13 +87,14 @@ impl MqttConnectionHandler {
             metrics_sequence: 0,
             metrics: MqttMetrics::default(),
         };
-        let persistence_path = handler.context.persistence_path.clone();
-        let persistence_file =
-            PersistenceFile::new(&persistence_path, "inflight.bin".to_owned());
-        if let Err(e) = handler.reload_from_inflight_file(&persistence_file) {
-            error!("couldn't read inflight file: {e:?}");
+        if let Some(p) = handler.context.persistence_path.clone() {
+            let persistence_file =
+                PersistenceFile::new(&p, "inflight.bin".to_owned());
+            if let Err(e) = handler.reload_from_inflight_file(&persistence_file) {
+                error!("couldn't read inflight file: {e:?}");
+            }
+            let _ = persistence_file.delete();
         }
-        let _ = persistence_file.delete();
         handler
     }
 
@@ -236,32 +237,34 @@ impl MqttConnectionHandler {
 
 impl Drop for MqttConnectionHandler {
     fn drop(&mut self) {
-        self.eventloop.clean();
-        let publishes: Vec<&Publish> = self
-            .eventloop
-            .pending
-            .iter()
-            .filter_map(|request| match request {
-                Request::Publish(publish) => Some(publish),
-                _ => None,
-            })
-            .collect();
+        if let Some(p) = self.context.persistence_path.as_ref() {
+            self.eventloop.clean();
+            let publishes: Vec<&Publish> = self
+                .eventloop
+                .pending
+                .iter()
+                .filter_map(|request| match request {
+                    Request::Publish(publish) => Some(publish),
+                    _ => None,
+                })
+                .collect();
 
-        if !publishes.is_empty() {
-            let file =
-                PersistenceFile::new(&self.context.persistence_path, "inflight.bin".to_string());
-            let mut buf = BytesMut::new();
-            for publish in publishes {
-                if let Err(e) = publish.write(&mut buf) {
-                    error!("couldn't serialize an inflight message: {e:?}");
+            if !publishes.is_empty() {
+                let file =
+                    PersistenceFile::new(p, "inflight.bin".to_string());
+                let mut buf = BytesMut::new();
+                for publish in publishes {
+                    if let Err(e) = publish.write(&mut buf) {
+                        error!("couldn't serialize an inflight message: {e:?}");
+                    }
                 }
-            }
-            match file.write(&mut buf) {
-                Ok(_) => {
-                    info!("Pending publishes written to disk: {}", file.path().display());
-                }
-                Err(e) => {
-                    error!("couldn't write inflight messages to disk: {e:?}");
+                match file.write(&mut buf) {
+                    Ok(_) => {
+                        info!("Pending publishes written to disk: {}", file.path().display());
+                    }
+                    Err(e) => {
+                        error!("couldn't write inflight messages to disk: {e:?}");
+                    }
                 }
             }
         }

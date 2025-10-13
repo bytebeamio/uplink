@@ -40,17 +40,19 @@ pub mod path_parser {
     use serde::ser::Serializer;
     use std::path::PathBuf;
 
-    pub fn serialize<S>(p: &PathBuf, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(p: &Option<PathBuf>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        p.as_os_str().serialize(serializer)
+        p.as_ref()
+            .map(|p| p.as_os_str())
+            .serialize(serializer)
     }
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<PathBuf, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<PathBuf>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        Ok(PathBuf::deserialize(deserializer)?)
+        Ok(Some(PathBuf::deserialize(deserializer)?))
     }
 }
 
