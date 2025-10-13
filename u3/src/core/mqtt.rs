@@ -112,7 +112,9 @@ impl MqttConnectionHandler {
                     if publish.payload.len() > max_packet_size {
                         warn!(
                             "attempted to publish a payload of size {} on topic {}, mqtt.max_packet_size is {}! please increase the max_packet_size parameter or decrease buffer_size for this stream",
-                            publish.payload.len(), publish.topic, max_packet_size
+                            publish.payload.len(),
+                            publish.topic,
+                            max_packet_size
                         );
                     } else {
                         let _ = client.request_tx.try_send(Request::Publish(publish));

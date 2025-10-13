@@ -46,11 +46,12 @@ fn main() {
 
         let mut uplink = Uplink::spawn(cfg.clone(), auth.clone(), actions_tx.clone(), data_rx.clone());
         let mut sigterm = signal(SignalKind::terminate()).unwrap();
+        let mut sigint = Box::pin(tokio::signal::ctrl_c());
         loop {
             select! {
                 _ = async {
                     select! {
-                        _ = tokio::signal::ctrl_c() => {}
+                        _ = &mut sigint => {}
                         _ = sigterm.recv() => {}
                     }
                 } => {
@@ -74,7 +75,7 @@ fn main() {
                                 .write(true)
                                 .open(&args.authentication)
                                 .and_then(|mut auth_file_handle| auth_file_handle.write_all(serde_json::to_string_pretty(&new_credentials).unwrap().as_bytes())) {
-                                submit_action_response(&auth.http_credentials, now + 200, action.id.clone(), "Failed", 100, vec![format!("cannot reprovision, cannot write auth file: {e:?}")]);
+                                submit_action_response(&auth.http_credentials, now + 200, action.id.clone(), "Failed", 100, vec![format!("cannot write auth file: {e:?}")]);
                                 continue;
                             }
                             submit_action_response(&auth.http_credentials, now + 300, action.id.clone(), "Completed", 100, vec![]);

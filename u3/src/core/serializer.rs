@@ -1,6 +1,6 @@
 use crate::config::StreamConfig;
 use crate::core::storage;
-use crate::core::storage::{Storage, StorageEnum, StorageWriteError};
+use crate::core::storage::{DiskQueue, StorageWriteError};
 use crate::utils::delaymap::DelayMap;
 use crate::{AppContext, DataRow, PublishItem};
 use flume::r#async::SendFut;
@@ -47,7 +47,7 @@ pub struct SerializerConfig {
 }
 
 struct StorageState {
-    storage: StorageEnum,
+    storage: DiskQueue,
     stream_config: StreamConfig,
     live_data: Option<Publish>,
     live_data_pushed_at: usize,
@@ -69,11 +69,14 @@ impl SerializerStorageHandler {
     ) -> Self {
         let mut buffers = HashMap::new();
         for (name, cfg) in context.streams.iter() {
-            buffers.insert(name.clone(), BufferState {
-                data: Vec::with_capacity(cfg.buffer_size),
-                stream_config: cfg.clone(),
-                json_payload_size: 2,
-            });
+            buffers.insert(
+                name.clone(),
+                BufferState {
+                    data: Vec::with_capacity(cfg.buffer_size),
+                    stream_config: cfg.clone(),
+                    json_payload_size: 2,
+                },
+            );
         }
 
         let storages = context
@@ -166,7 +169,8 @@ impl SerializerStorageHandler {
     fn buffer_row(&mut self, row: DataRow) -> Option<(String, Vec<PublishItem>)> {
         match self.buffers.get_mut(&row.stream) {
             Some(BufferState { data, stream_config, json_payload_size }) => {
-                let row_size = serde_json::to_string(&row.data).unwrap().len() + if data.len() == 0 { 0 } else { 1 };
+                let row_size = serde_json::to_string(&row.data).unwrap().len()
+                    + if data.len() == 0 { 0 } else { 1 };
                 let new_size = *json_payload_size + row_size;
                 let mqtt_max_packet_size = if stream_config.compress {
                     self.context.mqtt_max_packet_size
@@ -175,7 +179,8 @@ impl SerializerStorageHandler {
                 };
                 if new_size > mqtt_max_packet_size {
                     self.timeouts.remove(&row.stream);
-                    let data = std::mem::replace(data, Vec::with_capacity(stream_config.buffer_size));
+                    let data =
+                        std::mem::replace(data, Vec::with_capacity(stream_config.buffer_size));
                     *json_payload_size = 2;
                     return Some((row.stream, data));
                 } else {
@@ -185,11 +190,13 @@ impl SerializerStorageHandler {
                 data.push(row.data);
                 if data.len() > stream_config.buffer_size {
                     self.timeouts.remove(&row.stream);
-                    let data = std::mem::replace(data, Vec::with_capacity(stream_config.buffer_size));
+                    let data =
+                        std::mem::replace(data, Vec::with_capacity(stream_config.buffer_size));
                     *json_payload_size = 0;
                     return Some((row.stream, data));
                 } else if data.len() == 1 {
-                    self.timeouts.insert(&row.stream, Duration::from_secs(stream_config.flush_interval));
+                    self.timeouts
+                        .insert(&row.stream, Duration::from_secs(stream_config.flush_interval));
                 }
             }
             None => {
@@ -199,8 +206,12 @@ impl SerializerStorageHandler {
                     let stream_config = StreamConfig::default();
                     let mut data = Vec::with_capacity(stream_config.buffer_size);
                     data.push(row.data);
-                    self.timeouts.insert(&row.stream, Duration::from_secs(stream_config.flush_interval));
-                    self.buffers.insert(row.stream.clone(), BufferState { data, stream_config, json_payload_size: 2 });
+                    self.timeouts
+                        .insert(&row.stream, Duration::from_secs(stream_config.flush_interval));
+                    self.buffers.insert(
+                        row.stream.clone(),
+                        BufferState { data, stream_config, json_payload_size: 2 },
+                    );
                     self.dynamic_streams_count += 1;
                 }
             }
@@ -242,13 +253,6 @@ impl SerializerStorageHandler {
         if let Some(publish) = publish_to_write {
             match state.storage.write_packet(publish) {
                 Ok(_) => {}
-                Err(StorageWriteError::FileSystemError(e)) => {
-                    log::error!(
-                        "Encountered file system error when reading packet for stream({}): {e}, falling back to in memory persistence",
-                        state.storage.name()
-                    );
-                    replace_with_or_abort(&mut state.storage, |s| s.to_in_memory());
-                }
                 Err(StorageWriteError::InvalidPacket(e)) => {
                     log::error!(
                         "Found invalid packet when writing to storage for stream({stream_name}): {e:?}"
@@ -278,23 +282,9 @@ impl SerializerStorageHandler {
                 Err(storage::StorageReadError::Empty) => {
                     continue;
                 }
-                Err(storage::StorageReadError::FileSystemError(e)) => {
-                    log::error!(
-                        "Encountered file system error when reading packet for stream({}): {e}, falling back to in memory persistence",
-                        storage.name()
-                    );
-                    replace_with_or_abort(storage, |s| s.to_in_memory());
-                }
                 Err(storage::StorageReadError::InvalidPacket(e)) => {
                     log::error!(
-                        "Found invalid packet when reading from storage for stream({}): {e:?}",
-                        storage.name()
-                    );
-                }
-                Err(storage::StorageReadError::UnsupportedPacketType) => {
-                    log::error!(
-                        "Found unsupported packet type when reading from storage for stream({})",
-                        storage.name()
+                        "Found invalid packet when reading from storage for stream({name}): {e}"
                     );
                 }
             }
@@ -326,9 +316,7 @@ impl Drop for SerializerStorageHandler {
             if let Some(publish) = storage.live_data.take() {
                 let _ = storage.storage.write_packet(publish);
             }
-            if let Err(e) = storage.storage.flush() {
-                error!("couldn't flush storage for stream({name:?}) : {e:?}");
-            }
+            storage.storage.flush();
         }
     }
 }
@@ -337,33 +325,8 @@ fn create_storage_for_stream(
     ctx: &SerializerConfig,
     name: &str,
     config: &StreamConfig,
-) -> StorageEnum {
-    if config.persistence.max_file_count == 0 {
-        StorageEnum::InMemory(storage::InMemoryStorage::new(
-            name,
-            config.persistence.max_file_size,
-            usize::MAX,
-        ))
-    } else {
-        match storage::DirectoryStorage::new(
-            ctx.persistence_path.as_ref().unwrap().join(name),
-            config.persistence.max_file_size,
-            config.persistence.max_file_count,
-            usize::MAX,
-        ) {
-            Ok(s) => StorageEnum::Directory(s),
-            Err(e) => {
-                log::error!(
-                    "Failed to initialize disk backed storage for {name} : {e}, falling back to in memory persistence"
-                );
-                StorageEnum::InMemory(storage::InMemoryStorage::new(
-                    name,
-                    config.persistence.max_file_size,
-                    usize::MAX,
-                ))
-            }
-        }
-    }
+) -> DiskQueue {
+    DiskQueue::new(ctx.persistence_path.as_ref().unwrap().join(name), config.persistence.clone())
 }
 
 fn create_publish(stream_name: &str, data: &[PublishItem], compress: bool) -> Publish {
