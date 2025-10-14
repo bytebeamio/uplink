@@ -1,6 +1,8 @@
+use std::cmp::Ordering;
 use crate::config::StreamConfig;
 use crate::core::storage;
 use crate::core::storage::{DiskQueue, StorageWriteError};
+use crate::utils::array_map::ArrayMap;
 use crate::utils::delaymap::DelayMap;
 use crate::{AppContext, DataRow, PublishItem};
 use flume::r#async::SendFut;
@@ -28,7 +30,8 @@ pub struct SerializerStorageHandler {
 
     // handler storage and persistence
     mqtt_client: Sender<Publish>,
-    storages: HashMap<String, StorageState>,
+    storages: ArrayMap<String, StorageState>,
+    /// incremented whenever we do a publish,
     live_data_clock: usize,
     current_publish: Option<(String, Publish)>,
 }
@@ -79,21 +82,17 @@ impl SerializerStorageHandler {
             );
         }
 
-        let storages = context
-            .streams
-            .iter()
-            .map(|(name, cfg)| {
-                (
-                    name.clone(),
-                    StorageState {
-                        storage: create_storage_for_stream(&context, name, cfg),
-                        stream_config: cfg.clone(),
-                        live_data: None,
-                        live_data_pushed_at: 0,
-                    },
-                )
-            })
-            .collect();
+        let mut storages = ArrayMap::<String, StorageState>::new(|a, b| {
+            b.stream_config.priority.cmp(&a.stream_config.priority)
+        });
+        for (name, cfg) in context.streams.iter() {
+            storages.insert(name.clone(),                     StorageState {
+                storage: create_storage_for_stream(&context, name, cfg),
+                stream_config: cfg.clone(),
+                live_data: None,
+                live_data_pushed_at: 0,
+            });
+        }
         Self {
             context,
 
@@ -128,6 +127,7 @@ impl SerializerStorageHandler {
         }
         queue_next_publish!();
 
+        let mut metrics_timer = tokio::time::interval(Duration::from_secs(10));
         loop {
             select! {
                 // first two tasks read data points, and move them to storage according to stream buffer size and timeout config
@@ -161,7 +161,25 @@ impl SerializerStorageHandler {
                         Err(_) => retry_current_publish!(),
                     }
                 }
-                else => break
+
+                _ = metrics_timer.tick() => {
+                    for (name, storage) in self.storages.iter_mut() {
+                        let m = storage.storage.metrics();
+                    }
+                    // serializer metrics:
+                    // * memory usage
+                    // * disk usage
+                    // * disk percentage
+                    // * live messages pushed
+                    // * storage messages pushed
+                    // * net compression time
+                    // * net serialization time
+                    // stream metrics (for each stream):
+                    // * number of messages
+                    // * serialization/compression time/size
+                    // *
+                    // for individual streams, collect number of messages, serialization time/size, compression size/time, and push as stream metrics
+                }
             }
         }
     }
@@ -175,7 +193,7 @@ impl SerializerStorageHandler {
                 let mqtt_max_packet_size = if stream_config.compress {
                     self.context.mqtt_max_packet_size
                 } else {
-                    self.context.mqtt_max_packet_size * 12/5
+                    self.context.mqtt_max_packet_size * 12 / 5
                 };
                 if new_size > mqtt_max_packet_size {
                     self.timeouts.remove(&row.stream);
@@ -312,7 +330,7 @@ impl Drop for SerializerStorageHandler {
             self.write_publish_to_storage(name, publish);
         }
         // flush all the storages to disk
-        for (name, storage) in self.storages.iter_mut() {
+        for (_, storage) in self.storages.iter_mut() {
             if let Some(publish) = storage.live_data.take() {
                 let _ = storage.storage.write_packet(publish);
             }

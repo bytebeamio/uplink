@@ -64,6 +64,7 @@ pub struct StreamConfig {
     pub compress: bool,
     pub buffer_size: usize,
     pub flush_interval: u64,
+    pub priority: i32,
     pub persistence: PersistenceConfig,
 }
 impl Default for StreamConfig {
@@ -72,6 +73,7 @@ impl Default for StreamConfig {
             compress: false,
             buffer_size: 128,
             flush_interval: 10,
+            priority: 0,
             persistence: PersistenceConfig::default(),
         }
     }
@@ -183,13 +185,14 @@ pub fn parse_config(config_path: &str) -> Result<UplinkConfig, String> {
             return Err("action_status is a special stream and cannot be configured".into());
         }
     }
-    for metrics_stream in ["action_status", "uplink_mqtt_metrics", "uplink_serializer_metrics"] {
+    for metrics_stream in ["action_status", "uplink_mqtt_metrics", "uplink_serializer_metrics", "uplink_stream_metrics"] {
         cfg.streams.insert(
             metrics_stream.into(),
             StreamConfig {
                 compress: false,
                 buffer_size: 1,
                 flush_interval: 5,
+                priority: 0,
                 persistence: PersistenceConfig { max_file_size: 102400, max_file_count: 10 },
             },
         );

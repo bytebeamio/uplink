@@ -1,4 +1,5 @@
 pub mod delaymap;
+pub mod array_map;
 
 use flume::{Receiver, Sender};
 use rumqttc::{Publish, Request};

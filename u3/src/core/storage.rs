@@ -258,7 +258,7 @@ impl DiskQueue {
         self.files_queue.drain(..);
     }
 
-    fn metrics(&self) -> StorageMetrics {
+    pub fn metrics(&self) -> StorageMetrics {
         StorageMetrics {
             read_buffer_size: self.read_buffer.len() as _,
             write_buffer_size: self.write_buffer.len() as _,
