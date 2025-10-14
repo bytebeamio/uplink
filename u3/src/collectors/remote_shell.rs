@@ -1,5 +1,4 @@
 use crate::DataRow;
-use crate::core::mqtt::{Action, send_action_response};
 use flume::{Receiver, Sender};
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryFutureExt};
@@ -8,6 +7,7 @@ use std::pin::Pin;
 use tokio::select;
 use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
+use crate::core::actions::{send_action_response, Action};
 
 pub async fn remote_shell_task(data_tx: Sender<DataRow>, action_rx: Receiver<Action>) {
     let mut shells = FuturesUnordered::<Pin<Box<dyn Future<Output = ()> + Send>>>::new();

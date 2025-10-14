@@ -2,7 +2,6 @@ use crate::config::PersistenceConfig;
 use anyhow::Context;
 use bytes::{Buf, BufMut, BytesMut};
 use log::error;
-use rumqttc::{Packet, Publish};
 use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -149,11 +148,8 @@ impl DiskQueue {
                 }
             }
         }
-        match Packet::read(&mut self.read_buffer, usize::MAX) {
-            Ok(Packet::Publish(packet)) => Ok(packet),
-            Ok(p) => {
-                Err(StorageReadError::InvalidPacket(format!("found packet of invalid type: {p:?}")))
-            }
+        match Publish::read(&mut self.read_buffer) {
+            Ok(r) => Ok(r),
             Err(e) => {
                 self.read_buffer.clear();
                 Err(StorageReadError::InvalidPacket(format!("{e:?}")))
@@ -173,7 +169,7 @@ impl DiskQueue {
     ///     }
     /// }
     /// append_to_write_buffer();
-    pub fn write_packet(&mut self, packet: Publish) -> Result<(), StorageWriteError> {
+    pub fn write_packet(&mut self, packet: Publish) {
         if self.write_buffer.len() >= self.persistence.max_file_size {
             if self.persistence.max_file_count == 0 {
                 std::mem::swap(&mut self.read_buffer, &mut self.write_buffer);
@@ -224,10 +220,7 @@ impl DiskQueue {
             }
         }
 
-        match packet.write(&mut self.write_buffer) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(StorageWriteError::InvalidPacket(e)),
-        }
+        packet.write(&mut self.write_buffer);
     }
 
     /// save_read_buffer_to_disk();
@@ -269,6 +262,36 @@ impl DiskQueue {
     }
 }
 
+// format:
+// u32 -> payload_len
+// u8 -> stream_name_len
+// u8 -> compressed
+// stream name size and content
+// buffer size and content
+#[derive(Clone)]
+pub struct Publish {
+    pub payload: Vec<u8>,
+    pub compressed: bool,
+}
+impl Publish {
+    pub fn write(&self, buf: &mut BytesMut) {
+        buf.put_u8(self.compressed as _);
+        buf.put_u32(self.payload.len() as _);
+        buf.put_slice(&self.payload);
+    }
+
+    pub fn read(buf: &mut BytesMut) -> Result<Self, &'static str> {
+        let compressed = buf.try_get_u8().map_err(|_| "insufficient bytes")? != 0;
+        let payload_len = buf.get_u32() as usize;
+        if buf.len() < payload_len {
+            return Err("insufficient bytes");
+        }
+        let payload = buf.split_to(payload_len).to_vec();
+
+        Ok(Self { compressed, payload })
+    }
+}
+
 #[derive(Debug)]
 pub enum StorageReadError {
     /// Nothing left in storage, poll the storage with lower priority
@@ -276,11 +299,6 @@ pub enum StorageReadError {
     /// Should never happen because we write valid packets to storage and files on disk have a checksum,
     /// If this is returned that means the buffer with this packet has been cleared, try polling again
     InvalidPacket(String),
-}
-
-#[derive(Debug)]
-pub enum StorageWriteError {
-    InvalidPacket(rumqttc::Error),
 }
 
 #[derive(Debug)]

@@ -11,7 +11,6 @@ use structopt::StructOpt;
 use tokio::select;
 use tokio::signal::unix::{SignalKind, signal};
 use u3::config::{AuthConfig, HttpCreds, parse_auth_file, parse_config};
-use u3::core::mqtt::Action;
 use u3::utils::{clock, num_cores};
 use u3::{DataRow, PublishItem, Uplink};
 

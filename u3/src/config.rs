@@ -123,12 +123,6 @@ impl Default for DeviceShadowConfig {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-pub struct MtlsCerts {
-    pub ca_certificate: String,
-    pub device_certificate: String,
-    pub device_private_key: String,
-}
-#[derive(Clone, Deserialize, Serialize)]
 pub struct HttpCreds {
     pub api_key: String,
     pub api_url: String,
@@ -154,7 +148,6 @@ pub struct AuthConfig {
     pub device_id: String,
     pub broker: String,
     pub port: u16,
-    pub authentication: Option<MtlsCerts>,
     pub http_credentials: HttpCreds,
 }
 
@@ -243,14 +236,6 @@ pub fn parse_auth_file(auth_file_path: &str) -> Result<AuthConfig, String> {
             ));
         }
     };
-
-    if let Some(auth) = &auth.authentication {
-        Certificate::from_pem(auth.ca_certificate.as_bytes())
-            .map_err(|_| "invalid ca certificate".to_owned())?;
-        let mut buf = BytesMut::from(auth.device_private_key.as_bytes());
-        buf.extend_from_slice(auth.device_certificate.as_bytes());
-        Identity::from_pem(&buf).map_err(|_| "invalid device certificates".to_owned())?;
-    }
 
     Ok(auth)
 }

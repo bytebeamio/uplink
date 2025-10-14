@@ -1,7 +1,6 @@
-use std::cmp::Ordering;
-use crate::config::StreamConfig;
+use crate::config::{HttpCreds, StreamConfig};
 use crate::core::storage;
-use crate::core::storage::{DiskQueue, StorageWriteError};
+use crate::core::storage::{DiskQueue, Publish};
 use crate::utils::array_map::ArrayMap;
 use crate::utils::delaymap::DelayMap;
 use crate::{AppContext, DataRow, PublishItem};
@@ -10,13 +9,14 @@ use flume::{Receiver, SendError, Sender};
 use log::{debug, error, info};
 use lz4_flex::frame::FrameEncoder;
 use replace_with::replace_with_or_abort;
-use rumqttc::{AsyncClient, Publish, QoS, Request};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use reqwest::{Error, Response};
 use tokio::select;
 
 pub struct SerializerStorageHandler {
@@ -29,7 +29,6 @@ pub struct SerializerStorageHandler {
     dynamic_streams_count: usize,
 
     // handler storage and persistence
-    mqtt_client: Sender<Publish>,
     storages: ArrayMap<String, StorageState>,
     /// incremented whenever we do a publish,
     live_data_clock: usize,
@@ -43,6 +42,7 @@ struct BufferState {
 }
 
 pub struct SerializerConfig {
+    pub credentials: HttpCreds,
     pub streams: HashMap<String, StreamConfig>,
     pub mqtt_max_packet_size: usize,
     pub max_dynamic_streams_count: usize,
@@ -65,11 +65,7 @@ impl SerializerStorageHandler {
     ///
     /// `metrics_rx` is lower priority than `data_rx`
     /// Data from `metrics_rx` isn't saved on shutdown
-    pub fn new(
-        context: SerializerConfig,
-        data_rx: Receiver<DataRow>,
-        mqtt_client: Sender<Publish>,
-    ) -> Self {
+    pub fn new(context: SerializerConfig, data_rx: Receiver<DataRow>) -> Self {
         let mut buffers = HashMap::new();
         for (name, cfg) in context.streams.iter() {
             buffers.insert(
@@ -86,12 +82,15 @@ impl SerializerStorageHandler {
             b.stream_config.priority.cmp(&a.stream_config.priority)
         });
         for (name, cfg) in context.streams.iter() {
-            storages.insert(name.clone(),                     StorageState {
-                storage: create_storage_for_stream(&context, name, cfg),
-                stream_config: cfg.clone(),
-                live_data: None,
-                live_data_pushed_at: 0,
-            });
+            storages.insert(
+                name.clone(),
+                StorageState {
+                    storage: create_storage_for_stream(&context, name, cfg),
+                    stream_config: cfg.clone(),
+                    live_data: None,
+                    live_data_pushed_at: 0,
+                },
+            );
         }
         Self {
             context,
@@ -101,7 +100,6 @@ impl SerializerStorageHandler {
             timeouts: DelayMap::new(),
             dynamic_streams_count: 0,
 
-            mqtt_client,
             storages,
             live_data_clock: 0,
             current_publish: None,
@@ -109,14 +107,13 @@ impl SerializerStorageHandler {
     }
 
     pub async fn run(mut self) {
-        let mqtt_client = self.mqtt_client.clone();
         let mut current_publish_task = None;
         macro_rules! retry_current_publish {
             () => {{
                 current_publish_task = self
                     .current_publish
                     .clone()
-                    .map(|(_, publish)| Box::pin(mqtt_client.send_async(publish)));
+                    .map(|(stream_name, publish)| Box::pin(upload_data(self.context.credentials.clone(), stream_name, publish)));
             }};
         }
         macro_rules! queue_next_publish {
@@ -248,7 +245,7 @@ impl SerializerStorageHandler {
             .get(&stream_name)
             .map(|storage| storage.stream_config.compress)
             .unwrap_or(false);
-        let publish = create_publish(&stream_name, &data, compress);
+        let publish = create_publish(&data, compress);
         self.write_publish_to_storage(stream_name, publish);
     }
 
@@ -269,14 +266,7 @@ impl SerializerStorageHandler {
         let mut publish_to_write = Some(publish);
         std::mem::swap(&mut publish_to_write, &mut state.live_data);
         if let Some(publish) = publish_to_write {
-            match state.storage.write_packet(publish) {
-                Ok(_) => {}
-                Err(StorageWriteError::InvalidPacket(e)) => {
-                    log::error!(
-                        "Found invalid packet when writing to storage for stream({stream_name}): {e:?}"
-                    );
-                }
-            };
+            state.storage.write_packet(publish)
         }
     }
 
@@ -347,42 +337,33 @@ fn create_storage_for_stream(
     DiskQueue::new(ctx.persistence_path.as_ref().unwrap().join(name), config.persistence.clone())
 }
 
-fn create_publish(stream_name: &str, data: &[PublishItem], compress: bool) -> Publish {
-    let point_count = data.len();
-    log::trace!("Data received on stream: {stream_name}; message count = {point_count}");
-
-    let topic = if stream_name == "action_status" {
-        "/action/status".to_owned()
-    } else {
-        format!("/events/{stream_name}/jsonarray{}", if compress { "/lz4" } else { "" })
-    };
-
-    let serialization_start = Instant::now();
+fn create_publish(data: &[PublishItem], compressed: bool) -> Publish {
     let mut payload = serde_json::to_vec(data).unwrap();
-    let serialization_time = serialization_start.elapsed();
-    // metrics.add_serialization_time(serialization_time);
-
-    let data_size = payload.len();
-    let mut compressed_data_size = None;
-
-    if compress {
-        let compression_start = Instant::now();
+    if compressed {
         lz4_compress(&mut payload);
-        let compression_time = compression_start.elapsed();
-        // metrics.add_compression_time(compression_time);
-
-        compressed_data_size = Some(payload.len());
     }
-
-    // metrics.add_serialized_sizes(data_size, compressed_data_size);
-
-    let mut result = Publish::new(topic, QoS::AtLeastOnce, payload);
-    result.pkid = 1;
-    result
+    Publish { payload, compressed }
 }
 
 fn lz4_compress(payload: &mut Vec<u8>) {
     let mut compressor = FrameEncoder::new(vec![]);
     compressor.write_all(payload).unwrap();
     *payload = compressor.finish().unwrap();
+}
+
+async fn upload_data(creds: HttpCreds, stream_name: String, publish: Publish) -> anyhow::Result<()> {
+    let mut req = reqwest::Client::new()
+        .post(format!("{}/v1/streams/{stream_name}/submit", creds.api_url))
+        .header("x-bytebeam-device-identity", creds.api_key)
+        .header("content-type", "application/json");
+    if publish.compressed {
+        req = req.header("content-encoding", "lz4")
+    }
+    let resp = req.body(publish.payload)
+        .send().await?;
+    if !resp.status().is_success() {
+        let message = resp.text().await.unwrap_or(String::new());
+        log::error!("server responded with an error when uploading data for stream({stream_name})!\nresponse:\n{message}");
+    }
+    Ok(())
 }

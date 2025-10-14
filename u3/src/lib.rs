@@ -2,13 +2,13 @@ use crate::collectors::device_shadow::device_shadow_task;
 use crate::collectors::remote_shell::remote_shell_task;
 use crate::collectors::tcp_client::tcp_client_task;
 use crate::config::{AuthConfig, HttpCreds, UplinkConfig};
-use crate::core::mqtt::{Action, MqttConnectionHandler, MqttTaskContext, send_action_response};
+use crate::core::actions::{Action, send_action_response};
 use crate::core::serializer::{SerializerConfig, SerializerStorageHandler};
+use crate::core::storage::Publish;
 use crate::utils::num_cores;
 use flume::{Receiver, Sender};
 use futures::task::SpawnExt;
 use log::warn;
-use rumqttc::Publish;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::collections::HashMap;
@@ -48,12 +48,9 @@ pub struct Uplink {
     config: UplinkConfig,
     auth: AuthConfig,
 
-    lib_actions_tx: Sender<Action>,
-    lib_data_rx: Receiver<DataRow>,
-    publish_rx: Receiver<Publish>,
+    data_rx: Receiver<DataRow>,
     actions_mapping: HashMap<String, Sender<Action>>,
 
-    mqtt_task: JoinHandle<()>,
     serializer_task: JoinHandle<()>,
     plugin_tasks: JoinSet<()>,
     cleanup_done: bool,
@@ -91,27 +88,16 @@ impl Uplink {
             ));
         }
 
-        let (publish_tx, publish_rx) = flume::bounded(0);
-        let mqtt_task = tokio::spawn(Box::pin(
-            MqttConnectionHandler::new(MqttTaskContext {
-                publish_rx: publish_rx.clone(),
-                actions_mapping: actions_mapping.clone(),
-                auth: auth.clone(),
-                mqtt: config.mqtt.clone(),
-                persistence_path: config.persistence_path.clone(),
-            })
-            .run(),
-        ));
         let serializer_task = tokio::spawn(Box::pin(
             SerializerStorageHandler::new(
                 SerializerConfig {
+                    credentials: auth.http_credentials.clone(),
                     streams: config.streams.clone(),
                     mqtt_max_packet_size: config.mqtt.max_packet_size,
                     max_dynamic_streams_count: config.max_dynamic_streams_count,
                     persistence_path: config.persistence_path.clone(),
                 },
-                data_rx,
-                publish_tx,
+                data_rx.clone(),
             )
             .run(),
         ));
@@ -119,11 +105,8 @@ impl Uplink {
         Self {
             config,
             auth,
-            lib_actions_tx,
-            lib_data_rx,
-            publish_rx,
+            data_rx,
             actions_mapping,
-            mqtt_task,
             serializer_task,
             plugin_tasks,
             cleanup_done: false,
@@ -131,27 +114,28 @@ impl Uplink {
     }
 
     pub async fn update_credentials(&mut self, new_credentials: AuthConfig) {
-        self.mqtt_task.abort();
-        let old_task = std::mem::replace(&mut self.mqtt_task, tokio::spawn(async {}));
-        let _ = old_task.await;
+        self.serializer_task.abort();
+        std::mem::replace(&mut self.serializer_task, tokio::spawn(async {})).await;
         self.auth = new_credentials;
-        self.mqtt_task = tokio::spawn(Box::pin(
-            MqttConnectionHandler::new(MqttTaskContext {
-                publish_rx: self.publish_rx.clone(),
-                actions_mapping: self.actions_mapping.clone(),
-                auth: self.auth.clone(),
-                mqtt: self.config.mqtt.clone(),
-                persistence_path: self.config.persistence_path.clone(),
-            })
+        self.serializer_task = tokio::spawn(Box::pin(
+            SerializerStorageHandler::new(
+                SerializerConfig {
+                    credentials: self.auth.http_credentials.clone(),
+                    streams: self.config.streams.clone(),
+                    mqtt_max_packet_size: self.config.mqtt.max_packet_size,
+                    max_dynamic_streams_count: self.config.max_dynamic_streams_count,
+                    persistence_path: self.config.persistence_path.clone(),
+                },
+                self.data_rx.clone(),
+            )
             .run(),
-        ))
+        ));
     }
 
     pub async fn terminate(&mut self) {
         let plugin_tasks = std::mem::replace(&mut self.plugin_tasks, JoinSet::new());
         let serializer_task = std::mem::replace(&mut self.serializer_task, tokio::spawn(async {}));
-        let mqtt_task = std::mem::replace(&mut self.mqtt_task, tokio::spawn(async {}));
-        Self::terminate_impl(plugin_tasks, vec![serializer_task, mqtt_task]).await;
+        Self::terminate_impl(plugin_tasks, vec![serializer_task]).await;
         self.cleanup_done = true;
     }
 
@@ -172,11 +156,10 @@ impl Drop for Uplink {
             let plugin_tasks = std::mem::replace(&mut self.plugin_tasks, JoinSet::new());
             let serializer_task =
                 std::mem::replace(&mut self.serializer_task, tokio::spawn(async {}));
-            let mqtt_task = std::mem::replace(&mut self.mqtt_task, tokio::spawn(async {}));
             // workaround because async Drop isn't stable yet
             let _ = futures::executor::block_on(tokio::spawn(tokio::time::timeout(
                 Duration::from_secs(2),
-                Self::terminate_impl(plugin_tasks, vec![serializer_task, mqtt_task]),
+                Self::terminate_impl(plugin_tasks, vec![serializer_task]),
             )));
         }
     }
