@@ -34,12 +34,12 @@ pub struct UplinkConfig {
     pub enable_certificate_renewal: bool,
     pub enable_remote_shell: bool,
     pub max_dynamic_streams_count: usize,
+    pub max_packet_size: usize,
 
     pub streams: HashMap<String, StreamConfig>,
     pub tcp_clients: HashMap<String, TcpClientConfig>,
     pub lib_actions: Vec<ActionConfig>,
     pub builtin_collectors: BuiltinCollectorsConfig,
-    pub mqtt: MqttConfig,
 }
 impl Default for UplinkConfig {
     fn default() -> Self {
@@ -49,11 +49,11 @@ impl Default for UplinkConfig {
             enable_certificate_renewal: true,
             enable_remote_shell: true,
             max_dynamic_streams_count: 5,
+            max_packet_size: 1024 * 1024 * 3,
             streams: Default::default(),
             tcp_clients: Default::default(),
             lib_actions: vec![],
             builtin_collectors: Default::default(),
-            mqtt: Default::default(),
         }
     }
 }
@@ -126,20 +126,6 @@ impl Default for DeviceShadowConfig {
 pub struct HttpCreds {
     pub api_key: String,
     pub api_url: String,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
-pub struct MqttConfig {
-    pub max_packet_size: usize,
-    pub keep_alive: u64,
-    pub max_inflight: u16,
-    pub network_timeout: u64,
-}
-impl Default for MqttConfig {
-    fn default() -> Self {
-        Self { max_packet_size: 1024000, max_inflight: 100, keep_alive: 30, network_timeout: 30 }
-    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]

@@ -93,7 +93,7 @@ impl Uplink {
                 SerializerConfig {
                     credentials: auth.http_credentials.clone(),
                     streams: config.streams.clone(),
-                    mqtt_max_packet_size: config.mqtt.max_packet_size,
+                    max_packet_size: config.max_packet_size,
                     max_dynamic_streams_count: config.max_dynamic_streams_count,
                     persistence_path: config.persistence_path.clone(),
                 },
@@ -122,7 +122,7 @@ impl Uplink {
                 SerializerConfig {
                     credentials: self.auth.http_credentials.clone(),
                     streams: self.config.streams.clone(),
-                    mqtt_max_packet_size: self.config.mqtt.max_packet_size,
+                    max_packet_size: self.config.max_packet_size,
                     max_dynamic_streams_count: self.config.max_dynamic_streams_count,
                     persistence_path: self.config.persistence_path.clone(),
                 },

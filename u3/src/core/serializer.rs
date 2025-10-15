@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use futures::stream::{FlatMapUnordered, FuturesUnordered, StreamExt};
 use reqwest::{Error, Response};
 use tokio::select;
 
@@ -32,7 +33,7 @@ pub struct SerializerStorageHandler {
     storages: ArrayMap<String, StorageState>,
     /// incremented whenever we do a publish,
     live_data_clock: usize,
-    current_publish: Option<(String, Publish)>,
+    active_publishes: HashMap<u32, (String, Publish)>,
 }
 
 struct BufferState {
@@ -44,7 +45,7 @@ struct BufferState {
 pub struct SerializerConfig {
     pub credentials: HttpCreds,
     pub streams: HashMap<String, StreamConfig>,
-    pub mqtt_max_packet_size: usize,
+    pub max_packet_size: usize,
     pub max_dynamic_streams_count: usize,
     pub persistence_path: Option<PathBuf>,
 }
@@ -102,24 +103,28 @@ impl SerializerStorageHandler {
 
             storages,
             live_data_clock: 0,
-            current_publish: None,
+            active_publishes: HashMap::new(),
         }
     }
 
     pub async fn run(mut self) {
-        let mut current_publish_task = None;
-        macro_rules! retry_current_publish {
-            () => {{
-                current_publish_task = self
-                    .current_publish
-                    .clone()
-                    .map(|(stream_name, publish)| Box::pin(upload_data(self.context.credentials.clone(), stream_name, publish)));
+        let mut current_publish_tasks = FuturesUnordered::<Pin<Box<dyn Future<Output=(u32, anyhow::Result<()>)> + Send>>>::new();
+        macro_rules! try_publish_with_id {
+            ($id:expr) => {{
+                let credentials = self.context.credentials.clone();
+                let (stream_name, publish) = self.active_publishes.get(&$id).unwrap().clone();
+                current_publish_tasks.push(Box::pin(async move {
+                    ($id, upload_data(credentials, stream_name, publish).await)
+                }));
             }};
         }
         macro_rules! queue_next_publish {
             () => {{
-                self.current_publish = self.get_next_publish();
-                retry_current_publish!();
+                let id = rand::random::<u32>();
+                if let Some(next_publish) = self.get_next_publish() {
+                    self.active_publishes.insert(id, next_publish.clone());
+                    try_publish_with_id!(id);
+                }
             }};
         }
         queue_next_publish!();
@@ -136,7 +141,7 @@ impl SerializerStorageHandler {
                 } => if let Some(filled_buffer) = self.buffer_row(row) {
                     debug!("flushing {}", &filled_buffer.0);
                     self.write_buffer_to_storage(filled_buffer);
-                    if current_publish_task.is_none() {
+                    if current_publish_tasks.len() < 4 {
                         queue_next_publish!();
                     }
                 },
@@ -146,16 +151,20 @@ impl SerializerStorageHandler {
                     let data = std::mem::take(&mut stream_state.data);
                     stream_state.json_payload_size = 2;
                     self.write_buffer_to_storage((stream_name, data));
-                    if current_publish_task.is_none() {
+                    if current_publish_tasks.len() < 4 {
                         queue_next_publish!();
                     }
                 }
 
-                // moves data from storage to mqtt client
-                res = async { current_publish_task.as_mut().unwrap().await }, if current_publish_task.is_some() => {
+                Some((id, res)) = current_publish_tasks.next(), if !current_publish_tasks.is_empty() => {
                     match res {
-                        Ok(_) => queue_next_publish!(),
-                        Err(_) => retry_current_publish!(),
+                        Ok(_) => {
+                            self.active_publishes.remove(&id);
+                            queue_next_publish!();
+                        }
+                        Err(_) => {
+                            try_publish_with_id!(id);
+                        }
                     }
                 }
 
@@ -188,9 +197,9 @@ impl SerializerStorageHandler {
                     + if data.len() == 0 { 0 } else { 1 };
                 let new_size = *json_payload_size + row_size;
                 let mqtt_max_packet_size = if stream_config.compress {
-                    self.context.mqtt_max_packet_size
+                    self.context.max_packet_size
                 } else {
-                    self.context.mqtt_max_packet_size * 12 / 5
+                    self.context.max_packet_size * 12 / 5
                 };
                 if new_size > mqtt_max_packet_size {
                     self.timeouts.remove(&row.stream);
@@ -315,8 +324,8 @@ impl Drop for SerializerStorageHandler {
                 self.write_buffer_to_storage((stream_name, buf.data));
             }
         }
-        // write inflight publish to storage
-        if let Some((name, publish)) = self.current_publish.take() {
+        // write inflight publishes to storage
+        for (_, (name, publish)) in std::mem::take(&mut self.active_publishes) {
             self.write_publish_to_storage(name, publish);
         }
         // flush all the storages to disk
