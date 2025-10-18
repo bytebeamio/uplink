@@ -263,10 +263,8 @@ impl DiskQueue {
 }
 
 // format:
-// u32 -> payload_len
-// u8 -> stream_name_len
 // u8 -> compressed
-// stream name size and content
+// u32 -> payload_len
 // buffer size and content
 #[derive(Clone)]
 pub struct Publish {

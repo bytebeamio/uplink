@@ -17,10 +17,8 @@ use std::path::{Path, PathBuf};
 //   - uplink_metadata
 //     - active_actions.json - on shutdown, collectors can save active actions to this file, it will be reloaded on reboot
 //     - uplink_config.txt - will contain hash of config file and uplink version, uplink will throw away the state on disk if it doesn't match
-//   - inflight.bin - mqtt inflight messages
-//   - backup@corrupted
 //   - <stream name>
-//     - backum@1
+//     - backup@1
 //     - backup@2
 //     - backup@corrupted
 //
@@ -132,8 +130,6 @@ pub struct HttpCreds {
 pub struct AuthConfig {
     pub project_id: String,
     pub device_id: String,
-    pub broker: String,
-    pub port: u16,
     pub http_credentials: HttpCreds,
 }
 
@@ -148,7 +144,7 @@ pub fn parse_config(config_path: &str) -> Result<UplinkConfig, String> {
     let mut cfg = match toml::from_str::<UplinkConfig>(&config_str) {
         Ok(r) => r,
         Err(e) => {
-            let mut msg = "Couldn't parse config file:\n".to_owned();
+            let mut msg = "couldn't parse config file:\n".to_owned();
             if let Some(span) = e.span() {
                 if let Ok((line, column)) = byte_offset_to_position(&config_str, span.start) {
                     msg.push_str(&format!("Error at: line {line}, column {column}\n"));
@@ -215,7 +211,7 @@ pub fn parse_auth_file(auth_file_path: &str) -> Result<AuthConfig, String> {
         Ok(r) => r,
         Err(e) => {
             return Err(format!(
-                "Couldn't parse auth file: error at line: {}, column: {}, message: {}",
+                "couldn't parse auth file: error at line: {}, column: {}, message: {}",
                 e.line(),
                 e.column(),
                 e
