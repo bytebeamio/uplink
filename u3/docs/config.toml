@@ -5,10 +5,6 @@ enable_remote_shell = true
 [builtin_collectors.device_shadow]
 interval_seconds = 1
 
-[streams.device_shadow]
-buffer_size = 1
-persistence = { max_file_size = 102400, max_file_count = 10 }
-
 [streams.motor_info]
 buffer_size = 1024
 persistence = { max_file_size = 2000000, max_file_count = 10 }

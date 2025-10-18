@@ -3,7 +3,7 @@ use crate::collectors::remote_shell::remote_shell_task;
 use crate::collectors::tcp_client::tcp_client_task;
 use crate::config::{AuthConfig, HttpCreds, UplinkConfig};
 use crate::core::actions::{Action, send_action_response};
-use crate::core::serializer::{SerializerConfig, SerializerStorageHandler};
+use crate::core::serializer::{ConnectionManager, SerializerConfig, SerializerStorageHandler};
 use crate::core::storage::Publish;
 use crate::utils::num_cores;
 use flume::{Receiver, Sender};
@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+use arc_swap::ArcSwap;
 use tokio::task::{JoinError, JoinHandle, JoinSet};
 use tracing::Instrument;
 
@@ -48,8 +49,8 @@ pub struct Uplink {
     config: UplinkConfig,
     auth: AuthConfig,
 
-    data_rx: Receiver<DataRow>,
     actions_mapping: HashMap<String, Sender<Action>>,
+    connection_manager: Arc<ArcSwap<ConnectionManager>>,
 
     serializer_task: JoinHandle<()>,
     plugin_tasks: JoinSet<()>,
@@ -63,6 +64,7 @@ impl Uplink {
         lib_actions_tx: Sender<Action>,
         lib_data_rx: Receiver<DataRow>,
     ) -> Self {
+        let connection_manager = Arc::new(ArcSwap::from_pointee(ConnectionManager::new(auth.http_credentials.clone())));
         let (data_tx, data_rx) = flume::bounded(decide_data_buffer_size(&config));
         let mut plugin_tasks = JoinSet::new();
         let mut actions_mapping = HashMap::new();
@@ -91,7 +93,7 @@ impl Uplink {
         let serializer_task = tokio::spawn(Box::pin(
             SerializerStorageHandler::new(
                 SerializerConfig {
-                    credentials: auth.http_credentials.clone(),
+                    connection_manager: connection_manager.clone(),
                     streams: config.streams.clone(),
                     max_packet_size: config.max_packet_size,
                     max_dynamic_streams_count: config.max_dynamic_streams_count,
@@ -105,7 +107,7 @@ impl Uplink {
         Self {
             config,
             auth,
-            data_rx,
+            connection_manager,
             actions_mapping,
             serializer_task,
             plugin_tasks,
@@ -114,22 +116,8 @@ impl Uplink {
     }
 
     pub async fn update_credentials(&mut self, new_credentials: AuthConfig) {
-        self.serializer_task.abort();
-        std::mem::replace(&mut self.serializer_task, tokio::spawn(async {})).await;
+        self.connection_manager.store(Arc::new(ConnectionManager::new(new_credentials.http_credentials.clone())));
         self.auth = new_credentials;
-        self.serializer_task = tokio::spawn(Box::pin(
-            SerializerStorageHandler::new(
-                SerializerConfig {
-                    credentials: self.auth.http_credentials.clone(),
-                    streams: self.config.streams.clone(),
-                    max_packet_size: self.config.max_packet_size,
-                    max_dynamic_streams_count: self.config.max_dynamic_streams_count,
-                    persistence_path: self.config.persistence_path.clone(),
-                },
-                self.data_rx.clone(),
-            )
-            .run(),
-        ));
     }
 
     pub async fn terminate(&mut self) {

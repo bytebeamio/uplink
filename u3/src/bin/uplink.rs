@@ -1,4 +1,3 @@
-use backtrace::Backtrace;
 use log::{error, info};
 use reqwest::{Error, Response};
 use serde::Deserialize;

@@ -14,10 +14,12 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime};
+use arc_swap::ArcSwap;
 use futures::stream::{FlatMapUnordered, FuturesUnordered, StreamExt};
-use reqwest::{Error, Response};
+use reqwest::{Client, Error, Response};
+use reqwest::header::{HeaderMap, HeaderValue};
 use tokio::select;
 
 pub struct SerializerStorageHandler {
@@ -43,7 +45,7 @@ struct BufferState {
 }
 
 pub struct SerializerConfig {
-    pub credentials: HttpCreds,
+    pub connection_manager: Arc<ArcSwap<ConnectionManager>>,
     pub streams: HashMap<String, StreamConfig>,
     pub max_packet_size: usize,
     pub max_dynamic_streams_count: usize,
@@ -108,13 +110,17 @@ impl SerializerStorageHandler {
     }
 
     pub async fn run(mut self) {
-        let mut current_publish_tasks = FuturesUnordered::<Pin<Box<dyn Future<Output=(u32, anyhow::Result<()>)> + Send>>>::new();
+        let mut current_publish_tasks = FuturesUnordered::<Pin<Box<dyn Future<Output=(u32, bool)> + Send>>>::new();
         macro_rules! try_publish_with_id {
             ($id:expr) => {{
-                let credentials = self.context.credentials.clone();
+                let cm = self.context.connection_manager.clone();
                 let (stream_name, publish) = self.active_publishes.get(&$id).unwrap().clone();
                 current_publish_tasks.push(Box::pin(async move {
-                    ($id, upload_data(credentials, stream_name, publish).await)
+                    let success = cm.load().upload(&stream_name, publish).await;
+                    if !success {
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    }
+                    ($id, success)
                 }));
             }};
         }
@@ -156,18 +162,14 @@ impl SerializerStorageHandler {
                     }
                 }
 
-                Some((id, res)) = current_publish_tasks.next(), if !current_publish_tasks.is_empty() => {
-                    match res {
-                        Ok(_) => {
-                            self.active_publishes.remove(&id);
-                            queue_next_publish!();
-                        }
-                        Err(_) => {
-                            try_publish_with_id!(id);
-                        }
+                Some((id, ok)) = current_publish_tasks.next(), if !current_publish_tasks.is_empty() => {
+                    if ok {
+                        self.active_publishes.remove(&id);
+                        queue_next_publish!();
+                    } else {
+                        try_publish_with_id!(id);
                     }
                 }
-
                 _ = metrics_timer.tick() => {
                     for (name, storage) in self.storages.iter_mut() {
                         let m = storage.storage.metrics();
@@ -212,7 +214,7 @@ impl SerializerStorageHandler {
                 }
 
                 data.push(row.data);
-                if data.len() > stream_config.buffer_size {
+                if data.len() >= stream_config.buffer_size {
                     self.timeouts.remove(&row.stream);
                     let data =
                         std::mem::replace(data, Vec::with_capacity(stream_config.buffer_size));
@@ -360,19 +362,97 @@ fn lz4_compress(payload: &mut Vec<u8>) {
     *payload = compressor.finish().unwrap();
 }
 
-async fn upload_data(creds: HttpCreds, stream_name: String, publish: Publish) -> anyhow::Result<()> {
-    let mut req = reqwest::Client::new()
-        .post(format!("{}/v1/streams/{stream_name}/submit", creds.api_url))
-        .header("x-bytebeam-device-identity", creds.api_key)
-        .header("content-type", "application/json");
-    if publish.compressed {
-        req = req.header("content-encoding", "lz4")
+pub struct ConnectionManager {
+    pub creds: HttpCreds,
+    pub state: Mutex<CMState>,
+}
+struct CMState {
+    pub client: Option<Client>,
+    pub connected: Option<bool>,
+}
+
+impl ConnectionManager {
+    pub fn new(creds: HttpCreds) -> Self {
+        let mut result = Self {
+            creds,
+            state: Mutex::new(CMState {
+                client: None,
+                connected: None,
+            })
+        };
+        result
     }
-    let resp = req.body(publish.payload)
-        .send().await?;
-    if !resp.status().is_success() {
-        let message = resp.text().await.unwrap_or(String::new());
-        log::error!("server responded with an error when uploading data for stream({stream_name})!\nresponse:\n{message}");
+
+    fn try_init(&self) {
+        let mut state = self.state.lock().unwrap();
+        if state.client.is_none() {
+            let mut headers = HeaderMap::new();
+            headers.insert("content-type", HeaderValue::from_str("application/json").unwrap());
+            headers.insert("x-bytebeam-device-identity", HeaderValue::from_str(&self.creds.api_key).unwrap());
+            state.client = reqwest::ClientBuilder::new()
+                .default_headers(headers)
+                .pool_max_idle_per_host(1)
+                .build()
+                .ok();
+        }
     }
-    Ok(())
+
+    /// returns error in case of disconnection or server error
+    pub async fn upload(&self, stream: &str, data: Publish) -> bool {
+        match self.upload_impl(stream, data).await {
+            Ok(_) => {
+                let mut state = self.state.lock().unwrap();
+                if state.connected != Some(true) {
+                    state.connected = Some(true);
+                    info!("connected to server!");
+                }
+                true
+            },
+            Err(e) => {
+                let mut state = self.state.lock().unwrap();
+                if state.connected != Some(false) {
+                    state.connected = Some(false);
+                    match e {
+                        ErrorKind::NetworkError(msg) => error!("network error: {msg}"),
+                        ErrorKind::ServerError(msg) => error!("server error: {msg}"),
+                        ErrorKind::DnsError => error!("dns error!"),
+                    }
+                }
+                false
+            }
+        }
+    }
+
+    async fn upload_impl(&self, stream: &str, data: Publish) -> Result<(), ErrorKind> {
+        self.try_init();
+        let client = {
+            let state = self.state.lock().unwrap();
+            match state.client.clone() {
+                Some(c) => c,
+                None => return Err(ErrorKind::DnsError),
+            }
+        };
+        let mut req = client.post(format!("{}/v1/streams/{stream}/submit", self.creds.api_url))
+            .body(data.payload);
+        if data.compressed {
+            req = req.header("content-encoding", "lz4")
+        }
+        let resp = req.send().await
+            .map_err(|e| ErrorKind::NetworkError(format!("{e:?}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let message = resp.text().await.unwrap_or(String::new());
+            if status.is_server_error() {
+                return Err(ErrorKind::ServerError(message));
+            }
+            log::error!("server responded with an error when uploading data for stream({stream})!\nresponse:\n{message}");
+        }
+        Ok(())
+    }
+}
+
+enum ErrorKind {
+    NetworkError(String),
+    ServerError(String),
+    DnsError
 }

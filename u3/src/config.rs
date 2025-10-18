@@ -160,7 +160,7 @@ pub fn parse_config(config_path: &str) -> Result<UplinkConfig, String> {
             return Err("action_status is a special stream and cannot be configured".into());
         }
     }
-    for metrics_stream in ["action_status", "uplink_mqtt_metrics", "uplink_serializer_metrics", "uplink_stream_metrics"] {
+    for metrics_stream in ["device_shadow", "action_status", "uplink_mqtt_metrics", "uplink_serializer_metrics", "uplink_stream_metrics"] {
         cfg.streams.insert(
             metrics_stream.into(),
             StreamConfig {
@@ -172,6 +172,16 @@ pub fn parse_config(config_path: &str) -> Result<UplinkConfig, String> {
             },
         );
     }
+    // cfg.streams.insert(
+    //     "device_shadow".into(),
+    //     StreamConfig {
+    //         compress: false,
+    //         buffer_size: 1,
+    //         flush_interval: 1,
+    //         priority: 0,
+    //         persistence: PersistenceConfig { max_file_size: 102400, max_file_count: 10 },
+    //     },
+    // );
 
     if !cfg.lib_actions.is_empty() {
         return Err("unsupported parameter 'lib_actions'".into());
