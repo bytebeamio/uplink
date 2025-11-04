@@ -1,29 +1,22 @@
-use std::sync::Arc;
-use std::sync::atomic::AtomicPtr;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 pub struct AC<T> {
-    inner: AtomicPtr<Arc<T>>
+    inner: RwLock<Arc<T>>
 }
 
 impl<T> AC<T> {
     pub fn new(inner: T) -> Self {
-        let arc = Box::new(Arc::new(inner));
-        let ptr = arc.as_ref() as *const Arc<T> as *mut Arc<T>;
-        let inner = AtomicPtr::new(ptr);
-        std::mem::forget(arc);
+        let inner = RwLock::new(Arc::new(inner));
         Self { inner }
     }
 
-    pub fn swap(&mut self, new: T) {
-        let arc = Arc::new(new);
-        let ptr = self.inner.as_ptr() as *const Arc<T> as *mut Arc<T>;
-        std::mem::replace(unsafe { &mut *ptr }, arc);
-        todo!();
+    pub fn get(&self) -> Arc<T> {
+        let lock = self.inner.read().unwrap();
+        lock.clone()
     }
 
+    pub fn put(&self, new: T) {
+        *self.inner.write().unwrap() = Arc::new(new);
+    }
 }
-
-// impl Drop for AC {
-//     fn drop(&mut self) {
-//     }
-// }

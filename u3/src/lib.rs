@@ -15,9 +15,9 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use arc_swap::ArcSwap;
 use tokio::task::{JoinError, JoinHandle, JoinSet};
 use tracing::Instrument;
+use crate::utils::ac::AC;
 
 pub mod collectors;
 pub mod config;
@@ -50,7 +50,7 @@ pub struct Uplink {
     auth: AuthConfig,
 
     actions_mapping: HashMap<String, Sender<Action>>,
-    connection_manager: Arc<ArcSwap<ConnectionManager>>,
+    connection_manager: Arc<AC<ConnectionManager>>,
 
     serializer_task: JoinHandle<()>,
     plugin_tasks: JoinSet<()>,
@@ -64,13 +64,24 @@ impl Uplink {
         lib_actions_tx: Sender<Action>,
         lib_data_rx: Receiver<DataRow>,
     ) -> Self {
-        let connection_manager = Arc::new(ArcSwap::from_pointee(ConnectionManager::new(auth.http_credentials.clone())));
+        let connection_manager = Arc::new(AC::new(ConnectionManager::new(auth.http_credentials.clone())));
+
         let (data_tx, data_rx) = flume::bounded(decide_data_buffer_size(&config));
         let mut plugin_tasks = JoinSet::new();
         let mut actions_mapping = HashMap::new();
         for action in config.lib_actions.iter() {
             actions_mapping.insert(action.name.clone(), lib_actions_tx.clone());
         }
+        plugin_tasks.spawn({
+            let data_tx = data_tx.clone();
+            Box::pin(async move {
+                while let Ok(m) = lib_data_rx.recv_async().await {
+                    if let Err(e) = data_tx.send_async(m).await {
+                        break;
+                    }
+                }
+            })
+        });
         if config.builtin_collectors.device_shadow.enable {
             plugin_tasks.spawn(Box::pin(device_shadow_task(data_tx.clone())));
         }
@@ -116,7 +127,7 @@ impl Uplink {
     }
 
     pub async fn update_credentials(&mut self, new_credentials: AuthConfig) {
-        self.connection_manager.store(Arc::new(ConnectionManager::new(new_credentials.http_credentials.clone())));
+        self.connection_manager.put(ConnectionManager::new(new_credentials.http_credentials.clone()));
         self.auth = new_credentials;
     }
 

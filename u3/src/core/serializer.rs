@@ -16,11 +16,11 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
-use arc_swap::ArcSwap;
 use futures::stream::{FlatMapUnordered, FuturesUnordered, StreamExt};
 use reqwest::{Client, Error, Response};
 use reqwest::header::{HeaderMap, HeaderValue};
 use tokio::select;
+use crate::utils::ac::AC;
 
 pub struct SerializerStorageHandler {
     context: SerializerConfig,
@@ -45,7 +45,7 @@ struct BufferState {
 }
 
 pub struct SerializerConfig {
-    pub connection_manager: Arc<ArcSwap<ConnectionManager>>,
+    pub connection_manager: Arc<AC<ConnectionManager>>,
     pub streams: HashMap<String, StreamConfig>,
     pub max_packet_size: usize,
     pub max_dynamic_streams_count: usize,
@@ -113,10 +113,10 @@ impl SerializerStorageHandler {
         let mut current_publish_tasks = FuturesUnordered::<Pin<Box<dyn Future<Output=(u32, bool)> + Send>>>::new();
         macro_rules! try_publish_with_id {
             ($id:expr) => {{
-                let cm = self.context.connection_manager.clone();
+                let cm = self.context.connection_manager.get();
                 let (stream_name, publish) = self.active_publishes.get(&$id).unwrap().clone();
                 current_publish_tasks.push(Box::pin(async move {
-                    let success = cm.load().upload(&stream_name, publish).await;
+                    let success = cm.upload(&stream_name, publish).await;
                     if !success {
                         tokio::time::sleep(Duration::from_secs(10)).await;
                     }
