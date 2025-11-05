@@ -414,12 +414,19 @@ impl ConnectionManager {
     pub async fn await_action(&self, ty: &str) -> Action {
         loop {
             match self.process_result(self.await_action_impl(ty).await) {
-                Some(Some(r)) => return r,
+                Some(Some(r)) => {
+                    info!("received action({ty}) : {r:?}");
+                    return r
+                }
                 _ => {
                     tokio::time::sleep(Duration::from_secs(3)).await;
                 }
             }
         }
+    }
+
+    pub fn create_copy(&self) -> Self {
+        Self::new(self.state.lock().unwrap().creds.clone())
     }
 
     async fn await_action_impl(&self, ty: &str) -> Result<Option<Action>, ErrorKind> {

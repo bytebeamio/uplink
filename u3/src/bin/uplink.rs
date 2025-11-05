@@ -5,6 +5,7 @@ use serde_json::json;
 use std::cmp::{max, min};
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use structopt::StructOpt;
 use tokio::select;
@@ -13,6 +14,7 @@ use u3::config::{AuthConfig, HttpCreds, parse_auth_file, parse_config};
 use u3::utils::{clock, num_cores};
 use u3::{DataRow, PublishItem, Uplink};
 use u3::core::actions::Action;
+use u3::core::serializer::ConnectionManager;
 
 fn main() {
     let args = Cli::from_args();
@@ -43,7 +45,8 @@ fn main() {
             }
         };
 
-        let mut uplink = Uplink::spawn(cfg.clone(), auth.clone(), data_rx.clone());
+        let connection_manager = Arc::new(ConnectionManager::new(auth.http_credentials.clone()));
+        let mut uplink = Uplink::spawn(cfg.clone(), connection_manager.clone(), data_rx.clone());
         let mut sigterm = signal(SignalKind::terminate()).unwrap();
         let mut sigint = Box::pin(tokio::signal::ctrl_c());
         loop {
@@ -56,50 +59,44 @@ fn main() {
                 } => {
                     uplink.terminate().await;
                     break;
-                },
-                Ok(action) = actions_rx.recv_async() => {
-                    match "renew_cert" {
-                        "renew_cert" => {
-                            let now = clock();
-                            let new_credentials = match serde_json::from_value::<AuthConfig>(action.params) {
-                                Ok(p) => p,
-                                Err(_) => {
-                                    submit_action_response(&auth.http_credentials, now + 100, action.action_id.clone(), "Failed", 100, vec!["invalid action payload".into()]);
-                                    continue;
-                                }
-                            };
-                            info!("received new certificated from server. project_id = {}, device_id = {}", new_credentials.project_id, new_credentials.device_id);
-                            // TODO: validate that we can connect using new credentials
-                            if let Err(e) = OpenOptions::new()
-                                .write(true)
-                                .open(&args.authentication)
-                                .and_then(|mut auth_file_handle| auth_file_handle.write_all(serde_json::to_string_pretty(&new_credentials).unwrap().as_bytes())) {
-                                submit_action_response(&auth.http_credentials, now + 200, action.action_id.clone(), "Failed", 100, vec![format!("cannot write auth file: {e:?}")]);
-                                continue;
-                            }
-                            submit_action_response(&auth.http_credentials, now + 300, action.action_id.clone(), "Completed", 100, vec![]);
-                            auth = new_credentials;
-                            info!("saved new certificates, reconnecting to the server...");
-                            uplink.update_credentials(auth.clone()).await;
+                }
+                action = connection_manager.await_action("renew_cert") => {
+                    let now = clock();
+                    let new_credentials = match serde_json::from_value::<AuthConfig>(action.params) {
+                        Ok(p) => p,
+                        Err(_) => {
+                            submit_action_response(&auth.http_credentials, action.action_id.clone(), "Failed", 100, vec!["invalid action payload".into()]).await;
+                            continue;
                         }
-                        "update_uplink" => {
-                            // check if we can update uplink exe file
-                            // download uplink to same directory
-                            // unlink old file and rename new file
-                            // submit action response
-                            break;
-                        }
-                        _ => {}
+                    };
+                    info!("received new certificated from server. project_id = {}, device_id = {}", new_credentials.project_id, new_credentials.device_id);
+                    // TODO: validate that we can connect using new credentials
+                    if let Err(e) = OpenOptions::new()
+                        .write(true)
+                        .open(&args.authentication)
+                        .and_then(|mut auth_file_handle| auth_file_handle.write_all(serde_json::to_string_pretty(&new_credentials).unwrap().as_bytes())) {
+                        submit_action_response(&auth.http_credentials, action.action_id.clone(), "Failed", 100, vec![format!("cannot write auth file: {e:?}")]).await;
+                        continue;
                     }
+                    submit_action_response(&auth.http_credentials, action.action_id.clone(), "Completed", 100, vec![]).await;
+                    auth = new_credentials;
+                    info!("saved new certificates, reconnecting to the server...");
+                    connection_manager.update_credentials(auth.http_credentials.clone());
+                }
+                action = connection_manager.await_action("update_uplink") => {
+                    // check if we can update uplink exe file
+                    // download uplink to same directory
+                    // unlink the old file and rename the new file
+                    // submit action response
+                    break;
                 }
             }
         }
     });
 }
 
-fn submit_action_response(
+async fn submit_action_response(
     auth: &HttpCreds,
-    timestamp: u64,
     action_id: String,
     status: &'static str,
     progress: u8,
@@ -110,31 +107,49 @@ fn submit_action_response(
     // and action will not make progress on dashboard, and broker will try sending the action again, and we will be sad
     let auth = auth.clone();
     let errors = errors.clone();
-    tokio::spawn(async move {
-        // issues are unlikely to happen because we just received an action over the internet, but just in case
-        for _ in 0..10 {
-            match reqwest::Client::new()
-                .post(format!("{}/v1/streams/action_status/submit", &auth.api_url))
-                .header("x-bytebeam-device-identity", &auth.api_key)
-                .json(&json!([
-                    {"sequence": 0, "timestamp": timestamp, "action_id": action_id, "state": status, "progress": progress, "errors": errors}
-                ]))
-                .send().await
-            {
-                Ok(resp) => {
-                    if !resp.status().is_success() {
-                        log::error!("action response upload failed. status = {}, body = {:?}", resp.status(), resp.text().await);
-                    }
+    // issues are unlikely to happen because we just received an action over the internet, but just in case
+    if !try_submit_action_response(&auth, &action_id, status, progress, &errors).await {
+        tokio::spawn(async move {
+            for _ in 0..10 {
+                if try_submit_action_response(&auth, &action_id, status, progress, &errors).await {
                     break;
                 }
-                Err(e) => {
-                    log::error!("action response upload failed: {e:?}");
-                }
+                tokio::time::sleep(Duration::from_secs(3)).await;
             }
-            tokio::time::sleep(Duration::from_secs(3)).await;
-        }
-    });
+        });
+    }
 }
+
+async fn try_submit_action_response(
+    auth: &HttpCreds,
+    action_id: &str,
+    status: &'static str,
+    progress: u8,
+    errors: &[String],
+) -> bool {
+    match reqwest::Client::new()
+        .post(format!("{}/v1/streams/action_status/submit", &auth.api_url))
+        .header("x-bytebeam-device-identity", &auth.api_key)
+        .json(&json!([
+            {"action_id": action_id, "state": status, "progress": progress, "errors": errors}
+        ]))
+        .send().await
+    {
+        Ok(resp) => {
+            if !resp.status().is_success() {
+                log::error!("action response upload failed. status = {}, body = {:?}", resp.status(), resp.text().await);
+                false
+            } else {
+                true
+            }
+        }
+        Err(e) => {
+            log::error!("action response upload failed: {e:?}");
+            false
+        }
+    }
+}
+
 
 async fn reqwest_error_for_status(resp: Response) -> Result<String, (reqwest::StatusCode, String)> {
     let status = resp.status();
