@@ -102,9 +102,6 @@ async fn submit_action_response(
     progress: u8,
     errors: Vec<String>,
 ) {
-    // we send the action response using http api because mqtt is async and cannot guarantee delivery
-    // these messages have to be sent to server before the reboot because otherwise the responses might end up in the wrong tenant
-    // and action will not make progress on dashboard, and broker will try sending the action again, and we will be sad
     let auth = auth.clone();
     let errors = errors.clone();
     // issues are unlikely to happen because we just received an action over the internet, but just in case
