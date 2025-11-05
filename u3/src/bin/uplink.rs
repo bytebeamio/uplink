@@ -12,6 +12,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use u3::config::{AuthConfig, HttpCreds, parse_auth_file, parse_config};
 use u3::utils::{clock, num_cores};
 use u3::{DataRow, PublishItem, Uplink};
+use u3::core::actions::Action;
 
 fn main() {
     let args = Cli::from_args();
@@ -23,7 +24,7 @@ fn main() {
         .expect("Failed to build Tokio runtime");
 
     runtime.block_on(async move {
-        let (actions_tx, actions_rx) = flume::bounded(8);
+        let (actions_tx, actions_rx) = flume::bounded::<Action>(8);
         let (data_tx, data_rx) = flume::bounded(128);
         initialize_logging(args.verbosity, args.log_filters_file_path);
 
@@ -42,7 +43,7 @@ fn main() {
             }
         };
 
-        let mut uplink = Uplink::spawn(cfg.clone(), auth.clone(), actions_tx.clone(), data_rx.clone());
+        let mut uplink = Uplink::spawn(cfg.clone(), auth.clone(), data_rx.clone());
         let mut sigterm = signal(SignalKind::terminate()).unwrap();
         let mut sigint = Box::pin(tokio::signal::ctrl_c());
         loop {
@@ -57,13 +58,13 @@ fn main() {
                     break;
                 },
                 Ok(action) = actions_rx.recv_async() => {
-                    match action.name.as_str() {
+                    match "renew_cert" {
                         "renew_cert" => {
                             let now = clock();
-                            let new_credentials = match serde_json::from_str::<AuthConfig>(&action.payload) {
+                            let new_credentials = match serde_json::from_value::<AuthConfig>(action.params) {
                                 Ok(p) => p,
                                 Err(_) => {
-                                    submit_action_response(&auth.http_credentials, now + 100, action.id.clone(), "Failed", 100, vec!["invalid action payload".into()]);
+                                    submit_action_response(&auth.http_credentials, now + 100, action.action_id.clone(), "Failed", 100, vec!["invalid action payload".into()]);
                                     continue;
                                 }
                             };
@@ -73,10 +74,10 @@ fn main() {
                                 .write(true)
                                 .open(&args.authentication)
                                 .and_then(|mut auth_file_handle| auth_file_handle.write_all(serde_json::to_string_pretty(&new_credentials).unwrap().as_bytes())) {
-                                submit_action_response(&auth.http_credentials, now + 200, action.id.clone(), "Failed", 100, vec![format!("cannot write auth file: {e:?}")]);
+                                submit_action_response(&auth.http_credentials, now + 200, action.action_id.clone(), "Failed", 100, vec![format!("cannot write auth file: {e:?}")]);
                                 continue;
                             }
-                            submit_action_response(&auth.http_credentials, now + 300, action.id.clone(), "Completed", 100, vec![]);
+                            submit_action_response(&auth.http_credentials, now + 300, action.action_id.clone(), "Completed", 100, vec![]);
                             auth = new_credentials;
                             info!("saved new certificates, reconnecting to the server...");
                             uplink.update_credentials(auth.clone()).await;

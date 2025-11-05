@@ -93,7 +93,6 @@ impl Default for PersistenceConfig {
 #[serde(deny_unknown_fields)]
 pub struct TcpClientConfig {
     pub port: u16,
-    pub actions: Vec<ActionConfig>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -116,7 +115,7 @@ pub struct DeviceShadowConfig {
 }
 impl Default for DeviceShadowConfig {
     fn default() -> Self {
-        Self { enable: true, interval_seconds: 20 }
+        Self { enable: true, interval_seconds: 5 }
     }
 }
 

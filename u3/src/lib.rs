@@ -31,7 +31,7 @@ pub struct DataRow {
     pub data: PublishItem,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PublishItem {
     pub sequence: u32,
     pub timestamp: u64,
@@ -49,7 +49,6 @@ pub struct Uplink {
     config: UplinkConfig,
     auth: AuthConfig,
 
-    actions_mapping: HashMap<String, Sender<Action>>,
     connection_manager: Arc<AC<ConnectionManager>>,
 
     serializer_task: JoinHandle<()>,
@@ -61,17 +60,12 @@ impl Uplink {
     pub fn spawn(
         config: UplinkConfig,
         auth: AuthConfig,
-        lib_actions_tx: Sender<Action>,
         lib_data_rx: Receiver<DataRow>,
     ) -> Self {
         let connection_manager = Arc::new(AC::new(ConnectionManager::new(auth.http_credentials.clone())));
 
         let (data_tx, data_rx) = flume::bounded(decide_data_buffer_size(&config));
         let mut plugin_tasks = JoinSet::new();
-        let mut actions_mapping = HashMap::new();
-        for action in config.lib_actions.iter() {
-            actions_mapping.insert(action.name.clone(), lib_actions_tx.clone());
-        }
         plugin_tasks.spawn({
             let data_tx = data_tx.clone();
             Box::pin(async move {
@@ -86,15 +80,10 @@ impl Uplink {
             plugin_tasks.spawn(Box::pin(device_shadow_task(data_tx.clone())));
         }
         if config.enable_remote_shell {
-            let (action_tx, action_rx) = flume::bounded(0);
-            actions_mapping.insert("launch_shell".to_owned(), action_tx);
-            plugin_tasks.spawn(Box::pin(remote_shell_task(data_tx.clone(), action_rx)));
+            plugin_tasks.spawn(Box::pin(remote_shell_task(data_tx.clone(), connection_manager.clone())));
         }
         for (name, cfg) in config.tcp_clients.iter() {
             let (action_tx, action_rx) = flume::bounded(0);
-            for action in cfg.actions.iter() {
-                actions_mapping.insert(action.name.clone(), action_tx.clone());
-            }
             plugin_tasks.spawn(Box::pin(
                 tcp_client_task(cfg.port, data_tx.clone(), action_rx)
                     .instrument(tracing::info_span!("tcp_client", name = name.clone())),
@@ -119,7 +108,6 @@ impl Uplink {
             config,
             auth,
             connection_manager,
-            actions_mapping,
             serializer_task,
             plugin_tasks,
             cleanup_done: false,

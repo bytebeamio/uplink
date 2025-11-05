@@ -19,7 +19,10 @@ use std::time::{Duration, Instant, SystemTime};
 use futures::stream::{FlatMapUnordered, FuturesUnordered, StreamExt};
 use reqwest::{Client, Error, Response};
 use reqwest::header::{HeaderMap, HeaderValue};
+use serde::Deserialize;
+use serde_json::json;
 use tokio::select;
+use crate::core::actions::Action;
 use crate::utils::ac::AC;
 
 pub struct SerializerStorageHandler {
@@ -348,7 +351,7 @@ fn create_storage_for_stream(
     DiskQueue::new(ctx.persistence_path.as_ref().unwrap().join(name), config.persistence.clone())
 }
 
-fn create_publish(data: &[PublishItem], compressed: bool) -> Publish {
+pub fn create_publish(data: &[PublishItem], compressed: bool) -> Publish {
     let mut payload = serde_json::to_vec(data).unwrap();
     if compressed {
         lz4_compress(&mut payload);
@@ -384,12 +387,18 @@ impl ConnectionManager {
     }
 
     fn try_init(&self) {
+        // 7.3 in, 10 out  - http1.1 actions
+        // 4.1 in, 5.1 out - http1.1 no action
+        // 6.1 in, 3.8 out - h2 actions
+        // 3.9 in, 2.4 out - h2 no actions
+        // 3.2 in, 3.2 out - mqtt
         let mut state = self.state.lock().unwrap();
         if state.client.is_none() {
             let mut headers = HeaderMap::new();
             headers.insert("content-type", HeaderValue::from_str("application/json").unwrap());
             headers.insert("x-bytebeam-device-identity", HeaderValue::from_str(&self.creds.api_key).unwrap());
             state.client = reqwest::ClientBuilder::new()
+                .use_rustls_tls()
                 .default_headers(headers)
                 .pool_max_idle_per_host(1)
                 .build()
@@ -399,26 +408,17 @@ impl ConnectionManager {
 
     /// returns error in case of disconnection or server error
     pub async fn upload(&self, stream: &str, data: Publish) -> bool {
-        match self.upload_impl(stream, data).await {
-            Ok(_) => {
-                let mut state = self.state.lock().unwrap();
-                if state.connected != Some(true) {
-                    state.connected = Some(true);
-                    info!("connected to server!");
+        self.process_result(self.upload_impl(stream, data).await)
+            .is_some()
+    }
+
+    pub async fn upload_message(&self, stream: &str, message: PublishItem) {
+        loop {
+            match self.upload_impl(stream, create_publish(&[message.clone()], false)).await {
+                Ok(_) => break,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
                 }
-                true
-            },
-            Err(e) => {
-                let mut state = self.state.lock().unwrap();
-                if state.connected != Some(false) {
-                    state.connected = Some(false);
-                    match e {
-                        ErrorKind::NetworkError(msg) => error!("network error: {msg}"),
-                        ErrorKind::ServerError(msg) => error!("server error: {msg}"),
-                        ErrorKind::DnsError => error!("dns error!"),
-                    }
-                }
-                false
             }
         }
     }
@@ -448,6 +448,93 @@ impl ConnectionManager {
             log::error!("server responded with an error when uploading data for stream({stream})!\nresponse:\n{message}");
         }
         Ok(())
+    }
+
+    pub async fn fetch_action(&self, ty: &str) -> Option<Action> {
+        loop {
+            debug!("fetching action");
+            match self.process_result(self.fetch_actions_impl(ty).await) {
+                Some(r) => {
+                    if let Some(a) = r.as_ref() {
+                        info!("received action({ty}): {a:?}");
+                        return r
+                    } else {
+                        debug!("no actions!");
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                    }
+                }
+                None => {
+                    debug!("error when fetching actions");
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                }
+            }
+        }
+    }
+
+    async fn fetch_actions_impl(&self, ty: &str) -> Result<Option<Action>, ErrorKind> {
+        self.try_init();
+        let client = {
+            let state = self.state.lock().unwrap();
+            match state.client.clone() {
+                Some(c) => c,
+                None => return Err(ErrorKind::DnsError),
+            }
+        };
+        let mut resp = client.get(format!("{}/v1/available-action/{ty}", self.creds.api_url))
+            .send().await
+            .map_err(|e| ErrorKind::NetworkError(format!("{e:?}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let message = resp.text().await.unwrap_or(String::new());
+            if status.is_server_error() {
+                return Err(ErrorKind::ServerError(message));
+            }
+            log::error!("server responded with an error when fetching actions!\nresponse:\n{message}");
+            Ok(None)
+        } else {
+            let resp = match resp.text().await {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(ErrorKind::ServerError(format!("couldnt fetch response: {e:?}")));
+                }
+            };
+            #[derive(Deserialize)]
+            struct FetchActionResponse {
+                action: Option<Action>,
+            }
+            match serde_json::from_str::<FetchActionResponse>(&resp) {
+                Ok(r) => Ok(r.action),
+                Err(e) => {
+                    log::error!("server returned an invalid response when fetching actions: {resp:?} {e:?}");
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    fn process_result<T>(&self, r: Result<T, ErrorKind>) -> Option<T> {
+        match r {
+            Ok(r) => {
+                let mut state = self.state.lock().unwrap();
+                if state.connected != Some(true) {
+                    state.connected = Some(true);
+                    info!("connected to server!");
+                }
+                Some(r)
+            }
+            Err(e) => {
+                let mut state = self.state.lock().unwrap();
+                if state.connected != Some(false) {
+                    state.connected = Some(false);
+                    match e {
+                        ErrorKind::NetworkError(msg) => error!("network error: {msg}"),
+                        ErrorKind::ServerError(msg) => error!("server error: {msg}"),
+                        ErrorKind::DnsError => error!("dns error!"),
+                    }
+                }
+                None
+            }
+        }
     }
 }
 
