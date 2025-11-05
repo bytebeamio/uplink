@@ -48,7 +48,7 @@ struct BufferState {
 }
 
 pub struct SerializerConfig {
-    pub connection_manager: Arc<AC<ConnectionManager>>,
+    pub connection_manager: Arc<ConnectionManager>,
     pub streams: HashMap<String, StreamConfig>,
     pub max_packet_size: usize,
     pub max_dynamic_streams_count: usize,
@@ -116,7 +116,7 @@ impl SerializerStorageHandler {
         let mut current_publish_tasks = FuturesUnordered::<Pin<Box<dyn Future<Output=(u32, bool)> + Send>>>::new();
         macro_rules! try_publish_with_id {
             ($id:expr) => {{
-                let cm = self.context.connection_manager.get();
+                let cm = self.context.connection_manager.clone();
                 let (stream_name, publish) = self.active_publishes.get(&$id).unwrap().clone();
                 current_publish_tasks.push(Box::pin(async move {
                     let success = cm.upload(&stream_name, publish).await;
@@ -365,48 +365,36 @@ fn lz4_compress(payload: &mut Vec<u8>) {
     *payload = compressor.finish().unwrap();
 }
 
+enum ErrorKind {
+    NetworkError(String),
+    ServerError(String),
+
+    DnsError
+}
+
 pub struct ConnectionManager {
-    pub creds: HttpCreds,
     pub state: Mutex<CMState>,
 }
+
 struct CMState {
+    pub creds: HttpCreds,
     pub client: Option<Client>,
     pub connected: Option<bool>,
+    pub abort_trigger: tokio::sync::broadcast::Sender<()>,
 }
 
 impl ConnectionManager {
     pub fn new(creds: HttpCreds) -> Self {
-        let mut result = Self {
-            creds,
+        Self {
             state: Mutex::new(CMState {
+                creds,
                 client: None,
                 connected: None,
+                abort_trigger: tokio::sync::broadcast::Sender::new(1)
             })
-        };
-        result
-    }
-
-    fn try_init(&self) {
-        // 7.3 in, 10 out  - http1.1 actions
-        // 4.1 in, 5.1 out - http1.1 no action
-        // 6.1 in, 3.8 out - h2 actions
-        // 3.9 in, 2.4 out - h2 no actions
-        // 3.2 in, 3.2 out - mqtt
-        let mut state = self.state.lock().unwrap();
-        if state.client.is_none() {
-            let mut headers = HeaderMap::new();
-            headers.insert("content-type", HeaderValue::from_str("application/json").unwrap());
-            headers.insert("x-bytebeam-device-identity", HeaderValue::from_str(&self.creds.api_key).unwrap());
-            state.client = reqwest::ClientBuilder::new()
-                .use_rustls_tls()
-                .default_headers(headers)
-                .pool_max_idle_per_host(1)
-                .build()
-                .ok();
         }
     }
 
-    /// returns error in case of disconnection or server error
     pub async fn upload(&self, stream: &str, data: Publish) -> bool {
         self.process_result(self.upload_impl(stream, data).await)
             .is_some()
@@ -423,16 +411,123 @@ impl ConnectionManager {
         }
     }
 
-    async fn upload_impl(&self, stream: &str, data: Publish) -> Result<(), ErrorKind> {
-        self.try_init();
-        let client = {
-            let state = self.state.lock().unwrap();
-            match state.client.clone() {
-                Some(c) => c,
-                None => return Err(ErrorKind::DnsError),
+    pub async fn await_action(&self, ty: &str) -> Action {
+        loop {
+            match self.process_result(self.await_action_impl(ty).await) {
+                Some(Some(r)) => return r,
+                _ => {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                }
+            }
+        }
+    }
+
+    async fn await_action_impl(&self, ty: &str) -> Result<Option<Action>, ErrorKind> {
+        let (client, api_url, mut abort_trigger) = {
+            let mut state = self.state.lock().unwrap();
+            if state.client.is_none() {
+                let mut headers = HeaderMap::new();
+                headers.insert("content-type", HeaderValue::from_str("application/json").unwrap());
+                headers.insert("x-bytebeam-device-identity", HeaderValue::from_str(&state.creds.api_key).unwrap());
+                state.client = reqwest::ClientBuilder::new()
+                    .use_rustls_tls()
+                    .default_headers(headers)
+                    .pool_max_idle_per_host(1)
+                    .build()
+                    .ok();
+            }
+            let client = {
+                match state.client.clone() {
+                    Some(c) => c,
+                    None => return Err(ErrorKind::DnsError),
+                }
+            };
+            let abort_trigger = state.abort_trigger.subscribe();
+            (client, state.creds.api_url.clone(), abort_trigger)
+        };
+        async move {
+            select! {
+                r = Self::await_action_standalone(client, api_url, ty.to_owned()) => r,
+                _ = abort_trigger.recv() => Ok(None)
+            }
+        }.await
+    }
+
+    async fn await_action_standalone(client: Client, api_url: String, ty: String) -> Result<Option<Action>, ErrorKind> {
+        let resp = match client
+            .get(format!("{api_url}/v1/available-action/{ty}/await"))
+            .send().await {
+            Ok(r) => {
+                r
+            }
+            Err(e) => {
+                return Err(ErrorKind::NetworkError(format!("{e:?}")));
             }
         };
-        let mut req = client.post(format!("{}/v1/streams/{stream}/submit", self.creds.api_url))
+        let status = resp.status();
+        let resp_text = match resp.text().await {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(ErrorKind::NetworkError(format!("{e:?}")));
+            }
+        };
+        #[derive(Deserialize)]
+        struct ActionResponse {
+            action: Option<Action>,
+        }
+        if status.is_success() {
+            match serde_json::from_str::<ActionResponse>(&resp_text) {
+                Ok(r) => return Ok(r.action),
+                Err(e) => {
+                    return Err(ErrorKind::ServerError(format!("server returned an unexpected response: {resp_text}, {e:?}")));
+                }
+            }
+        } else {
+            if status.is_server_error() {
+                return Err(ErrorKind::ServerError(format!("server error({status}): {resp_text}")));
+            } else {
+                log::error!("unexpected error when fetching action({ty}) : ({status}) : ({resp_text})");
+                return Ok(None)
+            }
+        }
+    }
+
+    pub fn update_credentials(&self, creds: HttpCreds) {
+        let mut state = self.state.lock().unwrap();
+        state.creds = creds;
+        state.client = None;
+        state.connected = None;
+        let _ = state.abort_trigger.send(());
+    }
+
+    async fn upload_impl(&self, stream: &str, data: Publish) -> Result<(), ErrorKind> {
+        let (client, api_url) = {
+            let mut state = self.state.lock().unwrap();
+            if state.client.is_none() {
+                let mut headers = HeaderMap::new();
+                headers.insert("content-type", HeaderValue::from_str("application/json").unwrap());
+                headers.insert("x-bytebeam-device-identity", HeaderValue::from_str(&state.creds.api_key).unwrap());
+                state.client = reqwest::ClientBuilder::new()
+                    .use_rustls_tls()
+                    .default_headers(headers)
+                    .pool_max_idle_per_host(1)
+                    .build()
+                    .ok();
+            }
+            let client = {
+                match state.client.clone() {
+                    Some(c) => c,
+                    None => return Err(ErrorKind::DnsError),
+                }
+            };
+            let api_url = state.creds.api_url.clone();
+            (client, api_url)
+        };
+        Self::upload_impl_standalone(client, api_url, stream.to_owned(), data).await
+    }
+
+    async fn upload_impl_standalone(client: Client, api_url: String, stream: String, data: Publish) -> Result<(), ErrorKind> {
+        let mut req = client.post(format!("{api_url}/v1/streams/{stream}/submit"))
             .body(data.payload);
         if data.compressed {
             req = req.header("content-encoding", "lz4")
@@ -443,79 +538,17 @@ impl ConnectionManager {
         if !status.is_success() {
             let message = resp.text().await.unwrap_or(String::new());
             if status.is_server_error() {
-                return Err(ErrorKind::ServerError(message));
+                return Err(ErrorKind::ServerError(format!("server error({status}) : {message}")));
             }
             log::error!("server responded with an error when uploading data for stream({stream})!\nresponse:\n{message}");
         }
         Ok(())
     }
 
-    pub async fn fetch_action(&self, ty: &str) -> Option<Action> {
-        loop {
-            debug!("fetching action");
-            match self.process_result(self.fetch_actions_impl(ty).await) {
-                Some(r) => {
-                    if let Some(a) = r.as_ref() {
-                        info!("received action({ty}): {a:?}");
-                        return r
-                    } else {
-                        debug!("no actions!");
-                        tokio::time::sleep(Duration::from_secs(3)).await;
-                    }
-                }
-                None => {
-                    debug!("error when fetching actions");
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                }
-            }
-        }
-    }
-
-    async fn fetch_actions_impl(&self, ty: &str) -> Result<Option<Action>, ErrorKind> {
-        self.try_init();
-        let client = {
-            let state = self.state.lock().unwrap();
-            match state.client.clone() {
-                Some(c) => c,
-                None => return Err(ErrorKind::DnsError),
-            }
-        };
-        let mut resp = client.get(format!("{}/v1/available-action/{ty}", self.creds.api_url))
-            .send().await
-            .map_err(|e| ErrorKind::NetworkError(format!("{e:?}")))?;
-        let status = resp.status();
-        if !status.is_success() {
-            let message = resp.text().await.unwrap_or(String::new());
-            if status.is_server_error() {
-                return Err(ErrorKind::ServerError(message));
-            }
-            log::error!("server responded with an error when fetching actions!\nresponse:\n{message}");
-            Ok(None)
-        } else {
-            let resp = match resp.text().await {
-                Ok(r) => r,
-                Err(e) => {
-                    return Err(ErrorKind::ServerError(format!("couldnt fetch response: {e:?}")));
-                }
-            };
-            #[derive(Deserialize)]
-            struct FetchActionResponse {
-                action: Option<Action>,
-            }
-            match serde_json::from_str::<FetchActionResponse>(&resp) {
-                Ok(r) => Ok(r.action),
-                Err(e) => {
-                    log::error!("server returned an invalid response when fetching actions: {resp:?} {e:?}");
-                    Ok(None)
-                }
-            }
-        }
-    }
-
     fn process_result<T>(&self, r: Result<T, ErrorKind>) -> Option<T> {
+        let mut state = self.state.lock().unwrap();
         match r {
             Ok(r) => {
-                let mut state = self.state.lock().unwrap();
                 if state.connected != Some(true) {
                     state.connected = Some(true);
                     info!("connected to server!");
@@ -536,10 +569,4 @@ impl ConnectionManager {
             }
         }
     }
-}
-
-enum ErrorKind {
-    NetworkError(String),
-    ServerError(String),
-    DnsError
 }

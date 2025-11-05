@@ -49,7 +49,7 @@ pub struct Uplink {
     config: UplinkConfig,
     auth: AuthConfig,
 
-    connection_manager: Arc<AC<ConnectionManager>>,
+    connection_manager: Arc<ConnectionManager>,
 
     serializer_task: JoinHandle<()>,
     plugin_tasks: JoinSet<()>,
@@ -62,7 +62,7 @@ impl Uplink {
         auth: AuthConfig,
         lib_data_rx: Receiver<DataRow>,
     ) -> Self {
-        let connection_manager = Arc::new(AC::new(ConnectionManager::new(auth.http_credentials.clone())));
+        let connection_manager = Arc::new(ConnectionManager::new(auth.http_credentials.clone()));
 
         let (data_tx, data_rx) = flume::bounded(decide_data_buffer_size(&config));
         let mut plugin_tasks = JoinSet::new();
@@ -115,7 +115,7 @@ impl Uplink {
     }
 
     pub async fn update_credentials(&mut self, new_credentials: AuthConfig) {
-        self.connection_manager.put(ConnectionManager::new(new_credentials.http_credentials.clone()));
+        self.connection_manager.update_credentials(new_credentials.http_credentials.clone());
         self.auth = new_credentials;
     }
 

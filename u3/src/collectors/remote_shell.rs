@@ -12,16 +12,14 @@ use crate::core::actions::{send_action_response, Action};
 use crate::core::serializer::ConnectionManager;
 use crate::utils::ac::AC;
 
-pub async fn remote_shell_task(data_tx: Sender<DataRow>, cm: Arc<AC<ConnectionManager>>) {
+pub async fn remote_shell_task(data_tx: Sender<DataRow>, cm: Arc<ConnectionManager>) {
     let mut shells = FuturesUnordered::<Pin<Box<dyn Future<Output = ()> + Send>>>::new();
     loop {
-        let cm = cm.get();
+        let cm = cm.clone();
         select! {
-            action = cm.fetch_action("launch_shell") => {
-                if let Some(action) = action {
-                    send_action_response(&cm, &action.action_id, "ShellSpawned", 90, &[]).await;
-                    shells.push(Box::pin(run_remote_shell(action, cm)));
-                }
+            action = cm.await_action("launch_shell") => {
+                send_action_response(&cm, &action.action_id, "ShellSpawned", 90, &[]).await;
+                shells.push(Box::pin(run_remote_shell(action, cm)));
             }
             _ = shells.next(), if !shells.is_empty() => {}
             else => break
