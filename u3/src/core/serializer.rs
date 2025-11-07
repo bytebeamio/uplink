@@ -112,6 +112,7 @@ impl SerializerStorageHandler {
     }
 
     pub async fn run(mut self) {
+        let mut is_connected = true;
         let mut current_publish_tasks = FuturesUnordered::<Pin<Box<dyn Future<Output=(u32, bool)> + Send>>>::new();
         macro_rules! try_publish_with_id {
             ($id:expr) => {{
@@ -164,11 +165,12 @@ impl SerializerStorageHandler {
                     }
                 }
 
-                Some((id, ok)) = current_publish_tasks.next(), if !current_publish_tasks.is_empty() => {
+                Some((id, ok)) = current_publish_tasks.next(), if !current_publish_tasks.is_empty() && is_connected => {
                     if ok {
                         self.active_publishes.remove(&id);
                         queue_next_publish!();
                     } else {
+                        is_connected = false;
                         try_publish_with_id!(id);
                     }
                 }
@@ -401,6 +403,10 @@ impl ConnectionManager {
         }
     }
 
+    pub async fn ping(&self) {
+
+    }
+
     pub async fn upload(&self, stream: &str, data: Publish) -> bool {
         self.process_result(self.upload_impl(stream, data).await)
             .is_some()
@@ -435,29 +441,39 @@ impl ConnectionManager {
         Self::new(self.state.lock().unwrap().creds.clone())
     }
 
-    async fn await_action_impl(&self, ty: &str) -> Result<Option<Action>, ErrorKind> {
-        let (client, api_url, mut abort_trigger) = {
-            let mut state = self.state.lock().unwrap();
-            if state.client.is_none() {
-                let mut headers = HeaderMap::new();
-                headers.insert("content-type", HeaderValue::from_str("application/json").unwrap());
-                headers.insert("x-bytebeam-device-identity", HeaderValue::from_str(&state.creds.api_key).unwrap());
-                state.client = reqwest::ClientBuilder::new()
-                    .use_rustls_tls()
-                    .default_headers(headers)
-                    .pool_max_idle_per_host(1)
-                    .build()
-                    .ok();
+    pub fn update_credentials(&self, creds: HttpCreds) {
+        let mut state = self.state.lock().unwrap();
+        state.creds = creds;
+        state.client = None;
+        state.connected = None;
+        let _ = state.abort_trigger.send(());
+    }
+
+    fn copy_connection_state(&self) -> Result<(Client, String, tokio::sync::broadcast::Receiver<()>), ErrorKind> {
+        let mut state = self.state.lock().unwrap();
+        if state.client.is_none() {
+            let mut headers = HeaderMap::new();
+            headers.insert("content-type", HeaderValue::from_str("application/json").unwrap());
+            headers.insert("x-bytebeam-device-identity", HeaderValue::from_str(&state.creds.api_key).unwrap());
+            state.client = reqwest::ClientBuilder::new()
+                .use_rustls_tls()
+                .default_headers(headers)
+                .pool_max_idle_per_host(1)
+                .build()
+                .ok();
+        }
+        let client = {
+            match state.client.clone() {
+                Some(c) => c,
+                None => return Err(ErrorKind::DnsError),
             }
-            let client = {
-                match state.client.clone() {
-                    Some(c) => c,
-                    None => return Err(ErrorKind::DnsError),
-                }
-            };
-            let abort_trigger = state.abort_trigger.subscribe();
-            (client, state.creds.api_url.clone(), abort_trigger)
         };
+        let abort_trigger = state.abort_trigger.subscribe();
+        Ok((client, state.creds.api_url.clone(), abort_trigger))
+    }
+
+    async fn await_action_impl(&self, ty: &str) -> Result<Option<Action>, ErrorKind> {
+        let (client, api_url, mut abort_trigger) = self.copy_connection_state()?;
         async move {
             select! {
                 r = Self::await_action_standalone(client, api_url, ty.to_owned()) => r,
@@ -505,37 +521,8 @@ impl ConnectionManager {
         }
     }
 
-    pub fn update_credentials(&self, creds: HttpCreds) {
-        let mut state = self.state.lock().unwrap();
-        state.creds = creds;
-        state.client = None;
-        state.connected = None;
-        let _ = state.abort_trigger.send(());
-    }
-
     async fn upload_impl(&self, stream: &str, data: Publish) -> Result<(), ErrorKind> {
-        let (client, api_url) = {
-            let mut state = self.state.lock().unwrap();
-            if state.client.is_none() {
-                let mut headers = HeaderMap::new();
-                headers.insert("content-type", HeaderValue::from_str("application/json").unwrap());
-                headers.insert("x-bytebeam-device-identity", HeaderValue::from_str(&state.creds.api_key).unwrap());
-                state.client = reqwest::ClientBuilder::new()
-                    .use_rustls_tls()
-                    .default_headers(headers)
-                    .pool_max_idle_per_host(1)
-                    .build()
-                    .ok();
-            }
-            let client = {
-                match state.client.clone() {
-                    Some(c) => c,
-                    None => return Err(ErrorKind::DnsError),
-                }
-            };
-            let api_url = state.creds.api_url.clone();
-            (client, api_url)
-        };
+        let (client, api_url, _) = self.copy_connection_state()?;
         Self::upload_impl_standalone(client, api_url, stream.to_owned(), data).await
     }
 
