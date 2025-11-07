@@ -1,11 +1,10 @@
-use futures_util::SinkExt;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
+use std::io::{BufWriter, Write};
+use std::net::TcpStream;
 use std::time::Duration;
+use std::thread::sleep;
 use structopt::StructOpt;
-use tokio::net::TcpStream;
-use tokio::time::sleep;
-use tokio_util::codec::{Framed, LinesCodec};
 use chrono::Utc;
 use uplink::base::clock;
 
@@ -67,16 +66,15 @@ fn parse_format(format: &str) -> Vec<FieldSpec> {
     specs
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     // Parse CLI arguments.
     let opt = Opt::from_args();
     let interval_duration = Duration::from_secs_f64(opt.interval);
     let field_specs = parse_format(&opt.format);
 
-    // Connect to the TCP server (using the default "127.0.0.1:5050").
-    let stream = TcpStream::connect(&opt.uplink_port).await.unwrap();
-    let mut framed = Framed::new(stream, LinesCodec::new());
+    // Connect to the TCP server.
+    let stream = TcpStream::connect(&opt.uplink_port).unwrap();
+    let mut writer = BufWriter::new(stream);
 
     let mut seq: u64 = 0;
     loop {
@@ -119,9 +117,10 @@ async fn main() {
 
         let data_s = serde_json::to_string(&payload).unwrap();
         if opt.verbose {
-            println!("{data_s}");
+            println!("{}", data_s);
         }
-        framed.send(data_s).await.unwrap();
-        sleep(interval_duration).await;
+        writeln!(writer, "{}", data_s).unwrap();
+        writer.flush().unwrap();
+        sleep(interval_duration);
     }
 }

@@ -8,7 +8,7 @@ use crate::core::storage::Publish;
 use crate::utils::num_cores;
 use flume::{Receiver, Sender};
 use futures::task::SpawnExt;
-use log::warn;
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::collections::HashMap;
@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::{JoinError, JoinHandle, JoinSet};
 use tracing::Instrument;
-use crate::utils::ac::AC;
 
 pub mod collectors;
 pub mod config;

@@ -1,6 +1,6 @@
 use crate::config::{HttpCreds, StreamConfig};
 use crate::core::storage;
-use crate::core::storage::{DiskQueue, Publish};
+use crate::core::storage::{DiskQueue, Publish, StorageMetrics};
 use crate::utils::array_map::ArrayMap;
 use crate::utils::delaymap::DelayMap;
 use crate::{AppContext, DataRow, PublishItem};
@@ -23,7 +23,6 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::select;
 use crate::core::actions::Action;
-use crate::utils::ac::AC;
 
 pub struct SerializerStorageHandler {
     context: SerializerConfig,
@@ -174,9 +173,16 @@ impl SerializerStorageHandler {
                     }
                 }
                 _ = metrics_timer.tick() => {
+                    let mut sm = StorageMetrics::default();
                     for (name, storage) in self.storages.iter_mut() {
                         let m = storage.storage.metrics();
+                        sm.bytes_on_disk += m.bytes_on_disk;
+                        sm.files_count += m.files_count;
+                        sm.lost_files += m.lost_files;
+                        sm.read_buffer_size += m.read_buffer_size;
+                        sm.write_buffer_size += m.write_buffer_size;
                     }
+                    dbg!(sm);
                     // serializer metrics:
                     // * memory usage
                     // * disk usage
@@ -365,10 +371,10 @@ fn lz4_compress(payload: &mut Vec<u8>) {
     *payload = compressor.finish().unwrap();
 }
 
+#[derive(Debug)]
 enum ErrorKind {
     NetworkError(String),
     ServerError(String),
-
     DnsError
 }
 
@@ -563,7 +569,6 @@ impl ConnectionManager {
                 Some(r)
             }
             Err(e) => {
-                let mut state = self.state.lock().unwrap();
                 if state.connected != Some(false) {
                     state.connected = Some(false);
                     match e {

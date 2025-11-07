@@ -10,7 +10,6 @@ use tokio_compat_02::FutureExt;
 use tunshell_client::{Client, ClientMode, Config, HostShell};
 use crate::core::actions::{send_action_response, Action};
 use crate::core::serializer::ConnectionManager;
-use crate::utils::ac::AC;
 
 pub async fn remote_shell_task(data_tx: Sender<DataRow>, cm: Arc<ConnectionManager>) {
     let mut shells = FuturesUnordered::<Pin<Box<dyn Future<Output = ()> + Send>>>::new();
@@ -38,6 +37,12 @@ async fn run_remote_shell(action: Action, cm: Arc<ConnectionManager>) {
     }
 }
 
+// TODO:
+// console
+// uplink proxy
+// events api
+// disable renaming
+// validate cache db and user in create tenant test
 async fn run_remote_shell_impl(action: &Action) -> Result<(), String> {
     let keys =
         serde_json::from_value::<Keys>(action.params.clone()).map_err(|_| "invalid action payload!")?;

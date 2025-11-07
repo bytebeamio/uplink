@@ -1,12 +1,13 @@
 use crate::config::PersistenceConfig;
 use anyhow::Context;
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::error;
 use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+#[derive(Default, Debug)]
 pub struct StorageMetrics {
     pub read_buffer_size: u64,
     pub write_buffer_size: u64,
