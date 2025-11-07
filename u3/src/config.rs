@@ -1,5 +1,4 @@
 use crate::utils::byte_offset_to_position;
-use bytes::BytesMut;
 use log::warn;
 use reqwest::{Certificate, Identity};
 use serde::{Deserialize, Serialize};
@@ -7,26 +6,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 // persistence_path is mandatory
-// download_path is mandatory if any downloads are enabled
-// directory structures
-// - <download directory>
-//   - <file version>
-//     - <file name>
-//     - metadata.txt - download url, checksum, size, how much has been downloaded
-// - persistence
-//   - uplink_metadata
-//     - active_actions.json - on shutdown, collectors can save active actions to this file, it will be reloaded on reboot
-//     - uplink_config.txt - will contain hash of config file and uplink version, uplink will throw away the state on disk if it doesn't match
-//   - <stream name>
-//     - backup@1
-//     - backup@2
-//     - backup@corrupted
-//
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct UplinkConfig {
-    #[serde(with = "crate::utils::path_parser")]
-    pub download_path: Option<PathBuf>,
     #[serde(with = "crate::utils::path_parser")]
     pub persistence_path: Option<PathBuf>,
     pub enable_certificate_renewal: bool,
@@ -42,7 +24,6 @@ pub struct UplinkConfig {
 impl Default for UplinkConfig {
     fn default() -> Self {
         Self {
-            download_path: None,
             persistence_path: None,
             enable_certificate_renewal: true,
             enable_remote_shell: true,
@@ -85,7 +66,7 @@ pub struct PersistenceConfig {
 }
 impl Default for PersistenceConfig {
     fn default() -> Self {
-        Self { max_file_size: 1024 * 1024, max_file_count: 0 }
+        Self { max_file_size: 100 * 1024, max_file_count: 0 }
     }
 }
 
@@ -159,7 +140,7 @@ pub fn parse_config(config_path: &str) -> Result<UplinkConfig, String> {
             return Err("action_status is a special stream and cannot be configured".into());
         }
     }
-    for metrics_stream in ["device_shadow", "action_status", "uplink_mqtt_metrics", "uplink_serializer_metrics", "uplink_stream_metrics"] {
+    for metrics_stream in ["device_shadow", "uplink_serializer_metrics", "uplink_stream_metrics"] {
         cfg.streams.insert(
             metrics_stream.into(),
             StreamConfig {
@@ -189,11 +170,6 @@ pub fn parse_config(config_path: &str) -> Result<UplinkConfig, String> {
         ActionConfig { name: "renew_cert".to_string() },
         ActionConfig { name: "update_uplink".to_string() },
     ];
-    if let Some(p) = &cfg.download_path {
-        if let Err(e) = validate_dir_permissions(p) {
-            return Err(format!("encountered a problem with download_path({p:?}):\n{e}",));
-        }
-    }
     if let Some(p) = &cfg.persistence_path {
         if let Err(e) = validate_dir_permissions(p) {
             return Err(format!("encountered a problem with persistence_path({p:?}):\n{e}",));

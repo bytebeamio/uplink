@@ -10,6 +10,8 @@ impl<K, V> ArrayMap<K, V> {
         ArrayMap { items: Vec::new(), compare }
     }
 
+    pub fn len(&self) -> usize { self.items.len() }
+
     pub fn insert(&mut self, key: K, value: V) {
         let insert_pos =
             self.items.binary_search_by(|(_, v)| (self.compare)(v, &value)).unwrap_or_else(|e| e);

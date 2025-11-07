@@ -1,7 +1,7 @@
 use crate::config::PersistenceConfig;
 use anyhow::Context;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use log::error;
+use bytes::{Buf, BufMut, BytesMut};
+use log::{debug, error, info};
 use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -77,8 +77,8 @@ impl DiskQueue {
         let mut result = Self {
             dir,
             files_queue: Default::default(),
-            read_buffer: BytesMut::with_capacity(persistence.max_file_size * 3 / 2),
-            write_buffer: BytesMut::with_capacity(persistence.max_file_size * 3 / 2),
+            read_buffer: BytesMut::with_capacity(persistence.max_file_size * 11 / 10),
+            write_buffer: BytesMut::with_capacity(persistence.max_file_size * 11 / 10),
             persistence,
             bytes_on_disk: 0,
             lost_files: 0,
@@ -254,8 +254,8 @@ impl DiskQueue {
 
     pub fn metrics(&self) -> StorageMetrics {
         StorageMetrics {
-            read_buffer_size: self.read_buffer.len() as _,
-            write_buffer_size: self.write_buffer.len() as _,
+            read_buffer_size: self.read_buffer.capacity() as _,
+            write_buffer_size: self.write_buffer.capacity() as _,
             bytes_on_disk: self.bytes_on_disk,
             files_count: self.files_queue.len() as _,
             lost_files: self.lost_files,

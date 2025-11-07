@@ -3,7 +3,7 @@ use crate::core::storage;
 use crate::core::storage::{DiskQueue, Publish, StorageMetrics};
 use crate::utils::array_map::ArrayMap;
 use crate::utils::delaymap::DelayMap;
-use crate::{AppContext, DataRow, PublishItem};
+use crate::{convert, AppContext, DataRow, PublishItem};
 use flume::r#async::SendFut;
 use flume::{Receiver, SendError, Sender};
 use log::{debug, error, info};
@@ -22,6 +22,8 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::select;
+use tokio::time::error::Elapsed;
+use tokio::time::Timeout;
 use crate::core::actions::Action;
 
 pub struct SerializerStorageHandler {
@@ -112,18 +114,14 @@ impl SerializerStorageHandler {
     }
 
     pub async fn run(mut self) {
-        let mut is_connected = true;
-        let mut current_publish_tasks = FuturesUnordered::<Pin<Box<dyn Future<Output=(u32, bool)> + Send>>>::new();
+        let mut connected = false;
+        let mut current_publish_tasks = FuturesUnordered::<Pin<Box<dyn Future<Output=(u32, Result<(), ErrorKind>)> + Send>>>::new();
         macro_rules! try_publish_with_id {
             ($id:expr) => {{
                 let cm = self.context.connection_manager.clone();
                 let (stream_name, publish) = self.active_publishes.get(&$id).unwrap().clone();
                 current_publish_tasks.push(Box::pin(async move {
-                    let success = cm.upload(&stream_name, publish).await;
-                    if !success {
-                        tokio::time::sleep(Duration::from_secs(10)).await;
-                    }
-                    ($id, success)
+                    ($id, cm.upload(&stream_name, publish).await)
                 }));
             }};
         }
@@ -138,7 +136,8 @@ impl SerializerStorageHandler {
         }
         queue_next_publish!();
 
-        let mut metrics_timer = tokio::time::interval(Duration::from_secs(10));
+        let metrics_interval = Duration::from_secs(10);
+        let mut metrics_timer = tokio::time::interval_at(tokio::time::Instant::now() + metrics_interval, metrics_interval);
         loop {
             select! {
                 // first two tasks read data points, and move them to storage according to stream buffer size and timeout config
@@ -150,7 +149,7 @@ impl SerializerStorageHandler {
                 } => if let Some(filled_buffer) = self.buffer_row(row) {
                     debug!("flushing {}", &filled_buffer.0);
                     self.write_buffer_to_storage(filled_buffer);
-                    if current_publish_tasks.len() < 4 {
+                    if current_publish_tasks.len() < 40 {
                         queue_next_publish!();
                     }
                 },
@@ -160,19 +159,33 @@ impl SerializerStorageHandler {
                     let data = std::mem::take(&mut stream_state.data);
                     stream_state.json_payload_size = 2;
                     self.write_buffer_to_storage((stream_name, data));
-                    if current_publish_tasks.len() < 4 {
+                    if current_publish_tasks.len() < 40 {
                         queue_next_publish!();
                     }
                 }
 
-                Some((id, ok)) = current_publish_tasks.next(), if !current_publish_tasks.is_empty() && is_connected => {
-                    if ok {
-                        self.active_publishes.remove(&id);
-                        queue_next_publish!();
-                    } else {
-                        is_connected = false;
-                        try_publish_with_id!(id);
+                Some((id, result)) = current_publish_tasks.next(), if !current_publish_tasks.is_empty() && connected => {
+                    match result {
+                        Ok(_) => {
+                            self.active_publishes.remove(&id);
+                            queue_next_publish!();
+                        }
+                        Err(e) => {
+                            if connected != false {
+                                connected = false;
+                                match e {
+                                    ErrorKind::NetworkError(msg) => error!("network error: {msg}"),
+                                    ErrorKind::ServerError(msg) => error!("server error: {msg}"),
+                                    ErrorKind::DnsError => error!("dns error!"),
+                                }
+                            }
+                            try_publish_with_id!(id);
+                        }
                     }
+                }
+                _ = self.context.connection_manager.await_connection(), if !connected => {
+                    info!("connected to server");
+                    connected = true;
                 }
                 _ = metrics_timer.tick() => {
                     let mut sm = StorageMetrics::default();
@@ -184,7 +197,12 @@ impl SerializerStorageHandler {
                         sm.read_buffer_size += m.read_buffer_size;
                         sm.write_buffer_size += m.write_buffer_size;
                     }
-                    dbg!(sm);
+                    info!(
+                        "streams_count: {}|{}, cache_size: {}, disk_files: {}, disk_usage: {}, lost_files: {}",
+                        self.storages.len(), self.dynamic_streams_count,
+                        convert((sm.read_buffer_size + sm.write_buffer_size) as _),
+                        sm.files_count, convert(sm.bytes_on_disk as f64), sm.lost_files
+                    );
                     // serializer metrics:
                     // * memory usage
                     // * disk usage
@@ -387,7 +405,6 @@ pub struct ConnectionManager {
 struct CMState {
     pub creds: HttpCreds,
     pub client: Option<Client>,
-    pub connected: Option<bool>,
     pub abort_trigger: tokio::sync::broadcast::Sender<()>,
 }
 
@@ -397,40 +414,51 @@ impl ConnectionManager {
             state: Mutex::new(CMState {
                 creds,
                 client: None,
-                connected: None,
                 abort_trigger: tokio::sync::broadcast::Sender::new(1)
             })
         }
     }
 
-    pub async fn ping(&self) {
-
-    }
-
-    pub async fn upload(&self, stream: &str, data: Publish) -> bool {
-        self.process_result(self.upload_impl(stream, data).await)
-            .is_some()
-    }
-
-    pub async fn upload_message(&self, stream: &str, message: PublishItem) {
+    pub async fn await_connection(&self) {
         loop {
-            match self.upload_impl(stream, create_publish(&[message.clone()], false)).await {
-                Ok(_) => break,
-                Err(_) => {
+            if let Ok((client, api_url, _)) = self.copy_connection_state() {
+                if let Ok(resp) = client.post(format!("{api_url}/v1/streams/device_shadow/submit"))
+                    .timeout(Duration::from_secs(3))
+                    .body("[]")
+                    .send().await {
+                    if resp.status().is_success() {
+                        return;
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+    }
+
+    pub async fn await_action(&self, ty: &str) -> Action {
+        loop {
+            match self.await_action_impl(ty).await {
+                Ok(Some(r)) => {
+                    info!("received action({ty}) : {r:?}");
+                    return r
+                }
+                _ => {
                     tokio::time::sleep(Duration::from_secs(3)).await;
                 }
             }
         }
     }
 
-    pub async fn await_action(&self, ty: &str) -> Action {
+    pub async fn upload(&self, stream: &str, data: Publish) -> Result<(), ErrorKind> {
+        let (client, api_url, _) = self.copy_connection_state()?;
+        Self::upload_impl_standalone(client, api_url, stream.to_owned(), data).await
+    }
+
+    pub async fn upload_message(&self, stream: &str, message: PublishItem) {
         loop {
-            match self.process_result(self.await_action_impl(ty).await) {
-                Some(Some(r)) => {
-                    info!("received action({ty}) : {r:?}");
-                    return r
-                }
-                _ => {
+            match self.upload(stream, create_publish(&[message.clone()], false)).await {
+                Ok(_) => break,
+                Err(_) => {
                     tokio::time::sleep(Duration::from_secs(3)).await;
                 }
             }
@@ -445,7 +473,6 @@ impl ConnectionManager {
         let mut state = self.state.lock().unwrap();
         state.creds = creds;
         state.client = None;
-        state.connected = None;
         let _ = state.abort_trigger.send(());
     }
 
@@ -486,9 +513,7 @@ impl ConnectionManager {
         let resp = match client
             .get(format!("{api_url}/v1/available-action/{ty}/await"))
             .send().await {
-            Ok(r) => {
-                r
-            }
+            Ok(r) => r,
             Err(e) => {
                 return Err(ErrorKind::NetworkError(format!("{e:?}")));
             }
@@ -521,11 +546,6 @@ impl ConnectionManager {
         }
     }
 
-    async fn upload_impl(&self, stream: &str, data: Publish) -> Result<(), ErrorKind> {
-        let (client, api_url, _) = self.copy_connection_state()?;
-        Self::upload_impl_standalone(client, api_url, stream.to_owned(), data).await
-    }
-
     async fn upload_impl_standalone(client: Client, api_url: String, stream: String, data: Publish) -> Result<(), ErrorKind> {
         let mut req = client.post(format!("{api_url}/v1/streams/{stream}/submit"))
             .body(data.payload);
@@ -543,29 +563,5 @@ impl ConnectionManager {
             log::error!("server responded with an error when uploading data for stream({stream})!\nresponse:\n{message}");
         }
         Ok(())
-    }
-
-    fn process_result<T>(&self, r: Result<T, ErrorKind>) -> Option<T> {
-        let mut state = self.state.lock().unwrap();
-        match r {
-            Ok(r) => {
-                if state.connected != Some(true) {
-                    state.connected = Some(true);
-                    info!("connected to server!");
-                }
-                Some(r)
-            }
-            Err(e) => {
-                if state.connected != Some(false) {
-                    state.connected = Some(false);
-                    match e {
-                        ErrorKind::NetworkError(msg) => error!("network error: {msg}"),
-                        ErrorKind::ServerError(msg) => error!("server error: {msg}"),
-                        ErrorKind::DnsError => error!("dns error!"),
-                    }
-                }
-                None
-            }
-        }
     }
 }
