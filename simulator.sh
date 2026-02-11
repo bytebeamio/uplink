@@ -79,12 +79,13 @@ EOF
 
 download_auth_config() {
     id=${1:?"Missing id"}
-    url="https://$CONSOLED_DOMAIN/api/v1/devices/$id/cert"
+    url="https://$CONSOLED_DOMAIN/api/v3/devices"
     echo "Downloading config: $url"
     mkdir -p devices
     curl --location $url \
-        --header "x-bytebeam-tenant: $BYTEBEAM_TENANT_ID" \
-        --header "x-bytebeam-api-key: $BYTEBEAM_API_KEY" > devices/device_$id.json
+        --header "x-bytebeam-api-key: $BYTEBEAM_API_KEY" > devices/device_$id.json \
+        --header "content-type: application/json" \
+        --data "{\"id\": \"$id\", \"generate_mtls_creds\": true, \"lifetime\": 315360000}"
 }
 
 run() {
